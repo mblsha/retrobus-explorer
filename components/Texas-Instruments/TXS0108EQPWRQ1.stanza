@@ -1,0 +1,215 @@
+; This file is generated based on the parts database query below:")
+;   database-part(["manufacturer" => "Texas Instruments", "mpn" => "TXS0108EQPWRQ1"])
+#use-added-syntax(jitx)
+defpackage components/Texas-Instruments/TXS0108EQPWRQ1 :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+
+
+pcb-pad capsule-smd-pad :
+  name = "capsule-smd-pad"
+  type = SMD
+  shape = Capsule(0.364, 1.742, loc(0.0, 0.0))
+  layer(SolderMask(Top)) = Capsule(0.466, 1.844, loc(0.0, 0.0))
+  layer(Paste(Top)) = Capsule(0.466, 1.844, loc(0.0, 0.0))
+
+pcb-landpattern lp :
+  pad p[1] : capsule-smd-pad at loc(-2.925, -2.870) on Top
+  pad p[2] : capsule-smd-pad at loc(-2.275, -2.870) on Top
+  pad p[3] : capsule-smd-pad at loc(-1.625, -2.870) on Top
+  pad p[4] : capsule-smd-pad at loc(-0.975, -2.870) on Top
+  pad p[5] : capsule-smd-pad at loc(-0.325, -2.870) on Top
+  pad p[6] : capsule-smd-pad at loc(0.325, -2.870) on Top
+  pad p[7] : capsule-smd-pad at loc(0.975, -2.870) on Top
+  pad p[8] : capsule-smd-pad at loc(1.625, -2.870) on Top
+  pad p[9] : capsule-smd-pad at loc(2.275, -2.870) on Top
+  pad p[10] : capsule-smd-pad at loc(2.925, -2.870) on Top
+  pad p[11] : capsule-smd-pad at loc(2.925, 2.870) on Top
+  pad p[12] : capsule-smd-pad at loc(2.275, 2.870) on Top
+  pad p[13] : capsule-smd-pad at loc(1.625, 2.870) on Top
+  pad p[14] : capsule-smd-pad at loc(0.975, 2.870) on Top
+  pad p[15] : capsule-smd-pad at loc(0.325, 2.870) on Top
+  pad p[16] : capsule-smd-pad at loc(-0.325, 2.870) on Top
+  pad p[17] : capsule-smd-pad at loc(-0.975, 2.870) on Top
+  pad p[18] : capsule-smd-pad at loc(-1.625, 2.870) on Top
+  pad p[19] : capsule-smd-pad at loc(-2.275, 2.870) on Top
+  pad p[20] : capsule-smd-pad at loc(-2.925, 2.870) on Top
+
+  layer(Silkscreen("F-SilkS", Top)) = Text(">REF", 0.5, W, loc(-0.750, 5.498))
+  layer(CustomLayer("Fab", Top)) = Text(">VALUE", 0.5, W, loc(-0.750, 4.498))
+  layer(Silkscreen("F-SilkS", Top)) = Polyline(0.152, [
+    Point(-3.326, -1.772)
+    Point(-3.326, 1.771)
+    Point(3.326, 1.771)
+    Point(3.326, -1.772)
+    Point(-3.326, -1.772)])
+  layer(Silkscreen("F-SilkS", Top)) = Polyline(0.300, [
+    Arc(-2.925, -1.019, 0.150, 0.0, -360.000)])
+  layer(Silkscreen("F-SilkS", Top)) = Polyline(0.300, [
+    Arc(-3.559, -2.870, 0.150, 0.0, -360.000)])
+  layer(CustomLayer("Fab", Top)) = Polyline(0.300, [
+    Arc(-2.925, -3.600, 0.150, 0.0, -360.000)])
+  layer(CustomLayer("Fab", Top)) = Polyline(0.060, [
+    Arc(-3.250, -3.200, 0.030, 0.0, -360.000)])
+  layer(Courtyard(Top)) = Rectangle(6.804, 7.585)
+
+  model3d = Model3D("{USER_PROJECT_ROOT}/3d-models/jitx-64d14149b789d8dc4b7a3e3b.stp",
+    Vec3D(0.0, 0.0, 0.0),
+    Vec3D(1.000, 1.000, 1.000),
+    Vec3D(0.0, 0.0, 0.0),
+    [],
+    )
+
+pcb-symbol sym-TXS0108EQPWRQ1 :
+  pin A1 at Point(-8.890, 11.430) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin VCCA at Point(-8.890, 8.890) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin A2 at Point(-8.890, 6.350) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin A3 at Point(-8.890, 3.810) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin A4 at Point(-8.890, 1.270) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin A5 at Point(-8.890, -1.270) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin A6 at Point(-8.890, -3.810) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin A7 at Point(-8.890, -6.350) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin A8 at Point(-8.890, -8.890) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin OE at Point(-8.890, -11.430) with :
+    direction = Left
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin GND at Point(8.890, -11.430) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B8 at Point(8.890, -8.890) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B7 at Point(8.890, -6.350) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B6 at Point(8.890, -3.810) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B5 at Point(8.890, -1.270) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B4 at Point(8.890, 1.270) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B3 at Point(8.890, 3.810) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B2 at Point(8.890, 6.350) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin VCCB at Point(8.890, 8.890) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+  pin B1 at Point(8.890, 11.430) with :
+    direction = Right
+    length = 2.540
+    number-size = 1.000
+    name-size = 1.000
+
+  draw("value") = Text(">VALUE", 0.7056, C, loc(0.0, 14.081))
+  draw("reference") = Text(">REF", 0.7056, C, loc(0.0, 15.081))
+  draw("foreground") = Rectangle(17.780, 27.940)
+  draw("foreground") = Circle(-7.620, 12.700, 0.381)
+
+public pcb-component component :
+  name = "C1021790"
+  description = "1.65V~5.5V 1 8 110Mbps 1.4V~3.6V TSSOP-20 Translators, Level Shifters ROHS"
+  manufacturer = "Texas Instruments"
+  mpn = "TXS0108EQPWRQ1"
+  datasheet = "https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2303021000_Texas-Instruments-TXS0108EQPWRQ1_C1021790.pdf"
+  reference-prefix = "U"
+  pin-properties :
+    [pin:Ref | pads:Ref ... | side:Dir | electrical-type:String | bank:Int]
+    [A1 | p[1] | Left | "unspecified" | 0]
+    [VCCA | p[2] | Left | "unspecified" | 0]
+    [A2 | p[3] | Left | "unspecified" | 0]
+    [A3 | p[4] | Left | "unspecified" | 0]
+    [A4 | p[5] | Left | "unspecified" | 0]
+    [A5 | p[6] | Left | "unspecified" | 0]
+    [A6 | p[7] | Left | "unspecified" | 0]
+    [A7 | p[8] | Left | "unspecified" | 0]
+    [A8 | p[9] | Left | "unspecified" | 0]
+    [OE | p[10] | Left | "unspecified" | 0]
+    [GND | p[11] | Right | "unspecified" | 0]
+    [B8 | p[12] | Right | "unspecified" | 0]
+    [B7 | p[13] | Right | "unspecified" | 0]
+    [B6 | p[14] | Right | "unspecified" | 0]
+    [B5 | p[15] | Right | "unspecified" | 0]
+    [B4 | p[16] | Right | "unspecified" | 0]
+    [B3 | p[17] | Right | "unspecified" | 0]
+    [B2 | p[18] | Right | "unspecified" | 0]
+    [VCCB | p[19] | Right | "unspecified" | 0]
+    [B1 | p[20] | Right | "unspecified" | 0]
+
+  assign-landpattern(lp)
+  assign-symbol(sym-TXS0108EQPWRQ1)
+
+  property(self.manufacturer_aliases) = ["Texas Instruments"]
+  property(self.mpn_aliases) = ["TXS0108EQPWRQ1"]
+  property(self.cofactr_id) = "XXLKSYY8Z98T"
+  property(self.reference_prefix) = "U"
+  property(self.trust) = "low"
+  property(self.x) = 6.804
+  property(self.y) = 7.585
+  property(self.area) = 51.608
+  property(self.case) = "TSSOP-20"
+  property(self.mounting) = "smd"
+
