@@ -9,28 +9,30 @@ defpackage main :
   import helpers
   import jsl/symbols/net-symbols
 
+  import components/TXS0108EQPWRQ1
+  ; import components/HED40LP03BK
+  ; import components/FPGAHeader
+
 ; Define the shape/size of the board
 val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
 
 ; Module to run as a design
 pcb-module my-design :
-  ; define some pins/ports
-  port gnd
-  port vdd
-  port signal
+  ; inst calc : components/HED40LP03BK/component
+  inst shifter : components/TXS0108EQPWRQ1/module
+  ; port gnd
+  ; port vdd
+  ; port signal
 
-  net GND (gnd)
-  net VDD (vdd)
-  net SIGNAL (signal)
+  ; net GND (gnd)
+  ; net VDD (vdd)
+  ; net SIGNAL (signal)
 
-  ; Instantiate and connect a 10k resistor component between vdd and signal
-  insert-resistor(VDD, SIGNAL, R-query, resistance = 10.0e3)
-  ; Instantiate and connect a 100nF capacitor component between vdd and gnd
-  insert-capacitor(VDD, GND, C-query, capacitance = 100.0e-9)
+  ; insert-resistor(VDD, SIGNAL, R-query, resistance = 10.0e3)
+  ; insert-capacitor(VDD, GND, C-query, capacitance = 100.0e-9)
 
-  ; schematic symbols
-  symbol(GND) = GND-SYMB
-  symbol(VDD) = PWR-SYMB
+  ; symbol(GND) = GND-SYMB
+  ; symbol(VDD) = PWR-SYMB
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory
@@ -38,15 +40,10 @@ pcb-module my-design :
 ;     signal-shrink   - a distance in mm to pull back copper signals from the board edge
 setup-design("jitx-design", board-shape, signal-shrink = 0.5)
 
-; Set the top level module (the module to be compile into a schematic and PCB)
 set-main-module(my-design)
 
-; View the results
-; take a look at the BOM that was generated
-view-bom(BOM-STD)
-; examine the schematic that was auto-generated
+; view-bom(BOM-STD)
 view-schematic()
-; view the board that was created
 view-board()
 
 

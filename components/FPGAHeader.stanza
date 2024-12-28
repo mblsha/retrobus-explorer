@@ -1,5 +1,5 @@
 #use-added-syntax(jitx)
-defpackage components/HED40LP03BK :
+defpackage components/FPGAHeader :
   import core
   import jitx
   import jitx/commands
@@ -7,11 +7,7 @@ defpackage components/HED40LP03BK :
   import jsl
 
 public pcb-component component :
-  name = "C5448171"
-  description = "1.27mm EDGE SLOT Direct Insert 40P -55℃~+105℃ Plugin,P=1.27mm Edgeboard Connectors ROHS"
-  manufacturer = "WingTAT"
-  mpn = "HED40LP03BK"
-  datasheet = "https://www.lcsc.com/datasheet/lcsc_datasheet_2312301551_WingTAT-HED40LP03BK_C5448171.pdf"
+  mpn = "FPGA Header"
   reference-prefix = "U"
 
   pin-properties :
@@ -60,11 +56,10 @@ public pcb-component component :
   val box = BoxSymbol(self)
   assign-symbol $ create-symbol(box)
 
-  ; FIXME: should use staggered pin layout
   val pkg = Header(
     num-leads = 40,
     pitch = 2.54,
-    rows = 4,
+    rows = 2,
     pad-diam = 0.8,
     lead-type = TH-Lead(
       length = tol(0.0),

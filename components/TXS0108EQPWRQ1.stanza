@@ -227,7 +227,7 @@ public pcb-component component :
   add-pass-through(self.A2, self.B2)
   pin-model(self.A2, self.B2) = PinModel(typ(0.0), typ(0.0))
 
-pcb-module module :
+public pcb-module module :
   port vcclo
   port vcchi
   port gnd
