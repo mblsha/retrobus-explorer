@@ -37,10 +37,14 @@ pcb-module my-design :
     net (gnd shift[i].gnd)
     net (vccb shift[i].vcchi)
     net (vcca shift[i].vcclo)
+    net (vcca shift[i].oe)
 
   defn do-shift (shiftno:Int, pinno:Int, high:JITXObject, low:JITXObject) :
+    println(ref(high))
+    val lownet = replace(to-string(ref(high)), "calc.", "my") as String
     net (high shift[shiftno].PT[pinno].B)
     net (low  shift[shiftno].PT[pinno].A)
+    ; ref-label(low) = lownet
 
   do-shift(0, 7, calc.M1,      fpga.P3)
   do-shift(0, 6, calc.MREQ,    fpga.P4)

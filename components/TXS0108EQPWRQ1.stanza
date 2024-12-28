@@ -231,6 +231,7 @@ public pcb-module module :
   port vcclo
   port vcchi
   port gnd
+  port oe
 
   inst shifter : components/TXS0108EQPWRQ1/component
 
@@ -258,6 +259,7 @@ public pcb-module module :
   net (gnd, shifter.GND)
   net (vcclo, shifter.VCCA)
   net (vcchi, shifter.VCCB)
+  net (oe, shifter.OE)
 
   place(shifter) at loc(0.0, 0.0, 270.0) on Top
   place(caplo) at loc(-2.0, 4.0, 90.0) on Top
