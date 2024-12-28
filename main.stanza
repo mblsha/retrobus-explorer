@@ -46,14 +46,14 @@ pcb-module my-design :
     net (low  shift[shiftno].PT[pinno].A)
     ; ref-label(low) = lownet
 
-  do-shift(0, 7, calc.M1,      fpga.P3)
-  do-shift(0, 6, calc.MREQ,    fpga.P4)
-  do-shift(0, 5, calc.IORQ,    fpga.P5)
-  do-shift(0, 4, calc.IORESET, fpga.P6)
-  do-shift(0, 3, calc.WAIT,    fpga.P7)
-  do-shift(0, 2, calc.INT1,    fpga.P8)
-  do-shift(0, 1, calc.WR,      fpga.P9)
-  do-shift(0, 0, calc.RD,      fpga.P10)
+  do-shift(0, 7, calc.IORQ,    fpga.P3)
+  do-shift(0, 6, calc.IORESET, fpga.P4)
+  do-shift(0, 5, calc.RD,      fpga.P5)
+  do-shift(0, 4, calc.M1,      fpga.P6)
+  do-shift(0, 3, calc.WR,      fpga.P7)
+  do-shift(0, 2, calc.WAIT,    fpga.P8)
+  do-shift(0, 1, calc.MREQ,    fpga.P9)
+  do-shift(0, 0, calc.INT1,    fpga.P10)
 
   do-shift(1, 7, calc.BNK1,    fpga.P11)
   do-shift(1, 6, calc.BNK0,    fpga.P12)
