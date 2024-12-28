@@ -232,20 +232,36 @@ public pcb-module module :
   port vcchi
   port gnd
 
-  public inst shifter : components/TXS0108EQPWRQ1/component
+  inst shifter : components/TXS0108EQPWRQ1/component
 
-  ; val num-chs = 2
-  ; port PT : pass-through[num-chs]
-  ; net (PT[0].A, shifter.A1)
-  ; net (PT[0].B, shifter.B1)
-  ; net (PT[1].A, shifter.A2)
-  ; net (PT[1].B, shifter.B2)
+  val num-chs = 8
+  port PT : pass-through[num-chs]
+  net (PT[0].A, shifter.A1)
+  net (PT[0].B, shifter.B1)
+  net (PT[1].A, shifter.A2)
+  net (PT[1].B, shifter.B2)
+  net (PT[2].A, shifter.A3)
+  net (PT[2].B, shifter.B3)
+  net (PT[3].A, shifter.A4)
+  net (PT[3].B, shifter.B4)
+  net (PT[4].A, shifter.A5)
+  net (PT[4].B, shifter.B5)
+  net (PT[5].A, shifter.A6)
+  net (PT[5].B, shifter.B6)
+  net (PT[6].A, shifter.A7)
+  net (PT[6].B, shifter.B7)
+  net (PT[7].A, shifter.A8)
+  net (PT[7].B, shifter.B8)
 
-  val caplo = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, vcclo, 1.0e-6)
-  val caphi = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, vcchi, 1.0e-6)
+  val caplo = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, gnd, 1.0e-6)
+  val caphi = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, gnd, 1.0e-6)
   net (gnd, shifter.GND)
+  net (vcclo, shifter.VCCA)
+  net (vcchi, shifter.VCCB)
 
   place(shifter) at loc(0.0, 0.0, 270.0) on Top
+  place(caplo) at loc(-2.0, 4.0, 90.0) on Top
+  place(caphi) at loc(2.0, 4.0, -90.0) on Top
 
 pcb-module test-module :
   port gnd
@@ -265,6 +281,6 @@ pcb-module test-module :
 
 ; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
 ; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
-; set-main-module(test-module)
+; set-main-module(module)
 ; view-schematic()
 ; view-board()

@@ -10,28 +10,43 @@ defpackage main :
   import jsl/symbols/net-symbols
 
   import components/FPGAHeader
-  import components/HED40LP03BK
+  import components/PCG850Bus
   import components/TXS0108EQPWRQ1
 
 val board-shape = RoundedRectangle(100.0, 100.0, 3.0)
 
 pcb-module my-design :
-  inst calc : components/HED40LP03BK/component
+  inst calc : components/PCG850Bus/component
   inst fpga : components/FPGAHeader/component
-  inst shifter : components/TXS0108EQPWRQ1/module
-  ; port gnd
-  ; port vdd
-  ; port signal
+  inst shift : components/TXS0108EQPWRQ1/module[5]
 
-  ; net GND (gnd)
-  ; net VDD (vdd)
-  ; net SIGNAL (signal)
+  port gnd
+  port vccb
+  port vcca
+  net GND (gnd)
+  net VCCB (vccb)
+  net VCCA (vcca)
+
+  net (vcca fpga.P39 fpga.P40)
+  net (gnd fpga.P1 fpga.P2)
+
+  net (vccb calc.VCCB1 calc.VCCB2)
+  net (gnd calc.GND1 calc.GND2)
+  for i in 0 to 5 do:
+    net (gnd shift[i].gnd)
+    net (vccb shift[i].vcchi)
+    net (vcca shift[i].vcclo)
+    ; net (calc.p[i] shift[i].A1)
+    ; net (calc.p[i + 5] shift[i].B1)
+    ; net (calc.p[i + 10] shift[i].A2)
+    ; net (calc.p[i + 15] shift[i].B2)
 
   ; insert-resistor(VDD, SIGNAL, R-query, resistance = 10.0e3)
   ; insert-capacitor(VDD, GND, C-query, capacitance = 100.0e-9)
 
-  ; symbol(GND) = GND-SYMB
-  ; symbol(VDD) = PWR-SYMB
+  symbol(GND) = GND-SYMB
+  symbol(VCCA) = PWR-SYMB
+  symbol(VCCB) = PWR-SYMB
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory

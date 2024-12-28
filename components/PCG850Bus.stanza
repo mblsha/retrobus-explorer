@@ -1,0 +1,86 @@
+; When renaming the stanza package name below, also rename it in the folder stanza.proj
+; See docs.jitx.com for help
+#use-added-syntax(jitx)
+defpackage components/PCG850Bus:
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+  import jsl
+
+public pcb-component component :
+  name = "C5448171"
+  description = "1.27mm EDGE SLOT Direct Insert 40P -55℃~+105℃ Plugin,P=1.27mm Edgeboard Connectors ROHS"
+  manufacturer = "WingTAT"
+  mpn = "PC-G850" ; "HED40LP03BK"
+  datasheet = "https://www.lcsc.com/datasheet/lcsc_datasheet_2312301551_WingTAT-HED40LP03BK_C5448171.pdf"
+  reference-prefix = "U"
+
+  pin-properties :
+    [pin:Ref | pads:Ref ... | side:Dir]
+    [VCCB1    | p[1]  | Left]
+    [VCCB2    | p[2]  | Left]
+    [M1       | p[3]  | Left]
+    [MREQ     | p[4]  | Left]
+    [IORQ     | p[5]  | Left]
+    [IORESET  | p[6]  | Left]
+    [WAIT     | p[7]  | Left]
+    [INT1     | p[8]  | Left]
+    [WR       | p[9]  | Left]
+    [RD       | p[10] | Left]
+    [BNK1     | p[11] | Left]
+    [BNK0     | p[12] | Left]
+    [CEROM2   | p[13] | Left]
+    [CERAM2   | p[14] | Left]
+    [D7       | p[15] | Left]
+    [D6       | p[16] | Left]
+    [D5       | p[17] | Left]
+    [D4       | p[18] | Left]
+    [D3       | p[19] | Left]
+    [D2       | p[20] | Left]
+    [D1       | p[21] | Right]
+    [D0       | p[22] | Right]
+    [A15      | p[23] | Right]
+    [A14      | p[24] | Right]
+    [A13      | p[25] | Right]
+    [A12      | p[26] | Right]
+    [A11      | p[27] | Right]
+    [A10      | p[28] | Right]
+    [A9       | p[29] | Right]
+    [A8       | p[30] | Right]
+    [A7       | p[31] | Right]
+    [A6       | p[32] | Right]
+    [A5       | p[33] | Right]
+    [A4       | p[34] | Right]
+    [A3       | p[35] | Right]
+    [A2       | p[36] | Right]
+    [A1       | p[37] | Right]
+    [A0       | p[38] | Right]
+    [GND1     | p[39] | Right]
+    [GND2     | p[40] | Right]
+
+  val box = BoxSymbol(self)
+  assign-symbol $ create-symbol(box)
+
+  ; FIXME: should use staggered pin layout
+  val pkg = Header(
+    num-leads = 40,
+    pitch = 2.54,
+    rows = 4,
+    pad-diam = 0.8,
+    lead-type = TH-Lead(
+      length = tol(0.0),
+      width = tol(0.8), ; FIXME: need to verify, same as pad-diam?
+    ),
+    package-body = PackageBody(
+      length = tol(31.50, 0.20),
+      width = typ(8.88),
+      height = typ(1.5)
+    ),
+  )
+
+  val lp = create-landpattern(pkg)
+  assign-landpattern(lp)
+
+
+; view(component)
