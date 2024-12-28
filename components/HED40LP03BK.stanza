@@ -1,0 +1,84 @@
+#use-added-syntax(jitx)
+defpackage components/HED40LP03BK :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+  import jsl
+
+public pcb-component component :
+  name = "C5448171"
+  description = "1.27mm EDGE SLOT Direct Insert 40P -55℃~+105℃ Plugin,P=1.27mm Edgeboard Connectors ROHS"
+  manufacturer = "WingTAT"
+  mpn = "HED40LP03BK"
+  datasheet = "https://www.lcsc.com/datasheet/lcsc_datasheet_2312301551_WingTAT-HED40LP03BK_C5448171.pdf"
+  reference-prefix = "U"
+
+  pin-properties :
+    [pin:Ref | pads:Ref ... | side:Dir]
+    [P1  | p[1]  | Left]
+    [P2  | p[2]  | Left]
+    [P3  | p[3]  | Left]
+    [P4  | p[4]  | Left]
+    [P5  | p[5]  | Left]
+    [P6  | p[6]  | Left]
+    [P7  | p[7]  | Left]
+    [P8  | p[8]  | Left]
+    [P9  | p[9]  | Left]
+    [P10 | p[10] | Left]
+    [P11 | p[11] | Left]
+    [P12 | p[12] | Left]
+    [P13 | p[13] | Left]
+    [P14 | p[14] | Left]
+    [P15 | p[15] | Left]
+    [P16 | p[16] | Left]
+    [P17 | p[17] | Left]
+    [P18 | p[18] | Left]
+    [P19 | p[19] | Left]
+    [P20 | p[20] | Left]
+    [P21 | p[21] | Right]
+    [P22 | p[22] | Right]
+    [P23 | p[23] | Right]
+    [P24 | p[24] | Right]
+    [P25 | p[25] | Right]
+    [P26 | p[26] | Right]
+    [P27 | p[27] | Right]
+    [P28 | p[28] | Right]
+    [P29 | p[29] | Right]
+    [P30 | p[30] | Right]
+    [P31 | p[31] | Right]
+    [P32 | p[32] | Right]
+    [P33 | p[33] | Right]
+    [P34 | p[34] | Right]
+    [P35 | p[35] | Right]
+    [P36 | p[36] | Right]
+    [P37 | p[37] | Right]
+    [P38 | p[38] | Right]
+    [P39 | p[39] | Right]
+    [P40 | p[40] | Right]
+
+  val box = BoxSymbol(self)
+  assign-symbol $ create-symbol(box)
+
+  ; FIXME: should use staggered pin layout
+  val pkg = Header(
+    num-leads = 40,
+    pitch = 2.54,
+    rows = 4,
+    pad-diam = 0.5,
+    lead-type = TH-Lead(
+      length = tol(0.0),
+      width = tol(0.8), ; FIXME: need to verify
+    ),
+    package-body = PackageBody(
+      length = tol(31.50, 0.20),
+      width = typ(8.88),
+      height = typ(1.5)
+    ),
+  )
+
+  val lp = create-landpattern(pkg)
+  assign-landpattern(lp)
+
+
+view(component)

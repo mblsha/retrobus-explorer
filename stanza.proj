@@ -4,4 +4,4 @@ pkg-cache: ".slm/pkg-cache"
 package main defined-in "main.stanza"
 package helpers defined-in "helpers.stanza"
 
-package components/Texas-Instruments/TXS0108EQPWRQ1 defined-in "components/Texas-Instruments/TXS0108EQPWRQ1.stanza"
+packages components/* defined-in "components/*"

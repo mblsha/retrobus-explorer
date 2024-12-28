@@ -1,11 +1,20 @@
 ; This file is generated based on the parts database query below:")
 ;   database-part(["manufacturer" => "Texas Instruments", "mpn" => "TXS0108EQPWRQ1"])
 #use-added-syntax(jitx)
-defpackage components/Texas-Instruments/TXS0108EQPWRQ1 :
+defpackage components/TXS0108EQPWRQ1 :
   import core
   import jitx
   import jitx/commands
   import ocdb/utils/box-symbol
+
+  ; pass-through
+  import jsl
+  ; setup-design
+  import helpers
+  ; insert-resistor
+  import jitx/parts
+  ; add-testpoint
+  import ocdb/utils/generic-components
 
 
 pcb-pad capsule-smd-pad :
@@ -213,3 +222,49 @@ public pcb-component component :
   property(self.case) = "TSSOP-20"
   property(self.mounting) = "smd"
 
+  add-pass-through(self.A1, self.B1)
+  pin-model(self.A1, self.B1) = PinModel(typ(0.0), typ(0.0))
+  add-pass-through(self.A2, self.B2)
+  pin-model(self.A2, self.B2) = PinModel(typ(0.0), typ(0.0))
+
+pcb-module module :
+  port vcclo
+  port vcchi
+  port gnd
+
+  public inst shifter : components/TXS0108EQPWRQ1/component
+
+  ; val num-chs = 2
+  ; port PT : pass-through[num-chs]
+  ; net (PT[0].A, shifter.A1)
+  ; net (PT[0].B, shifter.B1)
+  ; net (PT[1].A, shifter.A2)
+  ; net (PT[1].B, shifter.B2)
+
+  val caplo = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, vcclo, 1.0e-6)
+  val caphi = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, vcchi, 1.0e-6)
+  net (gnd, shifter.GND)
+
+  place(shifter) at loc(0.0, 0.0, 270.0) on Top
+
+pcb-module test-module :
+  port gnd
+  port vdd
+
+  net GND (gnd)
+  net VDD (vdd)
+
+  inst m : module
+
+  ; insert-resistor(VDD, m.PT[0].A, R-query, resistance = 10.0e3)
+  ; insert-resistor(GND, m.PT[0].B, R-query, resistance = 10.0e3)
+
+  val tp = add-testpoint([m.shifter.B1])
+  insert-resistor(VDD, m.shifter.A1, R-query, resistance = 10.0e3)
+  ; insert-resistor(GND, m.shifter.B1, R-query, resistance = 10.0e3)
+
+val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+set-main-module(test-module)
+view-schematic()
+view-board()
