@@ -32,17 +32,56 @@ pcb-module my-design :
 
   net (vccb calc.VCCB1 calc.VCCB2)
   net (gnd calc.GND1 calc.GND2)
+
   for i in 0 to 5 do:
     net (gnd shift[i].gnd)
     net (vccb shift[i].vcchi)
     net (vcca shift[i].vcclo)
-    ; net (calc.p[i] shift[i].A1)
-    ; net (calc.p[i + 5] shift[i].B1)
-    ; net (calc.p[i + 10] shift[i].A2)
-    ; net (calc.p[i + 15] shift[i].B2)
 
-  ; insert-resistor(VDD, SIGNAL, R-query, resistance = 10.0e3)
-  ; insert-capacitor(VDD, GND, C-query, capacitance = 100.0e-9)
+  defn do-shift (shiftno:Int, pinno:Int, high:JITXObject, low:JITXObject) :
+    net (high shift[shiftno].PT[pinno].B)
+    net (low  shift[shiftno].PT[pinno].A)
+
+  do-shift(0, 7, calc.M1,      fpga.P3)
+  do-shift(0, 6, calc.MREQ,    fpga.P4)
+  do-shift(0, 5, calc.IORQ,    fpga.P5)
+  do-shift(0, 4, calc.IORESET, fpga.P6)
+  do-shift(0, 3, calc.WAIT,    fpga.P7)
+  do-shift(0, 2, calc.INT1,    fpga.P8)
+  do-shift(0, 1, calc.WR,      fpga.P9)
+  do-shift(0, 0, calc.RD,      fpga.P10)
+
+  do-shift(1, 7, calc.BNK1,    fpga.P11)
+  do-shift(1, 6, calc.BNK0,    fpga.P12)
+  do-shift(1, 5, calc.CEROM2,  fpga.P13)
+  do-shift(1, 4, calc.CERAM2,  fpga.P14)
+  do-shift(1, 3, calc.D7,      fpga.P15)
+  do-shift(1, 2, calc.D6,      fpga.P16)
+  do-shift(1, 1, calc.D5,      fpga.P17)
+  do-shift(1, 0, calc.D4,      fpga.P18)
+
+  do-shift(2, 7, calc.D3,      fpga.P19)
+  do-shift(2, 6, calc.D2,      fpga.P20)
+  do-shift(2, 5, calc.D1,      fpga.P21)
+  do-shift(2, 4, calc.D0,      fpga.P22)
+  do-shift(2, 3, calc.A15,     fpga.P23)
+  do-shift(2, 2, calc.A14,     fpga.P24)
+  do-shift(2, 1, calc.A13,     fpga.P25)
+  do-shift(2, 0, calc.A12,     fpga.P26)
+
+  do-shift(3, 7, calc.A11,     fpga.P27)
+  do-shift(3, 6, calc.A10,     fpga.P28)
+  do-shift(3, 5, calc.A9,      fpga.P29)
+  do-shift(3, 4, calc.A8,      fpga.P30)
+  do-shift(3, 3, calc.A7,      fpga.P31)
+  do-shift(3, 2, calc.A6,      fpga.P32)
+  do-shift(3, 1, calc.A5,      fpga.P33)
+  do-shift(3, 0, calc.A4,      fpga.P34)
+
+  do-shift(4, 7, calc.A3,      fpga.P35)
+  do-shift(4, 6, calc.A2,      fpga.P36)
+  do-shift(4, 5, calc.A1,      fpga.P37)
+  do-shift(4, 4, calc.A0,      fpga.P38)
 
   symbol(GND) = GND-SYMB
   symbol(VCCA) = PWR-SYMB
