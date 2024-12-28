@@ -263,8 +263,8 @@ pcb-module test-module :
   insert-resistor(VDD, m.shifter.A1, R-query, resistance = 10.0e3)
   ; insert-resistor(GND, m.shifter.B1, R-query, resistance = 10.0e3)
 
-val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
-setup-design("jitx-design", board-shape, signal-shrink = 0.5)
-set-main-module(test-module)
-view-schematic()
-view-board()
+; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+; set-main-module(test-module)
+; view-schematic()
+; view-board()

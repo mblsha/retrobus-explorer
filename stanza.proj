@@ -4,4 +4,7 @@ pkg-cache: ".slm/pkg-cache"
 package main defined-in "main.stanza"
 package helpers defined-in "helpers.stanza"
 
-packages components/* defined-in "components/*"
+; packages components/* defined-in "components/*"
+package components/FPGAHeader defined-in "components/FPGAHeader.stanza"
+package components/HED40LP03BK defined-in "components/HED40LP03BK.stanza"
+package components/TXS0108EQPWRQ1 defined-in "components/TXS0108EQPWRQ1.stanza"

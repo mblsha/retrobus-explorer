@@ -9,16 +9,15 @@ defpackage main :
   import helpers
   import jsl/symbols/net-symbols
 
+  import components/FPGAHeader
+  import components/HED40LP03BK
   import components/TXS0108EQPWRQ1
-  ; import components/HED40LP03BK
-  ; import components/FPGAHeader
 
-; Define the shape/size of the board
-val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+val board-shape = RoundedRectangle(100.0, 100.0, 3.0)
 
-; Module to run as a design
 pcb-module my-design :
-  ; inst calc : components/HED40LP03BK/component
+  inst calc : components/HED40LP03BK/component
+  inst fpga : components/FPGAHeader/component
   inst shifter : components/TXS0108EQPWRQ1/module
   ; port gnd
   ; port vdd
