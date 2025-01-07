@@ -9,11 +9,26 @@ defpackage main :
   import helpers
   import jsl/symbols/net-symbols
 
+  ; topo-net
+  import jsl/si
+
   import components/FPGAHeader
   import components/PCG850Bus
   import components/TXS0108EQPWRQ1
 
-val board-shape = RoundedRectangle(100.0, 100.0, 3.0)
+; public pcb-routing-structure power-lines :
+;   name = "power traces"
+;   layer-constraints(Top) :
+;     trace-width = 0.5       ; mm
+;     clearance = 0.2         ; mm
+;     velocity = 0.19e12      ; mm/s
+;     insertion-loss = 0.008  ; db/mm @ 1GHz
+;     neck-down = NeckDown(0.5 0.12 false false)
+
+; topo-net(vcca => fpga.P39 => fpga.P40)
+; structure(fpga.P39 => fpga.P40) = power-lines
+
+val board-shape = RoundedRectangle(60.0, 50.0, 3.0)
 
 pcb-module my-design :
   inst calc : components/PCG850Bus/component
@@ -28,10 +43,10 @@ pcb-module my-design :
   net VCCA (vcca)
 
   net (vcca fpga.P39 fpga.P40)
-  net (gnd fpga.P1 fpga.P2)
+  net (gnd  fpga.P1  fpga.P2)
 
   net (vccb calc.VCCB1 calc.VCCB2)
-  net (gnd calc.GND1 calc.GND2)
+  net (gnd  calc.GND1  calc.GND2)
 
   for i in 0 to 5 do:
     net (gnd shift[i].gnd)
@@ -44,6 +59,7 @@ pcb-module my-design :
     net (high shift[shiftno].PT[pinno].B)
     make-net(to-symbol(low-name), [low, shift[shiftno].PT[pinno].A])
 
+  ; rearranging the connections to make single-level layout easier
   do-shift(0, 7, calc.IORQ,    fpga.P3)
   do-shift(0, 6, calc.IORESET, fpga.P4)
   do-shift(0, 5, calc.RD,      fpga.P5)
@@ -85,9 +101,14 @@ pcb-module my-design :
   do-shift(4, 5, calc.A1,      fpga.P37)
   do-shift(4, 4, calc.A0,      fpga.P38)
 
+  geom(GND) :
+    copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
+
   symbol(GND) = GND-SYMB
   symbol(VCCA) = PWR-SYMB
   symbol(VCCB) = PWR-SYMB
+
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory
