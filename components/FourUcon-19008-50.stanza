@@ -52,6 +52,10 @@ pcb-landpattern lp :
 
   layer(Silkscreen("F-SilkS", Top)) = Polyline(0.2, [
     Point(plastic_width / -2.0, plastic_height / -2.0),
+    Point(plastic_width / -2.0, -0.5),
+    Point(plastic_width / -2.0 + 0.3, -0.5),
+    Point(plastic_width / -2.0 + 0.3,  0.5),
+    Point(plastic_width / -2.0, 0.5),
     Point(plastic_width / -2.0, plastic_height /  2.0),
     Point(plastic_width /  2.0, plastic_height /  2.0),
     Point(plastic_width /  2.0, plastic_height / -2.0),
@@ -270,16 +274,34 @@ public pcb-component alchitry_d :
     power.V+ => self.VCC3V3
     power.V- => self.GND
 
+val shield_width = 65.0
+val shield_height = 45.0
+
+; Top: is actually the side that connects to the FPGA
 public pcb-module module :
   inst a : alchitry_a
   inst b : alchitry_b
   inst c : alchitry_c
   inst d : alchitry_d
 
+  ; includes 2*plastic_height
+  val vertical_outer_spacing = 40.0 - plastic_height
+  val left_to_side = 5.40
+  val distance_a_to_b = 10.3
+  val distance_c_to_d = 6.3
+
+  val b_d_offset_left = shield_width / -2.0 + left_to_side + plastic_width / 2.0
+
+  place(b) at loc(b_d_offset_left, vertical_outer_spacing / 2.0, 180.0) on Top
+  place(a) at loc(b_d_offset_left + distance_a_to_b + plastic_width, vertical_outer_spacing / 2.0, 180.0) on Top
+
+  place(d) at loc(b_d_offset_left, vertical_outer_spacing / -2.0, 180.0) on Top
+  place(c) at loc(b_d_offset_left + distance_c_to_d + plastic_width, vertical_outer_spacing / -2.0, 180.0) on Top
+
 ; view(component)
 ; view(alchitry_a)
 
-val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+val board-shape = RoundedRectangle(shield_width, shield_height, 3.0)
 setup-design("jitx-design", board-shape, signal-shrink = 0.5)
 set-main-module(module)
 view-schematic()
