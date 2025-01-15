@@ -7,14 +7,7 @@ defpackage main :
   import jitx/parts
 
   import helpers
-  import jsl/symbols/net-symbols
-
-  ; topo-net
-  import jsl/si
-
-  import components/FPGAHeader
-  import components/PCG850Bus
-  import components/TXS0108EQPWRQ1
+  import jsl
 
 ; public pcb-routing-structure power-lines :
 ;   name = "power traces"
