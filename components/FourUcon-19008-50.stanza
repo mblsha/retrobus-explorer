@@ -1,0 +1,154 @@
+#use-added-syntax(jitx)
+defpackage components/FourUcon-19008-50:
+  import core
+  import jitx
+  import jitx/commands
+
+  import jsl
+
+  ; setup-design
+  import helpers
+
+val pad_width = 0.25
+val pad_height = 2.0
+
+val plastic_width = 15.20 ; from table A: 50 pin
+val plastic_height = 4.0
+
+pcb-pad capsule-smd-pad :
+  name = "capsule-smd-pad"
+  type = SMD
+
+  val _w = pad_width
+  val _h = pad_height
+  val _reduce = 0.1 ; not sure why it's needed: JITX seems to reduce shape from SolderMask and Paste layers by a small amount
+
+  shape = Rectangle(_w - _reduce, _h - _reduce)
+  layer(SolderMask(Top)) = Rectangle(_w, _h)
+  layer(Paste(Top))      = Rectangle(_w, _h)
+
+pcb-landpattern lp :
+  val num_pads = 50
+
+  val drill_hole_span_per_side = 13.90 ; from table D: 50 pin
+  val drill_hole_offset_from_center = 1.25
+  val drill_hole_diameter = 0.55
+
+  val pads_per_side = num_pads / 2
+  val pad_span_per_side = 12.0 ; from table B: 50 pin
+  val distance_between_pad_rows = 2.40
+  val pad_pitch = pad_span_per_side / (to-double(pads_per_side) - 1.0)
+  val pad_offset_x = pad_span_per_side / -2.0
+
+  for i in 0 to pads_per_side do:
+    val x = pad_offset_x + (pad_pitch * to-double(i))
+    val y = pad_height / 2.0 + distance_between_pad_rows / 2.0
+    pad p[i] : capsule-smd-pad at loc(x, y * -1.0) on Top
+
+  for i in 0 to pads_per_side do:
+    val x = pad_offset_x + (pad_pitch * to-double(i))
+    val y = pad_height / 2.0 + distance_between_pad_rows / 2.0
+    pad p[pads_per_side + i] : capsule-smd-pad at loc(x * -1.0, y * 1.0) on Top
+
+  layer(Silkscreen("F-SilkS", Top)) = Polyline(0.2, [
+    Point(plastic_width / -2.0, plastic_height / -2.0),
+    Point(plastic_width / -2.0, plastic_height /  2.0),
+    Point(plastic_width /  2.0, plastic_height /  2.0),
+    Point(plastic_width /  2.0, plastic_height / -2.0),
+    Point(plastic_width / -2.0, plastic_height / -2.0)])
+
+  layer(Silkscreen("F-SilkS", Top)) =
+    Circle(Point((pad_span_per_side + 1.0) / -2.0,
+                 (distance_between_pad_rows + pad_height * 1.0 + 0.5) / -2.0), 0.3)
+
+  layer(Cutout()) = Circle(Point(drill_hole_span_per_side / 2.0,  drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
+  layer(Cutout()) = Circle(Point(drill_hole_span_per_side / -2.0, drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
+
+
+public pcb-component component :
+  name = "4UCON-19008-50"
+  description = "Connector, 0.5mm Board-to-Board, Double Slot Type Female, SMT 180° with Post, Stacking Height=5.5/6.0mm, with Cap, 50 Pins"
+  manufacturer = "4UCON"
+  datasheet = "http://www.4uconnector.com/online/object/4udrawing/19008.pdf"
+  reference-prefix = "J"
+
+  ; pin-properties :
+  ;   [pin:Ref      | pads:Int ... | side:Dir ]
+  ;   [PINNAME1     | 1            | Left     ]
+  ;   [PINNAME2     | 2            | Right    ]
+
+  val box = BoxSymbol(self)
+  val symb = create-symbol(box)
+  assign-symbol(symb)
+
+  assign-landpattern(lp)
+
+  ; supports power:
+  ;   power.V+ => self.VCC
+  ;   power.V- => self.GND
+
+public pcb-component alchitry_a :
+  pin-properties :
+    [pin:Ref | pads:Int ... | side:Dir ]
+      [VCC5V    | 0 49                      | Left ]
+      [T8       | 1                         | Left ]
+      [T7       | 2                         | Left ]
+      [GND      | 3 9 15 21 28 34 40 46     | Left ]
+      [T5       | 4                         | Left ]
+      [R5       | 5                         | Left ]
+      [VCC3V3   | 6 12 18 24 25 31 37 43    | Left ]
+      [R8       | 7                         | Left ]
+      [P8       | 8                         | Left ]
+      [L2       | 10                        | Left ]
+      [L3       | 11                        | Left ]
+      [J1       | 13                        | Left ]
+      [K1       | 14                        | Left ]
+      [H1       | 16                        | Left ]
+      [H2       | 17                        | Left ]
+      [G1       | 19                        | Left ]
+      [G2       | 20                        | Left ]
+      [K5       | 22                        | Left ]
+      [E6       | 23                        | Left ]
+      [M6       | 26                        | Right ]
+      [N6       | 27                        | Right ]
+      [H5       | 29                        | Right ]
+      [H4       | 30                        | Right ]
+      [J3       | 32                        | Right ]
+      [H3       | 33                        | Right ]
+      [J5       | 35                        | Right ]
+      [J4       | 36                        | Right ]
+      [K3       | 38                        | Right ]
+      [K2       | 39                        | Right ]
+      [N9       | 41                        | Right ]
+      [P9       | 42                        | Right ]
+      [R7       | 44                        | Right ]
+      [R6       | 45                        | Right ]
+      [T9       | 47                        | Right ]
+      [T10      | 48                        | Right ]
+
+
+  val box = BoxSymbol(self)
+  val symb = create-symbol(box)
+  assign-symbol(symb)
+
+  assign-landpattern(lp)
+
+public pcb-module module :
+  inst c : alchitry_a
+
+  pin-properties :
+    [pin:Ref      | pads:Int ... | side:Dir ]
+    ; [VCC          | 8            | Up       ]
+    ; [GND          | 4            | Down     ]
+    [FOO     | 1            | Left     ]
+
+
+
+; view(component)
+; view(alchitry_a)
+
+val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+set-main-module(module)
+view-schematic()
+view-board()
