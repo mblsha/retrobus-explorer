@@ -179,9 +179,55 @@ public pcb-component alchitry_b :
     power.V+ => self.VCC3V3
     power.V- => self.GND
 
+public pcb-component alchitry_c :
+  pin-properties :
+    [pin:Ref | pads:Int ... | side:Dir ]
+      [VCC5V    | 0 49                      | Left ]
+      [GND      | 3 9 15 21 28 34 40 46     | Left ]
+      [VCC3V3   | 6 12 18 24 25 31 37 43    | Left ]
+      [T13      | 1                         | Left ]
+      [R13      | 2                         | Left ]
+      [T12      | 4                         | Left ]
+      [R12      | 5                         | Left ]
+      [R11      | 7                         | Left ]
+      [R10      | 8                         | Left ]
+      [N2       | 10                        | Left ]
+      [N3       | 11                        | Left ]
+      [P3       | 13                        | Left ]
+      [P4       | 14                        | Left ]
+      [M4       | 16                        | Left ]
+      [L4       | 17                        | Left ]
+      [N4       | 19                        | Left ]
+      [M5       | 20                        | Left ]
+      [L5       | 22                        | Left ]
+      [P5       | 23                        | Left ]
+      [T4       | 26                        | Right ]
+      [T3       | 27                        | Right ]
+      [R3       | 29                        | Right ]
+      [T2       | 30                        | Right ]
+      [R2       | 32                        | Right ]
+      [R1       | 33                        | Right ]
+      [N1       | 35                        | Right ]
+      [P1       | 36                        | Right ]
+      [M2       | 38                        | Right ]
+      [M1       | 39                        | Right ]
+      [N13      | 41                        | Right ]
+      [P13      | 42                        | Right ]
+      [N11      | 44                        | Right ]
+      [N12      | 45                        | Right ]
+      [P10      | 47                        | Right ]
+      [P11      | 48                        | Right ]
+
+  assign-symbol(create-symbol(BoxSymbol(self)))
+  assign-landpattern(lp)
+
+  supports power:
+    power.V+ => self.VCC3V3
+    power.V- => self.GND
 public pcb-module module :
   inst a : alchitry_a
   inst b : alchitry_b
+  inst c : alchitry_c
 
 ; view(component)
 ; view(alchitry_a)
