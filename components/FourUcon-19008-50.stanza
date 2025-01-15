@@ -83,20 +83,20 @@ public pcb-component component :
 
   assign-landpattern(lp)
 
-  ; supports power:
-  ;   power.V+ => self.VCC
-  ;   power.V- => self.GND
+
+; Alchitry Au pinout:
+; https://cdn.sparkfun.com/assets/a/2/2/0/a/alchitry_au_sch_update-2.pdf
 
 public pcb-component alchitry_a :
   pin-properties :
     [pin:Ref | pads:Int ... | side:Dir ]
       [VCC5V    | 0 49                      | Left ]
+      [GND      | 3 9 15 21 28 34 40 46     | Left ]
+      [VCC3V3   | 6 12 18 24 25 31 37 43    | Left ]
       [T8       | 1                         | Left ]
       [T7       | 2                         | Left ]
-      [GND      | 3 9 15 21 28 34 40 46     | Left ]
       [T5       | 4                         | Left ]
       [R5       | 5                         | Left ]
-      [VCC3V3   | 6 12 18 24 25 31 37 43    | Left ]
       [R8       | 7                         | Left ]
       [P8       | 8                         | Left ]
       [L2       | 10                        | Left ]
@@ -126,23 +126,62 @@ public pcb-component alchitry_a :
       [T9       | 47                        | Right ]
       [T10      | 48                        | Right ]
 
-
-  val box = BoxSymbol(self)
-  val symb = create-symbol(box)
-  assign-symbol(symb)
-
+  assign-symbol(create-symbol(BoxSymbol(self)))
   assign-landpattern(lp)
 
-public pcb-module module :
-  inst c : alchitry_a
+  supports power:
+    power.V+ => self.VCC3V3
+    power.V- => self.GND
 
+public pcb-component alchitry_b :
   pin-properties :
-    [pin:Ref      | pads:Int ... | side:Dir ]
-    ; [VCC          | 8            | Up       ]
-    ; [GND          | 4            | Down     ]
-    [FOO     | 1            | Left     ]
+    [pin:Ref | pads:Int ... | side:Dir ]
+      [VCC5V    | 0 49                      | Left ]
+      [GND      | 3 9 15 21 28 34 40 46     | Left ]
+      [VCC3V3   | 6 12 18 24 25 31 37 43    | Left ]
+      [D1       | 1                         | Left ]
+      [E2       | 2                         | Left ]
+      [A2       | 4                         | Left ]
+      [B2       | 5                         | Left ]
+      [E1       | 7                         | Left ]
+      [F2       | 8                         | Left ]
+      [F3       | 10                        | Left ]
+      [F4       | 11                        | Left ]
+      [A3       | 13                        | Left ]
+      [B4       | 14                        | Left ]
+      [A4       | 16                        | Left ]
+      [A5       | 17                        | Left ]
+      [B5       | 19                        | Left ]
+      [B6       | 20                        | Left ]
+      [A7       | 22                        | Left ]
+      [B7       | 23                        | Left ]
+      [C7       | 26                        | Right ]
+      [C6       | 27                        | Right ]
+      [D6       | 29                        | Right ]
+      [D5       | 30                        | Right ]
+      [F5       | 32                        | Right ]
+      [E5       | 33                        | Right ]
+      [G5       | 35                        | Right ]
+      [G4       | 36                        | Right ]
+      [D4       | 38                        | Right ]
+      [C4       | 39                        | Right ]
+      [E3       | 41                        | Right ]
+      [D3       | 42                        | Right ]
+      [C3       | 44                        | Right ]
+      [C2       | 45                        | Right ]
+      [C1       | 47                        | Right ]
+      [B1       | 48                        | Right ]
 
+  assign-symbol(create-symbol(BoxSymbol(self)))
+  assign-landpattern(lp)
 
+  supports power:
+    power.V+ => self.VCC3V3
+    power.V- => self.GND
+
+public pcb-module module :
+  inst a : alchitry_a
+  inst b : alchitry_b
 
 ; view(component)
 ; view(alchitry_a)
