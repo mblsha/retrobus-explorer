@@ -40,15 +40,31 @@ pcb-landpattern lp :
   val pad_pitch = pad_span_per_side / (to-double(pads_per_side) - 1.0)
   val pad_offset_x = pad_span_per_side / -2.0
 
-  for i in 0 to pads_per_side do:
-    val x = pad_offset_x + (pad_pitch * to-double(i))
-    val y = pad_height / 2.0 + distance_between_pad_rows / 2.0
-    pad p[i] : capsule-smd-pad at loc(x, y * -1.0) on Top
+  ; FIXME: make this a parameter?
+  ;
+  ; use `true` if only want to route the connectors on the bottom part
+  ; of the Alchitry Au shield
+  val flip_sides = true
 
   for i in 0 to pads_per_side do:
     val x = pad_offset_x + (pad_pitch * to-double(i))
     val y = pad_height / 2.0 + distance_between_pad_rows / 2.0
-    pad p[pads_per_side + i] : capsule-smd-pad at loc(x * -1.0, y * 1.0) on Top
+    val computed_i =
+      if flip_sides :
+        num_pads - 1 - i
+      else :
+        i
+    pad p[computed_i] : capsule-smd-pad at loc(x, y * -1.0) on Top
+
+  for i in 0 to pads_per_side do:
+    val x = pad_offset_x + (pad_pitch * to-double(i))
+    val y = pad_height / 2.0 + distance_between_pad_rows / 2.0
+    val computed_i =
+      if flip_sides :
+        pads_per_side - 1 - i
+      else :
+        pads_per_side + i
+    pad p[computed_i] : capsule-smd-pad at loc(x * -1.0, y * 1.0) on Top
 
   layer(Silkscreen("F-SilkS", Top)) = Polyline(0.2, [
     Point(plastic_width / -2.0, plastic_height / -2.0),
@@ -61,9 +77,14 @@ pcb-landpattern lp :
     Point(plastic_width /  2.0, plastic_height / -2.0),
     Point(plastic_width / -2.0, plastic_height / -2.0)])
 
+  val first_pad_circle_factor =
+    if flip_sides :
+      2.0
+    else :
+      -2.0
   layer(Silkscreen("F-SilkS", Top)) =
     Circle(Point((pad_span_per_side + 1.0) / -2.0,
-                 (distance_between_pad_rows + pad_height * 1.0 + 0.5) / -2.0), 0.3)
+                 (distance_between_pad_rows + pad_height * 1.0 + 0.5) / first_pad_circle_factor), 0.3)
 
   layer(Cutout()) = Circle(Point(drill_hole_span_per_side / 2.0,  drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
   layer(Cutout()) = Circle(Point(drill_hole_span_per_side / -2.0, drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
@@ -90,6 +111,10 @@ public pcb-component component :
 
 ; Alchitry Au pinout:
 ; https://cdn.sparkfun.com/assets/a/2/2/0/a/alchitry_au_sch_update-2.pdf
+;
+; NOTE: the pinout is from the top side of the Alchitry Au board, so if want
+;       to route the pins on the bottom side of the shield, need to flip the
+;       pinout
 
 public pcb-component alchitry_a :
   pin-properties :
