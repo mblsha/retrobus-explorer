@@ -6,6 +6,9 @@ defpackage components/FourUcon-19008-50:
 
   import jsl
 
+  ; HashTable
+  import collections
+
   ; setup-design
   import helpers
 
@@ -155,6 +158,9 @@ public pcb-component alchitry_a :
       [T9       | 47                        | Right ]
       [T10      | 48                        | Right ]
 
+
+
+
   assign-symbol(create-symbol(BoxSymbol(self)))
   assign-landpattern(lp)
 
@@ -303,11 +309,133 @@ val shield_width = 65.0
 val shield_height = 45.0
 
 ; Top: is actually the side that connects to the FPGA
-public pcb-module module :
+public pcb-module alchitry_shield_bottom :
   inst a : alchitry_a
   inst b : alchitry_b
   inst c : alchitry_c
   inst d : alchitry_d
+
+  ; https://github.com/alchitry/Alchitry-Labs-V2/blob/master/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt
+  val m = HashTable<String, JITXObject>()
+  m["A2"]  = a.T8
+  m["A3"]  = a.T7
+  m["A5"]  = a.T5
+  m["A6"]  = a.R5
+  m["A8"]  = a.R8
+  m["A9"]  = a.P8
+  m["A11"] = a.L2
+  m["A12"] = a.L3
+  m["A14"] = a.J1
+  m["A15"] = a.K1
+  m["A17"] = a.H1
+  m["A18"] = a.H2
+  m["A20"] = a.G1
+  m["A21"] = a.G2
+  m["A23"] = a.K5
+  m["A24"] = a.E6
+  m["A27"] = a.M6
+  m["A28"] = a.N6
+  m["A30"] = a.H5
+  m["A31"] = a.H4
+  m["A33"] = a.J3
+  m["A34"] = a.H3
+  m["A36"] = a.J5
+  m["A37"] = a.J4
+  m["A39"] = a.K3
+  m["A40"] = a.K2
+  m["A42"] = a.N9
+  m["A43"] = a.P9
+  m["A45"] = a.R7
+  m["A46"] = a.R6
+  m["A48"] = a.T9
+  m["A49"] = a.T10
+  m["B2"]  = b.D1
+  m["B3"]  = b.E2
+  m["B5"]  = b.A2
+  m["B6"]  = b.B2
+  m["B8"]  = b.E1
+  m["B9"]  = b.F2
+  m["B11"] = b.F3
+  m["B12"] = b.F4
+  m["B14"] = b.A3
+  m["B15"] = b.B4
+  m["B17"] = b.A4
+  m["B18"] = b.A5
+  m["B20"] = b.B5
+  m["B21"] = b.B6
+  m["B23"] = b.A7
+  m["B24"] = b.B7
+  m["B27"] = b.C7
+  m["B28"] = b.C6
+  m["B30"] = b.D6
+  m["B31"] = b.D5
+  m["B33"] = b.F5
+  m["B34"] = b.E5
+  m["B36"] = b.G5
+  m["B37"] = b.G4
+  m["B39"] = b.D4
+  m["B40"] = b.C4
+  m["B42"] = b.E3
+  m["B43"] = b.D3
+  m["B45"] = b.C3
+  m["B46"] = b.C2
+  m["B48"] = b.C1
+  m["B49"] = b.B1
+  m["C2"]  = c.T13
+  m["C3"]  = c.R13
+  m["C5"]  = c.T12
+  m["C6"]  = c.R12
+  m["C8"]  = c.R11
+  m["C9"]  = c.R10
+  m["C11"] = c.N2
+  m["C12"] = c.N3
+  m["C14"] = c.P3
+  m["C15"] = c.P4
+  m["C17"] = c.M4
+  m["C18"] = c.L4
+  m["C20"] = c.N4
+  m["C21"] = c.M5
+  m["C23"] = c.L5
+  m["C24"] = c.P5
+  m["C27"] = c.T4
+  m["C28"] = c.T3
+  m["C30"] = c.R3
+  m["C31"] = c.T2
+  m["C33"] = c.R2
+  m["C34"] = c.R1
+  m["C36"] = c.N1
+  m["C37"] = c.P1
+  m["C39"] = c.M2
+  m["C40"] = c.M1
+  m["C42"] = c.N13
+  m["C43"] = c.P13
+  m["C45"] = c.N11
+  m["C46"] = c.N12
+  m["C48"] = c.P10
+  m["C49"] = c.P11
+  m["D8"]  = d.R16
+  m["D9"]  = d.R15
+  m["D11"] = d.P14
+  m["D12"] = d.M15
+  m["D42"] = d.T14
+  m["D43"] = d.T15
+
+  ; https://github.com/alchitry/Alchitry-Labs/blob/master/library/components/ft.acf
+  val ft_pins = ["A17" "A18" "A20" "A21" "A27" "A28" "A30" "A31"
+                 "B14" "B15" "B17" "B18" "B20" "B21" "B23" "B24"
+                 "B27" "B28" "B30" "B31" "B33" "B34" "B36" "B37"]
+
+  var num_safe_pins = 0
+  for k in to-seq(m) :
+    if not contains?(ft_pins, key(k)) :
+      num_safe_pins = num_safe_pins + 1
+
+  port data : pin[num_safe_pins]
+  var i = 0
+  for k in to-seq(m) :
+    if not contains?(ft_pins, key(k)) :
+      net (data[i], value(k))
+      i = i + 1
 
   ; includes 2*plastic_height
   val vertical_outer_spacing = 40.0 - plastic_height
@@ -328,6 +456,6 @@ public pcb-module module :
 
 val board-shape = RoundedRectangle(shield_width, shield_height, 3.0)
 setup-design("jitx-design", board-shape, signal-shrink = 0.5)
-set-main-module(module)
+set-main-module(alchitry_shield_bottom)
 view-schematic()
 view-board()
