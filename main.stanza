@@ -12,7 +12,7 @@ defpackage main :
 
 val board-shape = RoundedRectangle(
   components/AlchitryAu/element_width,
-  components/AlchitryAu/element_height + 5.0, 3.0)
+  components/AlchitryAu/element_height + 1.0, 3.0)
 
 defstruct Conn :
   start_index : Int
