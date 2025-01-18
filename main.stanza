@@ -8,6 +8,7 @@ defpackage main :
 
   import helpers
   import jsl
+  import collections
 
 ; public pcb-routing-structure power-lines :
 ;   name = "power traces"
@@ -21,7 +22,9 @@ defpackage main :
 ; topo-net(vcca => fpga.P39 => fpga.P40)
 ; structure(fpga.P39 => fpga.P40) = power-lines
 
-val board-shape = RoundedRectangle(components/AlchitryAu/element_width, components/AlchitryAu/element_height, 3.0)
+val board-shape = RoundedRectangle(
+  components/AlchitryAu/element_width,
+  components/AlchitryAu/element_height + 5.0, 3.0)
 
 pcb-module my-design :
   inst calc : components/PCG850Bus/component
@@ -107,7 +110,7 @@ defstruct Conn :
   shifter_index : Int
   invert_shifter_index : True|False
   fpga_port : JITXObject
-  fpga_start_index : Int
+  fpga_pins : Vector<Int>
 
 pcb-module alchitry-level-shifter :
   inst fpga : components/AlchitryAu/alchitry_element_bottom
@@ -146,24 +149,33 @@ pcb-module alchitry-level-shifter :
     net (high shift[shiftno].PT[pinno].B)
     make-net(to-symbol(low-name), [low, shift[shiftno].PT[pinno].A])
 
+  defn gen-seq (start:Int) :
+    val seq = Vector<Int>()
+    for i in 0 to 8 :
+      add(seq, start + i)
+    seq
+
+  ; println(gen-seq(0))
+  ; println(gen-seq(8)[1])
+
   val conversion = [
-    Conn(0, 0, false, fpga.data_a, 0)
-    Conn(8, 4, true, fpga.data_c, 0)
-    Conn(16, 1, false, fpga.data_a, 16)
-    Conn(24, 2, true, fpga.data_c, 16)
-    Conn(32, 3, true, fpga.data_c, 24)
-    Conn(40, 5, false, fpga.data_b, 0)
+                                                          ;1 2 3 4 5 6 7 8
+    Conn(0,  0, false, fpga.data_a, to-vector<Int>(to-seq([1 3 5 7 0 2 4 6]))),
+    Conn(8,  4, true,  fpga.data_c, gen-seq(0)),
+    Conn(16, 1, false, fpga.data_a, to-vector<Int>(to-seq([8 10 12 14 16 18 22 23]))),
+    Conn(24, 2, true,  fpga.data_c, gen-seq(16)),
+    Conn(32, 3, true,  fpga.data_c, gen-seq(24)),
+    Conn(40, 5, false, fpga.data_b, gen-seq(0))
   ]
 
   for i in conversion :
     val start_index = start_index(i)
     val shifter_index = shifter_index(i)
     val fpga_port = fpga_port(i)
-    val fpga_start_index = fpga_start_index(i)
 
     for j in 0 to 8 do :
       val data_index = start_index + j
-      val fpga_index = fpga_start_index + j
+      val fpga_index = fpga_pins(i)[j]
       val shifter_pin = if invert_shifter_index(i) :
         7 - j
       else :
