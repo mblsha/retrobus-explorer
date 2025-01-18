@@ -1,5 +1,5 @@
 #use-added-syntax(jitx)
-defpackage components/FourUcon-19008-50:
+defpackage components/AlchitryAu:
   import core
   import jitx
   import jitx/commands
