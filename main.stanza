@@ -121,7 +121,7 @@ pcb-module alchitry-level-shifter :
   port vcc5v
   net GND (gnd fpga.GND ffc1.GND ffc2.GND)
   net VCC3V3 (vcc3v3 fpga.VCC3V3)
-  net VCC5V (vcc5v ffc1.VCC5V ffc2.GND)
+  net VCC5V (vcc5v ffc1.VCC5V ffc2.VCC5V)
 
   val num_shifters = 6
   inst shift : components/LevelShifter/module[num_shifters]
@@ -186,6 +186,10 @@ pcb-module alchitry-level-shifter :
   val ffc_offset_y = 0.75
   place(ffc1) at loc(2.3960, ffc_offset_y + ffc_distance / -2.0, 180.0) on Bottom
   place(ffc2) at loc(2.3960, ffc_offset_y + ffc_distance / 2.0, 180.0) on Bottom
+
+  geom(GND) :
+    copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory

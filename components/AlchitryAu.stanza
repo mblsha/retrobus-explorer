@@ -474,10 +474,10 @@ public pcb-module alchitry_element_bottom :
       net (lookup(prefix_to_data, prefix)[lookup(index, prefix)], p)
       set(index, prefix, lookup(index, prefix) + 1)
 
-  port VCC5V : pin
+  ; port VCC5V : pin
   port VCC3V3 : pin
   port GND : pin
-  net (VCC5V, a.VCC5V, b.VCC5V, c.VCC5V, d.VCC5V)
+  ; net (VCC5V, a.VCC5V, b.VCC5V, c.VCC5V, d.VCC5V)
   net (VCC3V3, a.VCC3V3, b.VCC3V3, c.VCC3V3, d.VCC3V3)
   net (GND, a.GND, b.GND, c.GND, d.GND)
 
