@@ -47,13 +47,13 @@ pcb-landpattern lp :
   ;
   ; use `true` if only want to route the connectors on the bottom part
   ; of the Alchitry Au Element module
-  val flip_sides = true
+  val mirror_sides = true
 
   for i in 0 to pads_per_side do:
     val x = pad_offset_x + (pad_pitch * to-double(i))
     val y = pad_height / 2.0 + distance_between_pad_rows / 2.0
     val computed_i =
-      if flip_sides :
+      if mirror_sides :
         num_pads - 1 - i
       else :
         i
@@ -63,7 +63,7 @@ pcb-landpattern lp :
     val x = pad_offset_x + (pad_pitch * to-double(i))
     val y = pad_height / 2.0 + distance_between_pad_rows / 2.0
     val computed_i =
-      if flip_sides :
+      if mirror_sides :
         pads_per_side - 1 - i
       else :
         pads_per_side + i
@@ -81,7 +81,7 @@ pcb-landpattern lp :
     Point(plastic_width / -2.0, plastic_height / -2.0)])
 
   val first_pad_circle_factor =
-    if flip_sides :
+    if mirror_sides :
       2.0
     else :
       -2.0
