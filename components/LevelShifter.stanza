@@ -45,10 +45,10 @@ public pcb-module module :
 
   place(shifter) at loc(0.0, 0.0, 270.0) on Top
 
-  place(caplo1) at loc(-2.0, 4.0, 90.0) on Top
-  place(caplo2) at loc(-2.0, 5.25, 90.0) on Top
-  place(caphi1) at loc(2.0, 4.0, -90.0) on Top
-  place(caphi2) at loc(2.0, 5.25, -90.0) on Top
+  place(caplo1) at loc(-2.0, 4.1, 90.0) on Top
+  place(caplo2) at loc(-2.0, 5.35, 90.0) on Top
+  place(caphi1) at loc(2.0, 4.1, -90.0) on Top
+  place(caphi2) at loc(2.0, 5.35, -90.0) on Top
 
   ; val all-cats = BaseQuery(
   ;   mounting = "smd",

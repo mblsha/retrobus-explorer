@@ -114,13 +114,14 @@ pcb-module alchitry-level-shifter :
   place(fpga) at loc(0.0, 0.0, 0.0) on Top
 
   inst ffc1 : components/FFCConnector/module
+  inst ffc2 : components/FFCConnector/module
 
   port gnd
   port vcc3v3
   port vcc5v
-  net GND (gnd fpga.GND ffc1.GND)
+  net GND (gnd fpga.GND ffc1.GND ffc2.GND)
   net VCC3V3 (vcc3v3 fpga.VCC3V3)
-  net VCC5V (vcc5v ffc1.VCC5V)
+  net VCC5V (vcc5v ffc1.VCC5V ffc2.GND)
 
   val num_shifters = 6
   inst shift : components/LevelShifter/module[num_shifters]
@@ -129,6 +130,9 @@ pcb-module alchitry-level-shifter :
     net (vcc5v shift[i].vcchi)
     net (vcc3v3 shift[i].vcclo)
     net (vcc3v3 shift[i].oe)
+
+  for i in 0 to 48 :
+    net (ffc1.data[i] ffc2.data[i])
 
   symbol(GND) = GND-SYMB
   symbol(VCC3V3) = PWR-SYMB
@@ -145,7 +149,7 @@ pcb-module alchitry-level-shifter :
   val conversion = [
     Conn(0, 0, false, fpga.data_a, 0)
     Conn(8, 4, true, fpga.data_c, 0)
-    Conn(16, 1, false, fpga.data_a, 8)
+    Conn(16, 1, false, fpga.data_a, 16)
     Conn(24, 2, true, fpga.data_c, 16)
     Conn(32, 3, true, fpga.data_c, 24)
     Conn(40, 5, false, fpga.data_b, 0)
@@ -170,14 +174,18 @@ pcb-module alchitry-level-shifter :
   val shifter_pos = [
     loc(14.734, 9.4680, 270.0), ; 0
     loc(4.8113, 9.4680, 270.0), ; 1
-    loc(0.0678, -9.4680, 90.0), ; 2
-    loc(-10.15, -9.4680, 90.0), ; 3
+    loc(0.3, -9.4680, 90.0), ; 2
+    loc(-9.2, -9.4680, 90.0), ; 3
     loc(9.8165, -9.4680, 90.0), ; 4
-    loc(-14.64, 9.4680, 270.0) ; 5
+    loc(-13.64, 9.4680, 270.0) ; 5
   ]
-  place(ffc1) at loc(2.3960, -2.115, 180.0) on Bottom
   for (myloc in shifter_pos, i in 0 to false) :
     place(shift[i]) at myloc on Top
+
+  val ffc_distance = components/FFCConnector/height + 2.0
+  val ffc_offset_y = 0.75
+  place(ffc1) at loc(2.3960, ffc_offset_y + ffc_distance / -2.0, 180.0) on Bottom
+  place(ffc2) at loc(2.3960, ffc_offset_y + ffc_distance / 2.0, 180.0) on Bottom
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory

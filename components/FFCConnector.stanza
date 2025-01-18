@@ -9,6 +9,8 @@ defpackage components/FFCConnector :
   ; setup-design
   import helpers
 
+public val height = 5.5
+
 public pcb-module module :
   inst c : components/_0_5K-1_2X-60PWB/component
 
@@ -31,7 +33,7 @@ public pcb-module module :
       make-net(to-symbol(name), [data[out_index], c.p[i]])
       out_index = out_index + 1
 
-  place(c) at loc(0.0, 0.0, 0.0) on Top
+  place(c) at loc(0.0, 2.8, 0.0) on Top
 
 ; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
 ; setup-design("ffc-connector", board-shape, signal-shrink = 0.5)
