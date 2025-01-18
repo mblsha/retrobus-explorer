@@ -10,100 +10,9 @@ defpackage main :
   import jsl
   import collections
 
-; public pcb-routing-structure power-lines :
-;   name = "power traces"
-;   layer-constraints(Top) :
-;     trace-width = 0.5       ; mm
-;     clearance = 0.2         ; mm
-;     velocity = 0.19e12      ; mm/s
-;     insertion-loss = 0.008  ; db/mm @ 1GHz
-;     neck-down = NeckDown(0.5 0.12 false false)
-
-; topo-net(vcca => fpga.P39 => fpga.P40)
-; structure(fpga.P39 => fpga.P40) = power-lines
-
 val board-shape = RoundedRectangle(
   components/AlchitryAu/element_width,
   components/AlchitryAu/element_height + 5.0, 3.0)
-
-pcb-module my-design :
-  inst calc : components/PCG850Bus/component
-  inst fpga : components/FPGAHeader/component
-  inst shift : components/LevelShifter/module[5]
-
-  port gnd
-  port vccb
-  port vcca
-  net GND (gnd)
-  net VCCB (vccb)
-  net VCCA (vcca)
-
-  net (vcca fpga.P39 fpga.P40)
-  net (gnd  fpga.P1  fpga.P2)
-
-  net (vccb calc.VCCB1 calc.VCCB2)
-  net (gnd  calc.GND1  calc.GND2)
-
-  for i in 0 to 5 do:
-    net (gnd shift[i].gnd)
-    net (vccb shift[i].vcchi)
-    net (vcca shift[i].vcclo)
-    net (vcca shift[i].oe)
-
-  defn do-shift (shiftno:Int, pinno:Int, high:JITXObject, low:JITXObject) :
-    val low-name = replace(to-string(ref(high)), "calc.", "lo") as String
-    net (high shift[shiftno].PT[pinno].B)
-    make-net(to-symbol(low-name), [low, shift[shiftno].PT[pinno].A])
-
-  ; rearranging the connections to make single-level layout easier
-  do-shift(0, 7, calc.IORQ,    fpga.P3)
-  do-shift(0, 6, calc.IORESET, fpga.P4)
-  do-shift(0, 5, calc.RD,      fpga.P5)
-  do-shift(0, 4, calc.M1,      fpga.P6)
-  do-shift(0, 3, calc.WR,      fpga.P7)
-  do-shift(0, 2, calc.WAIT,    fpga.P8)
-  do-shift(0, 1, calc.MREQ,    fpga.P9)
-  do-shift(0, 0, calc.INT1,    fpga.P10)
-
-  do-shift(1, 7, calc.BNK1,    fpga.P11)
-  do-shift(1, 6, calc.BNK0,    fpga.P12)
-  do-shift(1, 5, calc.CEROM2,  fpga.P13)
-  do-shift(1, 4, calc.CERAM2,  fpga.P14)
-  do-shift(1, 3, calc.D7,      fpga.P15)
-  do-shift(1, 2, calc.D6,      fpga.P16)
-  do-shift(1, 1, calc.D5,      fpga.P17)
-  do-shift(1, 0, calc.D4,      fpga.P18)
-
-  do-shift(2, 7, calc.D3,      fpga.P19)
-  do-shift(2, 6, calc.D2,      fpga.P20)
-  do-shift(2, 5, calc.D1,      fpga.P21)
-  do-shift(2, 4, calc.D0,      fpga.P22)
-  do-shift(2, 3, calc.A15,     fpga.P23)
-  do-shift(2, 2, calc.A14,     fpga.P24)
-  do-shift(2, 1, calc.A13,     fpga.P25)
-  do-shift(2, 0, calc.A12,     fpga.P26)
-
-  do-shift(3, 7, calc.A11,     fpga.P27)
-  do-shift(3, 6, calc.A10,     fpga.P28)
-  do-shift(3, 5, calc.A9,      fpga.P29)
-  do-shift(3, 4, calc.A8,      fpga.P30)
-  do-shift(3, 3, calc.A7,      fpga.P31)
-  do-shift(3, 2, calc.A6,      fpga.P32)
-  do-shift(3, 1, calc.A5,      fpga.P33)
-  do-shift(3, 0, calc.A4,      fpga.P34)
-
-  do-shift(4, 7, calc.A3,      fpga.P35)
-  do-shift(4, 6, calc.A2,      fpga.P36)
-  do-shift(4, 5, calc.A1,      fpga.P37)
-  do-shift(4, 4, calc.A0,      fpga.P38)
-
-  geom(GND) :
-    copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
-    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
-
-  symbol(GND) = GND-SYMB
-  symbol(VCCA) = PWR-SYMB
-  symbol(VCCB) = PWR-SYMB
 
 defstruct Conn :
   start_index : Int
@@ -160,13 +69,12 @@ pcb-module alchitry-level-shifter :
   ; println(gen-seq(8)[1])
 
   val conversion = [
-                                                             ;1 2 3 4 5 6 7 8
     Conn(0,  0, false, fpga.data_a, 0, to-vector<Int>(to-seq([1 3 5 7 0 2 4 6]))),
     Conn(8,  4, true,  fpga.data_c, 0, to-vector<Int>(to-seq([0 2 4 6 1 3 5 7]))),
     Conn(16, 1, false, fpga.data_a, 0, to-vector<Int>(to-seq([8 10 12 14 16 18 22 23]))),
     Conn(24, 2, true,  fpga.data_c, 0, to-vector<Int>(to-seq([9 11 13 15 17 19 21 23]))),
     Conn(32, 3, true,  fpga.data_c, 0, to-vector<Int>(to-seq([25 27 29 31]))),
-    Conn(34, 3, true,  fpga.data_d, 4, to-vector<Int>(to-seq([0 2 1 3]))),
+    Conn(36, 3, true,  fpga.data_d, 4, to-vector<Int>(to-seq([0 2 1 3]))),
     Conn(40, 5, false, fpga.data_b, 0, to-vector<Int>(to-seq([1 3 5 7 0 2 4 6])))
   ]
 
@@ -204,6 +112,10 @@ pcb-module alchitry-level-shifter :
   geom(GND) :
     copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
     copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
+
+  geom(VCC3V3) :
+    copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
+
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory
