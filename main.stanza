@@ -26,7 +26,7 @@ val board-shape = RoundedRectangle(components/AlchitryAu/element_width, componen
 pcb-module my-design :
   inst calc : components/PCG850Bus/component
   inst fpga : components/FPGAHeader/component
-  inst shift : components/TXS0108EQPWRQ1/module[5]
+  inst shift : components/LevelShifter/module[5]
 
   port gnd
   port vccb
@@ -115,7 +115,7 @@ pcb-module alchitry-level-shifter :
   net VCC3V3 (vcc3v3 fpga.VCC3V3)
   net VCC5V (vcc5v ffc1.VCC5V)
 
-  inst shift : components/TXS0108EQPWRQ1/module[6]
+  inst shift : components/LevelShifter/module[6]
   for i in 0 to 6 do:
     net (gnd shift[i].gnd)
     net (vcc5v shift[i].vcchi)
@@ -126,11 +126,22 @@ pcb-module alchitry-level-shifter :
   symbol(VCC3V3) = PWR-SYMB
   symbol(VCC5V) = PWR-SYMB
 
+  defn do-shift (shiftno:Int, pinno:Int, high:JITXObject, low:JITXObject) :
+    val low-name = replace(to-string(ref(high)), "calc.", "lo") as String
+    net (high shift[shiftno].PT[pinno].B)
+    make-net(to-symbol(low-name), [low, shift[shiftno].PT[pinno].A])
+
+  for i in 0 to 6 do :
+    for j in 0 to 8 do :
+      val data_index = i * 8 + j
+      if data_index < 48 :
+        do-shift(i, j, ffc1.data[data_index], fpga.data[data_index])
+
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory
 ;     board           - a Board object representing the stackup, rules and board shape for a particular design
 ;     signal-shrink   - a distance in mm to pull back copper signals from the board edge
-setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+setup-design("alchitry-level-shifter", board-shape, signal-shrink = 0.5)
 
 set-main-module(alchitry-level-shifter)
 

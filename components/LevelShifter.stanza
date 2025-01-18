@@ -24,7 +24,8 @@ public pcb-module module :
   port gnd
   port oe
 
-  inst shifter : components/TXS0108EQPWRQ1/component
+  ; inst shifter : components/TXS0108EQPWRQ1/component
+  inst shifter : components/TXB0108PWR/component
 
   val num-chs = 8
   port PT : pass-through[num-chs]
@@ -34,7 +35,7 @@ public pcb-module module :
   net (vcchi, shifter.VCCB)
   net (oe, shifter.OE)
 
-  val capcase = "0402"
+  val capcase = "0603"
   val cap1 = 1.0e-7 ; 0.1uF
   val cap2 = 4.7e-6 ; 4.7uF
   val caplo1 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, gnd, ["capacitance" => cap1, "case" => capcase])
@@ -43,67 +44,68 @@ public pcb-module module :
   val caphi2 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, gnd, ["capacitance" => cap2, "case" => capcase])
 
   place(shifter) at loc(0.0, 0.0, 270.0) on Top
+
   place(caplo1) at loc(-2.0, 4.0, 90.0) on Top
-  place(caplo2) at loc(-2.0, 4.9, 90.0) on Top
+  place(caplo2) at loc(-2.0, 5.25, 90.0) on Top
   place(caphi1) at loc(2.0, 4.0, -90.0) on Top
-  place(caphi2) at loc(2.0, 4.9, -90.0) on Top
+  place(caphi2) at loc(2.0, 5.25, -90.0) on Top
 
-  val all-cats = BaseQuery(
-    mounting = "smd",
-    case = ["0402"], ; ... "0603"],
-  )
-  val R-query = ResistorQuery(
-    all-cats,
-    precision = (1 %)
-  )
-  val resval = 20.0 ; 20 ohms
+  ; val all-cats = BaseQuery(
+  ;   mounting = "smd",
+  ;   case = ["0402"], ; ... "0603"],
+  ; )
+  ; val R-query = ResistorQuery(
+  ;   all-cats,
+  ;   precision = (1 %)
+  ; )
+  ; val resval = 20.0 ; 20 ohms
 
-  defn do-res (index:Int, a:JITXObject, b:JITXObject, side:Dir) :
-    val start = 3.4
-    val h = 0.9
-    if side == Left:
-      val r = insert-resistor(a, b, R-query, resistance = resval)
-      place(r) at loc(-5.0, start - h * to-double(index), 90.0) on Top
-    else:
-      val r = insert-resistor(b, a, R-query, resistance = resval)
-      place(r) at loc(5.0, start - h * to-double(index), 90.0) on Top
-    ; FIXME: is this needed?
-    ; set-signal-end(a, b)
+  ; defn do-res (index:Int, a:JITXObject, b:JITXObject, side:Dir) :
+  ;   val start = 3.4
+  ;   val h = 0.9
+  ;   if side == Left:
+  ;     val r = insert-resistor(a, b, R-query, resistance = resval)
+  ;     place(r) at loc(-5.0, start - h * to-double(index), 90.0) on Top
+  ;   else:
+  ;     val r = insert-resistor(b, a, R-query, resistance = resval)
+  ;     place(r) at loc(5.0, start - h * to-double(index), 90.0) on Top
+  ;   ; FIXME: is this needed?
+  ;   ; set-signal-end(a, b)
 
-  ; net (PT[0].A, shifter.A1)
-  ; net (PT[0].B, shifter.B1)
-  ; net (PT[1].A, shifter.A2)
-  ; net (PT[1].B, shifter.B2)
-  ; net (PT[2].A, shifter.A3)
-  ; net (PT[2].B, shifter.B3)
-  ; net (PT[3].A, shifter.A4)
-  ; net (PT[3].B, shifter.B4)
-  ; net (PT[4].A, shifter.A5)
-  ; net (PT[4].B, shifter.B5)
-  ; net (PT[5].A, shifter.A6)
-  ; net (PT[5].B, shifter.B6)
-  ; net (PT[6].A, shifter.A7)
-  ; net (PT[6].B, shifter.B7)
-  ; net (PT[7].A, shifter.A8)
-  ; net (PT[7].B, shifter.B8)
+  net (PT[0].A, shifter.A1)
+  net (PT[0].B, shifter.B1)
+  net (PT[1].A, shifter.A2)
+  net (PT[1].B, shifter.B2)
+  net (PT[2].A, shifter.A3)
+  net (PT[2].B, shifter.B3)
+  net (PT[3].A, shifter.A4)
+  net (PT[3].B, shifter.B4)
+  net (PT[4].A, shifter.A5)
+  net (PT[4].B, shifter.B5)
+  net (PT[5].A, shifter.A6)
+  net (PT[5].B, shifter.B6)
+  net (PT[6].A, shifter.A7)
+  net (PT[6].B, shifter.B7)
+  net (PT[7].A, shifter.A8)
+  net (PT[7].B, shifter.B8)
 
-  do-res(0, PT[0].A, shifter.A1, Left)
-  do-res(1, PT[1].A, shifter.A2, Left)
-  do-res(2, PT[2].A, shifter.A3, Left)
-  do-res(3, PT[3].A, shifter.A4, Left)
-  do-res(4, PT[4].A, shifter.A5, Left)
-  do-res(5, PT[5].A, shifter.A6, Left)
-  do-res(6, PT[6].A, shifter.A7, Left)
-  do-res(7, PT[7].A, shifter.A8, Left)
+  ; do-res(0, PT[0].A, shifter.A1, Left)
+  ; do-res(1, PT[1].A, shifter.A2, Left)
+  ; do-res(2, PT[2].A, shifter.A3, Left)
+  ; do-res(3, PT[3].A, shifter.A4, Left)
+  ; do-res(4, PT[4].A, shifter.A5, Left)
+  ; do-res(5, PT[5].A, shifter.A6, Left)
+  ; do-res(6, PT[6].A, shifter.A7, Left)
+  ; do-res(7, PT[7].A, shifter.A8, Left)
 
-  do-res(0, PT[0].B, shifter.B1, Right)
-  do-res(1, PT[1].B, shifter.B2, Right)
-  do-res(2, PT[2].B, shifter.B3, Right)
-  do-res(3, PT[3].B, shifter.B4, Right)
-  do-res(4, PT[4].B, shifter.B5, Right)
-  do-res(5, PT[5].B, shifter.B6, Right)
-  do-res(6, PT[6].B, shifter.B7, Right)
-  do-res(7, PT[7].B, shifter.B8, Right)
+  ; do-res(0, PT[0].B, shifter.B1, Right)
+  ; do-res(1, PT[1].B, shifter.B2, Right)
+  ; do-res(2, PT[2].B, shifter.B3, Right)
+  ; do-res(3, PT[3].B, shifter.B4, Right)
+  ; do-res(4, PT[4].B, shifter.B5, Right)
+  ; do-res(5, PT[5].B, shifter.B6, Right)
+  ; do-res(6, PT[6].B, shifter.B7, Right)
+  ; do-res(7, PT[7].B, shifter.B8, Right)
 
 pcb-module test-module :
   port gnd
@@ -121,8 +123,8 @@ pcb-module test-module :
   insert-resistor(VDD, m.shifter.A1, R-query, resistance = 10.0e3)
   ; insert-resistor(GND, m.shifter.B1, R-query, resistance = 10.0e3)
 
-val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
-setup-design("jitx-design", board-shape, signal-shrink = 0.5)
-set-main-module(module)
-view-schematic()
-view-board()
+; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+; set-main-module(module)
+; view-schematic()
+; view-board()

@@ -215,3 +215,4 @@ public pcb-component component :
   property(self.case) = "TSSOP-20"
   property(self.mounting) = "smd"
 
+; view(component)

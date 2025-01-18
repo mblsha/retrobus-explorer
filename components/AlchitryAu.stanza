@@ -464,8 +464,8 @@ public pcb-module alchitry_element_bottom :
 ; view(component)
 ; view(alchitry_a)
 
-; val board-shape = RoundedRectangle(element_width, element_height, 3.0)
-; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
-; set-main-module(alchitry_element_bottom)
-; view-schematic()
-; view-board()
+val board-shape = RoundedRectangle(element_width, element_height, 3.0)
+setup-design("alchitry_element_bottom", board-shape, signal-shrink = 0.5)
+set-main-module(alchitry_element_bottom)
+view-schematic()
+view-board()
