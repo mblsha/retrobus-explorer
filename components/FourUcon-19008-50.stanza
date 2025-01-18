@@ -46,7 +46,7 @@ pcb-landpattern lp :
   ; FIXME: make this a parameter?
   ;
   ; use `true` if only want to route the connectors on the bottom part
-  ; of the Alchitry Au shield
+  ; of the Alchitry Au Element module
   val flip_sides = true
 
   for i in 0 to pads_per_side do:
@@ -116,7 +116,7 @@ public pcb-component component :
 ; https://cdn.sparkfun.com/assets/a/2/2/0/a/alchitry_au_sch_update-2.pdf
 ;
 ; NOTE: the pinout is from the top side of the Alchitry Au board, so if want
-;       to route the pins on the bottom side of the shield, need to flip the
+;       to route the pins on the bottom side of the element, need to flip the
 ;       pinout
 
 public pcb-component alchitry_a :
@@ -305,11 +305,11 @@ public pcb-component alchitry_d :
     power.V+ => self.VCC3V3
     power.V- => self.GND
 
-val shield_width = 65.0
-val shield_height = 45.0
+val element_width = 65.0
+val element_height = 45.0
 
 ; Top: is actually the side that connects to the FPGA
-public pcb-module alchitry_shield_bottom :
+public pcb-module alchitry_element_bottom :
   inst a : alchitry_a
   inst b : alchitry_b
   inst c : alchitry_c
@@ -430,6 +430,9 @@ public pcb-module alchitry_shield_bottom :
     if not contains?(ft_pins, key(k)) :
       num_safe_pins = num_safe_pins + 1
 
+  ; should be 78 pins when using Ft Element board
+  println(append("num_safe_pins: ", to-string(num_safe_pins)))
+
   port data : pin[num_safe_pins]
   var i = 0
   for k in to-seq(m) :
@@ -443,7 +446,7 @@ public pcb-module alchitry_shield_bottom :
   val distance_a_to_b = 10.3
   val distance_c_to_d = 6.3
 
-  val b_d_offset_left = shield_width / -2.0 + left_to_side + plastic_width / 2.0
+  val b_d_offset_left = element_width / -2.0 + left_to_side + plastic_width / 2.0
 
   place(b) at loc(b_d_offset_left, vertical_outer_spacing / 2.0, 180.0) on Top
   place(a) at loc(b_d_offset_left + distance_a_to_b + plastic_width, vertical_outer_spacing / 2.0, 180.0) on Top
@@ -454,8 +457,8 @@ public pcb-module alchitry_shield_bottom :
 ; view(component)
 ; view(alchitry_a)
 
-val board-shape = RoundedRectangle(shield_width, shield_height, 3.0)
+val board-shape = RoundedRectangle(element_width, element_height, 3.0)
 setup-design("jitx-design", board-shape, signal-shrink = 0.5)
-set-main-module(alchitry_shield_bottom)
+set-main-module(alchitry_element_bottom)
 view-schematic()
 view-board()
