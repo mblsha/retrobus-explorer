@@ -16,62 +16,25 @@ public pcb-module module :
   port GND : pin
   port data : pin[48]
 
-  net (VCC5V c.p[1])
-  net (GND c.p[5] c.p[10] c.p[15] c.p[20] c.p[25] c.p[30] c.p[35] c.p[40] c.p[45] c.p[50] c.p[55])
+  net VCC (VCC5V c.p[1])
+  val gnd_pins = [5 10 15 20 25 30 35 40 45 50 55]
+  for i in gnd_pins do :
+    net GND (GND c.p[i])
   ; mounting pads, connecting them to GND would make soldering more difficult
   ; net (GND c.p[61] c.p[62])
 
-  net (data[0]  c.p[2])
-  net (data[1]  c.p[3])
-  net (data[2]  c.p[4])
-  net (data[3]  c.p[6])
-  net (data[4]  c.p[7])
-  net (data[5]  c.p[8])
-  net (data[6]  c.p[9])
-  net (data[7]  c.p[11])
-  net (data[8]  c.p[12])
-  net (data[9] c.p[13])
-  net (data[10] c.p[14])
-  net (data[11] c.p[16])
-  net (data[12] c.p[17])
-  net (data[13] c.p[18])
-  net (data[14] c.p[19])
-  net (data[15] c.p[21])
-  net (data[16] c.p[22])
-  net (data[17] c.p[23])
-  net (data[18] c.p[24])
-  net (data[19] c.p[26])
-  net (data[20] c.p[27])
-  net (data[21] c.p[28])
-  net (data[22] c.p[29])
-  net (data[23] c.p[31])
-  net (data[24] c.p[32])
-  net (data[25] c.p[33])
-  net (data[26] c.p[34])
-  net (data[27] c.p[36])
-  net (data[28] c.p[37])
-  net (data[29] c.p[38])
-  net (data[30] c.p[39])
-  net (data[31] c.p[41])
-  net (data[32] c.p[42])
-  net (data[33] c.p[43])
-  net (data[34] c.p[44])
-  net (data[35] c.p[46])
-  net (data[36] c.p[47])
-  net (data[37] c.p[48])
-  net (data[38] c.p[49])
-  net (data[39] c.p[51])
-  net (data[40] c.p[52])
-  net (data[41] c.p[53])
-  net (data[42] c.p[54])
-  net (data[43] c.p[56])
-  net (data[44] c.p[57])
-  net (data[45] c.p[58])
-  net (data[46] c.p[59])
-  net (data[47] c.p[60])
+  var out_index = 0
+  for i in 2 to 61 :
+    if index-of(gnd_pins, i) == false :
+      ; println(i)
+      val name = append("DATA", to-string(out_index))
+      make-net(to-symbol(name), [data[out_index], c.p[i]])
+      out_index = out_index + 1
+
+  place(c) at loc(0.0, 0.0, 0.0) on Top
 
 ; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
-; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+; setup-design("ffc-connector", board-shape, signal-shrink = 0.5)
 ; set-main-module(module)
 ; view-schematic()
 ; view-board()

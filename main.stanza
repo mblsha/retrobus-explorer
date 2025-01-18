@@ -102,6 +102,13 @@ pcb-module my-design :
   symbol(VCCA) = PWR-SYMB
   symbol(VCCB) = PWR-SYMB
 
+defstruct Conn :
+  start_index : Int
+  shifter_index : Int
+  invert_shifter_index : True|False
+  fpga_port : JITXObject
+  fpga_start_index : Int
+
 pcb-module alchitry-level-shifter :
   inst fpga : components/AlchitryAu/alchitry_element_bottom
   place(fpga) at loc(0.0, 0.0, 0.0) on Top
@@ -115,8 +122,9 @@ pcb-module alchitry-level-shifter :
   net VCC3V3 (vcc3v3 fpga.VCC3V3)
   net VCC5V (vcc5v ffc1.VCC5V)
 
-  inst shift : components/LevelShifter/module[6]
-  for i in 0 to 6 do:
+  val num_shifters = 6
+  inst shift : components/LevelShifter/module[num_shifters]
+  for i in 0 to num_shifters do:
     net (gnd shift[i].gnd)
     net (vcc5v shift[i].vcchi)
     net (vcc3v3 shift[i].vcclo)
@@ -127,15 +135,49 @@ pcb-module alchitry-level-shifter :
   symbol(VCC5V) = PWR-SYMB
 
   defn do-shift (shiftno:Int, pinno:Int, high:JITXObject, low:JITXObject) :
-    val low-name = replace(to-string(ref(high)), "calc.", "lo") as String
+    ; println(to-string(ref(high)))
+    var low-name = replace(to-string(ref(high)), "ffc1.data", "loDATA") as String
+    low-name = replace(low-name, "[", "")
+    low-name = replace(low-name, "]", "")
     net (high shift[shiftno].PT[pinno].B)
     make-net(to-symbol(low-name), [low, shift[shiftno].PT[pinno].A])
 
-  for i in 0 to 6 do :
+  val conversion = [
+    Conn(0, 0, false, fpga.data_a, 0)
+    Conn(8, 4, true, fpga.data_c, 0)
+    Conn(16, 1, false, fpga.data_a, 8)
+    Conn(24, 2, true, fpga.data_c, 16)
+    Conn(32, 3, true, fpga.data_c, 24)
+    Conn(40, 5, false, fpga.data_b, 0)
+  ]
+
+  for i in conversion :
+    val start_index = start_index(i)
+    val shifter_index = shifter_index(i)
+    val fpga_port = fpga_port(i)
+    val fpga_start_index = fpga_start_index(i)
+
     for j in 0 to 8 do :
-      val data_index = i * 8 + j
-      if data_index < 48 :
-        do-shift(i, j, ffc1.data[data_index], fpga.data[data_index])
+      val data_index = start_index + j
+      val fpga_index = fpga_start_index + j
+      val shifter_pin = if invert_shifter_index(i) :
+        7 - j
+      else :
+        j
+      ; println(data_index)
+      do-shift(shifter_index, shifter_pin, ffc1.data[data_index], fpga_port[fpga_index])
+
+  val shifter_pos = [
+    loc(14.734, 9.4680, 270.0), ; 0
+    loc(4.8113, 9.4680, 270.0), ; 1
+    loc(0.0678, -9.4680, 90.0), ; 2
+    loc(-10.15, -9.4680, 90.0), ; 3
+    loc(9.8165, -9.4680, 90.0), ; 4
+    loc(-14.64, 9.4680, 270.0) ; 5
+  ]
+  place(ffc1) at loc(2.3960, -2.115, 180.0) on Bottom
+  for (myloc in shifter_pos, i in 0 to false) :
+    place(shift[i]) at myloc on Top
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory
