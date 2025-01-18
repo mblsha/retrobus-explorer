@@ -305,8 +305,8 @@ public pcb-component alchitry_d :
     power.V+ => self.VCC3V3
     power.V- => self.GND
 
-val element_width = 65.0
-val element_height = 45.0
+public val element_width = 65.0
+public val element_height = 45.0
 
 ; Top: is actually the side that connects to the FPGA
 public pcb-module alchitry_element_bottom :
@@ -440,6 +440,13 @@ public pcb-module alchitry_element_bottom :
       net (data[i], value(k))
       i = i + 1
 
+  port VCC5V : pin
+  port VCC3V3 : pin
+  port GND : pin
+  net (VCC5V, a.VCC5V, b.VCC5V, c.VCC5V, d.VCC5V)
+  net (VCC3V3, a.VCC3V3, b.VCC3V3, c.VCC3V3, d.VCC3V3)
+  net (GND, a.GND, b.GND, c.GND, d.GND)
+
   ; includes 2*plastic_height
   val vertical_outer_spacing = 40.0 - plastic_height
   val left_to_side = 5.40
@@ -457,8 +464,8 @@ public pcb-module alchitry_element_bottom :
 ; view(component)
 ; view(alchitry_a)
 
-val board-shape = RoundedRectangle(element_width, element_height, 3.0)
-setup-design("jitx-design", board-shape, signal-shrink = 0.5)
-set-main-module(alchitry_element_bottom)
-view-schematic()
-view-board()
+; val board-shape = RoundedRectangle(element_width, element_height, 3.0)
+; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+; set-main-module(alchitry_element_bottom)
+; view-schematic()
+; view-board()

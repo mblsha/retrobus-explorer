@@ -7,6 +7,8 @@ defpackage components/_0_5K-1_2X-60PWB :
   import jitx/commands
   import ocdb/utils/box-symbol
 
+  ; setup-design
+  import helpers
 
 pcb-pad rectangle-smd-pad :
   name = "rectangle-smd-pad"
@@ -511,5 +513,15 @@ public pcb-component component :
   property(self.case) = "SMD,P=0.5mm"
   property(self.mounting) = "smd"
   property(self.rated-temperature) = Toleranced(15.0, 70.0, 70.0)
+
+public pcb-module module :
+  inst c : components/_0_5K-1_2X-60PWB/component
+
+
+; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+; set-main-module(module)
+; view-schematic()
+; view-board()
 
 ; view(component)

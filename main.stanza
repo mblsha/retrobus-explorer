@@ -21,7 +21,7 @@ defpackage main :
 ; topo-net(vcca => fpga.P39 => fpga.P40)
 ; structure(fpga.P39 => fpga.P40) = power-lines
 
-val board-shape = RoundedRectangle(60.0, 50.0, 3.0)
+val board-shape = RoundedRectangle(components/AlchitryAu/element_width, components/AlchitryAu/element_height, 3.0)
 
 pcb-module my-design :
   inst calc : components/PCG850Bus/component
@@ -102,6 +102,29 @@ pcb-module my-design :
   symbol(VCCA) = PWR-SYMB
   symbol(VCCB) = PWR-SYMB
 
+pcb-module alchitry-level-shifter :
+  inst fpga : components/AlchitryAu/alchitry_element_bottom
+  place(fpga) at loc(0.0, 0.0, 0.0) on Top
+
+  inst ffc1 : components/FFCConnector/module
+
+  port gnd
+  port vcc3v3
+  port vcc5v
+  net GND (gnd fpga.GND ffc1.GND)
+  net VCC3V3 (vcc3v3 fpga.VCC3V3)
+  net VCC5V (vcc5v ffc1.VCC5V)
+
+  inst shift : components/TXS0108EQPWRQ1/module[6]
+  for i in 0 to 6 do:
+    net (gnd shift[i].gnd)
+    net (vcc5v shift[i].vcchi)
+    net (vcc3v3 shift[i].vcclo)
+    net (vcc3v3 shift[i].oe)
+
+  symbol(GND) = GND-SYMB
+  symbol(VCC3V3) = PWR-SYMB
+  symbol(VCC5V) = PWR-SYMB
 
 ; Set the :
 ;     design-name     - a directory with this name will be created in the "designs" directory
@@ -109,7 +132,7 @@ pcb-module my-design :
 ;     signal-shrink   - a distance in mm to pull back copper signals from the board edge
 setup-design("jitx-design", board-shape, signal-shrink = 0.5)
 
-set-main-module(my-design)
+set-main-module(alchitry-level-shifter)
 
 ; view-bom(BOM-STD)
 view-schematic()
