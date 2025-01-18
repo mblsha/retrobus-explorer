@@ -477,6 +477,10 @@ public pcb-module alchitry_element_bottom :
 
       val prefix = to-string(key[0])
       net (lookup(prefix_to_data, prefix)[lookup(index, prefix)], p)
+      ; if to-string(key[0]) == "A" :
+      ;   print(lookup(index, prefix))
+      ;   print(": ")
+      ;   println(key)
       set(index, prefix, lookup(index, prefix) + 1)
 
   ; port VCC5V : pin
