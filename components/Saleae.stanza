@@ -1,0 +1,53 @@
+#use-added-syntax(jitx)
+defpackage components/Saleae :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+  import jsl
+
+  ; setup-design
+  import helpers
+  ; pin-header
+  import ocdb/utils/generic-components
+
+public pcb-module saleae8 :
+  inst header : pin-header(8, 2)[2]
+
+  port gnd
+  for i in 0 to 2 :
+    for j in 0 to 8 :
+      if j % 2 == 0 :
+        net GND (gnd header[i].p[j + 1])
+
+  port data : pin[8]
+  net SALEAE0 (data[0] header[0].p[2])
+  net SALEAE1 (data[1] header[0].p[4])
+  net SALEAE2 (data[2] header[0].p[6])
+  net SALEAE3 (data[3] header[0].p[8])
+  net SALEAE4 (data[4] header[1].p[2])
+  net SALEAE5 (data[5] header[1].p[4])
+  net SALEAE6 (data[6] header[1].p[6])
+  net SALEAE7 (data[7] header[1].p[8])
+
+  ; https://support.saleae.com/datasheets-and-specifications/connector-dimensions
+  val distance = 13.462 ; 0.53"
+  place(header[0]) at loc(0.0, distance / -2.0) on Top
+  place(header[1]) at loc(0.0, distance / 2.0) on Top
+
+  for i in 0 to 4 :
+    inst num : ocdb/artwork/board-text/text(to-string(i), 1.5, 0.0)
+    val offset = 2.54 * to-double(i)
+    place(num) at loc(3.5, distance / 2.0 + 3.8 - offset) on Top
+
+  for i in 0 to 4 :
+    inst num : ocdb/artwork/board-text/text(to-string(4 + i), 1.5, 0.0)
+    val offset = 2.54 * to-double(i)
+    place(num) at loc(3.5, distance / -2.0 + 3.8 - offset) on Top
+
+
+val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+setup-design("saleae8", board-shape, signal-shrink = 0.5)
+set-main-module(saleae8)
+view-schematic()
+view-board()
