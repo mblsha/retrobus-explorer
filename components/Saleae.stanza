@@ -52,8 +52,8 @@ public pcb-module saleae8 :
     place(num) at loc(3.5, distance / -2.0 + 3.8 - offset) on Top
 
 
-val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
-setup-design("saleae8", board-shape, signal-shrink = 0.5)
-set-main-module(saleae8)
-view-schematic()
-view-board()
+; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+; setup-design("saleae8", board-shape, signal-shrink = 0.5)
+; set-main-module(saleae8)
+; view-schematic()
+; view-board()

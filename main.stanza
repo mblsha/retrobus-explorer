@@ -42,6 +42,8 @@ pcb-module alchitry-level-shifter :
   net VCC3V3 (vcc3v3 fpga.VCC3V3)
   net VCC5V (vcc5v ffc1.VCC5V ffc2.VCC5V)
 
+  inst saleae : components/Saleae/saleae8
+
   val num_shifters = 6
   inst shift : components/LevelShifter/module[num_shifters]
   for i in 0 to num_shifters do:
@@ -74,6 +76,9 @@ pcb-module alchitry-level-shifter :
   ; println(gen-seq(0))
   ; println(gen-seq(8)[1])
 
+  ; pins are arranged in a way to make single-layer layout possible since both
+  ; level shifters and FPGA are agnostic, and we just need to keep track of the
+  ; resulting pin destination to map it in gateware.
   val conversion = [
     Conn(0,  0, false, fpga.data_a, 0, to-vector<Int>(to-seq([1 3 5 7 0 2 4 6]))),
     Conn(8,  4, true,  fpga.data_c, 0, to-vector<Int>(to-seq([0 2 4 6 1 3 5 7]))),
@@ -84,6 +89,16 @@ pcb-module alchitry-level-shifter :
     Conn(32, 5, false, fpga.data_a, 0, to-vector<Int>(to-seq([20 21])))
     Conn(34, 5, false, fpga.data_b, 2, to-vector<Int>(to-seq([1 3 0 2 4 6])))
   ]
+
+  net (gnd saleae.gnd)
+  net (saleae.data[0], fpga.data_b[15])
+  net (saleae.data[1], fpga.data_b[13])
+  net (saleae.data[2], fpga.data_b[12])
+  net (saleae.data[3], fpga.data_b[14])
+  net (saleae.data[4], fpga.data_b[10])
+  net (saleae.data[5], fpga.data_b[8])
+  net (saleae.data[6], fpga.data_d[4])
+  net (saleae.data[7], fpga.data_d[5])
 
   for i in conversion :
     val start_index = start_index(i)
@@ -145,13 +160,15 @@ pcb-module alchitry-level-shifter :
   place(name-label)    at loc(w / 2.0 - 5.0, 0.0, 90.0) on Bottom
   place(version-label) at loc(w / 2.0 - 3.0, 0.0, 90.0) on Bottom
 
-  geom(GND) :
-    copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
-    copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
-    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
+  place(saleae) at loc(w / -2.0 + 10.0, 0.0, 0.0) on Bottom
 
-  geom(VCC3V3) :
-    copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
+
+  ; geom(GND) :
+  ;   copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
+  ;   copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
+  ;   copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
+  ; geom(VCC3V3) :
+  ;   copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
 
 
 ; Set the :
