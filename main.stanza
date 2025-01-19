@@ -10,9 +10,15 @@ defpackage main :
   import jsl
   import collections
 
+  ; gen-testpad
+  import ocdb/utils/generic-components
+  ; get-time-string
+  import utils/time
+
+
 val board-shape = RoundedRectangle(
   components/AlchitryAu/element_width,
-  components/AlchitryAu/element_height + 1.0, 3.0)
+  components/AlchitryAu/element_height + 0.0, 3.0)
 
 defstruct Conn :
   start_index : Int
@@ -105,10 +111,39 @@ pcb-module alchitry-level-shifter :
   for (myloc in shifter_pos, i in 0 to false) :
     place(shift[i]) at myloc on Top
 
-  val ffc_distance = components/FFCConnector/height + 2.0
+  ; Test Probes to measure signal integrity for the potential reflections.
+  inst tp_hi : gen-testpad(1.0)
+  net (tp_hi.p shift[0].PT[0].B)
+  inst tp_lo : gen-testpad(1.0)
+  net (tp_lo.p shift[0].PT[0].A)
+  place(tp_hi) at loc( 4.2, 4.0, 0.0) on Bottom (relative-to shift[0])
+  place(tp_lo) at loc(-4.2, 4.0, 0.0) on Bottom (relative-to shift[0])
+
+  inst tp_gnd : gen-testpad(3.0)[8]
+  for i in 0 to length(tp_gnd) :
+    net (GND tp_gnd[i].p)
+
+  val w = width(board-shape)
+  val h = height(board-shape)
+  place(tp_gnd[0]) at loc(w / 2.0 - 3.0, h /  2.0 - 3.0) on Top
+  place(tp_gnd[1]) at loc(w / 2.0 - 3.0, h /  2.0 - 3.0) on Bottom
+  place(tp_gnd[2]) at loc(w / 2.0 - 3.0, h / -2.0 + 3.0) on Top
+  place(tp_gnd[3]) at loc(w / 2.0 - 3.0, h / -2.0 + 3.0) on Bottom
+  place(tp_gnd[4]) at loc(w / -2.0 + 3.0, h /  2.0 - 3.0) on Top
+  place(tp_gnd[5]) at loc(w / -2.0 + 3.0, h /  2.0 - 3.0) on Bottom
+  place(tp_gnd[6]) at loc(w / -2.0 + 3.0, h / -2.0 + 3.0) on Top
+  place(tp_gnd[7]) at loc(w / -2.0 + 3.0, h / -2.0 + 3.0) on Bottom
+
+  val ffc_distance = components/FFCConnector/ffc-height + 2.0
   val ffc_offset_y = 0.75
   place(ffc1) at loc(2.3960, ffc_offset_y + ffc_distance / -2.0, 180.0) on Bottom
   place(ffc2) at loc(2.3960, ffc_offset_y + ffc_distance / 2.0, 180.0) on Bottom
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  inst name-label : ocdb/artwork/board-text/text("Level Shifter Element v1", 1.5, 0.0)
+  inst version-label  : ocdb/artwork/board-text/text(append("(c) mblsha ", mydate), 1.5, 0.0)
+  place(name-label)    at loc(w / 2.0 - 5.0, 0.0, 90.0) on Bottom
+  place(version-label) at loc(w / 2.0 - 3.0, 0.0, 90.0) on Bottom
 
   geom(GND) :
     copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
