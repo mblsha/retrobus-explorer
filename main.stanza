@@ -149,6 +149,12 @@ pcb-module alchitry-level-shifter :
   place(tp_gnd[6]) at loc(w / -2.0 + 3.0, h / -2.0 + 3.0) on Top
   place(tp_gnd[7]) at loc(w / -2.0 + 3.0, h / -2.0 + 3.0) on Bottom
 
+  inst tp_vcc : gen-testpad(1.0)[2]
+  net (vcc3v3 tp_vcc[0].p)
+  net (vcc5v  tp_vcc[1].p)
+  place(tp_vcc[0]) at loc(0.0, 12.0) on Bottom
+  place(tp_vcc[1]) at loc(0.0, 7.0)  on Bottom
+
   val ffc_distance = components/FFCConnector/ffc-height + 2.0
   val ffc_offset_y = 0.75
   place(ffc1) at loc(2.3960, ffc_offset_y + ffc_distance / -2.0, 180.0) on Bottom
@@ -162,6 +168,8 @@ pcb-module alchitry-level-shifter :
 
   place(saleae) at loc(w / -2.0 + 10.0, 0.0, 0.0) on Bottom
 
+  ; NOTE: bgupta recommended commenting out the copper-pours during the initial
+  ;       layout phase to help avoid major slowdowns.
 
   ; geom(GND) :
   ;   copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
