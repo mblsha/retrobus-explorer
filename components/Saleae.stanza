@@ -8,6 +8,7 @@ defpackage components/Saleae :
 
   ; setup-design
   import helpers
+  import pose-helpers
   ; pin-header
   import ocdb/utils/generic-components
 
@@ -32,8 +33,13 @@ public pcb-module saleae8 :
 
   ; https://support.saleae.com/datasheets-and-specifications/connector-dimensions
   val distance = 13.462 ; 0.53"
-  place(header[0]) at loc(0.0, distance / -2.0) on Top
-  place(header[1]) at loc(0.0, distance / 2.0) on Top
+  place(header[0]) at loc(0.0, distance / 2.0) on Top
+  place(header[1]) at loc(0.0, distance / -2.0) on Top
+
+  ; inst test : pin-header(8, 2)
+  ; place(test) at loc(0.0, 0.0, 0.0) on Top
+  ; FIXME: try using get-pins-physically-ordered
+  ; val foo = get-pins-physically-ordered(test)
 
   for i in 0 to 4 :
     inst num : ocdb/artwork/board-text/text(to-string(i), 1.5, 0.0)
