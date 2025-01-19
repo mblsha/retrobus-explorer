@@ -32,8 +32,9 @@ pcb-module alchitry-level-shifter :
   inst fpga : components/AlchitryAu/alchitry_element_bottom
   place(fpga) at loc(0.0, 0.0, 0.0) on Top
 
-  inst ffc1 : components/FFCConnector/module
-  inst ffc2 : components/FFCConnector/module
+  ; NOTE: adapter boards need to be flipped to match the pinout.
+  inst ffc1 : components/FFCConnector/module(flip_pins = false)
+  inst ffc2 : components/FFCConnector/module(flip_pins = false)
 
   port gnd
   port vcc3v3
