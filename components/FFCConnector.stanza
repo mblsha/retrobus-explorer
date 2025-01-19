@@ -9,7 +9,8 @@ defpackage components/FFCConnector :
   ; setup-design
   import helpers
 
-public val height = 5.5
+public val ffc-width = 18.0 * 2.0
+public val ffc-height = 5.5
 
 public pcb-module module :
   inst c : components/_0_5K-1_2X-60PWB/component
@@ -32,6 +33,8 @@ public pcb-module module :
       val name = append("DATA", to-string(out_index))
       make-net(to-symbol(name), [data[out_index], c.p[i]])
       out_index = out_index + 1
+
+  layer(Silkscreen("F-SilkS", Top)) = Circle(Point(ffc-width / 2.0 - 2.6, 0.5), 0.3)
 
   place(c) at loc(0.0, 2.8, 0.0) on Top
 

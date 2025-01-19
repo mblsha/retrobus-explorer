@@ -105,8 +105,8 @@ pcb-landpattern lp :
     Point(18.041, 1.247)])
   layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(17.661, 1.247), Point(17.914, 1.247)])
   layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-0.199, 1.247), Point(15.199, 1.247)])
-  layer(Silkscreen("F-SilkS", Top)) = Polyline(0.254, [
-    Arc(15.374, -2.182, 0.127, 0.0, -360.000)])
+  ; layer(Silkscreen("F-SilkS", Top)) = Polyline(0.2, [
+  ;   Arc(15.374, -2.182, 0.127, 0.0, -360.000)])
   layer(Courtyard(Top)) = Rectangle(36.336, 5.543)
 
 pcb-symbol sym-0_5K-1_2X-60PWB :
