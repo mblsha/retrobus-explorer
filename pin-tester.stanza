@@ -20,19 +20,101 @@ val board-shape = RoundedRectangle(
   50.0,
   30.0, 3.0)
 
+pcb-module power-pins :
+  inst header : pin-header(4, 2)
+
+  port vcc
+  net VCC (vcc header.p[1] header.p[2])
+
+  port gnd
+  net GND (gnd header.p[3] header.p[4])
+
+  place(header) at loc(0.0, 0.0) on Top
+
+  for side in 0 to 2 :
+    for i in 0 to 2 :
+      val text = if i == 0 :
+        "VCC"
+      else if i == 1 :
+        "GND"
+      else :
+        "ERR"
+      inst num : ocdb/artwork/board-text/text(text, 1.0, 0.0)
+      val x = if side == 0 : 3.5 else : -3.5
+      val start_offset_y = 2.54 / 2.0
+      val offset_y = 2.54 * to-double(i)
+      place(num) at loc(x, start_offset_y - offset_y) on Top
+
+pcb-module test-pins (start-index:Int) :
+  inst header : pin-header(8, 2)
+
+  port data : pin[8]
+
+  val start_offset_y = 2.54 / 2.0 * 4.0 - 1.27
+
+  place(header) at loc(0.0, 0.0) on Top
+  layer(Silkscreen("F-SilkS", Top)) =
+    Circle(Point(3.0, start_offset_y + 1.27), 0.3)
+
+  ; side: 0 is right, 1 is left
+  for side in 0 to 2 :
+    for i in 0 to 4 :
+      val num = if side == 0 :
+        start-index + side * 4 + i
+      else :
+        start-index + side * 4 + 3 - i
+      ; on the header the pins are indexed in rows, not columns
+      ; so have to use different math to get the pin number
+      val pin_num = if side == 0 :
+        2 + i * 2
+      else :
+        1 + i * 2
+      inst lbl : ocdb/artwork/board-text/text(to-string(num), 1.0, 0.0)
+      val x = if side == 0 : 1.0 else : -1.0
+      val offset_y = 2.54 * to-double(i)
+      place(lbl) at loc(3.4 * x, start_offset_y - offset_y) on Top
+
+      val net_name = append("HEAD", to-string(num))
+      make-net(to-symbol(net_name), [data[num - start-index] header.p[pin_num]])
+
+
 pcb-module pin-tester :
-  inst ffc1 : components/FFCConnector/module(flip_pins = true)
-  inst ffc2 : components/FFCConnector/module(flip_pins = false)
-  ; place(ffc) at loc(0.0, 0.0, 0.0) on Top
+  ; NOTE: need to have flipped pins to match the main board.
+  inst ffc : components/FFCConnector/module(flip_pins = true)
+
+  port GND (ffc.GND)
+
+  inst power : power-pins[2]
+  for i in 0 to length(power) :
+    net (power[i].vcc ffc.VCC5V)
+    net (power[i].gnd ffc.GND)
+
+  inst h0 : test-pins(8 * 0)
+  inst h1 : test-pins(8 * 1)
+  inst h2 : test-pins(8 * 2)
+  inst h3 : test-pins(8 * 3)
+  inst h4 : test-pins(8 * 4)
+  inst h5 : test-pins(8 * 5)
+  val heads = [h0 h1 h2 h3 h4 h5]
+
+  place(ffc) at loc(0.0, 0.0, 0.0) on Bottom
+
+  for i in 0 to length(heads) :
+    val head_start_index = 8 * i
+    for j in 0 to 8 :
+      val data_index = head_start_index + j
+      net (heads[i].data[j] ffc.data[data_index])
+
+  ; val tests = Vector<JITXObject>()
+  ; for i in 0 to 2 :
+  ;   val test = test-pins(i * 8)
+  ;   add(tests, test)
+  ; place(test) at loc(0.0, 0.0, 0.0) on Top
 
 setup-design("pin-tester", board-shape, signal-shrink = 0.5)
-
 set-main-module(pin-tester)
-
-; view-bom(BOM-STD)
 view-schematic()
 view-board()
-
 ; export-to-cad()
 
 
