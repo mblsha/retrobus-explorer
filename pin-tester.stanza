@@ -98,7 +98,7 @@ pcb-module pin-tester :
   inst h5 : test-pins(8 * 5)
   val heads = [h0 h1 h2 h3 h4 h5]
 
-  place(ffc) at loc(0.0, -3.5, 0.0) on Bottom
+  place(ffc) at loc(0.0, -4.5, 0.0) on Bottom
 
   for i in 0 to length(heads) :
     val head_start_index = 8 * i
@@ -108,7 +108,7 @@ pcb-module pin-tester :
 
   val start_x = 12.0
   val offset_x = 9.5 / 2.0
-  val start_y = 8.5
+  val start_y = 10.0
   for i in 0 to length(heads) :
     val x = start_x - offset_x * to-double(i)
     ; even rows are on the top (positive start_y), odd are
