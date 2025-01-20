@@ -62,7 +62,7 @@ pcb-module test-pins (start-index:Int) :
       val num = if side == 0 :
         start-index + side * 4 + i
       else :
-        start-index + side * 4 + 3 - i
+        start-index + side * 4 + i
       ; on the header the pins are indexed in rows, not columns
       ; so have to use different math to get the pin number
       val pin_num = if side == 0 :
@@ -83,6 +83,7 @@ pcb-module pin-tester :
   inst ffc : components/FFCConnector/module(flip_pins = true)
 
   port GND (ffc.GND)
+  port VCC (ffc.VCC5V)
 
   inst power : power-pins[2]
   for i in 0 to length(power) :
@@ -97,7 +98,7 @@ pcb-module pin-tester :
   inst h5 : test-pins(8 * 5)
   val heads = [h0 h1 h2 h3 h4 h5]
 
-  place(ffc) at loc(0.0, 0.0, 0.0) on Bottom
+  place(ffc) at loc(0.0, -0.75, 0.0) on Bottom
 
   for i in 0 to length(heads) :
     val head_start_index = 8 * i
@@ -105,11 +106,31 @@ pcb-module pin-tester :
       val data_index = head_start_index + j
       net (heads[i].data[j] ffc.data[data_index])
 
-  ; val tests = Vector<JITXObject>()
-  ; for i in 0 to 2 :
-  ;   val test = test-pins(i * 8)
-  ;   add(tests, test)
-  ; place(test) at loc(0.0, 0.0, 0.0) on Top
+  val start_x = 12.0
+  val offset_x = 9.5 / 2.0
+  val start_y = 6.5
+  for i in 0 to length(heads) :
+    val x = start_x - offset_x * to-double(i)
+    ; even rows are on the top (positive start_y), odd are
+    ; on the bottom (negative start_y)
+    val y = if i % 2 == 0 : start_y else : start_y * -1.0
+    place(heads[i]) at loc(x, y) on Top
+
+  place(power[0]) at loc(start_x + offset_x,       start_y * -1.0) on Top
+  place(power[1]) at loc(start_x - offset_x * 6.0, start_y *  1.0) on Top
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val label-text = append("pin-tester v1 (c) mblsha ", mydate)
+  inst version-label : ocdb/artwork/board-text/text(label-text, 1.5, 0.0)
+  val label_y = height(board-shape) / 2.0 - 2.0
+  place(version-label) at loc(0.0, label_y, 0.0) on Top
+
+  geom(GND) :
+    copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
+  geom(VCC) :
+    copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
 
 setup-design("pin-tester", board-shape, signal-shrink = 0.5)
 set-main-module(pin-tester)
