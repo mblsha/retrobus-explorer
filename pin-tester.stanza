@@ -82,8 +82,10 @@ pcb-module pin-tester :
   ; NOTE: need to have flipped pins to match the main board.
   inst ffc : components/FFCConnector/module(flip_pins = true)
 
-  port GND (ffc.GND)
-  port VCC (ffc.VCC5V)
+  port gnd
+  port vcc
+  net GND (gnd ffc.GND)
+  net VCC (vcc ffc.VCC5V)
 
   inst power : power-pins[2]
   for i in 0 to length(power) :
@@ -133,11 +135,11 @@ pcb-module pin-tester :
   val label_y = height(board-shape) / 2.0 - 2.0
   place(version-label) at loc(0.0, label_y, 0.0) on Top
 
-  geom(GND) :
+  geom(gnd) :
     copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
-    ; copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
     copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
-  ; geom(VCC) :
+  ; geom(vcc) :
   ;   copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
 
 setup-design("pin-tester", board-shape, signal-shrink = 0.5)
