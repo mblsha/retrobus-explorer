@@ -135,20 +135,11 @@ pcb-module alchitry-level-shifter :
   place(tp_hi) at loc( 4.2, 4.0, 0.0) on Bottom (relative-to shift[0])
   place(tp_lo) at loc(-4.2, 4.0, 0.0) on Bottom (relative-to shift[0])
 
-  inst tp_gnd : gen-testpad(3.0)[8]
-  for i in 0 to length(tp_gnd) :
-    net (GND tp_gnd[i].p)
-
   val w = width(board-shape)
   val h = height(board-shape)
-  place(tp_gnd[0]) at loc(w / 2.0 - 3.0, h /  2.0 - 3.0) on Top
-  place(tp_gnd[1]) at loc(w / 2.0 - 3.0, h /  2.0 - 3.0) on Bottom
-  place(tp_gnd[2]) at loc(w / 2.0 - 3.0, h / -2.0 + 3.0) on Top
-  place(tp_gnd[3]) at loc(w / 2.0 - 3.0, h / -2.0 + 3.0) on Bottom
-  place(tp_gnd[4]) at loc(w / -2.0 + 3.0, h /  2.0 - 3.0) on Top
-  place(tp_gnd[5]) at loc(w / -2.0 + 3.0, h /  2.0 - 3.0) on Bottom
-  place(tp_gnd[6]) at loc(w / -2.0 + 3.0, h / -2.0 + 3.0) on Top
-  place(tp_gnd[7]) at loc(w / -2.0 + 3.0, h / -2.0 + 3.0) on Bottom
+  inst tp-gnd : components/GndTestpads/module(diameter = 3.0, width = w, height = h)
+  net (tp-gnd.GND GND)
+  place(tp-gnd) at loc(0.0, 0.0) on Top
 
   inst tp_vcc : gen-testpad(1.0)[2]
   net (vcc3v3 tp_vcc[0].p)
@@ -172,12 +163,12 @@ pcb-module alchitry-level-shifter :
   ; NOTE: bgupta recommended commenting out the copper-pours during the initial
   ;       layout phase to help avoid major slowdowns.
 
-  geom(GND) :
-    copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
-    copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
-    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
-  geom(VCC3V3) :
-    copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
+  ; geom(GND) :
+  ;   copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
+  ;   copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
+  ;   copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
+  ; geom(VCC3V3) :
+  ;   copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
 
 
 ; Set the :
@@ -192,6 +183,6 @@ set-main-module(alchitry-level-shifter)
 view-schematic()
 view-board()
 
-export-to-cad()
+; export-to-cad()
 
 
