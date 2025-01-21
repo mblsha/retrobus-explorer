@@ -10,19 +10,6 @@ defpackage components/PCG850Bus:
   import ocdb/utils/generic-components
   import ocdb/utils/landpatterns
 
-pcb-pad my-th-pad :
-  name = "my-th-pad"
-  type = TH
-
-  val drill_diameter = 1.0
-  val pad_diameter = 1.8
-  val reduce = 0.1 ; not sure why it's needed: JITX seems to reduce shape from SolderMask and Paste layers by a small amount
-
-  shape = Circle(Point(0.0, 0.0), (pad_diameter - reduce) / 2.0)
-  layer(SolderMask(Top)) = Circle(Point(0.0, 0.0), pad_diameter / 2.0)
-  layer(Paste(Top))      = Circle(Point(0.0, 0.0), pad_diameter / 2.0)
-  layer(Cutout()) = Circle(Point(0.0, 0.0), drill_diameter / 2.0)
-
 pcb-landpattern lp :
   val num_pads = 40
   val num_rows = 2
@@ -46,7 +33,7 @@ pcb-landpattern lp :
         layer(Silkscreen("F-SilkS", Top)) =
           Circle(Point(x - 1.0 + offset_x, y + 1.0 + offset_y), 0.3)
 
-      pad p[pin_number] : my-th-pad at loc(x + offset_x, y + offset_y) on Top
+      pad p[pin_number] : circle-pth-circle-pad(1.0, 1.5) at loc(x + offset_x, y + offset_y) on Top
       pin_number = pin_number + 1
 
   val case_width = 31.50
