@@ -7,6 +7,56 @@ defpackage components/PCG850Bus:
   import jitx/commands
   import ocdb/utils/box-symbol
   import jsl
+  import ocdb/utils/generic-components
+  import ocdb/utils/landpatterns
+
+pcb-pad my-th-pad :
+  name = "my-th-pad"
+  type = TH
+
+  val drill_diameter = 1.0
+  val pad_diameter = 1.8
+  val reduce = 0.1 ; not sure why it's needed: JITX seems to reduce shape from SolderMask and Paste layers by a small amount
+
+  shape = Circle(Point(0.0, 0.0), (pad_diameter - reduce) / 2.0)
+  layer(SolderMask(Top)) = Circle(Point(0.0, 0.0), pad_diameter / 2.0)
+  layer(Paste(Top))      = Circle(Point(0.0, 0.0), pad_diameter / 2.0)
+  layer(Cutout()) = Circle(Point(0.0, 0.0), drill_diameter / 2.0)
+
+pcb-landpattern lp :
+  val num_pads = 40
+  val num_rows = 2
+  val num_cols = num_pads / num_rows
+
+  val row_pitch = 2.54 * 2.0
+  val col_pitch = 1.27
+
+  val offset_x = (to-double(num_cols) - 1.0) * col_pitch / 2.0 * -1.0
+  val offset_y = (to-double(num_rows) - 1.0) * row_pitch / 2.0 + row_pitch / 4.0
+
+  var pin_number = 1
+  for col in 0 to num_cols :
+    val column_offset = if col % 2 == 1 : row_pitch / 2.0 else : 0.0
+
+    for row in 0 to num_rows :
+      val x = to-double(col) * col_pitch
+      val y = to-double(row) * row_pitch * -1.0 - column_offset
+
+      if pin_number == 1:
+        layer(Silkscreen("F-SilkS", Top)) =
+          Circle(Point(x - 1.0 + offset_x, y + 1.0 + offset_y), 0.3)
+
+      pad p[pin_number] : my-th-pad at loc(x + offset_x, y + offset_y) on Top
+      pin_number = pin_number + 1
+
+  val case_width = 31.50
+  val case_height = 8.88
+  layer(Silkscreen("F-SilkS", Top)) = Polyline(0.2, [
+    Point(case_width / -2.0, case_height / -2.0),
+    Point(case_width / -2.0, case_height /  2.0),
+    Point(case_width /  2.0, case_height /  2.0),
+    Point(case_width /  2.0, case_height / -2.0),
+    Point(case_width / -2.0, case_height / -2.0)])
 
 public pcb-component component :
   name = "C5448171"
@@ -18,8 +68,7 @@ public pcb-component component :
 
   pin-properties :
     [pin:Ref | pads:Ref ... | side:Dir]
-    [VCCB1    | p[1]  | Left]
-    [VCCB2    | p[2]  | Left]
+    [VCC     | p[1] p[2]  | Left]
     [M1       | p[3]  | Left]
     [MREQ     | p[4]  | Left]
     [IORQ     | p[5]  | Left]
@@ -56,31 +105,11 @@ public pcb-component component :
     [A2       | p[36] | Right]
     [A1       | p[37] | Right]
     [A0       | p[38] | Right]
-    [GND1     | p[39] | Right]
-    [GND2     | p[40] | Right]
+    [GND      | p[39] p[40] | Right]
 
   val box = BoxSymbol(self)
   assign-symbol $ create-symbol(box)
 
-  ; FIXME: should use staggered pin layout
-  val pkg = Header(
-    num-leads = 40,
-    pitch = 2.54,
-    rows = 4,
-    pad-diam = 0.8,
-    lead-type = TH-Lead(
-      length = tol(0.0),
-      width = tol(0.8), ; FIXME: need to verify, same as pad-diam?
-    ),
-    package-body = PackageBody(
-      length = tol(31.50, 0.20),
-      width = typ(8.88),
-      height = typ(1.5)
-    ),
-  )
-
-  val lp = create-landpattern(pkg)
   assign-landpattern(lp)
 
-
-; view(component)
+view(component)

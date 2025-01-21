@@ -1,0 +1,42 @@
+#use-added-syntax(jitx)
+defpackage components/GndTestpads :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+  import jsl
+
+  ; setup-design
+  import helpers
+  import pose-helpers
+  ; pin-header
+  import ocdb/utils/generic-components
+
+public pcb-module module (-- diameter:Double, width:Double, height:Double) :
+  inst tp_gnd : gen-testpad(diameter)[8]
+
+  port GND
+  for i in 0 to length(tp_gnd) :
+    net (GND tp_gnd[i].p)
+
+  val w = width
+  val h = height
+  place(tp_gnd[0]) at loc(w / 2.0  - diameter, h /  2.0 - diameter) on Top
+  place(tp_gnd[1]) at loc(w / 2.0  - diameter, h /  2.0 - diameter) on Bottom
+  place(tp_gnd[2]) at loc(w / 2.0  - diameter, h / -2.0 + diameter) on Top
+  place(tp_gnd[3]) at loc(w / 2.0  - diameter, h / -2.0 + diameter) on Bottom
+  place(tp_gnd[4]) at loc(w / -2.0 + diameter, h /  2.0 - diameter) on Top
+  place(tp_gnd[5]) at loc(w / -2.0 + diameter, h /  2.0 - diameter) on Bottom
+  place(tp_gnd[6]) at loc(w / -2.0 + diameter, h / -2.0 + diameter) on Top
+  place(tp_gnd[7]) at loc(w / -2.0 + diameter, h / -2.0 + diameter) on Bottom
+
+pcb-module test-module :
+  inst tp : module(diameter = 3.0, width = 30.0, height = 18.5)
+  place(tp) at loc(0.0, 0.0) on Top
+
+
+; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+; setup-design("gnd-testpads", board-shape, signal-shrink = 0.5)
+; set-main-module(test-module)
+; view-schematic()
+; view-board()

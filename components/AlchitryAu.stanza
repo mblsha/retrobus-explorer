@@ -15,8 +15,8 @@ defpackage components/AlchitryAu:
 val pad_width = 0.25
 val pad_height = 2.0
 
-val plastic_width = 15.20 ; from table A: 50 pin
-val plastic_height = 4.0
+val case_width = 15.20 ; from table A: 50 pin
+val case_height = 4.0
 
 pcb-pad capsule-smd-pad :
   name = "capsule-smd-pad"
@@ -70,15 +70,15 @@ pcb-landpattern lp :
     pad p[computed_i] : capsule-smd-pad at loc(x * -1.0, y * 1.0) on Top
 
   layer(Silkscreen("F-SilkS", Top)) = Polyline(0.2, [
-    Point(plastic_width / -2.0, plastic_height / -2.0),
-    Point(plastic_width / -2.0, -0.5),
-    Point(plastic_width / -2.0 + 0.3, -0.5),
-    Point(plastic_width / -2.0 + 0.3,  0.5),
-    Point(plastic_width / -2.0, 0.5),
-    Point(plastic_width / -2.0, plastic_height /  2.0),
-    Point(plastic_width /  2.0, plastic_height /  2.0),
-    Point(plastic_width /  2.0, plastic_height / -2.0),
-    Point(plastic_width / -2.0, plastic_height / -2.0)])
+    Point(case_width / -2.0, case_height / -2.0),
+    Point(case_width / -2.0, -0.5),
+    Point(case_width / -2.0 + 0.3, -0.5),
+    Point(case_width / -2.0 + 0.3,  0.5),
+    Point(case_width / -2.0, 0.5),
+    Point(case_width / -2.0, case_height /  2.0),
+    Point(case_width /  2.0, case_height /  2.0),
+    Point(case_width /  2.0, case_height / -2.0),
+    Point(case_width / -2.0, case_height / -2.0)])
 
   val first_pad_circle_factor =
     if mirror_sides :
@@ -490,19 +490,19 @@ public pcb-module alchitry_element_bottom :
   net (VCC3V3, a.VCC3V3, b.VCC3V3, c.VCC3V3, d.VCC3V3)
   net (GND, a.GND, b.GND, c.GND, d.GND)
 
-  ; includes 2*plastic_height
-  val vertical_outer_spacing = 40.0 - plastic_height
+  ; includes 2*case_height
+  val vertical_outer_spacing = 40.0 - case_height
   val left_to_side = 5.40
   val distance_a_to_b = 10.3
   val distance_c_to_d = 6.3
 
-  val b_d_offset_left = element_width / -2.0 + left_to_side + plastic_width / 2.0
+  val b_d_offset_left = element_width / -2.0 + left_to_side + case_width / 2.0
 
   place(b) at loc(b_d_offset_left, vertical_outer_spacing / 2.0, 180.0) on Top
-  place(a) at loc(b_d_offset_left + distance_a_to_b + plastic_width, vertical_outer_spacing / 2.0, 180.0) on Top
+  place(a) at loc(b_d_offset_left + distance_a_to_b + case_width, vertical_outer_spacing / 2.0, 180.0) on Top
 
   place(d) at loc(b_d_offset_left, vertical_outer_spacing / -2.0, 180.0) on Top
-  place(c) at loc(b_d_offset_left + distance_c_to_d + plastic_width, vertical_outer_spacing / -2.0, 180.0) on Top
+  place(c) at loc(b_d_offset_left + distance_c_to_d + case_width, vertical_outer_spacing / -2.0, 180.0) on Top
 
 ; view(component)
 ; view(alchitry_a)
