@@ -99,4 +99,4 @@ public pcb-component component :
 
   assign-landpattern(lp)
 
-view(component)
+; view(component)
