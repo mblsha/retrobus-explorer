@@ -17,4 +17,5 @@ package components/FFCConnector defined-in "components/FFCConnector.stanza"
 package components/_0_5K-1_2X-60PWB defined-in "components/_0_5K-1_2X-60PWB.stanza"
 package components/LevelShifter defined-in "components/LevelShifter.stanza"
 package components/Saleae defined-in "components/Saleae.stanza"
+package components/GndTestpads defined-in "components/GndTestpads.stanza"
 

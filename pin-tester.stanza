@@ -136,16 +136,13 @@ pcb-module pin-tester :
   place(version-label) at loc(0.0, label_y, 0.0) on Top
 
   geom(gnd) :
-    copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
     copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
-    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
-  ; geom(vcc) :
-  ;   copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
 
 setup-design("pin-tester", board-shape, signal-shrink = 0.5)
 set-main-module(pin-tester)
 view-schematic()
 view-board()
-; export-to-cad()
+export-to-cad()
 
 

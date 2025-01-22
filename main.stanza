@@ -163,11 +163,8 @@ pcb-module alchitry-level-shifter :
   ; NOTE: bgupta recommended commenting out the copper-pours during the initial
   ;       layout phase to help avoid major slowdowns.
 
-  ; geom(GND) :
-  ;   copper-pour(LayerIndex(0),         isolate = 0.15, rank = 1) = board-shape
+  ; geom(gnd) :
   ;   copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
-  ;   copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
-  ; geom(VCC3V3) :
   ;   copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
 
 
@@ -182,7 +179,6 @@ set-main-module(alchitry-level-shifter)
 ; view-bom(BOM-STD)
 view-schematic()
 view-board()
-
-; export-to-cad()
+export-to-cad()
 
 
