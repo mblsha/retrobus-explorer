@@ -20,6 +20,7 @@ defpackage sharp-pc-e500 :
 val board-shape = RoundedRectangle(
   54.0,
   42.0, 2.0)
+val board-thickness = 2.0 ; 1.6 also works
 
 val bigpad-w = 2.0
 val bigpad-h = 10.0
@@ -50,7 +51,6 @@ pcb-landpattern lp :
   for i in 0 to 2 :
     val start-x = width(board-shape) / -2.0 + 3.7 + bigpad-w / 2.0
     val x = start-x + big-pitch * to-double(i)
-    println(x)
     pad p[1 + i] : my-pad(bigpad-name, bigpad-w, bigpad-h) at loc(x, 0.0) on Top
 
   for i in 0 to num_pads :
@@ -66,9 +66,8 @@ pcb-component ramcard :
 
   pin-properties :
     [pin:Ref | pads:Int ... | side:Dir ]
-    [VCC     | 1            | Left     ]
+    [VCC     | 1 3          | Left     ]
     [GND     | 2            | Left    ]
-    [VCC1    | 3            | Left    ]
     [RW      | 4            | Left    ]
     [A0      | 5            | Left    ]
     [A1      | 6            | Left    ]
@@ -123,43 +122,60 @@ pcb-module module :
   net (vcc bus.VCC)
 
   val data = [
-    bus.VCC1
+    bus.GND ; extra
+    bus.GND ; extra
     bus.RW
     bus.A0
     bus.A1
+    bus.GND ; extra
     bus.A2
     bus.A3
     bus.A4
+    bus.GND ; extra
     bus.A5
     bus.A6
     bus.A7
+    bus.GND ; extra
     bus.A8
     bus.A9
     bus.A10
+    bus.GND ; extra
     bus.A11
     bus.A12
     bus.A13
+    bus.GND ; extra
     bus.A14
     bus.A15
     bus.A16
+    bus.GND ; extra
     bus.A17
     bus.VCC2
     bus.D0
+    bus.GND ; extra
     bus.D1
     bus.D2
+    bus.GND ; extra
     bus.D3
     bus.D4
     bus.D5
+    bus.GND ; extra
     bus.D6
     bus.D7
     bus.CE1
+    bus.GND ; extra
     bus.CE6
     bus.NC
     bus.OE
+    bus.GND ; extra
+    bus.GND ; extra
+    bus.GND ; extra
+    bus.GND ; extra
   ]
 
   for i in 0 to length(data) do :
-    net (data[i] ffc.data[i])
+    val bus-name = replace(to-string(ref(data[i])), "bus.", "") as String
+    val name = to-string("%_-DATA%_" % [bus-name, i])
+    make-net(to-symbol(name), [data[i], ffc.data[i]])
 
   val dx = -0.0
   place(ffc) at loc(0.0, 0.0, 180.0) on Bottom
@@ -170,6 +186,9 @@ pcb-module module :
   inst version-label : ocdb/artwork/board-text/text(label-text, 1.5, 0.0)
   val label_y = height(board-shape) / -2.0 + 2.0
   place(version-label) at loc(0.0, label_y, 180.0) on Bottom
+
+  ; geom(gnd) :
+  ;   copper-pour(LayerIndex(0, Top), isolate = 0.15, rank = 1) = board-shape
 
 setup-design("sharp-pc-e500", board-shape, signal-shrink = 0.5)
 set-main-module(module)
