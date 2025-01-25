@@ -35,6 +35,8 @@ public pcb-module module :
   net (vcchi, shifter.VCCB)
   net (oe, shifter.OE)
 
+  ; FIXME: use a single decoupling cap?
+  ; reference: https://mastodon.social/@timonsku/113879320591652467
   val capcase = "0603"
   val cap1 = 1.0e-7 ; 0.1uF
   val cap2 = 4.7e-6 ; 4.7uF
