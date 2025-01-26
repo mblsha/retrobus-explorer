@@ -33,7 +33,7 @@ pcb-landpattern lp :
         layer(Silkscreen("F-SilkS", Top)) =
           Circle(Point(x - 1.0 + offset_x, y + 1.0 + offset_y), 0.3)
 
-      pad p[pin_number] : circle-pth-circle-pad(1.0, 1.5) at loc(x + offset_x, y + offset_y) on Top
+      pad p[pin_number] : circle-pth-circle-pad(1.0, 1.5, mask = 1.4) at loc(x + offset_x, y + offset_y) on Top
       pin_number = pin_number + 1
 
   val case_width = 31.50
