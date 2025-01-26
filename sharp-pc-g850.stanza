@@ -107,9 +107,10 @@ pcb-module module :
   val label_y = height(board-shape) / 2.0 - 2.0
   place(version-label) at loc(0.0, label_y, 0.0) on Top
 
-  ; geom(gnd) :
-  ;   copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
-  ;   copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
+  geom(gnd) :
+    copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
+    copper-pour(LayerIndex(0, Bottom), isolate = 0.15, rank = 1) = board-shape
 
 setup-design("sharp-pc-g850", board-shape, signal-shrink = 0.5)
 set-main-module(module)
