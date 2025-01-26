@@ -12,23 +12,35 @@ defpackage components/GndTestpads :
   ; pin-header
   import ocdb/utils/generic-components
 
-public pcb-module module (-- diameter:Double, width:Double, height:Double) :
-  inst tp_gnd : gen-testpad(diameter)[8]
-
-  port GND
-  for i in 0 to length(tp_gnd) :
-    net (GND tp_gnd[i].p)
+pcb-landpattern lp (-- diameter:Double, width:Double, height:Double) :
+  defn do-pad () :
+    circle-pth-circle-pad(diameter / 2.0, diameter, mask = diameter - 0.1)
 
   val w = width
   val h = height
-  place(tp_gnd[0]) at loc(w / 2.0  - diameter, h /  2.0 - diameter) on Top
-  place(tp_gnd[1]) at loc(w / 2.0  - diameter, h /  2.0 - diameter) on Bottom
-  place(tp_gnd[2]) at loc(w / 2.0  - diameter, h / -2.0 + diameter) on Top
-  place(tp_gnd[3]) at loc(w / 2.0  - diameter, h / -2.0 + diameter) on Bottom
-  place(tp_gnd[4]) at loc(w / -2.0 + diameter, h /  2.0 - diameter) on Top
-  place(tp_gnd[5]) at loc(w / -2.0 + diameter, h /  2.0 - diameter) on Bottom
-  place(tp_gnd[6]) at loc(w / -2.0 + diameter, h / -2.0 + diameter) on Top
-  place(tp_gnd[7]) at loc(w / -2.0 + diameter, h / -2.0 + diameter) on Bottom
+  pad p[1] : do-pad() at loc(w /  2.0 - diameter, h /  2.0 - diameter) on Top
+  pad p[2] : do-pad() at loc(w /  2.0 - diameter, h / -2.0 + diameter) on Top
+  pad p[3] : do-pad() at loc(w / -2.0 + diameter, h /  2.0 - diameter) on Top
+  pad p[4] : do-pad() at loc(w / -2.0 + diameter, h / -2.0 + diameter) on Top
+
+public pcb-component component (-- diameter:Double, width:Double, height:Double) :
+  name = "gnd-testpads"
+
+  pin-properties :
+    [pin:Ref | pads:Ref ... | side:Dir]
+    [GND     | p[1] p[2] p[3] p[4]  | Left]
+
+  val box = BoxSymbol(self)
+  assign-symbol $ create-symbol(box)
+  assign-landpattern(lp(diameter = diameter, width = width, height = height))
+
+public pcb-module module (-- diameter:Double, width:Double, height:Double) :
+  inst c : component(diameter = diameter, width = width, height = height)
+
+  port GND
+  net (GND c.GND)
+
+  place(c) at loc(0.0, 0.0) on Top
 
 pcb-module test-module :
   inst tp : module(diameter = 3.0, width = 30.0, height = 18.5)
