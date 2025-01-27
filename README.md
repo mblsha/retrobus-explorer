@@ -1,22 +1,22 @@
-# Getting started with a JITX Design
+# RetroBus Explorer
 
-Select the green `Use This Template` button towards the top of this page and create a new repository. If you do not see this button, sign into GitHub.
+RetroBus Explorer is an FPGA-based platform designed to capture, analyze, and visualize signals from legacy 5V system buses. It uses a specialized level-shifting interface board for bus compatibility, streams the captured data through an F600 FTDI chip, and presents live waveforms, decoded protocols, and analytics via a JavaScript (WebUSB) interface in the browser.
 
-Name your repository, select private or public, and select `Create repository from template` The repository will be created.
+# Hardware Adapters
 
-Select the green `Code` button and select the little clipboard icon to copy the repository source location
+* Pin Tester to test correctness and signal integrity
+* SHARP PC-G850
+* SHARP PC-E500
 
-In a terminal window on your machine, clone your repository by typing `git clone --recursive ` and paste in the location you copied. The command should look like this:
+# License
 
-```
-git clone --recursive git@github.com:<username>/<repository>.git .
-```
+* PCB Design Files
+All PCB design files are distributed under the
+`CERN Open Hardware Licence Version 2 – Permissive`.
 
-Open VSCode and select `File` then `Open Folder...` and open the folder location of the repository. Setting this directory in VSCode allows features like Go-to definition and Autocomplete to work. You can now open the `main.stanza` file in a VSCode editing pane and press `<Ctrl><Enter>` to run the template code.
+* Software (HDL, JS, etc.)
+All other repository contents—including FPGA gateware (HDL), JavaScript frontend, and server code—are released under the `Apache License 2.0`.
+
+You are free to use, modify, and distribute both portions of this project under their respective terms.
 
 
-# Library Management
-
-This repo will keep your library code in step with your design using the SLM package manager. You can look at the `slm.toml` file to see which libraries are being used and their versions. To update your libraries to the latest versions, you can run `slm update` in the terminal. This will fetch and install the most recent versions of the libraries specified in your `slm.toml` file.
-
-You can also add your own design libraries and link them in by editing the `slm.toml` file to include them.
