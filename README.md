@@ -1,6 +1,6 @@
 # RetroBus Explorer
 
-RetroBus Explorer is an FPGA-based platform designed to capture, analyze, and visualize signals from legacy 5V system buses. It uses a specialized level-shifting interface board for bus compatibility, streams the captured data through an F600 FTDI chip, and presents live waveforms, decoded protocols, and analytics via a JavaScript (WebUSB) interface in the browser.
+RetroBus Explorer is an FPGA-based platform designed to capture, analyze, and visualize signals from legacy 5V system buses. It uses a specialized level-shifting interface board for bus compatibility, streams the captured data through an FT600 FTDI chip, and presents live waveforms, decoded protocols, and analytics via a JavaScript (WebUSB) interface in the browser.
 
 # Hardware
 
@@ -27,4 +27,15 @@ All other repository contents—including FPGA gateware (HDL), JavaScript fronte
 
 You are free to use, modify, and distribute both portions of this project under their respective terms.
 
+# USB Device Info
 
+* Alchitry Au
+
+  Product ID: 0x6010
+  Vendor ID:  0x0403  (Future Technology Devices International Limited)
+
+* Alchitry Ft
+
+  Name: FTDI SuperSpeed-FIFO Bridge
+  Product ID: 0x601e
+  Vendor ID:  0x0403  (Future Technology Devices International Limited)
