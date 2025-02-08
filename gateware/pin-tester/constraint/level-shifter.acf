@@ -1,0 +1,53 @@
+STANDARD(LVCMOS33) { // standard 3.3V IO standard
+    // add pin constraints here
+    // pin SIGNAL PORT OPTIONAL_ATTRIBUTES
+    pin ffc_data[0] A49
+    pin ffc_data[1] A48
+    pin ffc_data[2] A46
+    pin ffc_data[3] A45
+    pin ffc_data[4] A2
+    pin ffc_data[5] A3
+    pin ffc_data[6] A5
+    pin ffc_data[7] A6
+    pin ffc_data[8] C2
+    pin ffc_data[9] C3
+    pin ffc_data[10] C5
+    pin ffc_data[11] C6
+    pin ffc_data[12] C49
+    pin ffc_data[13] C48
+    pin ffc_data[14] C46
+    pin ffc_data[15] C45
+    pin ffc_data[16] A8
+    pin ffc_data[17] A9
+    pin ffc_data[18] A11
+    pin ffc_data[19] A12
+    pin ffc_data[20] A14
+    pin ffc_data[21] A15
+    pin ffc_data[22] A23
+    pin ffc_data[23] A24
+    pin ffc_data[24] C43
+    pin ffc_data[25] C42
+    pin ffc_data[26] C40
+    pin ffc_data[27] C39
+    pin ffc_data[28] C37
+    pin ffc_data[29] C36
+    pin ffc_data[30] C34
+    pin ffc_data[31] C33
+    pin ffc_data[40] C31
+    pin ffc_data[41] C30
+    pin ffc_data[42] C28
+    pin ffc_data[43] C27
+    pin ffc_data[44] D8
+    pin ffc_data[45] D9
+    pin ffc_data[46] D43
+    pin ffc_data[47] D42
+    pin ffc_data[32] A34
+    pin ffc_data[33] A33
+    pin ffc_data[34] B49
+    pin ffc_data[35] B48
+    pin ffc_data[36] B2
+    pin ffc_data[37] B3
+    pin ffc_data[38] B5
+    pin ffc_data[39] B6
+
+}

@@ -1,0 +1,91 @@
+module alchitry_top (
+    input clk,              // 100MHz clock
+    input rst_n,            // reset button (active low)
+    output led[8],          // 8 user controllable LEDs
+    input usb_rx,           // USB->Serial input
+    output usb_tx,          // USB->Serial output
+
+    input ffc_data[48],
+
+    input ft_clk,
+    input ft_rxf,
+    input ft_txe,
+    inout ft_data[16],
+    inout ft_be[2],
+    output ft_rd,
+    output ft_wr,
+    output ft_oe
+) {
+    sig rst
+    enum States {IN, OUT_NL}
+    const NL_TEXT = $reverse("\r\n")
+
+    .clk(clk) {
+        reset_conditioner reset_cond
+
+        .rst(rst) {
+            // ft.ui_dout_be is either b01 or b11 (1 or 3)
+            ft ft(#BUS_WIDTH(16), .ft_clk(ft_clk), .ft_rxf(ft_rxf), .ft_txe(ft_txe), .ft_data(ft_data), .ft_be(ft_be))
+
+            #BAUD(1_000_000), #CLK_FREQ(100_000_000) {
+                uart_tx tx
+                uart_rx rx
+            }
+
+            dff state[$width(States)]
+            dff out_nl_count[$clog2($width(NL_TEXT, 0))]
+
+            dff bank[8]
+            dff last_read[48]
+        }
+    }
+
+    always {
+        reset_cond.in = ~rst_n  // input raw inverted reset signal
+        rst = reset_cond.out    // conditioned reset
+
+        usb_tx = tx.tx
+        rx.rx = usb_rx
+        tx.block = 0
+
+        ft_rd = ft.ft_rd
+        ft_wr = ft.ft_wr
+        ft_oe = ft.ft_oe
+        ft.ui_din = 0
+        ft.ui_din_be = 0
+        ft.ui_din_valid = 0
+        ft.ui_dout_get = 0
+
+        tx.data = 8h00
+        tx.new_data = 0
+
+        led = ffc_data[(bank.q * 8)+:8]
+
+        case (state.q) {
+            States.IN:
+                if (rx.new_data) {
+                    if (rx.data >= "0" && rx.data <= "5") {
+                        bank.d = rx.data - "0"
+
+                        tx.new_data = 1
+                        tx.data = rx.data
+
+                        state.d = States.OUT_NL
+                        out_nl_count.d = 0
+                    }
+                } else if (ffc_data != last_read.q && !tx.busy) {
+                    last_read.d = ffc_data
+                }
+
+            States.OUT_NL:
+                if (!tx.busy) {
+                    out_nl_count.d = out_nl_count.q + 1
+                    tx.data = NL_TEXT[out_nl_count.q]
+                    tx.new_data = 1
+                    if (out_nl_count.q == $width(NL_TEXT, 0) - 1) {
+                        state.d = States.IN
+                    }
+                }
+        }
+    }
+}
