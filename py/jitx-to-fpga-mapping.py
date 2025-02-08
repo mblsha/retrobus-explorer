@@ -22,24 +22,15 @@ def _(
     get_alchitry_ffc_mapping,
     get_sharp_pc_g850_bus_mapping,
     mo,
-    wraps,
 ):
     import functools
-
-    def add_header_footer(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            content = func(*args, **kwargs)
-            return ["--- Header ---"] + content + ["--- Footer ---"]
-        return wrapper
-
 
     def acf_constraint(f):
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             contents = f(*args, **kwargs)
             return "STANDARD(LVCMOS33) {\n" + \
-                '\n'.join([f'  {i}' for i in contents]) + "\n}"
+                '\n'.join([' '*4 + i for i in contents]) + "\n}"
         return wrapper
 
     @acf_constraint
@@ -74,7 +65,6 @@ def _(
 
     return (
         acf_constraint,
-        add_header_footer,
         download_constraint,
         functools,
         pin_tester,
