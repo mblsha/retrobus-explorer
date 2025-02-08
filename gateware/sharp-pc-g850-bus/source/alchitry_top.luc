@@ -1,0 +1,140 @@
+module alchitry_top (
+    input clk,              // 100MHz clock
+    input rst_n,            // reset button (active low)
+    output led[8],          // 8 user controllable LEDs
+    input usb_rx,           // USB->Serial input
+    output usb_tx,          // USB->Serial output
+
+    // Ft Element
+    input ft_clk,
+    input ft_rxf,
+    input ft_txe,
+    inout ft_data[16],
+    inout ft_be[2],
+    output ft_rd,
+    output ft_wr,
+    output ft_oe,
+
+    // PC-G850 System Bus
+    input z80_mreq,
+    input z80_m1,
+    input z80_ioreset,
+    input z80_iorq,
+    input z80_int1,
+    input z80_wait,
+    input z80_rd,
+    input z80_wr,
+
+    input data[8],
+    input addr[16],
+
+    input addr_bnk[2],
+    input addr_ceram2,
+    input addr_cerom2
+) {
+    sig rst
+
+    enum States {IN, OUT}
+
+    .clk(clk) {
+        reset_conditioner reset_cond
+
+        .rst(rst) {
+            ft ft(#BUS_WIDTH(16), .ft_clk(ft_clk), .ft_rxf(ft_rxf), .ft_txe(ft_txe), .ft_data(ft_data), .ft_be(ft_be))
+
+            #BAUD(1_000_000), #CLK_FREQ(100_000_000) {
+                uart_tx tx
+                uart_rx rx
+            }
+
+            fifo f(#WIDTH(8), #ENTRIES(256))
+
+            dff state[$width(States)]
+
+            dff last_iorq
+            dff last_mreq
+            dff last_rd
+            dff last_wr
+            dff last_addr[16]
+            dff last_data[8]
+        }
+    }
+
+    always {
+        reset_cond.in = ~rst_n  // input raw inverted reset signal
+        rst = reset_cond.out    // conditioned reset
+
+        led = 8h00
+
+        usb_tx = tx.tx
+        rx.rx = usb_rx
+        tx.block = 0
+        tx.data = 8h00
+        tx.new_data = 0
+
+        // fifo write
+        f.wput = 0
+        f.din = 8h00
+
+        // fifo read
+        f.rget = 0
+
+        ft_rd = ft.ft_rd
+        ft_wr = ft.ft_wr
+        ft_oe = ft.ft_oe
+        ft.ui_din = 0
+        ft.ui_din_be = 0
+        ft.ui_din_valid = 0
+        ft.ui_dout_get = 0
+
+        state.d = States.IN
+
+        case (state.q) {
+            States.IN:
+                if (!z80_mreq && last_mreq.q) {
+                    last_addr.d = addr
+                } else if (!z80_iorq && last_iorq.q) {
+                    // FIXME: fill only last 8 bytes? rest should be zeroes?
+                    last_addr.d = addr
+                }
+
+                if (!last_mreq.q && z80_rd && !last_rd.q) {
+                    // 1: Read
+                    // stream data + last_addr
+                    led = b1
+
+                    tx.new_data = 1
+                    tx.data = "R"
+                } else if (!last_mreq.q && z80_wr && !last_wr.q) {
+                    // 2: Write
+                    // stream last_data + last_addr
+                    led = b10
+
+                    tx.new_data = 1
+                    tx.data = "W"
+                } else if (!last_iorq.q && z80_rd && !last_rd.q) {
+                    // 3: IO Read
+                    // data + last_addr
+                    led = b100
+
+                    tx.new_data = 1
+                    tx.data = "r"
+                } else if (!last_iorq.q && z80_wr && !last_wr.q) {
+                    // 4: IO Write
+                    // last_data + last_addr
+                    led = b1000
+
+                    tx.new_data = 1
+                    tx.data = "w"
+                }
+
+                last_iorq.d = z80_iorq
+                last_mreq.d = z80_mreq
+                last_rd.d = z80_rd
+                last_wr.d = z80_wr
+                last_data.d = data
+
+            // States.OUT:
+        }
+    }
+}

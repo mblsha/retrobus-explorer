@@ -1,0 +1,41 @@
+STANDARD(LVCMOS33) {
+  pin z80_mreq A48
+  pin z80_m1 A46
+  pin z80_ioreset A45
+  pin z80_iorq A2
+  pin z80_int1 A3
+  pin z80_wait A5
+  pin z80_rd A6
+  pin z80_wr C2
+
+  pin data[0] A12
+  pin data[1] A14
+  pin data[2] A9
+  pin data[3] A11
+  pin data[4] C45
+  pin data[5] A8
+  pin data[6] C48
+  pin data[7] C46
+
+  pin addr[0] B48
+  pin addr[1] B2
+  pin addr[2] A33
+  pin addr[3] B49
+  pin addr[4] C33
+  pin addr[5] A34
+  pin addr[6] C36
+  pin addr[7] C34
+  pin addr[8] C39
+  pin addr[9] C37
+  pin addr[10] C42
+  pin addr[11] C40
+  pin addr[12] A24
+  pin addr[13] C43
+  pin addr[14] A15
+  pin addr[15] A23
+
+  pin addr_bnk[0] C3
+  pin addr_bnk[1] C5
+  pin addr_ceram2 C6
+  pin addr_cerom2 C49
+}
