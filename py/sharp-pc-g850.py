@@ -60,42 +60,43 @@ def _(Ft600Device):
     import datetime
     import time
 
-    def Send(buffwrite):
+    def GetBusData(num_seconds_before_timeout=5):
         print(datetime.datetime.now())
 
         with Ft600Device() as d:
             # clear input buffer
             for i in range(100):
-                bytes = d.read(1)
+                bytes = d.read(256)
 
             print('Ready...')
             data = []
 
             start = datetime.datetime.now()
-            # while len(data) < 1000:
             while True:
-                bytes = d.read(4)
+                bytes = d.read(256)
+                now = datetime.datetime.now()
                 if bytes is None:
-                    now = datetime.datetime.now()
-                    # if more than 1 second passed, break
-                    if (now - start).total_seconds() > 5:
+                    if (now - start).total_seconds() > num_seconds_before_timeout:
                         break
                     continue
+                start = now
                 data.append(bytes)
 
+            print(f'Done. Received {len(data)} packets.')
             return data
 
             # print(d.write(b'--'))
             # print(d.write(b'++'))
 
     # DemoLoopback()
-    data = Send(b"Helloworld!")
-    data
-    return Send, data, datetime, time
+    data_lines = GetBusData()
+    data_concat = b''.join(data_lines)
+    print(f"Received {len(data_concat)} bytes")
+    return GetBusData, data_concat, data_lines, datetime, time
 
 
 @app.cell
-def _(data):
+def _(data_concat):
     from enum import Enum
     from dataclasses import dataclass
     import struct
@@ -114,32 +115,42 @@ def _(data):
         # raw:  bytes
 
     def parse_data(data):
+        errors = []
         r = []
-        for i in data:
-            # FIXME: why we're getting 0s if we're not sending them?
-            if i[0] == 0:
+
+        offset = 0
+        while offset < len(data):
+            try:
+                type = Type(chr(data[offset]))
+            except ValueError:
+                errors.append(f"Invalid type at offset {offset}: {data[offset]}")
+                offset += 1
+                # raise ValueError(f"Invalid type at index {index}: {i}")
                 continue
 
-            type = Type(chr(i[0]))
-            val  = struct.unpack("B", i[1:2])[0]
-            addr = struct.unpack("H", i[2:4])[0]
+            # val  = struct.unpack("B", i[1:2])[0]
+            # addr = struct.unpack("H", i[2:4])[0]
+            val  = struct.unpack("B", data[offset+1:offset+2])[0]
+            addr = struct.unpack("H", data[offset+2:offset+4])[0]
+            offset += 4
+
             if type in [Type.IN_PORT, Type.OUT_PORT]:
                 addr &= 0xFF
 
             r.append(Event(type, val, addr))
-        return r
+        return r, errors
 
-    parsed = parse_data(data)
-
-    import pandas
-    return Enum, Event, Type, dataclass, pandas, parse_data, parsed, struct
+    parsed, errors = parse_data(data_concat)
+    errors
+    return Enum, Event, Type, dataclass, errors, parse_data, parsed, struct
 
 
 @app.cell
-def _(mo, pandas, parsed):
+def _(mo, parsed):
+    import pandas
     df = pandas.DataFrame(parsed)
     mo.ui.dataframe(df, page_size=20)
-    return (df,)
+    return df, pandas
 
 
 @app.cell
@@ -167,6 +178,13 @@ def _(Type, df):
 @app.cell
 def _(PCG850Display, Type, df):
     display = PCG850Display()
+    rom_bank = None
+    ex_bank = None
+    xin_enabled = None
+    key_strobe = 0
+
+    unhandled_inport = set()
+    unhandled_outport = set()
 
     for r in df.itertuples():
         # print(r.type, r.val, r.addr)
@@ -180,6 +198,18 @@ def _(PCG850Display, Type, df):
             # print('in_port')
             # match per r.addr
             match r.addr:
+                case 0x10:
+                    """The returned value (stored in the location pointed to by x) is built up by checking individual bits in the variable keyStrobe.
+    For each bit that is set in keyStrobe, a corresponding element from the keyMatrix array is OR‑ed into the result.
+    For example, if bit 0 (0x001) is set in keyStrobe, then keyMatrix[0] is included in the result.
+    Interpretation:
+    The result is a bit‑mask that represents which keys (or key groups) are currently “active” (i.e. pressed) for the rows/columns selected by the strobe.
+    The exact mapping depends on how the key matrix is arranged on your calculator, but essentially each bit in the returned value indicates the state (pressed or not) of keys in one of the rows."""
+                    key_strobe = r.val
+                    print(f"read key_strobe: {hex(key_strobe)}")
+                case 0x15:
+                    xin_enabled = r.val
+                    print(f"read xin_enabled: {xin_enabled}")
                 case 0x19:
                     rom_bank = r.val & 0x0F
                     ex_bank = (r.val & 0x70) >> 4
@@ -195,9 +225,26 @@ def _(PCG850Display, Type, df):
                     print(f"read rom_bank: {rom_bank}")
                     pass
                 case _:
-                    raise ValueError(f"Unknown in_port {hex(r.addr)}")
+                    unhandled_inport.add(r.addr)
+                    # raise ValueError(f"Unknown in_port {hex(r.addr)}")
+
+        
         elif r.type == Type.OUT_PORT:
             match r.addr:
+                case 0x11:
+                    """How to Interpret the Passed‑in Value:
+
+    The Entire 8‑bit Value:
+    The value written to port 0x11 is stored in keyStrobeLast and then OR‑ed into keyStrobe. This value acts as a bit‑mask that selects which parts of the key matrix will be read by the input routine on port 0x10.
+    Bit 4 (0x10):
+    If bit 4 is set in the written value, then the code additionally sets an interrupt flag (INTERRUPT_IA) in the interruptType register. This likely signals the CPU that a key‐action has occurred.
+    Interpretation:
+    To “select” a particular key (or group of keys), you write a value with the corresponding bit set. For example, writing 0x01 means “activate key matrix group 0,” writing 0x02 means “activate group 1,” and so on.
+    In many designs, multiple strobe lines might be combined. Here the code even OR‑s new strobe bits into keyStrobe so that successive writes accumulate until they are cleared by the timing logic.
+    Practical Note:
+    When you send a byte to port 0x11, check its bits to determine which key row(s) it is selecting. Also note that setting bit 4 (0x10) will trigger an interrupt for key input processing."""
+                    key_strobe |= r.val
+                    print(f"write key_strobe: {hex(key_strobe)}")
                 case 0x12:
                     """The byte you write is shifted left 8 bits and then OR‑ed into a “key strobe” mask.
     Meaning of the bits:
@@ -233,6 +280,8 @@ def _(PCG850Display, Type, df):
                     ex_bank = (r.val & 0x70) >> 4
                     print(f"write rom_bank: {rom_bank}, ex_bank: {ex_bank}")
                     pass
+                case 0x1a:
+                    print(f"boot rom on/off: {r.val}")
                 case 0x1b:
                     """Only bit 2 (mask 0x04) of the written value is used.
     If (x & 0x04) is different from the current ramBank:
@@ -242,6 +291,21 @@ def _(PCG850Display, Type, df):
                     ram_bank = r.val & 0x04
                     print(f"write ram_bank: {ram_bank}")
                     pass
+                case 0x1e:
+                    """How to Interpret the Passed‑in Value:
+
+    Value Masking:
+    Only the lower two bits of the value (mask 0x03) are used.
+    Interpretation:
+    The value written sets the battery check mode by storing x & 0x03 into the variable battChk.
+    For example:
+    Writing 0x00 → battery check mode 0
+    Writing 0x01 → mode 1
+    Writing 0x02 → mode 2
+    Writing 0x03 → mode 3
+    What It Means:
+    Although the provided code for the battery state (in port 0x1D) always returns 0, the mode set via port 0x1E would typically affect how the battery status is measured or reported. It might be used to select thresholds or to initiate a battery test sequence."""
+                    print(f"write battery check mode: {r.val & 0x03}")
                 case 0x40:
                     display.parse_out40(r.val)
                 case 0x41:
@@ -256,24 +320,36 @@ def _(PCG850Display, Type, df):
                 case 0xed:
                     pass
                 case _:
-                    raise ValueError(f"Unknown out_port {hex(r.addr)}")
+                    unhandled_outport.add(r.addr)
+                    # raise ValueError(f"Unknown out_port {hex(r.addr)}")
         else:
             raise ValueError(f"Unknown type {r.type}")
 
-    print(display)
+    # print(display)
     display.dump_vram()
-    return display, ex_bank, key_strobe, r, ram_bank, rom_bank, xin_enabled
+    print(f"unhandled_inport: {unhandled_inport}")
+    print(f"unhandled_outport: {unhandled_outport}")
+    return (
+        display,
+        ex_bank,
+        key_strobe,
+        r,
+        ram_bank,
+        rom_bank,
+        unhandled_inport,
+        unhandled_outport,
+        xin_enabled,
+    )
 
 
-@app.cell
-def _():
-    class PCG850Display:
+app._unparsable_cell(
+    r"""
         LCD_WIDTH = 166
         LCD_HEIGHT = 8
 
         def __init__(self):
             self.lcdRead = False     # Flag: whether a read was already performed
-            self.lcdMod = False      # Special "modification" mode flag
+            self.lcdMod = False      # Special \"modification\" mode flag
             self.lcdX = 0            # Current horizontal coordinate (0-255)
             self.lcdX2 = 0           # Backup horizontal coordinate (used in lcdMod)
             self.lcdY = 0            # Current vertical coordinate (0-7)
@@ -298,13 +374,16 @@ def _():
             # (You might print or log the new contrast if needed.)
             pass
 
+        def debug(self, str):
+            print('>display: ' + str)
+
         def parse_out40(self, x):
-            """
+            \"\"\"
             Parse an OUT command to port 0x40.
             x: integer 0-255 representing the byte written.
             This function decodes the high nibble (x & 0xf0) and then uses the low nibble
             as a parameter.
-            """
+            \"\"\"
             self.lcdRead = False
             high = x & 0xf0
             low = x & 0x0f
@@ -313,117 +392,144 @@ def _():
                 # Set lower nibble of horizontal coordinate if not in lcdMod mode.
                 if not self.lcdMod:
                     self.lcdX = (self.lcdX & 0xf0) | low
+                    self.debug(f'Set lcdX low to {self.lcdX}')
 
             elif high == 0x10:
                 # Set upper nibble of lcdX.
                 if not self.lcdMod:
                     # (x << 4) gives the new high nibble.
                     self.lcdX = ((x & 0xff) << 4) | (self.lcdX & 0x0f)
+                    self.debug(f'Set lcdX high to {self.lcdX}')
 
             elif high == 0x20:
                 # Enable/disable the LCD.
                 if x == 0x24:
                     self.lcdDisabled = True
+                    self.debug('LCD disabled')
                 elif x == 0x25:
                     self.lcdDisabled = False
+                    self.debug('LCD enabled')
                 self.updateLCDContrast()
 
             elif high == 0x30:
                 # Set timer interval.
                 self.timerInterval = 16192 * (low + 1)
+                self.debug(f'Set timer interval to {self.timerInterval}')
 
             elif high in (0x40, 0x50, 0x60, 0x70):
-                # Set the display "top" offset.
+                # Set the display \"top\" offset.
                 self.lcdTop = x - 0x40
+                self.debug(f'Set lcdTop to {self.lcdTop}')
 
             elif high in (0x80, 0x90):
                 # Set the LCD contrast.
                 self.lcdContrast = x - 0x80
+                self.debug(f'Set lcdContrast to {self.lcdContrast}')
                 self.updateLCDContrast()
 
             elif high == 0xa0:
                 # Control LCD effects.
                 if x == 0xa0:
                     self.lcdEffectMirror = False
+                    self.debug('LCD effect: mirror off')
                 elif x == 0xa1:
                     self.lcdEffectMirror = True
+                    self.debug('LCD effect: mirror on')
                 elif x == 0xa4:
                     self.lcdEffectBlack = False
+                    self.debug('LCD effect: black off')
                 elif x == 0xa5:
                     self.lcdEffectBlack = True
+                    self.debug('LCD effect: black on')
                 elif x == 0xa6:
                     self.lcdEffectReverse = False
+                    self.debug('LCD effect: reverse off')
                 elif x == 0xa7:
                     self.lcdEffectReverse = True
+                    self.debug('LCD effect: reverse on')
                 elif x == 0xa8:
                     self.lcdEffectDark = True
+                    self.debug('LCD effect: dark on')
                 elif x == 0xa9:
                     self.lcdEffectDark = False
+                    self.debug('LCD effect: dark off')
                 elif x == 0xae:
                     self.lcdEffectWhite = True
+                    self.debug('LCD effect: white on')
                 elif x == 0xaf:
                     self.lcdEffectWhite = False
+                    self.debug('LCD effect: white off')
+                else:
+                    raise ValueError(f'Unknown LCD effect: {x}')
                 self.updateLCDContrast()
 
             elif high == 0xb0:
                 # Set vertical coordinate.
                 self.lcdY = low
+                self.debug(f'Set lcdY to {self.lcdY}')
 
             elif high == 0xc0:
                 # Set LCD trim value.
                 self.lcdTrim = low
+                self.debug(f'Set lcdTrim to {self.lcdTrim}')
 
             elif high == 0xe0:
                 # Special mode commands.
                 if x == 0xe0:
                     self.lcdMod = True
                     self.lcdX2 = self.lcdX
+                    self.debug('Entered modification mode')
                 elif x == 0xe2:
                     # Reset contrast and modification mode.
                     self.lcdContrast = 0
                     self.lcdMod = False
+                    self.debug('Reset contrast and modification mode')
                     self.updateLCDContrast()
                 elif x == 0xee:
                     self.lcdMod = False
                     self.lcdX = self.lcdX2
+                    self.debug('Exited modification mode, restored lcdX to {self.lcdX}')
 
             # Other high values: do nothing
 
         def parse_out41(self, x):
-            """
+            \"\"\"
             Parse an OUT command to port 0x41.
             x: integer 0-255 representing the byte to write to video RAM.
             This writes the data to VRAM at the current (lcdX, lcdY) coordinate,
             then increments lcdX.
-            """
+            \"\"\"
             self.lcdRead = False
             if self.lcdX < self.LCD_WIDTH and self.lcdY < self.LCD_HEIGHT:
                 self.vram[self.lcdY][self.lcdX] = x & 0xff
+            self.debug(f'Wrote {x} to VRAM[{self.lcdY}][{self.lcdX}]')
             self.lcdX += 1
 
         def dump_vram(self):
-            """Print the VRAM contents (for debugging)"""
+            \"\"\"Print the VRAM contents (for debugging)\"\"\"
             for row in self.vram:
-                print(" ".join(f"{byte:02X}" for byte in row))
+                print(\" \".join(f\"{byte:02X}\" for byte in row))
 
         def __str__(self):
             state = (
-                f"lcdX = {self.lcdX}\n"
-                f"lcdY = {self.lcdY}\n"
-                f"lcdTop = {self.lcdTop}\n"
-                f"lcdContrast = {self.lcdContrast}\n"
-                f"lcdDisabled = {self.lcdDisabled}\n"
-                f"timerInterval = {self.timerInterval}\n"
-                f"lcdMod = {self.lcdMod}\n"
-                f"lcdEffectMirror = {self.lcdEffectMirror}\n"
-                f"lcdEffectBlack = {self.lcdEffectBlack}\n"
-                f"lcdEffectReverse = {self.lcdEffectReverse}\n"
-                f"lcdEffectDark = {self.lcdEffectDark}\n"
-                f"lcdEffectWhite = {self.lcdEffectWhite}\n"
-                f"lcdTrim = {self.lcdTrim}\n"
+                f\"lcdX = {self.lcdX}\n\"
+                f\"lcdY = {self.lcdY}\n\"
+                f\"lcdTop = {self.lcdTop}\n\"
+                f\"lcdContrast = {self.lcdContrast}\n\"
+                f\"lcdDisabled = {self.lcdDisabled}\n\"
+                f\"timerInterval = {self.timerInterval}\n\"
+                f\"lcdMod = {self.lcdMod}\n\"
+                f\"lcdEffectMirror = {self.lcdEffectMirror}\n\"
+                f\"lcdEffectBlack = {self.lcdEffectBlack}\n\"
+                f\"lcdEffectReverse = {self.lcdEffectReverse}\n\"
+                f\"lcdEffectDark = {self.lcdEffectDark}\n\"
+                f\"lcdEffectWhite = {self.lcdEffectWhite}\n\"
+                f\"lcdTrim = {self.lcdTrim}\n\"
             )
             return state
-    return (PCG850Display,)
+    """,
+    name="_"
+)
 
 
 @app.cell
