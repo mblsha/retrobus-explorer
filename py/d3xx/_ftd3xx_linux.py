@@ -16,7 +16,7 @@ LONG = c_long
 UINT = c_uint
 LPSTR = STRING
 
-_libname = 'libftd3xx.so'
+_libname = 'libftd3xx.dylib' if sys.platform == 'darwin' else 'libftd3xx.so'
 _libraries = {}
 _libraries[_libname] = c.cdll.LoadLibrary(_libname)  # CDLL(_libname)
 

@@ -73,7 +73,7 @@ module alchitry_top (
         reset_cond.in = ~rst_n  // input raw inverted reset signal
         rst = reset_cond.out    // conditioned reset
 
-        led = 8h00
+        led = ft_enabled.q
         saleae_rw = 4h00
 
         usb_tx = tx.tx
@@ -144,6 +144,25 @@ module alchitry_top (
                     }
                 }
 
+/*
+                if (!ft.ui_dout_empty) {
+                    ft.ui_dout_get = 1
+                    if (ft.ui_dout[0+:8] == "+") {
+                        ft_enabled.d = 1
+                        if (!tx.busy) {
+                            tx.new_data = 1
+                            tx.data = "+"
+                        }
+                    } else if (ft.ui_dout[0+:8] == "-") {
+                        ft_enabled.d = 0
+                        if (!tx.busy) {
+                            tx.new_data = 1
+                            tx.data = "-"
+                        }
+                    }
+                }
+*/
+
                 if (!z80_mreq && last_mreq.q) {
                     last_addr.d = addr
                 } else if (!z80_iorq && last_iorq.q) {
@@ -158,7 +177,7 @@ module alchitry_top (
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
-                        fifo.din = c{"R", data, last_addr.q}
+                        fifo.din = c{last_addr.q, data, "R"}
                     }
 
                     if (!tx.busy) {
@@ -172,7 +191,7 @@ module alchitry_top (
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
-                        fifo.din = c{"W", last_data.q, last_addr.q}
+                        fifo.din = c{last_addr.q, last_data.q, "W"}
                     }
 
                     if (!tx.busy) {
@@ -186,7 +205,7 @@ module alchitry_top (
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
-                        fifo.din = c{"r", data, last_addr.q}
+                        fifo.din = c{last_addr.q, data, "r"}
                     }
 
                     if (!tx.busy) {
@@ -200,7 +219,7 @@ module alchitry_top (
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
-                        fifo.din = c{"w", last_data.q, last_addr.q}
+                        fifo.din = c{last_addr.q, last_data.q, "w"}
                     }
 
                     if (!tx.busy) {
