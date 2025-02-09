@@ -20,6 +20,7 @@ def _(mo):
 def _(
     get_alchitry_element_mapping,
     get_alchitry_ffc_mapping,
+    get_saleae_mapping,
     get_sharp_pc_g850_bus_mapping,
     mo,
 ):
@@ -52,6 +53,16 @@ def _(
             r.append(f'pin {name} {alchitry_mapping[ffc[int(pin)]]}')
         return r
 
+    @acf_constraint
+    def saleae():
+        ffc = get_alchitry_ffc_mapping()
+        alchitry_mapping = get_alchitry_element_mapping()
+        saleae_mapping = get_saleae_mapping()
+        r = []
+        for saleae_pin, alchitry_pin in saleae_mapping.items():
+            r.append(f'pin saleae[{saleae_pin}] {alchitry_mapping[alchitry_pin]}')
+        return r
+
     def download_constraint(filename, contents):
         return mo.hstack([
             mo.download(data=contents, filename=f'{filename}.acf', mimetype='text/plain'),
@@ -60,6 +71,7 @@ def _(
 
     mo.accordion({
         'Pin Tester': download_constraint('pin_tester', pin_tester()),
+        'Saleae': download_constraint('saleae', saleae()),
         'Sharp PC-G850 Bus': download_constraint('sharp_pc_g850_bus', sharp_pc_g850_bus()),
     })
 
@@ -68,6 +80,7 @@ def _(
         download_constraint,
         functools,
         pin_tester,
+        saleae,
         sharp_pc_g850_bus,
     )
 
@@ -331,6 +344,48 @@ def _():
     loDATA39 → fpga.data_b[6]
     """.strip()
     return (ffc_to_alchitry_mapping,)
+
+
+@app.cell
+def _():
+    saleae_to_alchitry_mapping = """
+    saleae0 → fpga.data_b[15]
+    saleae1 → fpga.data_b[13]
+    saleae2 → fpga.data_b[12]
+    saleae3 → fpga.data_b[14]
+    saleae4 → fpga.data_b[10]
+    saleae5 → fpga.data_b[8]
+    saleae6 → fpga.data_d[4]
+    saleae7 → fpga.data_d[5]
+    """.strip()
+    return (saleae_to_alchitry_mapping,)
+
+
+@app.cell
+def _(saleae_to_alchitry_mapping):
+    def get_saleae_mapping():
+        """
+        maps from Saleae pin to the internal bank name
+        """
+        import re
+        mapping = {}
+        for line in saleae_to_alchitry_mapping.split('\n'):
+            m = re.match(r"saleae(\d+) → fpga.data_([a-d])\[(\d+)\]", line)
+            # print(line.split(' '))
+            # print(m)
+            # print(m.groups())
+            saleae_pin, bank, bank_num = m.groups()
+            mapping[int(saleae_pin)] = f'{bank.upper()}{bank_num}'
+            # break
+        return mapping
+
+    get_saleae_mapping()
+    return (get_saleae_mapping,)
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":

@@ -15,6 +15,8 @@ module alchitry_top (
     output ft_wr,
     output ft_oe,
 
+    output saleae[8],
+
     // PC-G850 System Bus
     input z80_mreq,
     input z80_m1,
@@ -65,11 +67,14 @@ module alchitry_top (
         }
     }
 
+    sig saleae_rw[4]
+
     always {
         reset_cond.in = ~rst_n  // input raw inverted reset signal
         rst = reset_cond.out    // conditioned reset
 
         led = 8h00
+        saleae_rw = 4h00
 
         usb_tx = tx.tx
         rx.rx = usb_rx
@@ -149,7 +154,7 @@ module alchitry_top (
                 if (!last_mreq.q && z80_rd && !last_rd.q) {
                     // 1: Read
                     // stream data + last_addr
-                    led = b1
+                    saleae_rw = b1
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
@@ -163,7 +168,7 @@ module alchitry_top (
                 } else if (!last_mreq.q && z80_wr && !last_wr.q) {
                     // 2: Write
                     // stream last_data + last_addr
-                    led = b10
+                    saleae_rw = b10
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
@@ -177,7 +182,7 @@ module alchitry_top (
                 } else if (!last_iorq.q && z80_rd && !last_rd.q) {
                     // 3: IO Read
                     // data + last_addr
-                    led = b100
+                    saleae_rw = b100
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
@@ -191,7 +196,7 @@ module alchitry_top (
                 } else if (!last_iorq.q && z80_wr && !last_wr.q) {
                     // 4: IO Write
                     // last_data + last_addr
-                    led = b1000
+                    saleae_rw = b1000
 
                     if (!fifo.full && ft_enabled.q) {
                         fifo.wput = 1
@@ -212,5 +217,7 @@ module alchitry_top (
 
             // States.OUT:
         }
+
+        saleae = c{z80_ioreset, z80_wait, z80_int1, z80_m1, saleae_rw}
     }
 }

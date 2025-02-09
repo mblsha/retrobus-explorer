@@ -72,6 +72,12 @@
                     "type": "Component",
                     "path": "Constraints/ft_v1.acf"
                 }
+            },
+            {
+                "file": {
+                    "type": "DiskFile",
+                    "path": "constraint\\saleae.acf"
+                }
             }
         ],
         "ipCores": []
