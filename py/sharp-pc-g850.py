@@ -199,12 +199,6 @@ def _(PCG850Display, Type, df):
             # match per r.addr
             match r.addr:
                 case 0x10:
-                    """The returned value (stored in the location pointed to by x) is built up by checking individual bits in the variable keyStrobe.
-    For each bit that is set in keyStrobe, a corresponding element from the keyMatrix array is OR‑ed into the result.
-    For example, if bit 0 (0x001) is set in keyStrobe, then keyMatrix[0] is included in the result.
-    Interpretation:
-    The result is a bit‑mask that represents which keys (or key groups) are currently “active” (i.e. pressed) for the rows/columns selected by the strobe.
-    The exact mapping depends on how the key matrix is arranged on your calculator, but essentially each bit in the returned value indicates the state (pressed or not) of keys in one of the rows."""
                     key_strobe = r.val
                     print(f"read key_strobe: {hex(key_strobe)}")
                 case 0x15:
@@ -232,50 +226,19 @@ def _(PCG850Display, Type, df):
         elif r.type == Type.OUT_PORT:
             match r.addr:
                 case 0x11:
-                    """How to Interpret the Passed‑in Value:
-
-    The Entire 8‑bit Value:
-    The value written to port 0x11 is stored in keyStrobeLast and then OR‑ed into keyStrobe. This value acts as a bit‑mask that selects which parts of the key matrix will be read by the input routine on port 0x10.
-    Bit 4 (0x10):
-    If bit 4 is set in the written value, then the code additionally sets an interrupt flag (INTERRUPT_IA) in the interruptType register. This likely signals the CPU that a key‐action has occurred.
-    Interpretation:
-    To “select” a particular key (or group of keys), you write a value with the corresponding bit set. For example, writing 0x01 means “activate key matrix group 0,” writing 0x02 means “activate group 1,” and so on.
-    In many designs, multiple strobe lines might be combined. Here the code even OR‑s new strobe bits into keyStrobe so that successive writes accumulate until they are cleared by the timing logic.
-    Practical Note:
-    When you send a byte to port 0x11, check its bits to determine which key row(s) it is selecting. Also note that setting bit 4 (0x10) will trigger an interrupt for key input processing."""
                     key_strobe |= r.val
                     print(f"write key_strobe: {hex(key_strobe)}")
                 case 0x12:
-                    """The byte you write is shifted left 8 bits and then OR‑ed into a “key strobe” mask.
-    Meaning of the bits:
-    The final 16‑bit value (keyStrobe) controls which parts of the key matrix are being “strobed” (i.e. activated for scanning).
-    In the complementary input routine (port 0x10, not listed here) the bits of this strobe mask determine which rows (or columns) of the key matrix are read from the corresponding keyMatrix[] entries.
-    For example, writing 0x01 results in 0x0100; that sets bit 8, which (by the code’s convention) selects one particular key line."""
                     key_strobe = (r.val << 8) & 0xFF00
                     print(f"write key_strobe: {hex(key_strobe)}")
                 case 0x15:
-                    """Only bit 7 of the written value matters.
-    If bit 7 is set: xinEnabled becomes nonzero (typically 0x80), meaning the “Xin” input is enabled.
-    If bit 7 is clear: xinEnabled is 0, disabling the Xin input.
-    How to use it: Interpret the value as a flag—bit 7 = 1 means “enable external input (Xin)”; otherwise, disable it."""
                     xin_enabled = r.val & 0x80
                     print(f"write xin_enabled: {xin_enabled}")
                     pass
                 case 0x16:
-                    """The output byte is used as a mask to clear bits in the interruptType register.
-    Each bit set to 1 in x: Causes the corresponding bit in interruptType to be cleared.
-    How to use it: When you write a value here, each 1‑bit signals that you wish to acknowledge (or “clear”) that particular interrupt request. For example, writing 0x01 clears interrupt flag bit 0."""
                     print(f"write interruptType: {hex(r.val)}")
                     pass
                 case 0x19:
-                    """The byte is split into two parts:
-    Lower nibble (bits 0–3):
-    Taken modulo the total number of ROM banks, this value selects the new ROM bank.
-    Bits 4–6 (x & 0x70, then shifted right by 4):
-    These bits select the external ROM (EXROM) bank.
-    How to use it:
-    To select a given memory bank configuration, pack the desired ROM bank number into the lower 4 bits and the desired EXROM bank (0–7) into bits 4–6.
-    For example, writing 0x23 means “select ROM bank 3 and EXROM bank 2.”"""
                     rom_bank = r.val & 0x0F
                     ex_bank = (r.val & 0x70) >> 4
                     print(f"write rom_bank: {rom_bank}, ex_bank: {ex_bank}")
@@ -283,37 +246,16 @@ def _(PCG850Display, Type, df):
                 case 0x1a:
                     print(f"boot rom on/off: {r.val}")
                 case 0x1b:
-                    """Only bit 2 (mask 0x04) of the written value is used.
-    If (x & 0x04) is different from the current ramBank:
-    The code swaps 0x8000 bytes between the main memory and external RAM (exram).
-    How to use it:
-    Write either 0x00 or 0x04 to select between two RAM banks. The value tells the system which bank is active."""
                     ram_bank = r.val & 0x04
                     print(f"write ram_bank: {ram_bank}")
                     pass
                 case 0x1e:
-                    """How to Interpret the Passed‑in Value:
-
-    Value Masking:
-    Only the lower two bits of the value (mask 0x03) are used.
-    Interpretation:
-    The value written sets the battery check mode by storing x & 0x03 into the variable battChk.
-    For example:
-    Writing 0x00 → battery check mode 0
-    Writing 0x01 → mode 1
-    Writing 0x02 → mode 2
-    Writing 0x03 → mode 3
-    What It Means:
-    Although the provided code for the battery state (in port 0x1D) always returns 0, the mode set via port 0x1E would typically affect how the battery status is measured or reported. It might be used to select thresholds or to initiate a battery test sequence."""
                     print(f"write battery check mode: {r.val & 0x03}")
                 case 0x40:
                     display.parse_out40(r.val)
                 case 0x41:
                     display.parse_out41(r.val)
                 case 0x69:
-                    """The value written is treated as the desired ROM bank number.
-    How to use it:
-    Simply write the bank number you wish to activate. If the value differs from the current bank, the routine calls swrom() to remap the ROM into the CPU’s address space. (Typically, only the lower 4 bits are significant.)"""
                     rom_bank = r.val & 0x0F
                     print(f"write rom_bank: {rom_bank}")
                     pass
@@ -342,14 +284,15 @@ def _(PCG850Display, Type, df):
     )
 
 
-app._unparsable_cell(
-    r"""
+@app.cell
+def _():
+    class PCG850Display:
         LCD_WIDTH = 166
-        LCD_HEIGHT = 8
+        LCD_HEIGHT = 9
 
         def __init__(self):
             self.lcdRead = False     # Flag: whether a read was already performed
-            self.lcdMod = False      # Special \"modification\" mode flag
+            self.lcdMod = False      # Special "modification" mode flag
             self.lcdX = 0            # Current horizontal coordinate (0-255)
             self.lcdX2 = 0           # Backup horizontal coordinate (used in lcdMod)
             self.lcdY = 0            # Current vertical coordinate (0-7)
@@ -378,12 +321,12 @@ app._unparsable_cell(
             print('>display: ' + str)
 
         def parse_out40(self, x):
-            \"\"\"
+            """
             Parse an OUT command to port 0x40.
             x: integer 0-255 representing the byte written.
             This function decodes the high nibble (x & 0xf0) and then uses the low nibble
             as a parameter.
-            \"\"\"
+            """
             self.lcdRead = False
             high = x & 0xf0
             low = x & 0x0f
@@ -417,7 +360,7 @@ app._unparsable_cell(
                 self.debug(f'Set timer interval to {self.timerInterval}')
 
             elif high in (0x40, 0x50, 0x60, 0x70):
-                # Set the display \"top\" offset.
+                # Set the display "top" offset.
                 self.lcdTop = x - 0x40
                 self.debug(f'Set lcdTop to {self.lcdTop}')
 
@@ -493,12 +436,12 @@ app._unparsable_cell(
             # Other high values: do nothing
 
         def parse_out41(self, x):
-            \"\"\"
+            """
             Parse an OUT command to port 0x41.
             x: integer 0-255 representing the byte to write to video RAM.
             This writes the data to VRAM at the current (lcdX, lcdY) coordinate,
             then increments lcdX.
-            \"\"\"
+            """
             self.lcdRead = False
             if self.lcdX < self.LCD_WIDTH and self.lcdY < self.LCD_HEIGHT:
                 self.vram[self.lcdY][self.lcdX] = x & 0xff
@@ -506,35 +449,471 @@ app._unparsable_cell(
             self.lcdX += 1
 
         def dump_vram(self):
-            \"\"\"Print the VRAM contents (for debugging)\"\"\"
+            """Print the VRAM contents (for debugging)"""
             for row in self.vram:
-                print(\" \".join(f\"{byte:02X}\" for byte in row))
+                print(" ".join(f"{byte:02X}" for byte in row))
 
         def __str__(self):
             state = (
-                f\"lcdX = {self.lcdX}\n\"
-                f\"lcdY = {self.lcdY}\n\"
-                f\"lcdTop = {self.lcdTop}\n\"
-                f\"lcdContrast = {self.lcdContrast}\n\"
-                f\"lcdDisabled = {self.lcdDisabled}\n\"
-                f\"timerInterval = {self.timerInterval}\n\"
-                f\"lcdMod = {self.lcdMod}\n\"
-                f\"lcdEffectMirror = {self.lcdEffectMirror}\n\"
-                f\"lcdEffectBlack = {self.lcdEffectBlack}\n\"
-                f\"lcdEffectReverse = {self.lcdEffectReverse}\n\"
-                f\"lcdEffectDark = {self.lcdEffectDark}\n\"
-                f\"lcdEffectWhite = {self.lcdEffectWhite}\n\"
-                f\"lcdTrim = {self.lcdTrim}\n\"
+                f"lcdX = {self.lcdX}\n"
+                f"lcdY = {self.lcdY}\n"
+                f"lcdTop = {self.lcdTop}\n"
+                f"lcdContrast = {self.lcdContrast}\n"
+                f"lcdDisabled = {self.lcdDisabled}\n"
+                f"timerInterval = {self.timerInterval}\n"
+                f"lcdMod = {self.lcdMod}\n"
+                f"lcdEffectMirror = {self.lcdEffectMirror}\n"
+                f"lcdEffectBlack = {self.lcdEffectBlack}\n"
+                f"lcdEffectReverse = {self.lcdEffectReverse}\n"
+                f"lcdEffectDark = {self.lcdEffectDark}\n"
+                f"lcdEffectWhite = {self.lcdEffectWhite}\n"
+                f"lcdTrim = {self.lcdTrim}\n"
             )
             return state
-    """,
-    name="_"
-)
+    return (PCG850Display,)
 
 
 @app.cell
 def _():
+    a = 8
+    1 + (a % 8 != 0)
+    return (a,)
+
+
+@app.cell
+def _(Tuple, dataclass, display):
+    from typing import NamedTuple, Optional, List
+    from PIL import Image, ImageDraw
+
+    @dataclass
+    class Machineinfo:
+        cell_width: int  # Width (in pixels) per cell
+        cell_height: int # Height (in pixels) per cell
+        lcd_cols: int    # Number of cells horizontally
+        lcd_rows: int    # Number of cells vertically
+        vram_cols: int
+        vram_rows: int
+
+        @property
+        def vram_width(self):
+            return self.vram_cols * self.cell_width
+
+        @property
+        def vram_height(self):
+            return self.vram_rows * 8
+
+    g850info = Machineinfo(
+        cell_width=6,
+        cell_height=8,
+        lcd_cols=24,
+        lcd_rows=6,
+        vram_cols=24,
+        vram_rows=8,
+    )
+
+    def draw_vram(vram: List[int],
+                  machine: Machineinfo,
+                  lcdTop: int,
+                  zoom: int = 1,
+                  off_color: Tuple[int, int, int] = (0, 0, 0),
+                  on_color: Tuple[int, int, int] = (0, 255, 0)
+                  ) -> Image.Image:
+        lcd_cols = machine.lcd_cols
+        lcd_rows = machine.lcd_rows
+        cell_width  = machine.cell_width
+        cell_height = machine.cell_height
+        vram_width  = machine.vram_width
+
+        lcd_width = lcd_cols * cell_width
+        lcd_height = lcd_rows * cell_height
+        img_width  = lcd_width * zoom
+        img_height = lcd_height * zoom
+        print(f'Image size: {img_width} x {img_height}')
+
+        image = Image.new("RGB", (img_width, img_height), off_color)
+        draw = ImageDraw.Draw(image)
+
+        vram_offset = (lcdTop // 8) * vram_width
+        shift = lcdTop % 8;
+        for y in range(0, lcd_height, cell_height):
+            for x0 in range(0, lcd_width, cell_width):
+                for x in range(cell_width):
+                    pat = vram[vram_offset] >> shift | vram[vram_offset + vram_width] << (8 - shift)
+
+                    for p in range(cell_height):
+                        bit = 1 << p
+                        dx = x0 + x + p
+                        dy = y
+                        color = on_color if bit else off_color
+                        draw.rectangle([dx * zoom, dy * zoom, dx * zoom + zoom - 1, dy * zoom + zoom - 1], fill=color)    
+
+                    vram_offset += 1
+            vram_offset += 1
+        
+        return image
+
+    vram = sum(display.vram, [])
+    # print(len(vram))
+    draw_vram(vram, g850info, display.lcdTop, zoom=4)
+    return (
+        Image,
+        ImageDraw,
+        List,
+        Machineinfo,
+        NamedTuple,
+        Optional,
+        draw_vram,
+        g850info,
+        vram,
+    )
+
+
+@app.cell
+def _(display):
+    display.vram
     return
+
+
+@app.cell
+def _(Image, ImageDraw, display):
+    def draw_vram2(vram, zoom=4):
+        off_color = (0, 0, 0)
+        on_color = (0, 255, 0)
+
+        img_width = len(vram[0]) * zoom
+        img_height = len(vram) * 8 * zoom
+        image = Image.new("RGB", (img_width, img_height), off_color)
+        draw = ImageDraw.Draw(image)
+
+        for row in range(len(vram)):
+            for col in range(len(vram[row])):
+                byte = vram[row][col]
+                for bit in range(8):
+                    pixel_state = (byte >> bit) & 1
+                    color = on_color if pixel_state else off_color
+
+                    dx = col
+                    dy = row * 8 + bit
+                    draw.rectangle([dx * zoom, dy * zoom, dx * zoom + zoom - 1, dy * zoom + zoom - 1], fill=color)    
+        
+        return image
+
+    draw_vram2(display.vram)
+    return (draw_vram2,)
+
+
+@app.cell(hide_code=True)
+def _(Enum, List, NamedTuple, Optional):
+    # existing alternative is to use objcopy like this:
+    # objcopy -I ihex rom00.txt -O binary rom00.bin
+
+    from lark import Lark, Transformer, v_args, Token
+
+    class RecordType(Enum):
+        DATA = 1
+        EOF = 2
+        EXTENDED_LINEAR_ADDRESS = 3
+        START_LINEAR_ADDRESS = 4
+
+    class IntelHexRecord(NamedTuple):
+        record_type: RecordType
+        addr: int
+        size: int
+        data: Optional[bytes] = None
+        checksum: Optional[str] = None
+
+    class Segment(NamedTuple):
+        start_address: int
+        data: bytes
+
+    grammar = r"""
+    start: record*
+
+    record: ":" byte_count address record_data _NL?
+
+    byte_count: hexpair
+    address: HEXDIGIT HEXDIGIT HEXDIGIT HEXDIGIT
+
+    record_data: data_record
+               | eof_record
+               | extended_linear_address_record
+               | start_linear_address_record
+
+    data_record: "00" hexpair_seq checksum
+    eof_record: "01" /[Ff]{2}/
+    extended_linear_address_record: "04" hexpair_seq checksum
+    start_linear_address_record: "05" hexpair_seq checksum
+
+    hexpair_seq: hexpair+
+    hexpair: HEXDIGIT HEXDIGIT
+    checksum: hexpair
+
+    %import common.HEXDIGIT
+    %import common.NEWLINE -> _NL
+
+    %import common.WS
+    %ignore WS
+    """
+
+    class IntermediateRecord(NamedTuple):
+        record_type: RecordType
+        raw_data: Optional[bytes] = None
+        checksum: Optional[str] = None
+
+    @v_args(inline=True)
+    class IntelHexTransformer(Transformer):
+        def byte_count(self, token: Token) -> int:
+            return int(token, 16)
+        
+        def address(self, a: Token, b: Token, c: Token, d: Token) -> int:
+            return int(a.value + b.value + c.value + d.value, 16)
+        
+        def hexpair(self, a: Token, b: Token) -> str:
+            return a.value + b.value
+        
+        def hexpair_seq(self, *pairs: str) -> bytes:
+            return bytes.fromhex(''.join(pairs))
+        
+        def checksum(self, pair: str) -> str:
+            return pair
+        
+        def data_record(self, hex_seq: bytes, checksum: str) -> IntermediateRecord:
+            return IntermediateRecord(
+                record_type=RecordType.DATA,
+                raw_data=hex_seq,
+                checksum=checksum
+            )
+        
+        def eof_record(self, type_token: Token) -> IntermediateRecord:
+            return IntermediateRecord(record_type=RecordType.EOF)
+        
+        def extended_linear_address_record(self, type_token: Token, hex_seq: bytes, checksum: str) -> IntermediateRecord:
+            return IntermediateRecord(
+                record_type=RecordType.EXTENDED_LINEAR_ADDRESS,
+                raw_data=hex_seq,
+                checksum=checksum
+            )
+        
+        def start_linear_address_record(self, type_token: Token, hex_seq: bytes, checksum: str) -> IntermediateRecord:
+            return IntermediateRecord(
+                record_type=RecordType.START_LINEAR_ADDRESS,
+                raw_data=hex_seq,
+                checksum=checksum
+            )
+
+        def record_data(self, data: IntermediateRecord) -> IntermediateRecord:
+            return data
+        
+        def record(self, byte_count: int, address: int, rec_data: IntermediateRecord) -> IntelHexRecord:
+            size: int = byte_count
+            addr: int = address
+            rtype: RecordType = rec_data.record_type
+            if rtype in {RecordType.DATA, RecordType.EXTENDED_LINEAR_ADDRESS, RecordType.START_LINEAR_ADDRESS}:
+                raw = rec_data.raw_data
+                if raw is None or len(raw) != size:
+                    raise ValueError(f"Byte count mismatch: expected {size}, got {len(raw) if raw is not None else 0}")
+                data_field: bytes = raw
+                cs: Optional[str] = rec_data.checksum
+            else:  # EOF record
+                data_field = None
+                cs = None
+            return IntelHexRecord(record_type=rtype, addr=addr, size=size, data=data_field, checksum=cs)
+        
+        def start(self, *records: IntelHexRecord) -> List[IntelHexRecord]:
+            return list(records)
+
+
+    parser = Lark(grammar, parser="earley")
+
+    class ProcessedRecords(NamedTuple):
+        segments: List[Segment]
+        execution_start_address: Optional[int]
+
+    def process_records(records: List[IntelHexRecord]) -> ProcessedRecords:
+        """
+        Processes a list of IntelHexRecord parsed from an Intel HEX file.
+        It creates data segments using the extended linear address record (if provided)
+        and then merges adjacent segments.
+        """
+        segments: List[Segment] = []
+        extended_linear_address: int = 0
+        execution_start_address: Optional[int] = None
+
+        # First pass: Build individual segments.
+        for record in records:
+            if record.record_type == RecordType.EXTENDED_LINEAR_ADDRESS:
+                # Convert the two-byte data field to an integer.
+                extended_linear_address = int.from_bytes(record.data, byteorder='big')
+            elif record.record_type == RecordType.START_LINEAR_ADDRESS:
+                execution_start_address = int.from_bytes(record.data, byteorder='big')
+            elif record.record_type == RecordType.DATA:
+                full_address = (extended_linear_address << 16) + record.addr
+                segments.append(Segment(start_address=full_address, data=record.data))
+            elif record.record_type == RecordType.EOF:
+                # End-of-file record; no action needed.
+                pass
+            else:
+                raise ValueError(f"Unknown record type: {record.record_type}")
+
+        # Second pass: Merge adjacent segments.
+        segments.sort(key=lambda seg: seg.start_address)
+        merged_segments: List[Segment] = []
+        
+        for seg in segments:
+            if merged_segments and (merged_segments[-1].start_address + len(merged_segments[-1].data) == seg.start_address):
+                # Merge contiguous segments.
+                last_seg = merged_segments.pop()
+                merged_data = last_seg.data + seg.data
+                merged_seg = Segment(start_address=last_seg.start_address, data=merged_data)
+                merged_segments.append(merged_seg)
+            else:
+                merged_segments.append(seg)
+        
+        return ProcessedRecords(segments=merged_segments, execution_start_address=execution_start_address)
+
+    return (
+        IntelHexRecord,
+        IntelHexTransformer,
+        IntermediateRecord,
+        Lark,
+        ProcessedRecords,
+        RecordType,
+        Segment,
+        Token,
+        Transformer,
+        grammar,
+        parser,
+        process_records,
+        v_args,
+    )
+
+
+@app.cell
+def _():
+    # import os
+    # import glob
+    # import re
+
+    # def parse_rom(filename):
+    #     m = re.match(r'.*rom([0-9a-fA-F]+).txt', filename)
+    #     bank = int(m.group(1), 16)
+
+    #     with open(filename, 'r') as f:
+    #         hex_text = f.read()
+    #         p = parser.parse(hex_text)
+    #         t = IntelHexTransformer()
+    #         result = process_records(t.transform(p))
+
+    #         assert len(result.segments) == 1
+    #         assert result.segments[0].start_address == 0x1000
+            
+    #     return bank, result.segments[0].data
+
+    # banks = {}
+    # for f in mo.status.progress_bar(glob.glob('g850-roms/rom*.txt')):
+    #     bank, data = parse_rom(f)
+    #     banks[bank] = data
+    return
+
+
+@app.cell
+def _(banks):
+    banks
+    return
+
+
+@app.cell
+def _():
+    # def dump_banks():
+    #     for bank, data in banks.items():
+    #         with open(f'g850-roms/rom{bank:02x}.bin', 'wb') as f:
+    #             f.write(data)
+
+    # dump_banks()
+    return
+
+
+@app.cell
+def _(banks):
+    for bank1 in banks:
+        d = banks[bank1]
+        print(bank1, hex(d[0]), hex(d[1]), hex(d[2]))
+    return bank1, d
+
+
+@app.cell
+def _(Type, banks, df):
+    def verify_rom_memory():
+        rom_bank = None
+        ex_bank = None
+        ram_bank = None
+
+        i = 0
+
+        for r in df.itertuples():
+            # print(r.type, r.val, r.addr)
+            if r.type == Type.WRITE:
+                # print('write')
+                pass
+            elif r.type == Type.READ:
+                # print('read')
+                if rom_bank is None:
+                    continue
+
+                bank_start = 0xC000
+                if r.addr > bank_start:
+                    for bank in banks:
+                        bank_size = len(banks[bank])
+                        expect = banks[bank][r.addr - bank_start]
+                        if r.val != expect:
+                            print(f"mismatch at {hex(r.addr)}: {hex(r.val)} != {hex(expect)}")
+                        else:
+                            print(f"match at {hex(r.addr)}: {hex(r.val)} == {hex(expect)}")
+                print(hex(r.addr))
+                print(rom_bank)
+                print(ex_bank)
+                i += 1
+                if i > 10:
+                    return
+                pass
+            elif r.type == Type.IN_PORT:
+                match r.addr:
+                    case 0x19:
+                        assert(rom_bank is not None)
+                        assert(ex_bank is not None)
+                        rom_bank = r.val & 0x0F
+                        ex_bank = (r.val & 0x70) >> 4
+                        # print(f"read rom_bank: {rom_bank}, ex_bank: {ex_bank}")
+                        pass
+                    case 0x69:
+                        assert(rom_bank is not None)
+                        rom_bank = r.val & 0x0F
+                        # print(f"read rom_bank: {rom_bank}")
+                        pass
+                    case _:
+                        pass
+            elif r.type == Type.OUT_PORT:
+                match r.addr:
+                    case 0x19:
+                        rom_bank = r.val & 0x0F
+                        ex_bank = (r.val & 0x70) >> 4
+                        # print(f"write rom_bank: {rom_bank}, ex_bank: {ex_bank}")
+                        pass
+                    case 0x1b:
+                        ram_bank = r.val & 0x04
+                        # print(f"write ram_bank: {ram_bank}")
+                        pass
+                    case 0x69:
+                        rom_bank = r.val & 0x0F
+                        # print(f"write rom_bank: {rom_bank}")
+                        pass
+                    case _:
+                        pass
+            else:
+                raise ValueError(f"Unknown type {r.type}")
+
+    verify_rom_memory()
+    return (verify_rom_memory,)
 
 
 if __name__ == "__main__":
