@@ -8,7 +8,7 @@ app = marimo.App(width="medium")
 def _(mo):
     mo.md(
         r"""
-        Python port of https://observablehq.com/@mblsha/intel-hex-parser
+        Python port of https://observablehq.com/@mblsha/intel-hex-parser using Lark. Uses Earley parser, so is very slow compared to the JS version.
 
         It's quite slow though, so for known contiguous blocks of bytes objcopy is much faster:
 

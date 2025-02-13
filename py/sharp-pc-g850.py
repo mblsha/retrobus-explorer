@@ -12,6 +12,12 @@ def _():
 
 @app.cell
 def _():
+    import altair as alt
+    return (alt,)
+
+
+@app.cell
+def _():
     import sys
     sys.path.append("d3xx")
 
@@ -20,7 +26,7 @@ def _():
     return ftd3xx, mft, sys
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(ftd3xx, mft):
     import ctypes
 
@@ -55,44 +61,114 @@ def _(ftd3xx, mft):
     return Ft600Device, ctypes
 
 
-@app.cell
-def _(Ft600Device):
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""# Collect Data from SHARP PC-G850 System Bus""")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    collect_data_button = mo.ui.run_button(label='Collect Bus Data')
+    collect_data_button
+    return (collect_data_button,)
+
+
+@app.cell(hide_code=True)
+def _(Ft600Device, collect_data_button, mo):
+    mo.stop(not collect_data_button.value)
+
     import datetime
     import time
+    import humanize
+
+
+    class TransferRateCalculator():
+        def __init__(self, callback):
+            self.start = datetime.datetime.now()
+            self.status_update_time = self.start
+            self.status_update_bytes = 0
+            self.status_update_packets = 0
+            self.callback = callback
+
+        def update(self, data):
+            now = datetime.datetime.now()
+            if (now - self.status_update_time).total_seconds() > 1:
+                rate = (
+                    self.status_update_bytes
+                    / (now - self.status_update_time).total_seconds()
+                )
+
+                msg = f"Received {humanize.naturalsize(rate, binary=True)}/sec {self.status_update_packets} packets/sec"
+                self.callback(msg)
+                self.status_update_time = now
+                self.status_update_bytes = 0
+                self.status_update_packets = 0
+
+            if data is not None:
+                self.status_update_packets += 1
+                self.status_update_bytes += len(data)
+
 
     def GetBusData(num_seconds_before_timeout=5):
-        print(datetime.datetime.now())
+        # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
+        # which results in some events being lost.
+        read_size = 2**15
 
         with Ft600Device() as d:
             # clear input buffer
             for i in range(100):
-                bytes = d.read(256)
+                bytes = d.read(read_size)
 
-            print('Ready...')
             data = []
 
-            start = datetime.datetime.now()
-            while True:
-                bytes = d.read(256)
-                now = datetime.datetime.now()
-                if bytes is None:
-                    if (now - start).total_seconds() > num_seconds_before_timeout:
-                        break
-                    continue
-                start = now
-                data.append(bytes)
+            with mo.status.spinner(subtitle="Collecting data ...") as _spinner:
+                start = datetime.datetime.now()
+                rate_calculator = TransferRateCalculator(
+                    lambda rate: _spinner.update(
+                        subtitle=f"Collecting data ... {rate}"
+                    )
+                )
 
-            print(f'Done. Received {len(data)} packets.')
+                while True:
+                    bytes = d.read(read_size)
+                    rate_calculator.update(bytes)
+
+                    now = datetime.datetime.now()
+                    if bytes is None:
+                        if (
+                            now - start
+                        ).total_seconds() > num_seconds_before_timeout:
+                            break
+                        continue
+                    start = now
+                    data.append(bytes)
+
             return data
 
             # print(d.write(b'--'))
             # print(d.write(b'++'))
 
-    # DemoLoopback()
+
     data_lines = GetBusData()
-    data_concat = b''.join(data_lines)
-    print(f"Received {len(data_concat)} bytes")
-    return GetBusData, data_concat, data_lines, datetime, time
+    data_concat = b"".join(data_lines)
+    mo.md(f"Received {humanize.naturalsize(len(data_concat), binary=True)}, ({len(data_lines)} packets)")
+    return (
+        GetBusData,
+        TransferRateCalculator,
+        data_concat,
+        data_lines,
+        datetime,
+        humanize,
+        time,
+    )
+
+
+@app.cell
+def _():
+    # with open('g5500-bank-03.bin', 'wb') as f:
+    #     f.write(data_concat)
+    return
 
 
 @app.cell
@@ -128,10 +204,8 @@ def _(data_concat):
                 # raise ValueError(f"Invalid type at index {index}: {i}")
                 continue
 
-            # val  = struct.unpack("B", i[1:2])[0]
-            # addr = struct.unpack("H", i[2:4])[0]
             val  = struct.unpack("B", data[offset+1:offset+2])[0]
-            addr = struct.unpack("H", data[offset+2:offset+4])[0]
+            addr = struct.unpack("<H", data[offset+2:offset+4])[0]
             offset += 4
 
             if type in [Type.IN_PORT, Type.OUT_PORT]:
@@ -474,13 +548,6 @@ def _():
 
 
 @app.cell
-def _():
-    a = 8
-    1 + (a % 8 != 0)
-    return (a,)
-
-
-@app.cell
 def _(Tuple, dataclass, display):
     from typing import NamedTuple, Optional, List
     from PIL import Image, ImageDraw
@@ -569,12 +636,6 @@ def _(Tuple, dataclass, display):
 
 
 @app.cell
-def _(display):
-    display.vram
-    return
-
-
-@app.cell
 def _(Image, ImageDraw, display):
     def draw_vram2(vram, zoom=4):
         off_color = (0, 0, 0)
@@ -640,78 +701,207 @@ def _(rom_banks):
 
 
 @app.cell
-def _(Type, banks, df):
+def _(Type, df):
+    class RomVerifier:
+        RAM_ADDR_START = 0x100
+        ROM0_ADDR_START = 0x8000
+        # bank1 and up
+        BANK_ADDR_START = 0xC000
+
+        def __init__(self):
+            self.rom_bank = None
+
+            # Setting BK'2 to 1 enables the CPU's /CEROM2 signal and disconnects the main ROM.
+            # BK'1 and BK'0 are output to the BANK1 and BANK0 terminals of the 40-pin system bus.
+            self.ex_bank = None
+
+            # RAM CE signal selection:
+            # 0: CERAM1 (internal RAM)
+            # 1: CERAM2 (external RAM on system bus)
+            self.ram_bank = None
+
+            self.ram = ['-'] * 0x8000
+            
+            self.i = 0
+
+        def get_rom_bank(self, bank):
+            assert(self.rom_bank is not None)
+            # if self.rom_bank != bank:
+            #     print(f"Expected rom_bank {hex(self.rom_bank)}, got {hex(bank)}")
+            # else:
+            #     print(f"!Expected rom_bank {hex(self.rom_bank)}, got {hex(bank)}")
+            # assert(self.rom_bank == bank)
+
+        def get_ex_bank(self, bank):
+            assert(self.ex_bank is not None)
+            # if self.ex_bank != bank:
+            #     print(f"Expected ex_bank {self.ex_bank}, got {bank}")
+            # assert(self.ex_bank == bank)
+        
+        def set_rom_bank(self, bank):
+            # print(f"Setting rom_bank to {hex(bank)}")
+            self.rom_bank = bank
+
+        def set_ex_bank(self, bank):
+            if bank != 0:
+                raise ValueError(f"Unexpected ex_bank value: {hex(bank)}")
+            # print(f"Setting ex_bank to {hex(bank)}")
+            self.ex_bank = bank
+
+        def get_ram_bank(self, bank):
+            pass
+        
+        def set_ram_bank(self, bank):
+            self.ram_bank = bank
+
+        def write(self, addr, val):
+            if addr > self.RAM_ADDR_START and addr < self.ROM0_ADDR_START:
+                self.ram[addr] = val
+            # if addr > self.ROM0_ADDR_START:
+            #     print(f"Unexpected write to ROM region: {hex(addr)}: {hex(val)}")
+            pass
+        
+        def read(self, addr, val):
+            pass
+            # if self.i > 10:
+            #     return
+
+            # if addr > self.ROM0_ADDR_START:
+            #     print(f'addr: {hex(addr)}, val: {hex(val)}')
+
+            # if rom_bank is None:
+            #     return
+
+            # if addr > self.ROM0_ADDR_START and addr < self.BANK_ADDR_START:
+            #     self.i += 1
+            #     expect = rom_banks[0][addr - self.ROM0_ADDR_START]
+            #     if val != expect:
+            #         print(f"0mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}")
+            #     else:
+            #         print(f"0match at {hex(addr)}: {hex(val)} == {hex(expect)}")
+
+
     def verify_rom_memory():
-        rom_bank = None
-        ex_bank = None
-        ram_bank = None
+        verifier = RomVerifier()
 
-        i = 0
-
+        # IO Port documentation:
+        # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
         for r in df.itertuples():
             # print(r.type, r.val, r.addr)
             if r.type == Type.WRITE:
-                # print('write')
+                # verifier.write(r.addr, r.val)
                 pass
             elif r.type == Type.READ:
-                # print('read')
-                if rom_bank is None:
-                    continue
-
-                bank_start = 0xC000
-                if r.addr > bank_start:
-                    for bank in banks:
-                        bank_size = len(banks[bank])
-                        expect = banks[bank][r.addr - bank_start]
-                        if r.val != expect:
-                            print(f"mismatch at {hex(r.addr)}: {hex(r.val)} != {hex(expect)}")
-                        else:
-                            print(f"match at {hex(r.addr)}: {hex(r.val)} == {hex(expect)}")
-                print(hex(r.addr))
-                print(rom_bank)
-                print(ex_bank)
-                i += 1
-                if i > 10:
-                    return
+                # verifier.read(r.addr, r.val)
                 pass
             elif r.type == Type.IN_PORT:
                 match r.addr:
                     case 0x19:
-                        assert(rom_bank is not None)
-                        assert(ex_bank is not None)
-                        rom_bank = r.val & 0x0F
-                        ex_bank = (r.val & 0x70) >> 4
-                        # print(f"read rom_bank: {rom_bank}, ex_bank: {ex_bank}")
+                        # rom_bank = r.val & 0x0F
+                        # ex_bank = (r.val & 0x70) >> 4
+                        # verifier.get_rom_bank(rom_bank)
+                        # verifier.get_ex_bank(ex_bank)
+                        pass
+                    case 0x1b:
+                        # verifier.get_ram_bank(r.val)
                         pass
                     case 0x69:
-                        assert(rom_bank is not None)
-                        rom_bank = r.val & 0x0F
-                        # print(f"read rom_bank: {rom_bank}")
+                        # verifier.get_rom_bank(r.val)
                         pass
                     case _:
                         pass
             elif r.type == Type.OUT_PORT:
                 match r.addr:
                     case 0x19:
-                        rom_bank = r.val & 0x0F
-                        ex_bank = (r.val & 0x70) >> 4
-                        # print(f"write rom_bank: {rom_bank}, ex_bank: {ex_bank}")
+                        # rom_bank = r.val & 0x0F
+                        # ex_bank = (r.val & 0x70) >> 4
+                        # verifier.set_rom_bank(rom_bank)
+                        # verifier.set_ex_bank(ex_bank)
                         pass
                     case 0x1b:
-                        ram_bank = r.val & 0x04
-                        # print(f"write ram_bank: {ram_bank}")
+                        # verifier.set_ram_bank(r.val)
                         pass
                     case 0x69:
-                        rom_bank = r.val & 0x0F
-                        # print(f"write rom_bank: {rom_bank}")
+                        # verifier.set_rom_bank(r.val)
                         pass
+                    case 0x6f:
+                        print('foo')
                     case _:
                         pass
             else:
                 raise ValueError(f"Unknown type {r.type}")
 
-    verify_rom_memory()
-    return (verify_rom_memory,)
+        return verifier
+
+    verifier = verify_rom_memory()
+    return RomVerifier, verifier, verify_rom_memory
+
+
+@app.cell
+def _(alt, df, mo, pandas):
+    def plot_df_addr():
+        full_scale = alt.Scale(domain=[0x0, 0x10000])
+        bars = alt.Chart(df).transform_aggregate(
+            count='count()', groupby=['addr', 'type']
+        ).transform_calculate(
+            truncated_count="min(datum.count, 20)"
+        ).mark_bar().encode(
+            x=alt.X('addr:Q', title='Address (Hex)',
+                axis=alt.Axis(labelExpr="format(datum.value, 'X')"),  # Format as hex
+                scale=full_scale),
+            y=alt.Y('truncated_count:Q', title='Number of Events'),
+            color='type:N',
+            tooltip=[alt.Tooltip('addr:Q', title='Address', format='X'), 'type:N', alt.Tooltip('count()', title='Count')]
+        )
+
+        rules = alt.Chart(pandas.DataFrame({'addr': [0x8000, 0xC000]})).mark_rule(
+            color='blue',
+            strokeWidth=1
+        ).encode(
+            x=alt.X('addr:Q', scale=full_scale),
+        )
+        
+        # Combine bars and rules
+        return (bars + rules).properties(title='Memory Bus Events by Address and Type')
+
+    mo.ui.altair_chart(plot_df_addr())
+    return (plot_df_addr,)
+
+
+@app.cell
+def _(df):
+    # filter df to be only reads within 0x1000 and 0x2000
+    df2 = df[(df['addr'] >= 0x1000) & (df['addr'] < 0x2000)]
+
+    # sort them by addr and convert val to hex
+    df2 = df2.sort_values(by=['addr'])
+    df2['addrh'] = df2['addr'].apply(lambda x: hex(x))
+    df2['valh'] = df2['val'].apply(lambda x: hex(x))
+    df2 = df2.drop_duplicates()
+    return (df2,)
+
+
+@app.cell
+def _(df2):
+    df2
+    return
+
+
+@app.cell
+def _(df):
+    # goal is to inspect all reads around 0x1000 to figure out why there are skips
+
+    start_row = 3502261
+    df_sel = df.iloc[start_row : start_row + 21]
+    df_sel['addrh'] = df_sel['addr'].apply(lambda x: hex(x))
+    df_sel['valh']  = df_sel['val'].apply(lambda x: hex(x))
+    df_sel
+    return df_sel, start_row
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":
