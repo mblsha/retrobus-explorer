@@ -49,6 +49,7 @@ module alchitry_top (
             }
 
             fifo fifo(#WIDTH(32), #ENTRIES(32768))
+            dff fifo_full_counter[24] // 8 bytes for the Err code
 
             dff state[$width(States)]
 
@@ -182,6 +183,7 @@ module alchitry_top (
                             fifo.wput = 1
                             fifo.din = c{last_addr.q, data, "R"}
                         } else {
+                            fifo_full_counter.d = fifo_full_counter.q + 1
                             tx.new_data = 1
                             tx.data = "R"
                         }
@@ -196,6 +198,7 @@ module alchitry_top (
                             fifo.wput = 1
                             fifo.din = c{last_addr.q, last_data.q, "W"}
                         } else {
+                            fifo_full_counter.d = fifo_full_counter.q + 1
                             tx.new_data = 1
                             tx.data = "W"
                         }
@@ -210,6 +213,7 @@ module alchitry_top (
                             fifo.wput = 1
                             fifo.din = c{last_addr.q, data, "r"}
                         } else {
+                            fifo_full_counter.d = fifo_full_counter.q + 1
                             tx.new_data = 1
                             tx.data = "r"
                         }
@@ -224,10 +228,15 @@ module alchitry_top (
                             fifo.wput = 1
                             fifo.din = c{last_addr.q, last_data.q, "w"}
                         } else {
+                            fifo_full_counter.d = fifo_full_counter.q + 1
                             tx.new_data = 1
                             tx.data = "w"
                         }
                     }
+                } else if (ft_enabled.q && !fifo.full && fifo_full_counter.q > 0) {
+                    fifo.wput = 1
+                    fifo.din = c{fifo_full_counter.q, "E"}
+                    fifo_full_counter.d = 0
                 }
 
                 last_iorq.d = z80_iorq
