@@ -52,6 +52,18 @@
                     "type": "Component",
                     "path": "Memory/fifo.luc"
                 }
+            },
+            {
+                "file": {
+                    "type": "Component",
+                    "path": "Miscellaneous/pipeline.luc"
+                }
+            },
+            {
+                "file": {
+                    "type": "Component",
+                    "path": "Pulses/edge_detector.luc"
+                }
             }
         ],
         "constraintFiles": [
