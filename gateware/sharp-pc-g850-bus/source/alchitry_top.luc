@@ -48,11 +48,13 @@ module alchitry_top (
                 uart_rx rx
             }
 
-            fifo fifo(#WIDTH(32), #ENTRIES(256))
+            fifo fifo(#WIDTH(32), #ENTRIES(32768))
 
             dff state[$width(States)]
 
-            ft ft(#BUS_WIDTH(16), .ft_clk(ft_clk), .ft_rxf(ft_rxf), .ft_txe(ft_txe), .ft_data(ft_data), .ft_be(ft_be))
+            // TX_BUFFER(64)
+            // RX_BUFFER(64)
+            ft ft(#BUS_WIDTH(16), #TX_BUFFER(8192), .ft_clk(ft_clk), .ft_rxf(ft_rxf), .ft_txe(ft_txe), .ft_data(ft_data), .ft_be(ft_be))
 
             dff ft_enabled
             dff ft_cur_value[32]
@@ -73,7 +75,8 @@ module alchitry_top (
         reset_cond.in = ~rst_n  // input raw inverted reset signal
         rst = reset_cond.out    // conditioned reset
 
-        led = ft_enabled.q
+        led = c{ft.ui_din_full, !ft.ui_dout_empty, !ft_rxf, !ft_txe,
+                1b0, fifo.full, fifo.empty, ft_enabled.q}
         saleae_rw = 4h00
 
         usb_tx = tx.tx
@@ -166,7 +169,6 @@ module alchitry_top (
                 if (!z80_mreq && last_mreq.q) {
                     last_addr.d = addr
                 } else if (!z80_iorq && last_iorq.q) {
-                    // FIXME: fill only last 8 bytes? rest should be zeroes?
                     last_addr.d = addr
                 }
 
@@ -175,56 +177,56 @@ module alchitry_top (
                     // stream data + last_addr
                     saleae_rw = b1
 
-                    if (!fifo.full && ft_enabled.q) {
-                        fifo.wput = 1
-                        fifo.din = c{last_addr.q, data, "R"}
-                    }
-
-                    if (!tx.busy) {
-                        tx.new_data = 1
-                        tx.data = "R"
+                    if (ft_enabled.q) {
+                        if (!fifo.full) {
+                            fifo.wput = 1
+                            fifo.din = c{last_addr.q, data, "R"}
+                        } else {
+                            tx.new_data = 1
+                            tx.data = "R"
+                        }
                     }
                 } else if (!last_mreq.q && z80_wr && !last_wr.q) {
                     // 2: Write
                     // stream last_data + last_addr
                     saleae_rw = b10
 
-                    if (!fifo.full && ft_enabled.q) {
-                        fifo.wput = 1
-                        fifo.din = c{last_addr.q, last_data.q, "W"}
-                    }
-
-                    if (!tx.busy) {
-                        tx.new_data = 1
-                        tx.data = "W"
+                    if (ft_enabled.q) {
+                        if (!fifo.full) {
+                            fifo.wput = 1
+                            fifo.din = c{last_addr.q, last_data.q, "W"}
+                        } else {
+                            tx.new_data = 1
+                            tx.data = "W"
+                        }
                     }
                 } else if (!last_iorq.q && z80_rd && !last_rd.q) {
                     // 3: IO Read
                     // data + last_addr
                     saleae_rw = b100
 
-                    if (!fifo.full && ft_enabled.q) {
-                        fifo.wput = 1
-                        fifo.din = c{last_addr.q, data, "r"}
-                    }
-
-                    if (!tx.busy) {
-                        tx.new_data = 1
-                        tx.data = "r"
+                    if (ft_enabled.q) {
+                        if (!fifo.full) {
+                            fifo.wput = 1
+                            fifo.din = c{last_addr.q, data, "r"}
+                        } else {
+                            tx.new_data = 1
+                            tx.data = "r"
+                        }
                     }
                 } else if (!last_iorq.q && z80_wr && !last_wr.q) {
                     // 4: IO Write
                     // last_data + last_addr
                     saleae_rw = b1000
 
-                    if (!fifo.full && ft_enabled.q) {
-                        fifo.wput = 1
-                        fifo.din = c{last_addr.q, last_data.q, "w"}
-                    }
-
-                    if (!tx.busy) {
-                        tx.new_data = 1
-                        tx.data = "w"
+                    if (ft_enabled.q) {
+                        if (!fifo.full) {
+                            fifo.wput = 1
+                            fifo.din = c{last_addr.q, last_data.q, "w"}
+                        } else {
+                            tx.new_data = 1
+                            tx.data = "w"
+                        }
                     }
                 }
 
