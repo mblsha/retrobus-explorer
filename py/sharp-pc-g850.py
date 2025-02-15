@@ -696,7 +696,7 @@ def _():
 
 
 @app.cell
-def _(Type, df):
+def _(Type, df, rom_banks):
     class RomVerifier:
         RAM_ADDR_START = 0x100
         ROM0_ADDR_START = 0x8000
@@ -721,59 +721,53 @@ def _(Type, df):
 
         def get_rom_bank(self, bank):
             assert(self.rom_bank is not None)
-            # if self.rom_bank != bank:
-            #     print(f"Expected rom_bank {hex(self.rom_bank)}, got {hex(bank)}")
-            # else:
-            #     print(f"!Expected rom_bank {hex(self.rom_bank)}, got {hex(bank)}")
-            # assert(self.rom_bank == bank)
+            if self.rom_bank != bank:
+                raise ValueError(f"Expected rom_bank {hex(self.rom_bank)}, got {hex(bank)}")
 
         def get_ex_bank(self, bank):
             assert(self.ex_bank is not None)
-            # if self.ex_bank != bank:
-            #     print(f"Expected ex_bank {self.ex_bank}, got {bank}")
-            # assert(self.ex_bank == bank)
+            if self.ex_bank != bank:
+                raise ValueError(f"Expected ex_bank {self.ex_bank}, got {bank}")
+
+        def get_ram_bank(self, bank):
+            assert(self.ram_bank is not None)
+            if self.ram_bank != bank:
+                raise ValueError(f"Expected ram_bank {hex(self.ram_bank)}, got {hex(bank)}")
 
         def set_rom_bank(self, bank):
-            # print(f"Setting rom_bank to {hex(bank)}")
+            if self.rom_bank != bank:
+                # print(f"Setting rom_bank to {hex(bank)}")
+                pass
             self.rom_bank = bank
 
         def set_ex_bank(self, bank):
-            if bank != 0:
-                raise ValueError(f"Unexpected ex_bank value: {hex(bank)}")
-            # print(f"Setting ex_bank to {hex(bank)}")
+            if self.ex_bank != bank:
+                # print(f"Setting ex_bank to {hex(bank)}")
+                pass
             self.ex_bank = bank
 
-        def get_ram_bank(self, bank):
-            pass
-
         def set_ram_bank(self, bank):
+            if self.ram_bank != bank:
+                # print(f"Setting ram_bank to {hex(bank)}")
+                pass
             self.ram_bank = bank
 
         def write(self, addr, val):
             if addr > self.RAM_ADDR_START and addr < self.ROM0_ADDR_START:
                 self.ram[addr] = val
-            # if addr > self.ROM0_ADDR_START:
-            #     print(f"Unexpected write to ROM region: {hex(addr)}: {hex(val)}")
-            pass
+            if addr > self.ROM0_ADDR_START:
+                raise ValueError(f"Unexpected write to ROM region: {hex(addr)}: {hex(val)}")
 
         def read(self, addr, val):
-            pass
-            # if self.i > 10:
-            #     return
+            if addr > self.ROM0_ADDR_START and addr < self.BANK_ADDR_START:
+                expect = rom_banks[0][addr - self.ROM0_ADDR_START]
+                if val != expect:
+                    print(f"ex_bank({self.ex_bank}): mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}")
 
-            # if addr > self.ROM0_ADDR_START:
-            #     print(f'addr: {hex(addr)}, val: {hex(val)}')
-
-            # if rom_bank is None:
-            #     return
-
-            # if addr > self.ROM0_ADDR_START and addr < self.BANK_ADDR_START:
-            #     self.i += 1
-            #     expect = rom_banks[0][addr - self.ROM0_ADDR_START]
-            #     if val != expect:
-            #         print(f"0mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}")
-            #     else:
-            #         print(f"0match at {hex(addr)}: {hex(val)} == {hex(expect)}")
+            if addr > self.BANK_ADDR_START:
+                expect = rom_banks[self.rom_bank][addr - self.BANK_ADDR_START]
+                if val != expect:
+                    print(f"rom_bank({self.rom_bank}): mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}")
 
 
     def verify_rom_memory():
@@ -781,46 +775,38 @@ def _(Type, df):
 
         # IO Port documentation:
         # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
-        for r in df.itertuples():
+        for r in df.iloc[0:1000000].itertuples():
+            index = r.Index
             # print(r.type, r.val, r.addr)
+
             if r.type == Type.WRITE:
-                # verifier.write(r.addr, r.val)
-                pass
+                verifier.write(r.addr, r.val)
             elif r.type in [Type.READ, Type.FETCH]:
-                # verifier.read(r.addr, r.val)
-                pass
+                verifier.read(r.addr, r.val)
             elif r.type == Type.IN_PORT:
                 match r.addr:
                     case 0x19:
-                        # rom_bank = r.val & 0x0F
-                        # ex_bank = (r.val & 0x70) >> 4
-                        # verifier.get_rom_bank(rom_bank)
-                        # verifier.get_ex_bank(ex_bank)
-                        pass
+                        rom_bank = r.val & 0x0F
+                        ex_bank = (r.val & 0x70) >> 4
+                        verifier.get_rom_bank(rom_bank)
+                        verifier.get_ex_bank(ex_bank)
                     case 0x1b:
-                        # verifier.get_ram_bank(r.val)
-                        pass
+                        verifier.get_ram_bank(r.val)
                     case 0x69:
-                        # verifier.get_rom_bank(r.val)
-                        pass
+                        verifier.get_rom_bank(r.val)
                     case _:
                         pass
             elif r.type == Type.OUT_PORT:
                 match r.addr:
                     case 0x19:
-                        # rom_bank = r.val & 0x0F
-                        # ex_bank = (r.val & 0x70) >> 4
-                        # verifier.set_rom_bank(rom_bank)
-                        # verifier.set_ex_bank(ex_bank)
-                        pass
+                        rom_bank = r.val & 0x0F
+                        ex_bank = (r.val & 0x70) >> 4
+                        verifier.set_rom_bank(rom_bank)
+                        verifier.set_ex_bank(ex_bank)
                     case 0x1b:
-                        # verifier.set_ram_bank(r.val)
-                        pass
+                        verifier.set_ram_bank(r.val)
                     case 0x69:
-                        # verifier.set_rom_bank(r.val)
-                        pass
-                    case 0x6f:
-                        print('foo')
+                        verifier.set_rom_bank(r.val)
                     case _:
                         pass
             else:
@@ -924,18 +910,6 @@ def _(df):
 def _(df2):
     df2
     return
-
-
-@app.cell
-def _(df):
-    # goal is to inspect all reads around 0x1000 to figure out why there are skips
-
-    start_row = 3502261
-    df_sel = df.iloc[start_row : start_row + 21]
-    df_sel['addrh'] = df_sel['addr'].apply(lambda x: hex(x))
-    df_sel['valh']  = df_sel['val'].apply(lambda x: hex(x))
-    df_sel
-    return df_sel, start_row
 
 
 @app.cell
