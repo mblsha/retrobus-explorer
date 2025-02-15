@@ -55,7 +55,8 @@ module alchitry_top (
     .clk(clk) {
         reset_conditioner reset_cond
 
-        // Fix potential metastability issues with pipelines.
+        // Fix potential metastability issues with help of pipelines.
+        //
         // Make MREQ/IORQ/M1 longer to propagate as we don't want them to rise
         // before RD/WR, so we can check the specifics.
         //
@@ -188,8 +189,12 @@ module alchitry_top (
             last_addr.d = addr_sync
         }
 
+        // FIXME: decode interrupt acknowledgement?
+        // https://github.com/MustBeArt/LAIR/tree/master?tab=readme-ov-file#theory-of-operation
+
         if (rd_rise) {
             if ((z80_mreq_sync && z80_iorq_sync) || (!z80_mreq_sync && !z80_iorq_sync)) {
+                // If this happens, likely need to increase MREQ/IORQ pipeline depth
                 tx.new_data = 1
                 tx.data = "E"
             } else if (!z80_m1_sync) {
@@ -234,6 +239,7 @@ module alchitry_top (
             }
         } else if (wr_rise) {
             if ((z80_mreq_sync && z80_iorq_sync) || (!z80_mreq_sync && !z80_iorq_sync)) {
+                // If this happens, likely need to increase MREQ/IORQ pipeline depth
                 tx.new_data = 1
                 tx.data = "e"
             } else if (!z80_mreq_sync) {

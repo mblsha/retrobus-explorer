@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.11.0"
+__generated_with = "0.11.5"
 app = marimo.App(width="medium")
 
 
@@ -670,7 +670,7 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     def read_rom_banks():
         import os
@@ -680,10 +680,10 @@ def _():
         def parse_rom(filename):
             m = re.match(r'.*rom([0-9a-fA-F]+).bin', filename)
             bank = int(m.group(1), 16)
-        
+
             with open(filename, 'rb') as f:
                 return bank, f.read()
-        
+
         banks = {}
         for f in glob.glob('g850-roms/rom*.bin'):
             bank, data = parse_rom(f)
@@ -693,12 +693,6 @@ def _():
 
     rom_banks = read_rom_banks()
     return read_rom_banks, rom_banks
-
-
-@app.cell
-def _(rom_banks):
-    rom_banks
-    return
 
 
 @app.cell
@@ -722,7 +716,7 @@ def _(Type, df):
             self.ram_bank = None
 
             self.ram = ['-'] * 0x8000
-            
+
             self.i = 0
 
         def get_rom_bank(self, bank):
@@ -738,7 +732,7 @@ def _(Type, df):
             # if self.ex_bank != bank:
             #     print(f"Expected ex_bank {self.ex_bank}, got {bank}")
             # assert(self.ex_bank == bank)
-        
+
         def set_rom_bank(self, bank):
             # print(f"Setting rom_bank to {hex(bank)}")
             self.rom_bank = bank
@@ -751,7 +745,7 @@ def _(Type, df):
 
         def get_ram_bank(self, bank):
             pass
-        
+
         def set_ram_bank(self, bank):
             self.ram_bank = bank
 
@@ -761,7 +755,7 @@ def _(Type, df):
             # if addr > self.ROM0_ADDR_START:
             #     print(f"Unexpected write to ROM region: {hex(addr)}: {hex(val)}")
             pass
-        
+
         def read(self, addr, val):
             pass
             # if self.i > 10:
@@ -838,9 +832,23 @@ def _(Type, df):
     return RomVerifier, verifier, verify_rom_memory
 
 
-@app.cell
-def _(alt, df, mo, pandas):
-    def plot_df_addr():
+@app.cell(hide_code=True)
+def _(df, mo):
+    df_range = mo.md('''
+    {start}
+
+    {length}
+    ''').batch(
+    length=mo.ui.number(start=1, stop=1000000, value=100000, step=1, label='Length'),
+    start=mo.ui.number(start=0, stop=df.shape[0], step=1, label='Start'),
+    )
+    df_range
+    return (df_range,)
+
+
+@app.cell(hide_code=True)
+def _(alt, df, df_range, mo, pandas):
+    def plot_df_addr(df):
         full_scale = alt.Scale(domain=[0x0, 0x10000])
         bars = alt.Chart(df).transform_aggregate(
             count='count()', groupby=['addr', 'type']
@@ -861,12 +869,42 @@ def _(alt, df, mo, pandas):
         ).encode(
             x=alt.X('addr:Q', scale=full_scale),
         )
-        
+
         # Combine bars and rules
         return (bars + rules).properties(title='Memory Bus Events by Address and Type')
 
-    mo.ui.altair_chart(plot_df_addr())
-    return (plot_df_addr,)
+    df_for_plot = df.iloc[df_range.value['start']:df_range.value['start'] + df_range.value['length']]
+    mo.ui.altair_chart(plot_df_addr(df_for_plot))
+    return df_for_plot, plot_df_addr
+
+
+@app.cell
+def _(df_for_plot, df_valh):
+    df_valh(df_for_plot)
+    return
+
+
+@app.cell
+def _():
+    from z80dis import z80
+    z80.disasm(b'\xed\xb0', 10)
+    return (z80,)
+
+
+@app.cell
+def _(Type, df_for_plot):
+    def df_valh(df):
+        df2 = df.copy()
+        df2['addrh'] = df2['addr'].apply(lambda x: hex(x))
+        df2['valh'] = df2['val'].apply(lambda x: hex(x))
+        return df2
+
+    def io_df(df):
+        df2 = df[df['type'].isin([Type.IN_PORT, Type.OUT_PORT])].copy()
+        return df_valh(df2)
+        
+    io_df(df_for_plot)
+    return df_valh, io_df
 
 
 @app.cell
