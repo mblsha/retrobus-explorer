@@ -841,8 +841,8 @@ def _(Enum):
             pass
 
         def cmd_a(self, low):
-            cmd = SED1560_CmdA(low & 0xE)
-            val = low & 0x1
+            cmd = SED1560_CmdA(low & 0b1110)
+            val = low & 0b1
             print(f"cmd_a: {cmd}, val: {val}")        
         
         def parse_out40(self, x):
@@ -853,12 +853,29 @@ def _(Enum):
                 # Initial Display Line
                 self.com0 = x & 0x3F
                 # self.debug(f'com0 ← {self.com0}')
+            elif (x >> 5) == 0b100:
+                self.contrast = x & 0b11111
+                print(f'contrast: {self.contrast}')
+            elif (x >> 1) == 0b10010:
+                self.psu_on = x & 0b1
+                print(f'psu_on: {self.psu_on}')
+            elif x == 0b11101101:
+                self.power_on_complete = True
+                print(f'power_on_complete')
             elif high == 0xB:
                 # Set Page Address
                 self.page = low
                 # self.debug(f'page ← {self.page}')
             elif high == 0xA:
                 self.cmd_a(low)
+            elif high == 0xC:
+                # Sets the common and segment output status register.
+                # This command selects the role of the COM/SEG dual pins and determines the LCD driver output status.
+                self.scanning_direction = low >> 3
+                case = low & 0b111
+                if case != 0b111:
+                    raise ValueError(f"Unhandled case: {bin(case)}, only SEG166 is supported")
+                print(f"scanning_direction: {self.scanning_direction}, case: {bin(case)}")
             elif high in [0x0, 0x1]:
                 if high:
                     self.col = (self.col & 0x0F) | low
