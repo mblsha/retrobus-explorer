@@ -37,17 +37,15 @@ module alchitry_top (
     sig rst
 
     enum FtStates {GET_FIFO, STREAM}
-    enum SaleaeStates {SYNC_SIGNALS, RAW_SIGNALS, DATA_SIGNALS, BUS_EVENTS}
+    enum SaleaeStates {SYNC_SIGNALS, RAW_SIGNALS, DATA_SIGNALS, BUS_EVENTS, EDGE_SIGNALS, COUNTER}
 
     sig z80_mreq_sync
+    sig z80_m1_sync
     sig z80_iorq_sync
     sig z80_rd_sync
     sig z80_wr_sync
     sig addr_sync[16]
     sig data_sync[8]
-
-    sig addr_different
-    sig data_different
 
     sig mreq_fall
     sig iorq_fall
@@ -57,22 +55,37 @@ module alchitry_top (
     .clk(clk) {
         reset_conditioner reset_cond
 
-        // Instantiate 2-stage pipelines (using pipeline.luc) to synchronize bus signals
-        #DEPTH(2) {
+        // Fix potential metastability issues with pipelines.
+        // Make MREQ/IORQ/M1 longer to propagate as we don't want them to rise
+        // before RD/WR, so we can check the specifics.
+        //
+        // NOTE: Delays are likely specific to PC-G850 and 100MHz FPGA clock,
+        //       need to verify this assumption using logic analyzer.
+        #DEPTH(4) {
             pipeline sync_mreq (.in(z80_mreq))
+            pipeline sync_m1   (.in(z80_m1))
             pipeline sync_iorq (.in(z80_iorq))
+        }
+        #DEPTH(2) {
             pipeline sync_rd   (.in(z80_rd))
+            // raw WR get high a few ns before IORQ
+            // with 2-pipeline they frequently go up at same exact time,
+            // but sometimes the difference is 12ns
             pipeline sync_wr   (.in(z80_wr))
+
             pipeline sync_addr[16] (.in(addr))
             pipeline sync_data[8]  (.in(data))
         }
 
         // FIXME: create a test bench for the edge_detector and report a bug
-        // because it seems to report the opposite of what it's supposed to do
-        edge_detector mreq_edge(#RISE(1), #FALL(0), .in(z80_mreq_sync)) // want fall
-        edge_detector iorq_edge(#RISE(1), #FALL(0), .in(z80_iorq_sync)) // want fall
-        edge_detector rd_edge  (#RISE(0), #FALL(1), .in(z80_rd_sync))   // want rise
-        edge_detector wr_edge  (#RISE(0), #FALL(1), .in(z80_wr_sync))   // want rise
+        // because it seems to report the opposite of what it's supposed to do.
+        //
+        // Seems to be related to the pipeline depth somehow?
+        edge_detector mreq_edge(#RISE(0), #FALL(1), .in(z80_mreq_sync)) // want fall
+        edge_detector iorq_edge(#RISE(0), #FALL(1), .in(z80_iorq_sync)) // want fall
+
+        edge_detector rd_edge  (#RISE(1), #FALL(0), .in(z80_rd_sync))   // want rise
+        edge_detector wr_edge  (#RISE(1), #FALL(0), .in(z80_wr_sync))   // want rise
 
         .rst(rst) {
             #BAUD(1_000_000), #CLK_FREQ(100_000_000) {
@@ -90,9 +103,11 @@ module alchitry_top (
             dff ft_state[$width(FtStates)]
 
             dff saleae_state[$width(SaleaeStates)]
+            dff saleae_counter[8]
 
             dff last_addr[16]
-            dff last_data[8]
+            // `data` is supposed to be valid when both WR/RD go up
+            // dff last_data[8]
         }
     }
 
@@ -105,7 +120,6 @@ module alchitry_top (
         led = c{ft.ui_din_full, !ft.ui_dout_empty, !ft_rxf, !ft_txe,
                 1b0, fifo.full, fifo.empty, ft_enabled.q}
         saleae_rw = 4h00
-        saleae = 0
 
         usb_tx = tx.tx
         rx.rx = usb_rx
@@ -129,6 +143,7 @@ module alchitry_top (
         ft.ui_dout_get = 0
 
         z80_mreq_sync = sync_mreq.out
+        z80_m1_sync = sync_m1.out
         z80_iorq_sync = sync_iorq.out
         z80_rd_sync = sync_rd.out
         z80_wr_sync = sync_wr.out
@@ -167,22 +182,29 @@ module alchitry_top (
                 }
         }
 
-        addr_different = last_addr.q != addr_sync
-        data_different = last_data.q != data_sync
-
         // Synchronize and capture bus address at the start of a bus cycle.
         // Latch the address when either mreq or iorq goes active (falling edge).
         if (mreq_fall || iorq_fall) {
             last_addr.d = addr_sync
         }
 
-        // Continuously update last_data from the synchronized data bus.
-        last_data.d = data_sync
-
         if (rd_rise) {
-            if (!z80_mreq_sync && !z80_iorq_sync) {
+            if ((z80_mreq_sync && z80_iorq_sync) || (!z80_mreq_sync && !z80_iorq_sync)) {
                 tx.new_data = 1
                 tx.data = "E"
+            } else if (!z80_m1_sync) {
+                // M1: Instruction fetch (m1 is active low)
+                saleae_rw = b11
+                if (ft_enabled.q) {
+                    if (!fifo.full) {
+                        fifo.wput = 1
+                        fifo.din = c{last_addr.q, data_sync, "M"}
+                    } else {
+                        fifo_full_counter.d = fifo_full_counter.q + 1
+                        tx.new_data = 1
+                        tx.data = "M"
+                    }
+                }
             } else if (!z80_mreq_sync) {
                 // Memory read event (mreq is active low)
                 saleae_rw = b1
@@ -211,7 +233,7 @@ module alchitry_top (
                 }
             }
         } else if (wr_rise) {
-            if (!z80_mreq_sync && !z80_iorq_sync) {
+            if ((z80_mreq_sync && z80_iorq_sync) || (!z80_mreq_sync && !z80_iorq_sync)) {
                 tx.new_data = 1
                 tx.data = "e"
             } else if (!z80_mreq_sync) {
@@ -220,7 +242,7 @@ module alchitry_top (
                 if (ft_enabled.q) {
                     if (!fifo.full) {
                         fifo.wput = 1
-                        fifo.din = c{last_addr.q, last_data.q, "W"}
+                        fifo.din = c{last_addr.q, data_sync, "W"}
                     } else {
                         fifo_full_counter.d = fifo_full_counter.q + 1
                         tx.new_data = 1
@@ -233,7 +255,7 @@ module alchitry_top (
                 if (ft_enabled.q) {
                     if (!fifo.full) {
                         fifo.wput = 1
-                        fifo.din = c{last_addr.q, last_data.q, "w"}
+                        fifo.din = c{last_addr.q, data_sync, "w"}
                     } else {
                         fifo_full_counter.d = fifo_full_counter.q + 1
                         tx.new_data = 1
@@ -266,6 +288,12 @@ module alchitry_top (
                     tx.new_data = 1
                     tx.data = "s"
                 }
+            } else if (rx.data == "e") {
+                saleae_state.d = SaleaeStates.EDGE_SIGNALS
+                if (!tx.busy) {
+                    tx.new_data = 1
+                    tx.data = "e"
+                }
             } else if (rx.data == "d") {
                 saleae_state.d = SaleaeStates.DATA_SIGNALS
                 if (!tx.busy) {
@@ -284,18 +312,30 @@ module alchitry_top (
                     tx.new_data = 1
                     tx.data = "b"
                 }
+            } else if (rx.data == "c") {
+                saleae_state.d = SaleaeStates.COUNTER
+                if (!tx.busy) {
+                    tx.new_data = 1
+                    tx.data = "c"
+                }
             }
         }
 
         case (saleae_state.q) {
-            // are fall/rise edges correctly handled?
+            // check the relative timing of the WR/RD/M1 vs MREQ/IORQ
+            // NOTE: edge signals are delayed by ~4ns
             SaleaeStates.SYNC_SIGNALS:
+                saleae = c{z80_mreq_sync, z80_iorq_sync, z80_rd_sync, z80_wr_sync,
+                           z80_m1_sync, mreq_fall, rd_rise, wr_rise}
+
+            // are fall/rise edges correctly handled?
+            SaleaeStates.EDGE_SIGNALS:
                 saleae = c{z80_mreq_sync, z80_iorq_sync, z80_rd_sync, z80_wr_sync,
                            mreq_fall, iorq_fall, rd_rise, wr_rise}
 
             // are we saving last_addr / last_data at the correct time?
             SaleaeStates.DATA_SIGNALS:
-                saleae = c{addr_different, data_different, 1b0, 1b0,
+                saleae = c{1b0, 1b0, 1b0, 1b0,
                            mreq_fall, iorq_fall, rd_rise, wr_rise}
 
             // are pipelines really improving the metastability?
@@ -306,6 +346,14 @@ module alchitry_top (
             // get decoded events (and extra signals) on the logic analyzer pins
             SaleaeStates.BUS_EVENTS:
                 saleae = c{z80_ioreset, z80_wait, z80_int1, z80_m1, saleae_rw}
+
+            // check that pins are read in the correct order
+            SaleaeStates.COUNTER:
+                saleae = saleae_counter.q
+                saleae_counter.d = saleae_counter.q + 1
+
+            default:
+                saleae = 0
         }
     }
 }

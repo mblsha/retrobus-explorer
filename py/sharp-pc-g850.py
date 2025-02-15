@@ -171,17 +171,18 @@ def _():
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(data_concat):
     from enum import Enum
     from dataclasses import dataclass
     import struct
 
     class Type(Enum):
-        READ = "R"
-        WRITE = "W"
-        IN_PORT = "r"
-        OUT_PORT = "w"
+        FETCH = "M" # M1: Instruction Fetch
+        READ  = "R" # Memory Read
+        WRITE = "W" # Memory Write
+        IN_PORT  = "r" # IO Read
+        OUT_PORT = "w" # IO Write
 
     @dataclass
     class Event:
@@ -265,7 +266,7 @@ def _(PCG850Display, Type, df):
         if r.type == Type.WRITE:
             # print('write')
             pass
-        elif r.type == Type.READ:
+        elif r.type in [Type.READ, Type.FETCH]:
             # print('read')
             pass
         elif r.type == Type.IN_PORT:
@@ -791,7 +792,7 @@ def _(Type, df):
             if r.type == Type.WRITE:
                 # verifier.write(r.addr, r.val)
                 pass
-            elif r.type == Type.READ:
+            elif r.type in [Type.READ, Type.FETCH]:
                 # verifier.read(r.addr, r.val)
                 pass
             elif r.type == Type.IN_PORT:
@@ -871,7 +872,7 @@ def _(alt, df, mo, pandas):
 @app.cell
 def _(df):
     # filter df to be only reads within 0x1000 and 0x2000
-    df2 = df[(df['addr'] >= 0x1000) & (df['addr'] < 0x2000)]
+    df2 = df[(df['addr'] >= 0x5500) & (df['addr'] < 0x5600)]
 
     # sort them by addr and convert val to hex
     df2 = df2.sort_values(by=['addr'])
