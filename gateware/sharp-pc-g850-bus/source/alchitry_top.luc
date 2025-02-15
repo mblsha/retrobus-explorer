@@ -59,6 +59,8 @@ module alchitry_top (
         //
         // Make MREQ/IORQ/M1 longer to propagate as we don't want them to rise
         // before RD/WR, so we can check the specifics.
+        // https://github.com/MustBeArt/LAIR#theory-of-operation implements
+        // same kind of delays but in hardware.
         //
         // NOTE: Delays are likely specific to PC-G850 and 100MHz FPGA clock,
         //       need to verify this assumption using logic analyzer.
