@@ -171,12 +171,28 @@ def _():
     return
 
 
-@app.cell(hide_code=True)
-def _(data_concat):
+@app.cell
+def _():
     from enum import Enum
     from dataclasses import dataclass
     import struct
 
+    from typing import NamedTuple, Optional, List
+    from PIL import Image, ImageDraw
+    return (
+        Enum,
+        Image,
+        ImageDraw,
+        List,
+        NamedTuple,
+        Optional,
+        dataclass,
+        struct,
+    )
+
+
+@app.cell
+def _(Enum, IOPort, Optional, data_concat, dataclass, struct):
     class Type(Enum):
         FETCH = "M" # M1: Instruction Fetch
         READ  = "R" # Memory Read
@@ -189,6 +205,7 @@ def _(data_concat):
         type: Type
         val:  int # uint8
         addr: int # uint16
+        port: Optional[IOPort]
         # raw:  bytes
 
     def parse_data(data):
@@ -209,15 +226,20 @@ def _(data_concat):
             addr = struct.unpack("<H", data[offset+2:offset+4])[0]
             offset += 4
 
+            port = None
             if type in [Type.IN_PORT, Type.OUT_PORT]:
                 addr &= 0xFF
+                try:
+                    port = IOPort(addr)
+                except:
+                    errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
 
-            r.append(Event(type, val, addr))
+            r.append(Event(type, val, addr, port))
         return r, errors
 
     parsed, errors = parse_data(data_concat)
     errors
-    return Enum, Event, Type, dataclass, errors, parse_data, parsed, struct
+    return Event, Type, errors, parse_data, parsed
 
 
 @app.cell
@@ -226,12 +248,6 @@ def _(mo, parsed):
     df = pandas.DataFrame(parsed)
     mo.ui.dataframe(df, page_size=20)
     return df, pandas
-
-
-@app.cell
-def _(df):
-    set(df['type'])
-    return
 
 
 @app.cell
@@ -251,308 +267,160 @@ def _(Type, df):
 
 
 @app.cell
-def _(PCG850Display, Type, df):
-    display = PCG850Display()
-    rom_bank = None
-    ex_bank = None
-    xin_enabled = None
-    key_strobe = 0
+def _(Enum):
+    # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
+    class IOPort(Enum):
+        LCD_COMMAND = 0x40
+        LCD_OUT = 0x41
+        
+        ROM_EX_BANK = 0x19
+        RAM_BANK = 0x1b
+        ROM_BANK = 0x69
 
-    unhandled_inport = set()
-    unhandled_outport = set()
+        # FIXME: what does it do??
+        SHIFT_KEY_INPUT = 0x13 # Read-only
+        
+        KEY_INPUT = 0x10 # Read-only
+        SET_KEY_STROBE_LO = 0x11 # Write-only
+        SET_KEY_STROBE_HI = 0x12 # Write-only
 
-    for r in df.itertuples():
-        # print(r.type, r.val, r.addr)
-        if r.type == Type.WRITE:
-            # print('write')
-            pass
-        elif r.type in [Type.READ, Type.FETCH]:
-            # print('read')
-            pass
-        elif r.type == Type.IN_PORT:
-            # print('in_port')
-            # match per r.addr
-            match r.addr:
-                case 0x10:
-                    key_strobe = r.val
-                    print(f"read key_strobe: {hex(key_strobe)}")
-                case 0x15:
-                    xin_enabled = r.val
-                    print(f"read xin_enabled: {xin_enabled}")
-                case 0x19:
-                    rom_bank = r.val & 0x0F
-                    ex_bank = (r.val & 0x70) >> 4
-                    print(f"read rom_bank: {rom_bank}, ex_bank: {ex_bank}")
-                    pass
-                case 0x40:
-                    # FIXME: fails??
-                    # if r.val != 0:
-                    #     raise ValueError(f"Unexpected value for IN_PORT 0x40: {r.val}")
-                    pass
-                case 0x69:
-                    rom_bank = r.val & 0x0F
-                    print(f"read rom_bank: {rom_bank}")
-                    pass
-                case _:
-                    unhandled_inport.add(r.addr)
-                    # raise ValueError(f"Unknown in_port {hex(r.addr)}")
+        TIMER = 0x14
+        XIN_ENABLED = 0x15
+        INTERRUPT_FLAGS = 0x16
+        INTERRUPT_MASK = 0x17    
 
+        ON_CONTROL_BY_CD_SIGNAL = 0x64
+        WAIT_AFTER_M1 = 0x65
+        WAIT_AFTER_IO = 0x66
+        CPU_CLOCK_MODE = 0x67
 
-        elif r.type == Type.OUT_PORT:
-            match r.addr:
-                case 0x11:
-                    key_strobe |= r.val
-                    print(f"write key_strobe: {hex(key_strobe)}")
-                case 0x12:
-                    key_strobe = (r.val << 8) & 0xFF00
-                    print(f"write key_strobe: {hex(key_strobe)}")
-                case 0x15:
-                    xin_enabled = r.val & 0x80
-                    print(f"write xin_enabled: {xin_enabled}")
-                    pass
-                case 0x16:
-                    print(f"write interruptType: {hex(r.val)}")
-                    pass
-                case 0x19:
-                    rom_bank = r.val & 0x0F
-                    ex_bank = (r.val & 0x70) >> 4
-                    print(f"write rom_bank: {rom_bank}, ex_bank: {ex_bank}")
-                    pass
-                case 0x1a:
-                    print(f"boot rom on/off: {r.val}")
-                case 0x1b:
-                    ram_bank = r.val & 0x04
-                    print(f"write ram_bank: {ram_bank}")
-                    pass
-                case 0x1e:
-                    print(f"write battery check mode: {r.val & 0x03}")
-                case 0x40:
-                    display.parse_out40(r.val)
-                case 0x41:
-                    display.parse_out41(r.val)
-                case 0x69:
-                    rom_bank = r.val & 0x0F
-                    print(f"write rom_bank: {rom_bank}")
-                    pass
-                case 0xed:
-                    pass
-                case _:
-                    unhandled_outport.add(r.addr)
-                    # raise ValueError(f"Unknown out_port {hex(r.addr)}")
-        else:
-            raise ValueError(f"Unknown type {r.type}")
+        SET_1S_TIMER_PERIOD = 0x68
 
-    # print(display)
-    display.dump_vram()
-    print(f"unhandled_inport: {unhandled_inport}")
-    print(f"unhandled_outport: {unhandled_outport}")
-    return (
-        display,
-        ex_bank,
-        key_strobe,
-        r,
-        ram_bank,
-        rom_bank,
-        unhandled_inport,
-        unhandled_outport,
-        xin_enabled,
-    )
+        GPIO_IO_OUTPUT = 0x18 # 11-pin connector
+        GET_GPIO_IO = 0x1f
+        GPIO_IO_MODE = 0x60
+        SET_PIO_DIRECTION = 0x61
+        PIO_REGISTER = 0x62
+        UART_FLOW_REGISTER = 0x63
+        UART_INPUT_SELECTION = 0x6b
+        SET_UART_MODE = 0x6c
+        SET_UART_COMMAND = 0x6d
+        GET_UART_STATUS = 0x6e
+        UART_DATA = 0x6f
+        
+        SET_BOOTROM_OFF = 0x1a
+        RAM_CE_MODE = 0x1b # 0: CERAM1 (internal RAM), 1: CERAM2 (external RAM on system bus)
+        SET_IORESET = 0x1c
+
+        UNKNOWN_1D = 0x1d
+        UNKNOWN_1E = 0x1e # battery check mode?
+        
+    return (IOPort,)
 
 
 @app.cell
-def _():
-    class PCG850Display:
-        LCD_WIDTH = 166
-        LCD_HEIGHT = 9
+def _(IOPort, PCG850Display, Type, df):
+    def process_trace():
+        display = PCG850Display()
+        xin_enabled = None
+        key_strobe = 0
+        
+        unhandled_inport = set()
+        unhandled_outport = set()
 
-        def __init__(self):
-            self.lcdRead = False     # Flag: whether a read was already performed
-            self.lcdMod = False      # Special "modification" mode flag
-            self.lcdX = 0            # Current horizontal coordinate (0-255)
-            self.lcdX2 = 0           # Backup horizontal coordinate (used in lcdMod)
-            self.lcdY = 0            # Current vertical coordinate (0-7)
-            self.lcdTop = 0          # Top offset of the display
-            self.lcdContrast = 0     # Contrast level (0-?)
-            self.lcdDisabled = False # Whether the LCD is disabled
-            self.timerInterval = 0   # Timer interval (derived from OUT 0x40 command 0x30)
-            self.lcdEffectMirror = False
-            self.lcdEffectBlack = False
-            self.lcdEffectReverse = False
-            self.lcdEffectDark = False
-            self.lcdEffectWhite = False
-            self.lcdTrim = 0         # LCD trim value
+        # IO Port descriptions:
+        # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
+        for r in df.itertuples():
+            # print(r.type, r.val, r.addr)
+            try:
+                port = IOPort(r.addr) if r.type in [Type.IN_PORT, Type.OUT_PORT] else None
+            except ValueError:
+                continue
+                
+            if r.type == Type.WRITE:
+                pass
+            elif r.type in [Type.READ, Type.FETCH]:
+                pass
+            elif r.type == Type.IN_PORT:
+                match port:
+                    case IOPort.KEY_INPUT:
+                        key_strobe = r.val
+                        print(f"read key_strobe: {hex(key_strobe)}")
+                    case 0x15:
+                        xin_enabled = r.val
+                        print(f"read xin_enabled: {xin_enabled}")
+                    case 0x19:
+                        rom_bank = r.val & 0x0F
+                        ex_bank = (r.val & 0x70) >> 4
+                        print(f"read rom_bank: {rom_bank}, ex_bank: {ex_bank}")
+                        pass
+                    case 0x40:
+                        # FIXME: fails??
+                        # if r.val != 0:
+                        #     raise ValueError(f"Unexpected value for IN_PORT 0x40: {r.val}")
+                        pass
+                    case 0x69:
+                        rom_bank = r.val & 0x0F
+                        print(f"read rom_bank: {rom_bank}")
+                        pass
+                    # case _:
+                    #     unhandled_inport.add(r.addr)
+                    #     # raise ValueError(f"Unknown in_port {hex(r.addr)}")
+        
+        
+            elif r.type == Type.OUT_PORT:
+                match r.addr:
+                    case 0x11:
+                        key_strobe |= r.val
+                        print(f"write key_strobe: {hex(key_strobe)}")
+                    case 0x12:
+                        key_strobe = (r.val << 8) & 0xFF00
+                        print(f"write key_strobe: {hex(key_strobe)}")
+                    case 0x15:
+                        xin_enabled = r.val & 0x80
+                        print(f"write xin_enabled: {xin_enabled}")
+                        pass
+                    case 0x16:
+                        print(f"write interruptType: {hex(r.val)}")
+                        pass
+                    case 0x19:
+                        rom_bank = r.val & 0x0F
+                        ex_bank = (r.val & 0x70) >> 4
+                        print(f"write rom_bank: {rom_bank}, ex_bank: {ex_bank}")
+                        pass
+                    case 0x1a:
+                        print(f"boot rom on/off: {r.val}")
+                    case 0x1b:
+                        ram_bank = r.val & 0x04
+                        print(f"write ram_bank: {ram_bank}")
+                        pass
+                    case 0x1e:
+                        print(f"write battery check mode: {r.val & 0x03}")
+                    case 0x40:
+                        display.parse_out40(r.val)
+                    case 0x41:
+                        display.parse_out41(r.val)
+                    case 0x69:
+                        rom_bank = r.val & 0x0F
+                        print(f"write rom_bank: {rom_bank}")
+                        pass
+                    case 0xed:
+                        pass
+                    case _:
+                        unhandled_outport.add(r.addr)
+                        # raise ValueError(f"Unknown out_port {hex(r.addr)}")
+            else:
+                raise ValueError(f"Unknown type {r.type}")
 
-            # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
-            self.vram = [[0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)]
+        return display
 
-        def updateLCDContrast(self):
-            # In the real system, this would update the LCD hardware contrast.
-            # For our simulation, we simply note that the contrast (and effects)
-            # have been updated.
-            # (You might print or log the new contrast if needed.)
-            pass
-
-        def debug(self, str):
-            print('>display: ' + str)
-
-        def parse_out40(self, x):
-            """
-            Parse an OUT command to port 0x40.
-            x: integer 0-255 representing the byte written.
-            This function decodes the high nibble (x & 0xf0) and then uses the low nibble
-            as a parameter.
-            """
-            self.lcdRead = False
-            high = x & 0xf0
-            low = x & 0x0f
-
-            if high == 0x00:
-                # Set lower nibble of horizontal coordinate if not in lcdMod mode.
-                if not self.lcdMod:
-                    self.lcdX = (self.lcdX & 0xf0) | low
-                    self.debug(f'Set lcdX low to {self.lcdX}')
-
-            elif high == 0x10:
-                # Set upper nibble of lcdX.
-                if not self.lcdMod:
-                    # (x << 4) gives the new high nibble.
-                    self.lcdX = ((x & 0xff) << 4) | (self.lcdX & 0x0f)
-                    self.debug(f'Set lcdX high to {self.lcdX}')
-
-            elif high == 0x20:
-                # Enable/disable the LCD.
-                if x == 0x24:
-                    self.lcdDisabled = True
-                    self.debug('LCD disabled')
-                elif x == 0x25:
-                    self.lcdDisabled = False
-                    self.debug('LCD enabled')
-                self.updateLCDContrast()
-
-            elif high == 0x30:
-                # Set timer interval.
-                self.timerInterval = 16192 * (low + 1)
-                self.debug(f'Set timer interval to {self.timerInterval}')
-
-            elif high in (0x40, 0x50, 0x60, 0x70):
-                # Set the display "top" offset.
-                self.lcdTop = x - 0x40
-                self.debug(f'Set lcdTop to {self.lcdTop}')
-
-            elif high in (0x80, 0x90):
-                # Set the LCD contrast.
-                self.lcdContrast = x - 0x80
-                self.debug(f'Set lcdContrast to {self.lcdContrast}')
-                self.updateLCDContrast()
-
-            elif high == 0xa0:
-                # Control LCD effects.
-                if x == 0xa0:
-                    self.lcdEffectMirror = False
-                    self.debug('LCD effect: mirror off')
-                elif x == 0xa1:
-                    self.lcdEffectMirror = True
-                    self.debug('LCD effect: mirror on')
-                elif x == 0xa4:
-                    self.lcdEffectBlack = False
-                    self.debug('LCD effect: black off')
-                elif x == 0xa5:
-                    self.lcdEffectBlack = True
-                    self.debug('LCD effect: black on')
-                elif x == 0xa6:
-                    self.lcdEffectReverse = False
-                    self.debug('LCD effect: reverse off')
-                elif x == 0xa7:
-                    self.lcdEffectReverse = True
-                    self.debug('LCD effect: reverse on')
-                elif x == 0xa8:
-                    self.lcdEffectDark = True
-                    self.debug('LCD effect: dark on')
-                elif x == 0xa9:
-                    self.lcdEffectDark = False
-                    self.debug('LCD effect: dark off')
-                elif x == 0xae:
-                    self.lcdEffectWhite = True
-                    self.debug('LCD effect: white on')
-                elif x == 0xaf:
-                    self.lcdEffectWhite = False
-                    self.debug('LCD effect: white off')
-                else:
-                    raise ValueError(f'Unknown LCD effect: {x}')
-                self.updateLCDContrast()
-
-            elif high == 0xb0:
-                # Set vertical coordinate.
-                self.lcdY = low
-                self.debug(f'Set lcdY to {self.lcdY}')
-
-            elif high == 0xc0:
-                # Set LCD trim value.
-                self.lcdTrim = low
-                self.debug(f'Set lcdTrim to {self.lcdTrim}')
-
-            elif high == 0xe0:
-                # Special mode commands.
-                if x == 0xe0:
-                    self.lcdMod = True
-                    self.lcdX2 = self.lcdX
-                    self.debug('Entered modification mode')
-                elif x == 0xe2:
-                    # Reset contrast and modification mode.
-                    self.lcdContrast = 0
-                    self.lcdMod = False
-                    self.debug('Reset contrast and modification mode')
-                    self.updateLCDContrast()
-                elif x == 0xee:
-                    self.lcdMod = False
-                    self.lcdX = self.lcdX2
-                    self.debug('Exited modification mode, restored lcdX to {self.lcdX}')
-
-            # Other high values: do nothing
-
-        def parse_out41(self, x):
-            """
-            Parse an OUT command to port 0x41.
-            x: integer 0-255 representing the byte to write to video RAM.
-            This writes the data to VRAM at the current (lcdX, lcdY) coordinate,
-            then increments lcdX.
-            """
-            self.lcdRead = False
-            if self.lcdX < self.LCD_WIDTH and self.lcdY < self.LCD_HEIGHT:
-                self.vram[self.lcdY][self.lcdX] = x & 0xff
-            self.debug(f'Wrote {x} to VRAM[{self.lcdY}][{self.lcdX}]')
-            self.lcdX += 1
-
-        def dump_vram(self):
-            """Print the VRAM contents (for debugging)"""
-            for row in self.vram:
-                print(" ".join(f"{byte:02X}" for byte in row))
-
-        def __str__(self):
-            state = (
-                f"lcdX = {self.lcdX}\n"
-                f"lcdY = {self.lcdY}\n"
-                f"lcdTop = {self.lcdTop}\n"
-                f"lcdContrast = {self.lcdContrast}\n"
-                f"lcdDisabled = {self.lcdDisabled}\n"
-                f"timerInterval = {self.timerInterval}\n"
-                f"lcdMod = {self.lcdMod}\n"
-                f"lcdEffectMirror = {self.lcdEffectMirror}\n"
-                f"lcdEffectBlack = {self.lcdEffectBlack}\n"
-                f"lcdEffectReverse = {self.lcdEffectReverse}\n"
-                f"lcdEffectDark = {self.lcdEffectDark}\n"
-                f"lcdEffectWhite = {self.lcdEffectWhite}\n"
-                f"lcdTrim = {self.lcdTrim}\n"
-            )
-            return state
-    return (PCG850Display,)
+    # display = process_trace()
+    # display.dump_vram()
+    return (process_trace,)
 
 
 @app.cell
-def _(Tuple, dataclass, display):
-    from typing import NamedTuple, Optional, List
-    from PIL import Image, ImageDraw
-
+def _(Image, ImageDraw, List, Tuple, dataclass):
     @dataclass
     class Machineinfo:
         cell_width: int  # Width (in pixels) per cell
@@ -620,24 +488,14 @@ def _(Tuple, dataclass, display):
 
         return image
 
-    vram = sum(display.vram, [])
-    # print(len(vram))
-    draw_vram(vram, g850info, display.lcdTop, zoom=4)
-    return (
-        Image,
-        ImageDraw,
-        List,
-        Machineinfo,
-        NamedTuple,
-        Optional,
-        draw_vram,
-        g850info,
-        vram,
-    )
+    # vram = sum(display.vram, [])
+    # # print(len(vram))
+    # draw_vram(vram, g850info, display.lcdTop, zoom=4)
+    return Machineinfo, draw_vram, g850info
 
 
 @app.cell
-def _(Image, ImageDraw, display):
+def _(Image, ImageDraw):
     def draw_vram2(vram, zoom=4):
         off_color = (0, 0, 0)
         on_color = (0, 255, 0)
@@ -659,8 +517,6 @@ def _(Image, ImageDraw, display):
                     draw.rectangle([dx * zoom, dy * zoom, dx * zoom + zoom - 1, dy * zoom + zoom - 1], fill=color)    
 
         return image
-
-    draw_vram2(display.vram)
     return (draw_vram2,)
 
 
@@ -695,8 +551,8 @@ def _():
     return read_rom_banks, rom_banks
 
 
-@app.cell
-def _(Type, df, rom_banks):
+@app.cell(hide_code=True)
+def _(IOPort, Type, df, rom_banks):
     class RomVerifier:
         RAM_ADDR_START = 0x100
         ROM0_ADDR_START = 0x8000
@@ -769,7 +625,6 @@ def _(Type, df, rom_banks):
                 if val != expect:
                     print(f"rom_bank({self.rom_bank}): mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}")
 
-
     def verify_rom_memory():
         verifier = RomVerifier()
 
@@ -779,36 +634,37 @@ def _(Type, df, rom_banks):
             index = r.Index
             # print(r.type, r.val, r.addr)
 
+            try:
+                port = IOPort(r.addr) if r.type in [Type.IN_PORT, Type.OUT_PORT] else None
+            except ValueError:
+                continue
+            
             if r.type == Type.WRITE:
                 verifier.write(r.addr, r.val)
             elif r.type in [Type.READ, Type.FETCH]:
                 verifier.read(r.addr, r.val)
             elif r.type == Type.IN_PORT:
-                match r.addr:
-                    case 0x19:
+                match port:
+                    case IOPort.ROM_EX_BANK:
                         rom_bank = r.val & 0x0F
                         ex_bank = (r.val & 0x70) >> 4
                         verifier.get_rom_bank(rom_bank)
                         verifier.get_ex_bank(ex_bank)
-                    case 0x1b:
+                    case IOPort.RAM_BANK:
                         verifier.get_ram_bank(r.val)
-                    case 0x69:
+                    case IOPort.ROM_BANK:
                         verifier.get_rom_bank(r.val)
-                    case _:
-                        pass
             elif r.type == Type.OUT_PORT:
-                match r.addr:
-                    case 0x19:
+                match port:
+                    case IOPort.ROM_EX_BANK:
                         rom_bank = r.val & 0x0F
                         ex_bank = (r.val & 0x70) >> 4
                         verifier.set_rom_bank(rom_bank)
                         verifier.set_ex_bank(ex_bank)
-                    case 0x1b:
+                    case IOPort.RAM_BANK:
                         verifier.set_ram_bank(r.val)
-                    case 0x69:
+                    case IOPort.ROM_BANK:
                         verifier.set_rom_bank(r.val)
-                    case _:
-                        pass
             else:
                 raise ValueError(f"Unknown type {r.type}")
 
@@ -865,12 +721,6 @@ def _(alt, df, df_range, mo, pandas):
 
 
 @app.cell
-def _(df_for_plot, df_valh):
-    df_valh(df_for_plot)
-    return
-
-
-@app.cell
 def _():
     from z80dis import z80
     z80.disasm(b'\xed\xb0', 10)
@@ -878,7 +728,7 @@ def _():
 
 
 @app.cell
-def _(Type, df_for_plot):
+def _(Type):
     def df_valh(df):
         df2 = df.copy()
         df2['addrh'] = df2['addr'].apply(lambda x: hex(x))
@@ -889,26 +739,318 @@ def _(Type, df_for_plot):
         df2 = df[df['type'].isin([Type.IN_PORT, Type.OUT_PORT])].copy()
         return df_valh(df2)
         
-    io_df(df_for_plot)
+    # io_df(df_for_plot)
     return df_valh, io_df
 
 
 @app.cell
-def _(df):
-    # filter df to be only reads within 0x1000 and 0x2000
-    df2 = df[(df['addr'] >= 0x5500) & (df['addr'] < 0x5600)]
+def _(IOPort, df, df_valh):
+    # df3 = df[df['type'].isin([Type.IN_PORT, Type.OUT_PORT])].copy()
+    lcd_commands = df[df['port'].isin([IOPort.LCD_COMMAND, IOPort.LCD_OUT])].copy().reset_index(drop=True)
+    # lcd_commands = lcd_commands[lcd_commands['val'] != 0]
+    # df3['key'] = df3['val'].apply(lambda x: KEY_TO_NAME[x & 0x7f])
 
-    # sort them by addr and convert val to hex
-    df2 = df2.sort_values(by=['addr'])
-    df2['addrh'] = df2['addr'].apply(lambda x: hex(x))
-    df2['valh'] = df2['val'].apply(lambda x: hex(x))
-    df2 = df2.drop_duplicates()
-    return (df2,)
+    df_valh(lcd_commands)
+    return (lcd_commands,)
+
+
+@app.cell(hide_code=True)
+def _(lcd_commands, mo):
+    def get_lcd_commands_range(df):
+        return mo.md("""
+        {start}
+        
+        {length}
+        """).batch(
+            length=mo.ui.number(
+                start=1,
+                stop=df.shape[0],
+                value=df.shape[0],
+                step=1,
+                label="Length",
+            ),
+            start=mo.ui.number(
+                start=0, stop=df.shape[0], step=1, label="Start"
+            ),
+        )
+
+    lcd_commands_range = get_lcd_commands_range(lcd_commands)
+    lcd_commands_range
+    return get_lcd_commands_range, lcd_commands_range
 
 
 @app.cell
-def _(df2):
-    df2
+def _(IOPort, SED1560, draw_vram2, lcd_commands, lcd_commands_range):
+    def process_lcd_commands(df):
+        display = SED1560()
+        df = df.iloc[
+            lcd_commands_range.value["start"] : lcd_commands_range.value["start"]
+            + lcd_commands_range.value["length"]
+        ]
+
+        for r in df.itertuples():
+            if r.port == IOPort.LCD_COMMAND:
+                display.parse_out40(r.val)
+            elif r.port == IOPort.LCD_OUT:
+                display.parse_out41(r.val)
+                # if r.val:
+                #     print(r.Index)
+                #     break
+        # return display
+        return draw_vram2(display.vram)
+
+    process_lcd_commands(lcd_commands)
+    return (process_lcd_commands,)
+
+
+@app.cell
+def _(Enum):
+    # need to mask off last bit
+    class SED1560_CmdA(Enum):
+        SET_RAM_SEGMENT_OUTPUT = 0x0 # 0: Normal, 1: Inverse
+        DISPLAY_ON_OFF = 0xE # 0: Off, 1: On
+        DISPLAY_MODE = 0x6 # 0: Normal, 1: Inverse
+        SEGMENTS_DISPLAY_MODE = 0x4 # 0: Normal, 1: All display segments On
+        LCD_CONTROLLER_DUTY1 = 0x8 # See Table 5.3
+        LCD_CONTROLLER_DUTY2 = 0xA
+
+    # display controller is SED1560
+    class SED1560:
+        # VRAM: 166 x 65 bits (last page is 1-bit high)
+
+        # 8 pages of 8 lines, last 9th page of 1 line
+        PAGE_HEIGHT = 8 # pixels
+        NUM_PAGES = 9
+
+        LCD_WIDTH = 166
+        LCD_HEIGHT = 8 
+
+        # When the Select ADC command is used to select inverse display operation, the column address decoder inverts the relationship between the RAM column data and the display segment outputs.
+        
+        def __init__(self):
+            self.page = 0
+            self.col = 0 # x coordinate
+
+            self.com0 = 0 # Initial Display Line register, 6 bits
+
+            # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
+            self.vram = [[0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)]
+
+        def debug(self, str):
+            print('>display: ' + str)
+            pass
+
+        def cmd_a(self, low):
+            cmd = SED1560_CmdA(low & 0xE)
+            val = low & 0x1
+            print(f"cmd_a: {cmd}, val: {val}")        
+        
+        def parse_out40(self, x):
+            high = (x & 0xf0) >> 4
+            low  = x & 0x0f
+
+            if (x >> 6) == 1:
+                # Initial Display Line
+                self.com0 = x & 0x3F
+                # self.debug(f'com0 ← {self.com0}')
+            elif high == 0xB:
+                # Set Page Address
+                self.page = low
+                # self.debug(f'page ← {self.page}')
+            elif high == 0xA:
+                self.cmd_a(low)
+            elif high in [0x0, 0x1]:
+                if high:
+                    self.col = (self.col & 0x0F) | low
+                else:
+                    self.col = (self.col & 0xF0) | low
+                # self.debug(f'col ← {self.col} ({'high' if high else 'low'})')
+            else:
+                print(f"{x:08b}")
+                print(f'Unhandled high: {hex(high)}, low: {hex(low)}')
+
+
+        def parse_out41(self, x):
+            # if not x:
+            #     return
+
+            # print(f'VRAM[{self.page}][{self.col}] ← {hex(x)}')
+            self.vram[self.page][self.col] = x
+
+            # The counter automatically stops at the highest address, A6H.
+            self.col = min(self.col + 1, self.LCD_WIDTH - 1)
+
+    return SED1560, SED1560_CmdA
+
+
+@app.cell(hide_code=True)
+def _():
+    # # display controller is SED1560
+    # class SED1560:
+    #     # VRAM: 166 x 65 bits
+
+    #     # 8 pages of 8 lines, last 9th page of 1 line
+    #     PAGE_HEIGHT = 8 # pixels
+    #     NUM_PAGES = 9
+
+    #     LCD_WIDTH = 166
+    #     LCD_HEIGHT = 8 
+
+    #     def __init__(self):
+    #         self.page = 0
+    #         self.col = 0 # x coordinate
+
+    #         # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
+    #         self.vram = [[0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)]
+
+    #     def updateLCDContrast(self):
+    #         pass
+
+    #     def debug(self, str):
+    #         print('>display: ' + str)
+    #         pass
+
+    #     def parse_out40(self, x):
+    #         print(f"{x:08b}")
+    #         self.lcdRead = False
+    #         high = x & 0xf0
+    #         low = x & 0x0f
+
+    #         if (x >> 6) == 1:
+    #             # Initial Display Line
+    #             self.lcdTop = x & 0x3F
+    #             self.debug(f'Set lcdTop to {self.lcdTop}')
+
+    #         elif high == 0x00:
+    #             # Set lower nibble of horizontal coordinate if not in lcdMod mode.
+    #             if not self.lcdMod:
+    #                 self.lcdX = (self.lcdX & 0xf0) | low
+    #                 self.debug(f'Set lcdX low to {self.lcdX}')
+
+    #         elif high == 0x10:
+    #             # Set upper nibble of lcdX.
+    #             if not self.lcdMod:
+    #                 # (x << 4) gives the new high nibble.
+    #                 self.lcdX = ((x & 0xff) << 4) | (self.lcdX & 0x0f)
+    #                 self.debug(f'Set lcdX high to {self.lcdX}')
+
+    #         elif high == 0x20:
+    #             # Enable/disable the LCD.
+    #             if x == 0x24:
+    #                 self.lcdDisabled = True
+    #                 self.debug('LCD disabled')
+    #             elif x == 0x25:
+    #                 self.lcdDisabled = False
+    #                 self.debug('LCD enabled')
+    #             self.updateLCDContrast()
+
+    #         elif high == 0x30:
+    #             # Set timer interval.
+    #             self.timerInterval = 16192 * (low + 1)
+    #             self.debug(f'Set timer interval to {self.timerInterval}')
+
+    #         elif high in (0x80, 0x90):
+    #             # Set the LCD contrast.
+    #             self.lcdContrast = x - 0x80
+    #             self.debug(f'Set lcdContrast to {self.lcdContrast}')
+    #             self.updateLCDContrast()
+
+    #         elif high == 0xa0:
+    #             # Control LCD effects.
+    #             if x == 0xa0:
+    #                 self.lcdEffectMirror = False
+    #                 self.debug('LCD effect: mirror off')
+    #             elif x == 0xa1:
+    #                 self.lcdEffectMirror = True
+    #                 self.debug('LCD effect: mirror on')
+    #             elif x == 0xa4:
+    #                 self.lcdEffectBlack = False
+    #                 self.debug('LCD effect: black off')
+    #             elif x == 0xa5:
+    #                 self.lcdEffectBlack = True
+    #                 self.debug('LCD effect: black on')
+    #             elif x == 0xa6:
+    #                 self.lcdEffectReverse = False
+    #                 self.debug('LCD effect: reverse off')
+    #             elif x == 0xa7:
+    #                 self.lcdEffectReverse = True
+    #                 self.debug('LCD effect: reverse on')
+    #             elif x == 0xa8:
+    #                 self.lcdEffectDark = True
+    #                 self.debug('LCD effect: dark on')
+    #             elif x == 0xa9:
+    #                 self.lcdEffectDark = False
+    #                 self.debug('LCD effect: dark off')
+    #             elif x == 0xae:
+    #                 self.lcdEffectWhite = True
+    #                 self.debug('LCD effect: white on')
+    #             elif x == 0xaf:
+    #                 self.lcdEffectWhite = False
+    #                 self.debug('LCD effect: white off')
+    #             else:
+    #                 raise ValueError(f'Unknown LCD effect: {x}')
+    #             self.updateLCDContrast()
+
+    #         elif high == 0xb0:
+    #             # Set vertical coordinate.
+    #             self.lcdY = low
+    #             self.debug(f'Set lcdY to {self.lcdY}')
+
+    #         elif high == 0xc0:
+    #             # Set LCD trim value.
+    #             self.lcdTrim = low
+    #             self.debug(f'Set lcdTrim to {self.lcdTrim}')
+
+    #         elif high == 0xe0:
+    #             # Special mode commands.
+    #             if x == 0xe0:
+    #                 self.lcdMod = True
+    #                 self.lcdX2 = self.lcdX
+    #                 self.debug('Entered modification mode')
+    #             elif x == 0xe2:
+    #                 # Reset contrast and modification mode.
+    #                 self.lcdContrast = 0
+    #                 self.lcdMod = False
+    #                 self.debug('Reset contrast and modification mode')
+    #                 self.updateLCDContrast()
+    #             elif x == 0xee:
+    #                 self.lcdMod = False
+    #                 self.lcdX = self.lcdX2
+    #                 self.debug('Exited modification mode, restored lcdX to {self.lcdX}')
+
+    #     def parse_out41(self, x):
+    #         if not x:
+    #             return
+    #         print(f'VRAM[{self.lcdY}][{self.lcdX}] ← {hex(x)}')
+
+    #         self.lcdRead = False
+    #         if self.lcdX < self.LCD_WIDTH and self.lcdY < self.LCD_HEIGHT:
+    #             self.vram[self.lcdY][self.lcdX] = x & 0xff
+
+    #         # The counter automatically stops at the highest address, A6H.
+    #         self.lcdX += math.max(self.lcdX + 1, self.LCD_WIDTH - 1)
+
+    #     def dump_vram(self):
+    #         for row in self.vram:
+    #             print(" ".join(f"{byte:02X}" for byte in row))
+
+    #     def __str__(self):
+    #         state = (
+    #             f"lcdX = {self.lcdX}\n"
+    #             f"lcdY = {self.lcdY}\n"
+    #             f"lcdTop = {self.lcdTop}\n"
+    #             f"lcdContrast = {self.lcdContrast}\n"
+    #             f"lcdDisabled = {self.lcdDisabled}\n"
+    #             f"timerInterval = {self.timerInterval}\n"
+    #             f"lcdMod = {self.lcdMod}\n"
+    #             f"lcdEffectMirror = {self.lcdEffectMirror}\n"
+    #             f"lcdEffectBlack = {self.lcdEffectBlack}\n"
+    #             f"lcdEffectReverse = {self.lcdEffectReverse}\n"
+    #             f"lcdEffectDark = {self.lcdEffectDark}\n"
+    #             f"lcdEffectWhite = {self.lcdEffectWhite}\n"
+    #             f"lcdTrim = {self.lcdTrim}\n"
+    #         )
+    #         return state
     return
 
 
