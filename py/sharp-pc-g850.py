@@ -754,6 +754,17 @@ def _(IOPort, df, df_valh):
     return (lcd_commands,)
 
 
+@app.cell
+def _(lcd_commands_range):
+    def filtered_lcd_commands(df):
+        df = df.iloc[
+            lcd_commands_range.value["start"] : lcd_commands_range.value["start"]
+            + lcd_commands_range.value["length"]
+        ]
+        return df
+    return (filtered_lcd_commands,)
+
+
 @app.cell(hide_code=True)
 def _(lcd_commands, mo):
     def get_lcd_commands_range(df):
@@ -780,124 +791,345 @@ def _(lcd_commands, mo):
 
 
 @app.cell
-def _(IOPort, SED1560, draw_vram2, lcd_commands, lcd_commands_range):
-    def process_lcd_commands(df):
-        display = SED1560()
-        df = df.iloc[
-            lcd_commands_range.value["start"] : lcd_commands_range.value["start"]
-            + lcd_commands_range.value["length"]
-        ]
+def _(IOPort, SED1560, filtered_lcd_commands, lcd_commands, pandas):
+    def parse_lcd_commands(df):
+        df = filtered_lcd_commands(df)
 
+        result = []
         for r in df.itertuples():
             if r.port == IOPort.LCD_COMMAND:
-                display.parse_out40(r.val)
+                parsed = SED1560.Parser.parse_out40(r.val)
             elif r.port == IOPort.LCD_OUT:
-                display.parse_out41(r.val)
-                # if r.val:
-                #     print(r.Index)
-                #     break
-        # return display
-        return draw_vram2(display.vram)
+                parsed = SED1560.Parser.parse_out41(r.val)
 
-    process_lcd_commands(lcd_commands)
-    return (process_lcd_commands,)
+            parsed_type = type(parsed).__name__
+            # if CmdA, then get type from parsed.cmd
+            if parsed_type == 'CmdA':
+                parsed_type = parsed.cmd.name
+            
+            result.append({
+                "index": r.Index,
+                "type": parsed_type,
+                **vars(parsed)
+            })
+        return pandas.DataFrame(result)
+        # return draw_vram2(display.vram)
+
+    parse_lcd_commands(lcd_commands)
+    return (parse_lcd_commands,)
+
+
+@app.cell(hide_code=True)
+def _(IOPort, SED1560, SetColumn, filtered_lcd_commands):
+    def preprocess_lcd_commands(df):
+        df = filtered_lcd_commands(df)
+
+        commands = []
+        for r in df.itertuples():
+            if r.port == IOPort.LCD_COMMAND:
+                parsed = SED1560.Parser.parse_out40(r.val)
+            elif r.port == IOPort.LCD_OUT:
+                parsed = SED1560.Parser.parse_out41(r.val)
+            commands.append(parsed)
+
+        processed = []
+        i = 0
+        while i < len(commands):
+            match commands[i:i+2]:
+                case [SED1560.SetColumnPart(is_high=False, value=low),
+                      SED1560.SetColumnPart(is_high=True, value=high)]:
+                    print('match1')
+                    processed.append(SetColumn(value=low | high))
+                    i += 2
+                case [SED1560.SetColumnPart(is_high=True, value=high),
+                      SED1560.SetColumnPart(is_high=False, value=low)]:
+                    print('match2')
+                    processed.append(SetColumn(value=low | high))
+                    i += 2
+                case _:
+                    processed.append(commands[i])
+                    i += 1
+                
+        return processed
+
+    # preprocess_lcd_commands(lcd_commands)
+    return (preprocess_lcd_commands,)
 
 
 @app.cell
-def _(Enum):
-    # need to mask off last bit
-    class SED1560_CmdA(Enum):
-        SET_RAM_SEGMENT_OUTPUT = 0x0 # 0: Normal, 1: Inverse
-        DISPLAY_ON_OFF = 0xE # 0: Off, 1: On
-        DISPLAY_MODE = 0x6 # 0: Normal, 1: Inverse
-        SEGMENTS_DISPLAY_MODE = 0x4 # 0: Normal, 1: All display segments On
-        LCD_CONTROLLER_DUTY1 = 0x8 # See Table 5.3
-        LCD_CONTROLLER_DUTY2 = 0xA
+def _(alt, lcd_commands, mo, parse_lcd_commands):
+    def plot_parsed_lcd_commands(df):
+        df = parse_lcd_commands(df)
+        events_points = alt.Chart(df[~df['type'].isin(['InitialDisplayLine', 'SetColumnPart', 'SetPageAddress', 'VRAMWrite'])]).mark_point().encode(
+            x='index:Q',
+            y='type:N',
+            color='type:N',
+            tooltip=['index', 'type', 'value']
+        )
 
-    # display controller is SED1560
-    class SED1560:
-        # VRAM: 166 x 65 bits (last page is 1-bit high)
+        sub_charts = alt.Chart(df[df['type'].isin(['VRAMWrite'])]).mark_point().encode(
+            x='index:Q',
+            y=alt.Y('value:Q', title="Value"),
+            color='type:N',
+            tooltip=['index', 'type', 'value']
+        ).properties(title="VRAM Write")
 
-        # 8 pages of 8 lines, last 9th page of 1 line
-        PAGE_HEIGHT = 8 # pixels
-        NUM_PAGES = 9
+        # also add SetColumnPart as two separate charts for is_high=False and is_high=True
+        set_column_high = alt.Chart(df[df['type'] == 'SetColumnPart']).mark_point().encode(
+            x='index:Q',
+            y=alt.Y('value:Q', title="Value"),
+            color='is_high:N',
+            tooltip=['index', 'type', 'value', 'is_high']
+        ).properties(title="Set Column")
 
-        LCD_WIDTH = 166
-        LCD_HEIGHT = 8 
-
-        # When the Select ADC command is used to select inverse display operation, the column address decoder inverts the relationship between the RAM column data and the display segment outputs.
+        set_page_address = alt.Chart(df[df['type'] == 'SetPageAddress']).mark_point().encode(
+            x='index:Q',
+            y='value:Q',
+            color='type:N',
+            tooltip=['index', 'type', 'value']
+        ).properties(title="Set Page Address")
         
-        def __init__(self):
-            self.page = 0
-            self.col = 0 # x coordinate
+        initial_display_line = alt.Chart(df[df['type'] == 'InitialDisplayLine']).mark_point().encode(
+            x='index:Q',
+            y='value:Q',
+            color='type:N',
+            tooltip=['index', 'type', 'value']
+        ).properties(title="Initial Display Line")
 
-            self.com0 = 0 # Initial Display Line register, 6 bits
+        return alt.vconcat(events_points, sub_charts, set_column_high, set_page_address, initial_display_line)
 
-            # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
-            self.vram = [[0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)]
 
-        def debug(self, str):
-            print('>display: ' + str)
+    mo.ui.altair_chart(plot_parsed_lcd_commands(lcd_commands))
+    return (plot_parsed_lcd_commands,)
+
+
+@app.cell
+def _(df_valh, filtered_lcd_commands, lcd_commands):
+    df_valh(filtered_lcd_commands(lcd_commands))
+    return
+
+
+@app.cell
+def _(Enum, dataclass):
+    class SED1560:
+        class CmdAType(Enum):
+            SET_RAM_SEGMENT_OUTPUT = 0x0  # 0: Normal, 1: Inverse
+            DISPLAY_ON = 0xE              # 0: Off, 1: On
+            DISPLAY_MODE = 0x6            # 0: Normal, 1: Inverse
+            SEGMENTS_DISPLAY_MODE = 0x4   # 0: Normal, 1: All display segments On
+            LCD_CONTROLLER_DUTY1 = 0x8    # See Table 5.3
+            LCD_CONTROLLER_DUTY2 = 0xA
+
+        @dataclass
+        class InitialDisplayLine:
+            value: int
+
+        @dataclass
+        class Contrast:
+            contrast: int
+
+        @dataclass
+        class PowerOn:
+            on: bool
+
+        @dataclass
+        class PowerOnComplete:
             pass
 
-        def cmd_a(self, low):
-            cmd = SED1560_CmdA(low & 0b1110)
-            val = low & 0b1
-            print(f"cmd_a: {cmd}, val: {val}")        
-        
-        def parse_out40(self, x):
-            high = (x & 0xf0) >> 4
-            low  = x & 0x0f
+        @dataclass
+        class SetPageAddress:
+            value: int
 
-            if (x >> 6) == 1:
-                # Initial Display Line
-                self.com0 = x & 0x3F
-                # self.debug(f'com0 ← {self.com0}')
-            elif (x >> 5) == 0b100:
-                self.contrast = x & 0b11111
-                print(f'contrast: {self.contrast}')
-            elif (x >> 1) == 0b10010:
-                self.psu_on = x & 0b1
-                print(f'psu_on: {self.psu_on}')
-            elif x == 0b11101101:
-                self.power_on_complete = True
-                print(f'power_on_complete')
-            elif high == 0xB:
-                # Set Page Address
-                self.page = low
-                # self.debug(f'page ← {self.page}')
-            elif high == 0xA:
-                self.cmd_a(low)
-            elif high == 0xC:
-                # Sets the common and segment output status register.
-                # This command selects the role of the COM/SEG dual pins and determines the LCD driver output status.
-                self.scanning_direction = low >> 3
-                case = low & 0b111
-                if case != 0b111:
-                    raise ValueError(f"Unhandled case: {bin(case)}, only SEG166 is supported")
-                print(f"scanning_direction: {self.scanning_direction}, case: {bin(case)}")
-            elif high in [0x0, 0x1]:
-                if high:
-                    self.col = (self.col & 0x0F) | low
+        @dataclass
+        class CmdA:
+            cmd: 'SED1560.CmdAType'
+            value: int
+
+        @dataclass
+        class SetCommonSegmentOutput:
+            scanning_direction: int
+            case: int
+
+        @dataclass
+        class SetColumnPart:
+            is_high: bool  # True if updating the high nibble, False for low nibble
+            value: int
+
+        @dataclass
+        class SetColumn:
+            value: int
+
+        @dataclass
+        class VRAMWrite:
+            value: int
+
+        @dataclass
+        class Unknown:
+            x: int
+            high: int
+            low: int
+
+        class Parser:
+            @staticmethod
+            def parse_out40(x: int):
+                high = (x & 0xF0) >> 4
+                low = x & 0x0F
+
+                if (x >> 6) == 1:
+                    # Initial Display Line command
+                    com0 = x & 0x3F
+                    return SED1560.InitialDisplayLine(value=com0)
+                elif (x >> 5) == 0b100:
+                    # Contrast command: lower 5 bits hold the contrast value
+                    contrast = x & 0b11111
+                    return SED1560.Contrast(contrast=contrast)
+                elif (x >> 1) == 0b10010:
+                    # PSU On command: LSB determines state (0 or 1)
+                    on = bool(x & 0b1)
+                    return SED1560.PowerOn(on=on)
+                elif x == 0b11101101:
+                    # Power on complete command
+                    return SED1560.PowerOnComplete()
+                elif high == 0xB:
+                    # Set Page Address command
+                    return SED1560.SetPageAddress(value=low)
+                elif high == 0xA:
+                    #  A: low nibble split into command and value
+                    command_a = SED1560.CmdAType(low & 0b1110)
+                    value = low & 0b1
+                    return SED1560.CmdA(cmd=command_a, value=value)
+                elif high == 0xC:
+                    # Set Common and Segment Output Status Register command
+                    scanning_direction = low >> 3
+                    case = low & 0b111
+                    if case != 0b111:
+                        raise ValueError(
+                            f"Unhandled case: {bin(case)}, only SEG166 is supported"
+                        )
+                    return SED1560.SetCommonSegmentOutput(
+                        scanning_direction=scanning_direction,
+                        case=case
+                    )
+                elif high in [0x0, 0x1]:
+                    # Column address command: update column based on high/low nibble.
+                    if high:  # high nibble update
+                        col = low << 4
+                        is_high = True
+                    else:     # low nibble update
+                        col = low
+                        is_high = False
+                    return SED1560.SetColumnPart(is_high=is_high, value=col)
                 else:
-                    self.col = (self.col & 0xF0) | low
-                # self.debug(f'col ← {self.col} ({'high' if high else 'low'})')
-            else:
-                print(f"{x:08b}")
-                print(f'Unhandled high: {hex(high)}, low: {hex(low)}')
+                    raise SED1560.Unknown(x=x, high=high, low=low)
+
+            @staticmethod
+            def parse_out41(x: int):
+                return SED1560.VRAMWrite(value=x)
+
+    return (SED1560,)
 
 
-        def parse_out41(self, x):
-            # if not x:
-            #     return
+@app.cell(hide_code=True)
+def _():
+    # # need to mask off last bit
+    # class SED1560_CmdA(Enum):
+    #     SET_RAM_SEGMENT_OUTPUT = 0x0  # 0: Normal, 1: Inverse
+    #     DISPLAY_ON = 0xE  # 0: Off, 1: On
+    #     DISPLAY_MODE = 0x6  # 0: Normal, 1: Inverse
+    #     SEGMENTS_DISPLAY_MODE = 0x4  # 0: Normal, 1: All display segments On
+    #     LCD_CONTROLLER_DUTY1 = 0x8  # See Table 5.3
+    #     LCD_CONTROLLER_DUTY2 = 0xA
 
-            # print(f'VRAM[{self.page}][{self.col}] ← {hex(x)}')
-            self.vram[self.page][self.col] = x
 
-            # The counter automatically stops at the highest address, A6H.
-            self.col = min(self.col + 1, self.LCD_WIDTH - 1)
+    # # display controller is SED1560
+    # class SED1560:
+    #     # VRAM: 166 x 65 bits (last page is 1-bit high)
 
-    return SED1560, SED1560_CmdA
+    #     # 8 pages of 8 lines, last 9th page of 1 line
+    #     PAGE_HEIGHT = 8  # pixels
+    #     NUM_PAGES = 9
+
+    #     LCD_WIDTH = 166
+    #     LCD_HEIGHT = 8
+
+    #     # When the Select ADC command is used to select inverse display operation, the column address decoder inverts the relationship between the RAM column data and the display segment outputs.
+
+    #     def __init__(self):
+    #         self.page = 0
+    #         self.col = 0  # x coordinate
+
+    #         self.com0 = 0  # Initial Display Line register, 6 bits
+
+    #         # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
+    #         self.vram = [
+    #             [0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)
+    #         ]
+
+    #     def debug(self, str):
+    #         print(">display: " + str)
+    #         pass
+
+    #     def parse_out40(self, x, index=None):
+    #         high = (x & 0xF0) >> 4
+    #         low = x & 0x0F
+
+    #         if (x >> 6) == 1:
+    #             # Initial Display Line
+    #             self.com0 = x & 0x3F
+    #             # self.debug(f'com0 ← {self.com0}')
+    #         elif (x >> 5) == 0b100:
+    #             self.contrast = x & 0b11111
+    #             print(f"contrast: {self.contrast}")
+    #         elif (x >> 1) == 0b10010:
+    #             self.psu_on = x & 0b1
+    #             print(f"{index}: psu_on: {self.psu_on}")
+    #         elif x == 0b11101101:
+    #             self.power_on_complete = True
+    #             print(f"{index}: power_on_complete")
+    #         elif high == 0xB:
+    #             # Set Page Address
+    #             self.page = low
+    #             # self.debug(f'page ← {self.page}')
+    #         elif high == 0xA:
+    #             cmd = SED1560_CmdA(low & 0b1110)
+    #             val = low & 0b1
+    #             print(f"{index}: cmd_a: {cmd}, val: {val}")
+    #         elif high == 0xC:
+    #             # Sets the common and segment output status register.
+    #             # This command selects the role of the COM/SEG dual pins and determines the LCD driver output status.
+    #             self.scanning_direction = low >> 3
+    #             case = low & 0b111
+    #             if case != 0b111:
+    #                 raise ValueError(
+    #                     f"Unhandled case: {bin(case)}, only SEG166 is supported"
+    #                 )
+    #             print(
+    #                 f"scanning_direction: {self.scanning_direction}, case: {bin(case)}"
+    #             )
+    #         elif high in [0x0, 0x1]:
+    #             if high:
+    #                 self.col = (self.col & 0x0F) | low
+    #             else:
+    #                 self.col = (self.col & 0xF0) | low
+    #             # self.debug(f'col ← {self.col} ({'high' if high else 'low'})')
+    #         else:
+    #             print(f"{x:08b}: Unhandled high: {hex(high)}, low: {hex(low)}")
+
+    #     def parse_out41(self, x):
+    #         # if not x:
+    #         #     return
+
+    #         # print(f'VRAM[{self.page}][{self.col}] ← {hex(x)}')
+    #         self.vram[self.page][self.col] = x
+
+    #         # The counter automatically stops at the highest address, A6H.
+    #         self.col = min(self.col + 1, self.LCD_WIDTH - 1)
+    return
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell(hide_code=True)
@@ -1073,6 +1305,7 @@ def _():
 
 @app.cell
 def _():
+    # 
     return
 
 
