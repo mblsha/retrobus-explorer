@@ -1,0 +1,495 @@
+package perfetto.protos;
+
+message DebugAnnotation {
+  // Name fields are set only for dictionary entries.
+  oneof name_field {
+    // interned DebugAnnotationName.
+    uint64 name_iid = 1;
+    // non-interned variant.
+    string name = 10;
+  }
+
+  oneof value {
+    bool bool_value = 2;
+    uint64 uint_value = 3;
+    int64 int_value = 4;
+    double double_value = 5;
+    // Pointers are stored in a separate type as the JSON output treats them
+    // differently from other uint64 values.
+    uint64 pointer_value = 7;
+
+    // Deprecated. Use dict_entries / array_values instead.
+    NestedValue nested_value = 8;
+
+    // Legacy instrumentation may not support conversion of nested data to
+    // NestedValue yet.
+    string legacy_json_value = 9;
+
+    // interned and non-interned variants of strings.
+    string string_value = 6;
+    // Corresponds to |debug_annotation_string_values| field in InternedData.
+    uint64 string_value_iid = 17;
+  }
+
+  // Used to embed arbitrary proto messages (which are also typically used to
+  // represent typed TrackEvent arguments). |proto_type_name| or
+  // |proto_type_name_iid| are storing the full name of the proto messages (e.g.
+  // .perfetto.protos.DebugAnnotation) and |proto_value| contains the serialised
+  // proto messages. See |TracedValue::WriteProto| for more details.
+  oneof proto_type_descriptor {
+    string proto_type_name = 16;
+    // interned DebugAnnotationValueTypeName.
+    uint64 proto_type_name_iid = 13;
+  }
+  optional bytes proto_value = 14;
+
+  repeated DebugAnnotation dict_entries = 11;
+  repeated DebugAnnotation array_values = 12;
+
+  // Deprecated legacy way to use nested values. Only kept for
+  // backwards-compatibility in TraceProcessor. May be removed in the future -
+  // code filling protos should use |dict_entries| and |array_values| instead.
+  message NestedValue {
+    enum NestedType {
+      // leaf value.
+      UNSPECIFIED = 0;
+      DICT = 1;
+      ARRAY = 2;
+    }
+    optional NestedType nested_type = 1;
+
+    repeated string dict_keys = 2;
+    repeated NestedValue dict_values = 3;
+    repeated NestedValue array_values = 4;
+    optional int64 int_value = 5;
+    optional double double_value = 6;
+    optional bool bool_value = 7;
+    optional string string_value = 8;
+  }
+}
+
+message UnsymbolizedSourceLocation {
+  optional uint64 iid = 1;
+  optional uint64 mapping_id = 2;
+  optional uint64 rel_pc = 3;
+}
+
+message SourceLocation {
+  optional uint64 iid = 1;
+  optional string file_name = 2;
+  optional string function_name = 3;
+  optional uint32 line_number = 4;
+}
+
+message ProcessDescriptor {
+  optional int32 pid = 1;
+  repeated string cmdline = 2;
+  optional string process_name = 6;
+
+  optional int32 process_priority = 5;
+  // Process start time in nanoseconds.
+  // The timestamp refers to the trace clock by default. Other clock IDs
+  // provided in TracePacket are not supported.
+  optional int64 start_timestamp_ns = 7;
+
+  // ---------------------------------------------------------------------------
+  // Deprecated / legacy fields, which will be removed in the future:
+  // ---------------------------------------------------------------------------
+
+  // See chromium's content::ProcessType.
+  enum ChromeProcessType {
+    PROCESS_UNSPECIFIED = 0;
+    PROCESS_BROWSER = 1;
+    PROCESS_RENDERER = 2;
+    PROCESS_UTILITY = 3;
+    PROCESS_ZYGOTE = 4;
+    PROCESS_SANDBOX_HELPER = 5;
+    PROCESS_GPU = 6;
+    PROCESS_PPAPI_PLUGIN = 7;
+    PROCESS_PPAPI_BROKER = 8;
+  }
+  optional ChromeProcessType chrome_process_type = 4;
+
+  // To support old UI. New UI should determine default sorting by process_type.
+  optional int32 legacy_sort_index = 3;
+
+  // Labels can be used to further describe properties of the work performed by
+  // the process. For example, these can be used by Chrome renderer process to
+  // provide titles of frames being rendered.
+  repeated string process_labels = 8;
+}
+
+message ThreadDescriptor {
+  optional int32 pid = 1;
+  optional int32 tid = 2;
+
+  optional string thread_name = 5;
+
+  // ---------------------------------------------------------------------------
+  // Deprecated / legacy fields, which will be removed in the future:
+  // ---------------------------------------------------------------------------
+
+  enum ChromeThreadType {
+    CHROME_THREAD_UNSPECIFIED = 0;
+
+    CHROME_THREAD_MAIN = 1;
+    CHROME_THREAD_IO = 2;
+
+    // Scheduler:
+    CHROME_THREAD_POOL_BG_WORKER = 3;
+    CHROME_THREAD_POOL_FG_WORKER = 4;
+    CHROME_THREAD_POOL_FB_BLOCKING = 5;
+    CHROME_THREAD_POOL_BG_BLOCKING = 6;
+    CHROME_THREAD_POOL_SERVICE = 7;
+
+    // Compositor:
+    CHROME_THREAD_COMPOSITOR = 8;
+    CHROME_THREAD_VIZ_COMPOSITOR = 9;
+    CHROME_THREAD_COMPOSITOR_WORKER = 10;
+
+    // Renderer:
+    CHROME_THREAD_SERVICE_WORKER = 11;
+
+    // Tracing related threads:
+    CHROME_THREAD_MEMORY_INFRA = 50;
+    CHROME_THREAD_SAMPLING_PROFILER = 51;
+  };
+  optional ChromeThreadType chrome_thread_type = 4;
+
+  // Deprecated. Use ClockSnapshot in combination with TracePacket's timestamp
+  // and timestamp_clock_id fields instead.
+  optional int64 reference_timestamp_us = 6;
+
+  // Absolute reference values. Clock values in subsequent TrackEvents can be
+  // encoded accumulatively and relative to these. This reduces their var-int
+  // encoding size.
+  // TODO(eseckler): Deprecated. Replace these with ClockSnapshot encoding.
+  optional int64 reference_thread_time_us = 7;
+  optional int64 reference_thread_instruction_count = 8;
+
+  // To support old UI. New UI should determine default sorting by thread_type.
+  optional int32 legacy_sort_index = 3;
+}
+
+message TrackDescriptor {
+  // Unique ID that identifies this track. This ID is global to the whole trace.
+  // Producers should ensure that it is unlikely to clash with IDs emitted by
+  // other producers. A value of 0 denotes the implicit trace-global track.
+  //
+  // For example, legacy TRACE_EVENT macros may use a hash involving the async
+  // event id + id_scope, pid, and/or tid to compute this ID.
+  optional uint64 uuid = 1;
+
+  // A parent track reference can be used to describe relationships between
+  // tracks. For example, to define an asynchronous track which is scoped to a
+  // specific process, specify the uuid for that process's process track here.
+  // Similarly, to associate a COUNTER_THREAD_TIME_NS counter track with a
+  // thread, specify the uuid for that thread's thread track here.
+  optional uint64 parent_uuid = 5;
+
+  // Name of the track. Optional - if unspecified, it may be derived from the
+  // process/thread name (process/thread tracks), the first event's name (async
+  // tracks), or counter name (counter tracks).
+  optional string name = 2;
+
+  optional ProcessDescriptor process = 3;
+  optional ThreadDescriptor thread = 4;
+}
+
+message TrackEvent {
+  // Names of categories of the event. In the client library, categories are a
+  // way to turn groups of individual events on or off.
+  // interned EventCategoryName.
+  repeated uint64 category_iids = 3;
+  // non-interned variant.
+  repeated string categories = 22;
+
+  // Optional name of the event for its display in trace viewer. May be left
+  // unspecified for events with typed arguments.
+  //
+  // Note that metrics should not rely on event names, as they are prone to
+  // changing. Instead, they should use typed arguments to identify the events
+  // they are interested in.
+  oneof name_field {
+    // interned EventName.
+    uint64 name_iid = 10;
+    // non-interned variant.
+    string name = 23;
+  }
+
+  // TODO(eseckler): Support using binary symbols for category/event names.
+
+  // Type of the TrackEvent (required if |phase| in LegacyEvent is not set).
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+
+    // Slice events are events that have a begin and end timestamp, i.e. a
+    // duration. They can be nested similar to a callstack: If, on the same
+    // track, event B begins after event A, but before A ends, B is a child
+    // event of A and will be drawn as a nested event underneath A in the UI.
+    // Note that child events should always end before their parents (e.g. B
+    // before A).
+    //
+    // Each slice event is formed by a pair of BEGIN + END events. The END event
+    // does not need to repeat any TrackEvent fields it has in common with its
+    // corresponding BEGIN event. Arguments and debug annotations of the BEGIN +
+    // END pair will be merged during trace import.
+    //
+    // Note that we deliberately chose not to support COMPLETE events (which
+    // would specify a duration directly) since clients would need to delay
+    // writing them until the slice is completed, which can result in reordered
+    // events in the trace and loss of unfinished events at the end of a trace.
+    TYPE_SLICE_BEGIN = 1;
+    TYPE_SLICE_END = 2;
+
+    // Instant events are nestable events without duration. They can be children
+    // of slice events on the same track.
+    TYPE_INSTANT = 3;
+
+    // Event that provides a value for a counter track. |track_uuid| should
+    // refer to a counter track and |counter_value| set to the new value. Note
+    // that most other TrackEvent fields (e.g. categories, name, ..) are not
+    // supported for TYPE_COUNTER events. See also CounterDescriptor.
+    TYPE_COUNTER = 4;
+  }
+  optional Type type = 9;
+
+  // Identifies the track of the event. The default value may be overridden
+  // using TrackEventDefaults, e.g., to specify the track of the TraceWriter's
+  // sequence (in most cases sequence = one thread). If no value is specified
+  // here or in TrackEventDefaults, the TrackEvent will be associated with an
+  // implicit trace-global track (uuid 0). See TrackDescriptor::uuid.
+  optional uint64 track_uuid = 11;
+
+  // A new value for a counter track. |track_uuid| should refer to a track with
+  // a CounterDescriptor, and |type| should be TYPE_COUNTER. For a more
+  // efficient encoding of counter values that are sampled at the beginning/end
+  // of a slice, see |extra_counter_values| and |extra_counter_track_uuids|.
+  // Counter values can optionally be encoded in as delta values (positive or
+  // negative) on each packet sequence (see CounterIncrementalBase).
+  oneof counter_value_field {
+    int64 counter_value = 30;
+    double double_counter_value = 44;
+  }
+
+  // To encode counter values more efficiently, we support attaching additional
+  // counter values to a TrackEvent of any type. All values will share the same
+  // timestamp specified in the TracePacket. The value at
+  // extra_counter_values[N] is for the counter track referenced by
+  // extra_counter_track_uuids[N].
+  //
+  // |extra_counter_track_uuids| may also be set via TrackEventDefaults. There
+  // should always be equal or more uuids than values. It is valid to set more
+  // uuids (e.g. via defaults) than values. If uuids are specified in
+  // TrackEventDefaults and a TrackEvent, the TrackEvent uuids override the
+  // default uuid list.
+  //
+  // For example, this allows snapshotting the thread time clock at each
+  // thread-track BEGIN and END event to capture the cpu time delta of a slice.
+  repeated uint64 extra_counter_track_uuids = 31;
+  repeated int64 extra_counter_values = 12;
+
+  // Counter snapshots using floating point instead of integer values.
+  repeated uint64 extra_double_counter_track_uuids = 45;
+  repeated double extra_double_counter_values = 46;
+
+  // IDs of flows originating, passing through, or ending at this event.
+  // Flow IDs are global within a trace.
+  //
+  // A flow connects a sequence of TrackEvents within or across tracks, e.g.
+  // an input event may be handled on one thread but cause another event on
+  // a different thread - a flow between the two events can associate them.
+  //
+  // The direction of the flows between events is inferred from the events'
+  // timestamps. The earliest event with the same flow ID becomes the source
+  // of the flow. Any events thereafter are intermediate steps of the flow,
+  // until the flow terminates at the last event with the flow ID.
+  //
+  // Flows can also be explicitly terminated (see |terminating_flow_ids|), so
+  // that the same ID can later be reused for another flow.
+  // DEPRECATED. Only kept for backwards compatibility. Use |flow_ids|.
+  repeated uint64 flow_ids_old = 36 [deprecated = true];
+  // TODO(b/204341740): replace "flow_ids_old" with "flow_ids" to reduce memory
+  // consumption.
+  repeated fixed64 flow_ids = 47;
+
+  // List of flow ids which should terminate on this event, otherwise same as
+  // |flow_ids|.
+  // Any one flow ID should be either listed as part of |flow_ids| OR
+  // |terminating_flow_ids|, not both.
+  // DEPRECATED. Only kept for backwards compatibility.  Use
+  // |terminating_flow_ids|.
+  repeated uint64 terminating_flow_ids_old = 42 [deprecated = true];
+  // TODO(b/204341740): replace "terminating_flow_ids_old" with
+  // "terminating_flow_ids" to reduce memory consumption.
+  repeated fixed64 terminating_flow_ids = 48;
+
+  // ---------------------------------------------------------------------------
+  // TrackEvent arguments:
+  // ---------------------------------------------------------------------------
+
+  // Unstable key/value annotations shown in the trace viewer but not intended
+  // for metrics use.
+  repeated DebugAnnotation debug_annotations = 4;
+
+  // Typed event arguments:
+  // optional TaskExecution task_execution = 5;
+  // optional LogMessage log_message = 21;
+  // optional ChromeCompositorSchedulerState cc_scheduler_state = 24;
+  // optional ChromeUserEvent chrome_user_event = 25;
+  // optional ChromeKeyedService chrome_keyed_service = 26;
+  // optional ChromeLegacyIpc chrome_legacy_ipc = 27;
+  // optional ChromeHistogramSample chrome_histogram_sample = 28;
+  // optional ChromeLatencyInfo chrome_latency_info = 29;
+  // optional ChromeFrameReporter chrome_frame_reporter = 32;
+  // optional ChromeApplicationStateInfo chrome_application_state_info = 39;
+  // optional ChromeRendererSchedulerState chrome_renderer_scheduler_state = 40;
+  // optional ChromeWindowHandleEventInfo chrome_window_handle_event_info = 41;
+  // optional ChromeContentSettingsEventInfo chrome_content_settings_event_info =
+  //     43;
+  // optional ChromeActiveProcesses chrome_active_processes = 49;
+  // optional Screenshot screenshot = 50;
+
+  // This field is used only if the source location represents the function that
+  // executes during this event.
+  oneof source_location_field {
+    // Non-interned field.
+    SourceLocation source_location = 33;
+    // Interned field.
+    uint64 source_location_iid = 34;
+  }
+
+  // optional ChromeMessagePump chrome_message_pump = 35;
+  // optional ChromeMojoEventInfo chrome_mojo_event_info = 38;
+
+  // New argument types go here :)
+
+  // Extension range for typed events defined externally.
+  // See docs/design-docs/extensions.md for more details.
+  //
+  // Extension support is work-in-progress, in the future the way to reserve a
+  // subrange for a particular project will be described here and in the design
+  // document linked above.
+  //
+  // Contact perfetto-dev@googlegroups.com if you are interested in a subrange
+  // for your project.
+
+  // Extension range reserved for chromium:
+  // https://source.chromium.org/chromium/chromium/src/+/main:base/tracing/protos/chrome_track_event.proto
+  extensions 1000 to 1999;
+  // Extension range reserved for https://b.corp.google.com/issues/301227627.
+  extensions 2000 to 2000;
+  // Extension range for future use.
+  extensions 2001 to 9899;
+  // Reserved for Perfetto unit and integration tests.
+  extensions 9900 to 10000;
+}
+
+// TracePacket is the root object of a Perfetto trace.
+// A Perfetto trace is a linear sequence of TracePacket(s).
+//
+// The tracing service guarantees that all TracePacket(s) written by a given
+// TraceWriter are seen in-order, without gaps or duplicates. If, for any
+// reason, a TraceWriter sequence becomes invalid, no more packets are returned
+// to the Consumer (or written into the trace file).
+// TracePacket(s) written by different TraceWriter(s), hence even different
+// data sources, can be seen in arbitrary order.
+// The consumer can re-establish a total order, if interested, using the packet
+// timestamps, after having synchronized the different clocks onto a global
+// clock.
+//
+// The tracing service is agnostic of the content of TracePacket, with the
+// exception of few fields (e.g.. trusted_*, trace_config) that are written by
+// the service itself.
+//
+// See the [Buffers and Dataflow](/docs/concepts/buffers.md) doc for details.
+//
+// Next reserved id: 14 (up to 15).
+// Next id: 95.
+message TracePacket {
+  // The timestamp of the TracePacket.
+  // By default this timestamps refers to the trace clock (CLOCK_BOOTTIME on
+  // Android). It can be overridden using a different timestamp_clock_id.
+  // The clock domain definition in ClockSnapshot can also override:
+  // - The unit (default: 1ns).
+  // - The absolute vs delta encoding (default: absolute timestamp).
+  optional uint64 timestamp = 8;
+
+  // Specifies the ID of the clock used for the TracePacket |timestamp|. Can be
+  // one of the built-in types from ClockSnapshot::BuiltinClocks, or a
+  // producer-defined clock id.
+  // If unspecified and if no default per-sequence value has been provided via
+  // TracePacketDefaults, it defaults to BuiltinClocks::BOOTTIME.
+  optional uint32 timestamp_clock_id = 58;
+
+  oneof data {
+    TrackEvent track_event = 11;
+
+    // ...
+
+    // Only used by TrackEvent.
+    TrackDescriptor track_descriptor = 60;
+
+    // ...
+  }
+
+  // Trusted user id of the producer which generated this packet. Keep in sync
+  // with TrustedPacket.trusted_uid.
+  //
+  // TODO(eseckler): Emit this field in a PacketSequenceDescriptor message
+  // instead.
+  oneof optional_trusted_uid { int32 trusted_uid = 3; };
+
+  // Service-assigned identifier of the packet sequence this packet belongs to.
+  // Uniquely identifies a producer + writer pair within the tracing session. A
+  // value of zero denotes an invalid ID. Keep in sync with
+  // TrustedPacket.trusted_packet_sequence_id.
+  oneof optional_trusted_packet_sequence_id {
+    uint32 trusted_packet_sequence_id = 10;
+  }
+
+  // Trusted process id of the producer which generated this packet, written by
+  // the service.
+  optional int32 trusted_pid = 79;
+
+  // ...
+
+  // Flag set by the service if, for the current packet sequence (see
+  // |trusted_packet_sequence_id|), either:
+  // * this is the first packet, or
+  // * one or multiple packets were dropped since the last packet that the
+  //   consumer read from the sequence. This can happen if chunks in the trace
+  //   buffer are overridden before the consumer could read them when the trace
+  //   is configured in ring buffer mode.
+  //
+  // When packet loss occurs, incrementally emitted data (including interned
+  // data) on the sequence should be considered invalid up until the next packet
+  // with SEQ_INCREMENTAL_STATE_CLEARED set.
+  optional bool previous_packet_dropped = 42;
+
+  // Flag set by a producer (starting from SDK v29) if, for the current packet
+  // sequence (see |trusted_packet_sequence_id|), this is the first packet.
+  //
+  // This flag can be used for distinguishing the two situations when
+  // processing the trace:
+  // 1. There are no prior events for the sequence because of data loss, e.g.
+  //    due to ring buffer wrapping.
+  // 2. There are no prior events for the sequence because it didn't start
+  //    before this packet (= there's definitely no preceeding data loss).
+  //
+  // Given that older SDK versions do not support this flag, this flag not
+  // being present for a particular sequence does not necessarily imply data
+  // loss.
+  optional bool first_packet_on_sequence = 87;
+}
+
+message Trace {
+  repeated TracePacket packet = 1;
+
+  // Do NOT add any other field here. This is just a convenience wrapper for
+  // the use case of a trace being saved to a file. There are other cases
+  // (streaming) where TracePacket are directly streamed without being wrapped
+  // in a Trace proto. Nothing should ever rely on the full trace, all the
+  // logic should be based on TracePacket(s).
+}
+
