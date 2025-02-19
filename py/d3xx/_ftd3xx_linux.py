@@ -17,6 +17,9 @@ UINT = c_uint
 LPSTR = STRING
 
 _libname = 'libftd3xx.dylib' if sys.platform == 'darwin' else 'libftd3xx.so'
+import os
+_libname = os.path.join(os.path.dirname(os.path.abspath(__file__)), _libname)
+
 _libraries = {}
 _libraries[_libname] = c.cdll.LoadLibrary(_libname)  # CDLL(_libname)
 
