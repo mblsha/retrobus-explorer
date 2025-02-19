@@ -7,13 +7,9 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
-    return (mo,)
-
-
-@app.cell
-def _():
     import altair as alt
-    return (alt,)
+    import pandas
+    return alt, mo, pandas
 
 
 @app.cell
@@ -21,6 +17,7 @@ def _():
     import sys
     sys.path.append("d3xx")
 
+    # NOTE: expect d3xx/libftd3xx.dylib to be present
     import ftd3xx
     import _ftd3xx_linux as mft
     return ftd3xx, mft, sys
@@ -192,7 +189,31 @@ def _():
 
 
 @app.cell
-def _(Enum, IOPort, Optional, data_concat, dataclass, struct):
+def _(z80):
+    z80.decode(b'\xCB\xE7', 0).status
+    return
+
+
+@app.cell
+def _():
+    # https://clrhome.org/table/#call
+    OPCODE_CALL_PREFIX = set([0xC4, 0xCC, 0xCD, 0xD4, 0xDC, 0xE4, 0xEC, 0xF4, 0xFC])
+    # https://clrhome.org/table/#ret
+    OPCODE_RET_PREFIX = set([0xC0, 0xC8, 0xC9, 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8])
+    return OPCODE_CALL_PREFIX, OPCODE_RET_PREFIX
+
+
+@app.cell
+def _(
+    Enum,
+    IOPort,
+    OPCODE_CALL_PREFIX,
+    OPCODE_RET_PREFIX,
+    Optional,
+    data_concat,
+    dataclass,
+    struct,
+):
     class Type(Enum):
         FETCH = "M" # M1: Instruction Fetch
         READ  = "R" # Memory Read
@@ -204,66 +225,239 @@ def _(Enum, IOPort, Optional, data_concat, dataclass, struct):
     class Event:
         type: Type
         val:  int # uint8
-        addr: int # uint16
+        addr: Optional[int] # uint16
+        bank: Optional[int]
+        pc: int # uint32
         port: Optional[IOPort]
-        # raw:  bytes
+        instr: Optional[InstructionType]
 
-    def parse_data(data):
-        errors = []
-        r = []
+    class InstructionType(Enum):
+        CALL = 1
+        RET = 2
 
-        offset = 0
-        while offset < len(data):
-            try:
-                type = Type(chr(data[offset]))
-            except ValueError:
-                errors.append(f"Invalid type at offset {offset}: {data[offset]}")
-                offset += 1
-                # raise ValueError(f"Invalid type at index {index}: {i}")
-                continue
+    class RawDataParser:
+        BANK_ADDR_START = 0xC000
+        BANK_SIZE = 0x4000
 
-            val  = struct.unpack("B", data[offset+1:offset+2])[0]
-            addr = struct.unpack("<H", data[offset+2:offset+4])[0]
-            offset += 4
+        def full_addr(self, addr):
+            # bank 0 is at BANK_ADDR_START, bank 1 is at BANK_ADDR_START + 0x4000
+            if addr < self.BANK_ADDR_START:
+                return addr, None
 
-            port = None
-            if type in [Type.IN_PORT, Type.OUT_PORT]:
-                addr &= 0xFF
+            return addr + self.BANK_SIZE * (self.rom_bank - 1), self.rom_bank
+
+        def parse(self, data):
+            self.rom_bank = None
+
+            pc = None
+            errors = []
+            r = []
+        
+            offset = 0
+            while offset < len(data):
                 try:
-                    port = IOPort(addr)
-                except:
-                    errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
+                    type = Type(chr(data[offset]))
+                except ValueError:
+                    errors.append(f"Invalid type at offset {offset}: {data[offset]}")
+                    offset += 1
+                    # raise ValueError(f"Invalid type at index {index}: {i}")
+                    continue
+        
+                val  = struct.unpack("B", data[offset+1:offset+2])[0]
+                addr = struct.unpack("<H", data[offset+2:offset+4])[0]
+                offset += 4
 
-            r.append(Event(type, val, addr, port))
-        return r, errors
+                instr = None
+                port = None
+                bank = None
+                if type == Type.FETCH:
+                    pc, bank = self.full_addr(addr)
+                    addr = pc
+                    if val in OPCODE_CALL_PREFIX:
+                        instr = InstructionType.CALL
+                    elif val in OPCODE_RET_PREFIX:
+                        instr = InstructionType.RET
+                elif type in [Type.READ, Type.WRITE]:
+                    addr, bank = self.full_addr(addr)
+                elif type in [Type.IN_PORT, Type.OUT_PORT]:
+                    addr &= 0xFF
+                    try:
+                        port = IOPort(addr)
 
-    parsed, errors = parse_data(data_concat)
-    errors
-    return Event, Type, errors, parse_data, parsed
+                        if port == IOPort.ROM_BANK:
+                            self.rom_bank = val
+                        elif port == IOPort.ROM_EX_BANK:
+                            self.rom_bank = val & 0x0F
+                    except:
+                        errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
+        
+                r.append(Event(type=type, val=val, addr=addr, pc=pc, port=port, instr=instr, bank=bank))
+            return r, errors
+
+    parsed, errors = RawDataParser().parse(data_concat)
+    len(parsed), errors
+    return Event, InstructionType, RawDataParser, Type, errors, parsed
 
 
 @app.cell
-def _(mo, parsed):
-    import pandas
+def _(pandas, parsed):
     df = pandas.DataFrame(parsed)
-    mo.ui.dataframe(df, page_size=20)
-    return df, pandas
+    return (df,)
 
 
 @app.cell
-def _(Type, df):
-    in_ports = []
-    out_ports = []
+def _(df):
+    df['bank'].unique()
+    # df.iloc[1370:]
+    return
 
-    for i in sorted(list(set(df[df['type'].isin([Type.IN_PORT])]['addr']))):
-        in_ports.append(hex(i))
 
-    for i in sorted(list(set(df[df['type'].isin([Type.OUT_PORT])]['addr']))):
-        out_ports.append(hex(i))
+@app.cell
+def _(InstructionType, PerfettoTraceBuilder, Type, parsed):
+    def create_perfetto_trace(data):
+        builder = PerfettoTraceBuilder()
+        last_stack_event = None
+        
+        ts = 0
+        pc = None
+        for e in data:
+            ts += 1
+            if e.type == Type.FETCH:
+                pc = e.addr
 
-    print('in_ports: ' + ','.join(in_ports))
-    print('out_ports: ' + ','.join(out_ports))
-    return i, in_ports, out_ports
+                if last_stack_event is not None:
+                    if last_stack_event.instr == InstructionType.CALL:
+                        with builder.add_slice_event(ts, 'begin', hex(pc)).annotation('call') as ann:
+                            ann.pointer("pc", pc)
+                            ann.pointer("caller", last_stack_event.addr)
+                            if e.bank:
+                                ann.int('bank', e.bank)
+                            if last_stack_event.bank:
+                                ann.int('last_bank', last_stack_event.bank)
+                    else:
+                        builder.add_slice_event(ts, 'end')
+        
+                    last_stack_event = None
+
+            elif e.type in [Type.IN_PORT, Type.OUT_PORT]:
+                name = f'{e.port.name} {hex(e.val)}'
+                with builder.add_instant_event(ts, name).annotation('call') as ann:
+                    ann.pointer("pc", pc)
+                    ann.pointer("port", e.port.value)
+                    ann.pointer("val", e.val)
+
+            if e.instr in [InstructionType.CALL, InstructionType.RET]:
+                last_stack_event = e
+
+            # if ts > 10000:
+            #     break
+
+        return builder
+
+    ppp = create_perfetto_trace(parsed)
+    with open('perfetto-test2.pb', 'wb') as ff:
+        ff.write(ppp.serialize())
+    return create_perfetto_trace, ff, ppp
+
+
+@app.cell
+def _():
+    import perfetto_pb2 as perfetto
+
+    class DebugAnnotation:
+        def __init__(self, ann):
+            self.ann = ann
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, type, value, traceback):
+            pass
+        
+        def entry(self, name):
+            entry = self.ann.dict_entries.add()
+            entry.name = name
+            return entry
+        
+        def pointer(self, name, value):
+            entry = self.entry(name)
+            entry.pointer_value = value
+
+        def string(self, name, value):
+            entry = self.entry(name)
+            entry.string_value = value
+
+        def bool(self, name, value):
+            entry = self.entry(name)
+            entry.bool_value = value
+
+        def int(self, name, value):
+            entry = self.entry(name)
+            entry.int_value = value
+
+    class TrackEvent:
+        def __init__(self, event):
+            self.event = event
+
+        def annotation(self, name):
+            ann = self.event.debug_annotations.add()
+            ann.name = name
+            return DebugAnnotation(ann)
+
+    class PerfettoTraceBuilder:
+        def __init__(self):
+            self.trace = perfetto.Trace()
+            self.track_uuid = 0xCA1C
+            self.trusted_packet_sequence_id = 0x123
+            self.process_uuid = 0x456
+            self.pid = 1234
+            self.tid = 5678
+
+            self.add_process_descriptor("SHARP PC-G850")
+            self.add_thread_descriptor("main")
+
+        def add_process_descriptor(self, process_name: str):
+            packet = self.trace.packet.add()
+            packet.track_descriptor.uuid = self.process_uuid
+            packet.track_descriptor.process.pid = self.pid
+            packet.track_descriptor.process.process_name = process_name
+
+        def add_thread_descriptor(self, thread_name: str):
+            packet = self.trace.packet.add()
+            packet.track_descriptor.uuid = self.track_uuid
+            packet.track_descriptor.parent_uuid = self.process_uuid
+            packet.track_descriptor.thread.pid = self.pid
+            packet.track_descriptor.thread.tid = self.tid
+            packet.track_descriptor.thread.thread_name = thread_name
+
+        def add_slice_event(self, timestamp: int, event_type: str, name: str = None):
+            packet = self.trace.packet.add()
+            packet.timestamp = timestamp
+
+            if event_type == 'begin':
+                packet.track_event.type = perfetto.TrackEvent.TYPE_SLICE_BEGIN
+                packet.track_event.name = name
+            elif event_type == 'end':
+                packet.track_event.type = perfetto.TrackEvent.TYPE_SLICE_END
+            else:
+                raise ValueError("event_type must be either 'begin' or 'end'.")
+
+            packet.track_event.track_uuid = self.track_uuid
+            packet.trusted_packet_sequence_id = self.trusted_packet_sequence_id
+            return TrackEvent(packet.track_event)
+
+        def add_instant_event(self, timestamp: int, name: str):
+            packet = self.trace.packet.add()
+            packet.timestamp = timestamp
+            packet.track_event.type = perfetto.TrackEvent.TYPE_INSTANT
+            packet.track_event.track_uuid = self.track_uuid
+            packet.track_event.name = name
+            packet.trusted_packet_sequence_id = self.trusted_packet_sequence_id
+            return TrackEvent(packet.track_event)
+
+        def serialize(self) -> bytes:
+            return self.trace.SerializeToString()
+    return DebugAnnotation, PerfettoTraceBuilder, TrackEvent, perfetto
 
 
 @app.cell
@@ -272,14 +466,14 @@ def _(Enum):
     class IOPort(Enum):
         LCD_COMMAND = 0x40
         LCD_OUT = 0x41
-        
+
         ROM_EX_BANK = 0x19
         RAM_BANK = 0x1b
         ROM_BANK = 0x69
 
         # FIXME: what does it do??
         SHIFT_KEY_INPUT = 0x13 # Read-only
-        
+
         KEY_INPUT = 0x10 # Read-only
         SET_KEY_STROBE_LO = 0x11 # Write-only
         SET_KEY_STROBE_HI = 0x12 # Write-only
@@ -287,7 +481,7 @@ def _(Enum):
         TIMER = 0x14
         XIN_ENABLED = 0x15
         INTERRUPT_FLAGS = 0x16
-        INTERRUPT_MASK = 0x17    
+        INTERRUPT_MASK = 0x17
 
         ON_CONTROL_BY_CD_SIGNAL = 0x64
         WAIT_AFTER_M1 = 0x65
@@ -301,203 +495,23 @@ def _(Enum):
         GPIO_IO_MODE = 0x60
         SET_PIO_DIRECTION = 0x61
         PIO_REGISTER = 0x62
+
+        # According to https://ver0.sakura.ne.jp/doc/pcg850vuart.html the PC-G850V has different port
+        # definitions compared to the PC-G850/PC-G850S.
         UART_FLOW_REGISTER = 0x63
         UART_INPUT_SELECTION = 0x6b
         SET_UART_MODE = 0x6c
         SET_UART_COMMAND = 0x6d
         GET_UART_STATUS = 0x6e
         UART_DATA = 0x6f
-        
+
         SET_BOOTROM_OFF = 0x1a
         RAM_CE_MODE = 0x1b # 0: CERAM1 (internal RAM), 1: CERAM2 (external RAM on system bus)
         SET_IORESET = 0x1c
 
         UNKNOWN_1D = 0x1d
         UNKNOWN_1E = 0x1e # battery check mode?
-        
     return (IOPort,)
-
-
-@app.cell
-def _(IOPort, PCG850Display, Type, df):
-    def process_trace():
-        display = PCG850Display()
-        xin_enabled = None
-        key_strobe = 0
-        
-        unhandled_inport = set()
-        unhandled_outport = set()
-
-        # IO Port descriptions:
-        # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
-        for r in df.itertuples():
-            # print(r.type, r.val, r.addr)
-            try:
-                port = IOPort(r.addr) if r.type in [Type.IN_PORT, Type.OUT_PORT] else None
-            except ValueError:
-                continue
-                
-            if r.type == Type.WRITE:
-                pass
-            elif r.type in [Type.READ, Type.FETCH]:
-                pass
-            elif r.type == Type.IN_PORT:
-                match port:
-                    case IOPort.KEY_INPUT:
-                        key_strobe = r.val
-                        print(f"read key_strobe: {hex(key_strobe)}")
-                    case 0x15:
-                        xin_enabled = r.val
-                        print(f"read xin_enabled: {xin_enabled}")
-                    case 0x19:
-                        rom_bank = r.val & 0x0F
-                        ex_bank = (r.val & 0x70) >> 4
-                        print(f"read rom_bank: {rom_bank}, ex_bank: {ex_bank}")
-                        pass
-                    case 0x40:
-                        # FIXME: fails??
-                        # if r.val != 0:
-                        #     raise ValueError(f"Unexpected value for IN_PORT 0x40: {r.val}")
-                        pass
-                    case 0x69:
-                        rom_bank = r.val & 0x0F
-                        print(f"read rom_bank: {rom_bank}")
-                        pass
-                    # case _:
-                    #     unhandled_inport.add(r.addr)
-                    #     # raise ValueError(f"Unknown in_port {hex(r.addr)}")
-        
-        
-            elif r.type == Type.OUT_PORT:
-                match r.addr:
-                    case 0x11:
-                        key_strobe |= r.val
-                        print(f"write key_strobe: {hex(key_strobe)}")
-                    case 0x12:
-                        key_strobe = (r.val << 8) & 0xFF00
-                        print(f"write key_strobe: {hex(key_strobe)}")
-                    case 0x15:
-                        xin_enabled = r.val & 0x80
-                        print(f"write xin_enabled: {xin_enabled}")
-                        pass
-                    case 0x16:
-                        print(f"write interruptType: {hex(r.val)}")
-                        pass
-                    case 0x19:
-                        rom_bank = r.val & 0x0F
-                        ex_bank = (r.val & 0x70) >> 4
-                        print(f"write rom_bank: {rom_bank}, ex_bank: {ex_bank}")
-                        pass
-                    case 0x1a:
-                        print(f"boot rom on/off: {r.val}")
-                    case 0x1b:
-                        ram_bank = r.val & 0x04
-                        print(f"write ram_bank: {ram_bank}")
-                        pass
-                    case 0x1e:
-                        print(f"write battery check mode: {r.val & 0x03}")
-                    case 0x40:
-                        display.parse_out40(r.val)
-                    case 0x41:
-                        display.parse_out41(r.val)
-                    case 0x69:
-                        rom_bank = r.val & 0x0F
-                        print(f"write rom_bank: {rom_bank}")
-                        pass
-                    case 0xed:
-                        pass
-                    case _:
-                        unhandled_outport.add(r.addr)
-                        # raise ValueError(f"Unknown out_port {hex(r.addr)}")
-            else:
-                raise ValueError(f"Unknown type {r.type}")
-
-        return display
-
-    # display = process_trace()
-    # display.dump_vram()
-    return (process_trace,)
-
-
-@app.cell
-def _(Image, ImageDraw, List, Tuple, dataclass):
-    @dataclass
-    class Machineinfo:
-        cell_width: int  # Width (in pixels) per cell
-        cell_height: int # Height (in pixels) per cell
-        lcd_cols: int    # Number of cells horizontally
-        lcd_rows: int    # Number of cells vertically
-        vram_cols: int
-        vram_rows: int
-
-        @property
-        def vram_width(self):
-            return self.vram_cols * self.cell_width
-
-        @property
-        def vram_height(self):
-            return self.vram_rows * 8
-
-    g850info = Machineinfo(
-        cell_width=6,
-        cell_height=8,
-        lcd_cols=24,
-        lcd_rows=6,
-        vram_cols=24,
-        vram_rows=8,
-    )
-
-    def draw_vram(vram: List[int],
-                  machine: Machineinfo,
-                  lcdTop: int,
-                  zoom: int = 1,
-                  off_color: Tuple[int, int, int] = (0, 0, 0),
-                  on_color: Tuple[int, int, int] = (0, 255, 0)
-                  ) -> Image.Image:
-        lcd_cols = machine.lcd_cols
-        lcd_rows = machine.lcd_rows
-        cell_width  = machine.cell_width
-        cell_height = machine.cell_height
-        vram_width  = machine.vram_width
-
-        lcd_width = lcd_cols * cell_width
-        lcd_height = lcd_rows * cell_height
-        img_width  = lcd_width * zoom
-        img_height = lcd_height * zoom
-        print(f'Image size: {img_width} x {img_height}')
-
-        image = Image.new("RGB", (img_width, img_height), off_color)
-        draw = ImageDraw.Draw(image)
-
-        vram_offset = (lcdTop // 8) * vram_width
-        shift = lcdTop % 8;
-        for y in range(0, lcd_height, cell_height):
-            for x0 in range(0, lcd_width, cell_width):
-                for x in range(cell_width):
-                    pat = vram[vram_offset] >> shift | vram[vram_offset + vram_width] << (8 - shift)
-
-                    for p in range(cell_height):
-                        bit = 1 << p
-                        dx = x0 + x + p
-                        dy = y
-                        color = on_color if bit else off_color
-                        draw.rectangle([dx * zoom, dy * zoom, dx * zoom + zoom - 1, dy * zoom + zoom - 1], fill=color)    
-
-                    vram_offset += 1
-            vram_offset += 1
-
-        return image
-
-    # vram = sum(display.vram, [])
-    # # print(len(vram))
-    # draw_vram(vram, g850info, display.lcdTop, zoom=4)
-    return Machineinfo, draw_vram, g850info
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""# Trying to match the reads in the ROM region with the known good ROM dumps""")
-    return
 
 
 @app.cell(hide_code=True)
@@ -523,6 +537,33 @@ def _():
 
     rom_banks = read_rom_banks()
     return read_rom_banks, rom_banks
+
+
+@app.cell
+def _(rom_banks):
+    rom_banks
+    return
+
+
+@app.cell
+def _(RomVerifier, rom_banks):
+    def make_continuous_rom_image():
+        result = b'\x00' * RomVerifier.ROM0_ADDR_START
+        for bank in sorted(rom_banks.keys()):
+            result += rom_banks[bank]
+
+        with open('g850-roms/base.bin', 'rb') as f:
+            base = f.read()
+        result = base + result[len(base):]
+
+        # add 0x1000 empty bytes to the end for fake port function creation
+        result += b'\x00' * 0x1000
+
+        with open('sharp-pc-g850-full.bin', 'wb') as f:
+            f.write(result)
+
+    # make_continuous_rom_image()
+    return (make_continuous_rom_image,)
 
 
 @app.cell(hide_code=True)
@@ -612,7 +653,7 @@ def _(IOPort, Type, df, rom_banks):
                 port = IOPort(r.addr) if r.type in [Type.IN_PORT, Type.OUT_PORT] else None
             except ValueError:
                 continue
-            
+
             if r.type == Type.WRITE:
                 verifier.write(r.addr, r.val)
             elif r.type in [Type.READ, Type.FETCH]:
@@ -644,8 +685,8 @@ def _(IOPort, Type, df, rom_banks):
 
         return verifier
 
-    verifier = verify_rom_memory()
-    return RomVerifier, verifier, verify_rom_memory
+    # verifier = verify_rom_memory()
+    return RomVerifier, verify_rom_memory
 
 
 @app.cell(hide_code=True)
@@ -702,6 +743,55 @@ def _():
 
 
 @app.cell
+def _(df, df_valh):
+    df_valh(df)
+    return
+
+
+@app.cell
+def _(Type, df, z80):
+    class ProcessBusEvents:
+        def decode(self):
+            disasm = z80.disasm(self.buf, self.pc)
+            if len(disasm):
+                print(f'{hex(self.pc)}: {disasm}')
+                self.i += 1
+                if self.i > 1000:
+                    return True
+            return False
+
+        def process_bus_events(self, df):
+            self.pc = None
+            self.buf = b''
+            self.i = 0
+                
+            for r in df.itertuples():
+                if r.type == Type.FETCH:
+                    self.pc = r.addr
+                    self.buf = b''
+                    if self.pc == 0xc000:
+                        print('<'*40)
+                    print(f'  {hex(self.pc)} {hex(r.val)}')
+                    self.buf += bytes([r.val])
+                    if self.decode():
+                        break
+                elif r.type == Type.READ:
+                    print(f'  {hex(self.pc)} {hex(r.val)}')
+                    self.buf += bytes([r.val])
+                    if self.decode():
+                        break
+
+    ProcessBusEvents().process_bus_events(df)
+    return (ProcessBusEvents,)
+
+
+@app.cell
+def _(df):
+    df
+    return
+
+
+@app.cell
 def _(Type):
     def df_valh(df):
         df2 = df.copy()
@@ -715,15 +805,18 @@ def _(Type):
     return df_valh, io_df
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(IOPort, SED1560, SED1560Parser, pandas):
     def parse_lcd_commands(df):
         commands = []
         for r in df.itertuples():
+            parsed = None
             if r.port == IOPort.LCD_COMMAND:
                 parsed = SED1560Parser.parse_out40(r.val)
             elif r.port == IOPort.LCD_OUT:
                 parsed = SED1560Parser.parse_out41(r.val)
+            else:
+                parsed = SED1560.Unknown(addr=r.port.value, value=r.val)
             commands.append(parsed)
 
         processed = []
@@ -753,7 +846,9 @@ def _(IOPort, SED1560, SED1560Parser, pandas):
             # if CmdA, then get type from parsed.cmd
             if parsed_type == 'CmdA':
                 parsed_type = parsed.cmd.name
-            
+            if parsed_type == 'Unknown':
+                parsed_type = IOPort(parsed.addr).name
+
             result.append({
                 "index": index,
                 "type": parsed_type,
@@ -765,14 +860,112 @@ def _(IOPort, SED1560, SED1560Parser, pandas):
 
 @app.cell
 def _(IOPort, df, get_parsed_lcd_commands_df, parse_lcd_commands):
-    parsed_lcd_commands = parse_lcd_commands(df[df["port"].isin([IOPort.LCD_COMMAND, IOPort.LCD_OUT])]
+    # # FIXME: what does it do??
+    # SHIFT_KEY_INPUT = 0x13 # Read-only
+
+    # KEY_INPUT = 0x10 # Read-only
+    # SET_KEY_STROBE_LO = 0x11 # Write-only
+    # SET_KEY_STROBE_HI = 0x12 # Write-only
+
+
+    parsed_lcd_commands = parse_lcd_commands(
+        df[
+            df["port"].isin(
+                [
+                    IOPort.LCD_COMMAND,
+                    IOPort.LCD_OUT,
+                    IOPort.KEY_INPUT,
+                    IOPort.SHIFT_KEY_INPUT,
+                    IOPort.SET_KEY_STROBE_LO,
+                    IOPort.SET_KEY_STROBE_HI,
+                ]
+            )
+        ]
         .copy()
-        .reset_index(drop=True))
+        .reset_index(drop=True)
+    )
     parsed_lcd_commands_df = get_parsed_lcd_commands_df(parsed_lcd_commands)
     return parsed_lcd_commands, parsed_lcd_commands_df
 
 
 @app.cell
+def _():
+    # parsed_lcd_commands_filtered
+    return
+
+
+@app.cell
+def _():
+    # Key Code table: https://ver0.sakura.ne.jp/doc/pcg800iocs.html
+    # If you press the SHIFT key at the same time, the most significant bit becomes 1.
+    return
+
+
+@app.cell(hide_code=True)
+def _(SED1560):
+    # TODO: use info from https://www.akiyan.com/pc-g850_technical_data
+    # to implement the remaining commands.
+    class SED1560Intepreter:
+        # VRAM: 166 x 65 bits (last page is 1-bit high)
+
+        # 8 pages of 8 lines, last 9th page of 1 line
+        PAGE_HEIGHT = 8  # pixels
+        NUM_PAGES = 9
+
+        LCD_WIDTH = 166
+        LCD_HEIGHT = 8
+
+        # When the Select ADC command is used to select inverse display operation, the column address decoder inverts the relationship between the RAM column data and the display segment outputs.
+
+        def __init__(self):
+            self.page = 0
+            self.col = 0  # x coordinate
+
+            self.com0 = 0  # Initial Display Line register, 6 bits
+
+            self.display_on = None
+            self.power_on = None
+            self.contrast = None
+            self.scanning_direction = None
+            self.segments_display_mode = None
+
+            # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
+            self.vram = [
+                [0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)
+            ]
+
+        def eval(self, cmd):
+            match cmd:
+                case SED1560.InitialDisplayLine(value=com0):
+                    self.com0 = com0
+                case SED1560.SetColumn(value=x):
+                    self.col = x
+                case SED1560.SetPageAddress(value=page):
+                    self.page = page
+                case SED1560.VRAMWrite(value=x):
+                    self.vram[self.page][self.col] = x
+                    # The counter automatically stops at the highest address, A6H.
+                    self.col = min(self.col + 1, self.LCD_WIDTH - 1)
+                case SED1560.SetCommonSegmentOutput(scanning_direction=direction, case=case):
+                    self.scanning_direction = direction
+                case SED1560.Contrast(contrast=contrast):
+                    self.contrast = contrast
+                case SED1560.PowerOn(on=on):
+                    self.power_on = on
+                case SED1560.PowerOnComplete():
+                    pass
+                case SED1560.CmdA(cmd=SED1560.CmdAType.DISPLAY_ON, value=value):
+                    self.display_on = value
+                case SED1560.CmdA(cmd=SED1560.CmdAType.SEGMENTS_DISPLAY_MODE, value=value):
+                    self.segments_display_mode = value
+                case SED1560.Unknown(addr=addr, value=value):
+                    pass
+                case _:
+                    raise ValueError(f"Unhandled command: {cmd}")
+    return (SED1560Intepreter,)
+
+
+@app.cell(hide_code=True)
 def _(lcd_commands_range):
     def filtered_lcd_commands(df):
         opts = lcd_commands_range
@@ -791,7 +984,7 @@ def _(mo, parsed_lcd_commands_df):
     def get_lcd_commands_range(df):
         return mo.md("""
         {start}
-        
+
         {length}
 
         {show_initial_display_line}
@@ -814,12 +1007,24 @@ def _(mo, parsed_lcd_commands_df):
     return get_lcd_commands_range, lcd_commands_range
 
 
+@app.cell
+def _(SED1560Intepreter, draw_vram2, parsed_lcd_commands_filtered):
+    display = SED1560Intepreter()
+    for cmd in parsed_lcd_commands_filtered:
+        display.eval(cmd)
+
+    draw_vram2(display.vram)
+    return cmd, display
+
+
 @app.cell(hide_code=True)
 def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
     def plot_parsed_lcd_commands(df):
         min_index = df['index'].min()
         max_index = df['index'].max()
         x_scale = alt.Scale(domain=(min_index, max_index))
+
+        key_columns = ['KEY_INPUT', 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
 
         events_points = (
             alt.Chart(
@@ -831,6 +1036,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
                             "SetColumn",
                             "SetPageAddress",
                             "VRAMWrite",
+                            *key_columns,
                         ]
                     )
                 ]
@@ -844,7 +1050,23 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
             )
         )
 
-        sub_charts = (
+        key_charts = []
+        for key in key_columns:
+            chart = (
+                alt.Chart(df[df["type"].isin([key])])
+                .mark_point()
+                .encode(
+                    x=alt.X('index:Q', scale=x_scale),
+                    y=alt.Y("value:Q", title="Value"),
+                    color="type:N",
+                    tooltip=["index", "type", "value"],
+                )
+                .properties(title=key)
+            )
+            key_charts.append(chart)
+
+
+        vram_write = (
             alt.Chart(df[df["type"].isin(["VRAMWrite"])])
             .mark_point()
             .encode(
@@ -895,7 +1117,8 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
 
         return alt.vconcat(
             events_points,
-            sub_charts,
+            *key_charts,
+            vram_write,
             set_column_high,
             set_page_address,
             initial_display_line,
@@ -907,13 +1130,13 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
 
 
 @app.cell
-def _(filtered_lcd_commands, mo, parsed_lcd_commands_df):
+def _():
     # 6641:6641+410
-    mo.ui.dataframe(filtered_lcd_commands(parsed_lcd_commands_df), page_size=20)
+    # mo.ui.dataframe(filtered_lcd_commands(parsed_lcd_commands_df), page_size=20)
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Enum, dataclass):
     class SED1560:
         class CmdAType(Enum):
@@ -969,9 +1192,8 @@ def _(Enum, dataclass):
 
         @dataclass
         class Unknown:
-            x: int
-            high: int
-            low: int
+            addr: int
+            value: int
 
     class SED1560Parser:
         @staticmethod
@@ -1024,33 +1246,27 @@ def _(Enum, dataclass):
                     is_high = False
                 return SED1560.SetColumnPart(is_high=is_high, value=col)
             else:
-                raise SED1560.Unknown(x=x, high=high, low=low)
+                raise SED1560.Unknown(addr=0x40, value=x)
 
         @staticmethod
         def parse_out41(x: int):
             return SED1560.VRAMWrite(value=x)
-
     return SED1560, SED1560Parser
+
+
+@app.cell
+def _(SED1560Parser):
+    SED1560Parser.parse_out40(0xaf)
+    return
 
 
 @app.cell
 def _(lcd_commands_range, parsed_lcd_commands):
     parsed_lcd_commands_filtered = parsed_lcd_commands[lcd_commands_range.value['start']: lcd_commands_range.value['start'] + lcd_commands_range.value['length']]
-    parsed_lcd_commands_filtered
     return (parsed_lcd_commands_filtered,)
 
 
-@app.cell
-def _(SED1560Intepreter, draw_vram2, parsed_lcd_commands_filtered):
-    display = SED1560Intepreter()
-    for cmd in parsed_lcd_commands_filtered:
-        display.eval(cmd)
-
-    draw_vram2(display.vram)
-    return cmd, display
-
-
-@app.cell
+@app.cell(hide_code=True)
 def _(Image, ImageDraw):
     def draw_vram2(vram, zoom=4):
         off_color = (0, 0, 0)
@@ -1070,123 +1286,10 @@ def _(Image, ImageDraw):
 
                     dx = col
                     dy = row * 8 + bit
-                    draw.rectangle([dx * zoom, dy * zoom, dx * zoom + zoom - 1, dy * zoom + zoom - 1], fill=color)    
+                    draw.rectangle([dx * zoom, dy * zoom, dx * zoom + zoom - 1, dy * zoom + zoom - 1], fill=color)
 
         return image
     return (draw_vram2,)
-
-
-@app.cell
-def _(SED1560, SED1560_CmdA):
-    class SED1560Intepreter:
-        # VRAM: 166 x 65 bits (last page is 1-bit high)
-
-        # 8 pages of 8 lines, last 9th page of 1 line
-        PAGE_HEIGHT = 8  # pixels
-        NUM_PAGES = 9
-
-        LCD_WIDTH = 166
-        LCD_HEIGHT = 8
-
-        # When the Select ADC command is used to select inverse display operation, the column address decoder inverts the relationship between the RAM column data and the display segment outputs.
-
-        def __init__(self):
-            self.page = 0
-            self.col = 0  # x coordinate
-
-            self.com0 = 0  # Initial Display Line register, 6 bits
-
-            # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
-            self.vram = [
-                [0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)
-            ]
-
-        def debug(self, str):
-            print(">display: " + str)
-            pass
-
-        def eval(self, cmd):
-            match cmd:
-                case SED1560.InitialDisplayLine(value=com0):
-                    self.com0 = com0
-                case SED1560.SetColumn(value=x):
-                    self.col = x
-                case SED1560.SetPageAddress(value=page):
-                    self.page = page
-                case SED1560.VRAMWrite(value=x):
-                    self.vram[self.page][self.col] = x
-                    # The counter automatically stops at the highest address, A6H.
-                    self.col = min(self.col + 1, self.LCD_WIDTH - 1)
-                case _:
-                    raise ValueError(f"Unhandled command: {cmd}")
-                
-        def parse_out40(self, x, index=None):
-            high = (x & 0xF0) >> 4
-            low = x & 0x0F
-
-            if (x >> 6) == 1:
-                # Initial Display Line
-                self.com0 = x & 0x3F
-                # self.debug(f'com0 ← {self.com0}')
-            elif (x >> 5) == 0b100:
-                self.contrast = x & 0b11111
-                print(f"contrast: {self.contrast}")
-            elif (x >> 1) == 0b10010:
-                self.psu_on = x & 0b1
-                print(f"{index}: psu_on: {self.psu_on}")
-            elif x == 0b11101101:
-                self.power_on_complete = True
-                print(f"{index}: power_on_complete")
-            elif high == 0xB:
-                # Set Page Address
-                self.page = low
-                # self.debug(f'page ← {self.page}')
-            elif high == 0xA:
-                cmd = SED1560_CmdA(low & 0b1110)
-                val = low & 0b1
-                print(f"{index}: cmd_a: {cmd}, val: {val}")
-            elif high == 0xC:
-                # Sets the common and segment output status register.
-                # This command selects the role of the COM/SEG dual pins and determines the LCD driver output status.
-                self.scanning_direction = low >> 3
-                case = low & 0b111
-                if case != 0b111:
-                    raise ValueError(
-                        f"Unhandled case: {bin(case)}, only SEG166 is supported"
-                    )
-                print(
-                    f"scanning_direction: {self.scanning_direction}, case: {bin(case)}"
-                )
-            elif high in [0x0, 0x1]:
-                if high:
-                    self.col = (self.col & 0x0F) | low
-                else:
-                    self.col = (self.col & 0xF0) | low
-                # self.debug(f'col ← {self.col} ({'high' if high else 'low'})')
-            else:
-                print(f"{x:08b}: Unhandled high: {hex(high)}, low: {hex(low)}")
-
-        def parse_out41(self, x):
-            # if not x:
-            #     return
-
-            # print(f'VRAM[{self.page}][{self.col}] ← {hex(x)}')
-            self.vram[self.page][self.col] = x
-
-            # The counter automatically stops at the highest address, A6H.
-            self.col = min(self.col + 1, self.LCD_WIDTH - 1)
-    return (SED1560Intepreter,)
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    # 
-    return
 
 
 if __name__ == "__main__":
