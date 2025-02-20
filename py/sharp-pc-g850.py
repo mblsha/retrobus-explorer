@@ -313,13 +313,32 @@ def _(df):
 
 
 @app.cell
-def _(InstructionType, PerfettoTraceBuilder, Type, parsed):
+def _():
+    # PC-G850
+    FUNCTIONS = {0xba36: 'set_rom_bank'}
+
+    def get_function_name(addr: int):
+        if addr in FUNCTIONS:
+            return FUNCTIONS[addr]
+        return f'func_{hex(addr)}'
+    return FUNCTIONS, get_function_name
+
+
+@app.cell
+def _(
+    InstructionType,
+    PerfettoTraceBuilder,
+    Type,
+    get_function_name,
+    parsed,
+):
     def create_perfetto_trace(data):
         builder = PerfettoTraceBuilder()
         last_stack_event = None
         
         ts = 0
         pc = None
+        stack = []
         for e in data:
             ts += 1
             if e.type == Type.FETCH:
@@ -327,20 +346,41 @@ def _(InstructionType, PerfettoTraceBuilder, Type, parsed):
 
                 if last_stack_event is not None:
                     if last_stack_event.instr == InstructionType.CALL:
-                        with builder.add_slice_event(ts, 'begin', hex(pc)).annotation('call') as ann:
-                            ann.pointer("pc", pc)
-                            ann.pointer("caller", last_stack_event.addr)
-                            if e.bank:
-                                ann.int('bank', e.bank)
-                            if last_stack_event.bank:
-                                ann.int('last_bank', last_stack_event.bank)
+                        with builder.add_slice_event(ts, 'begin', get_function_name(pc)) as begin_event:
+                            stack.append(begin_event)
+                            with begin_event.annotation('call') as ann:
+                                ann.pointer("pc", pc)
+                                ann.pointer("caller", last_stack_event.addr)
+                                if e.bank:
+                                    ann.int('bank', e.bank)
+                                if last_stack_event.bank:
+                                    ann.int('last_bank', last_stack_event.bank)
                     else:
-                        builder.add_slice_event(ts, 'end')
+                        if len(stack) > 0:
+                            begin_event = stack.pop()
+                            builder.add_slice_event(ts, 'end')
+                            
+                            with begin_event.annotation('ret') as ann:
+                                ann.pointer("pc", pc)
+                                ann.pointer("caller", last_stack_event.addr)
+                                if e.bank:
+                                    ann.int('bank', e.bank)
+                                if last_stack_event.bank:
+                                    ann.int('last_bank', last_stack_event.bank)
+                        else:
+                            with builder.add_instant_event(ts, 'UNDERFLOW').annotation('ret') as ann:
+                                ann.pointer("pc", pc)
+                                ann.pointer("caller", last_stack_event.addr)
+                                if e.bank:
+                                    ann.int('bank', e.bank)
+                                if last_stack_event.bank:
+                                    ann.int('last_bank', last_stack_event.bank)
         
                     last_stack_event = None
 
             elif e.type in [Type.IN_PORT, Type.OUT_PORT]:
-                name = f'{e.port.name} {hex(e.val)}'
+                direction = 'in' if e.type == Type.IN_PORT else 'out'
+                name = f'{e.port.name} {direction} {hex(e.val)}'
                 with builder.add_instant_event(ts, name).annotation('call') as ann:
                     ann.pointer("pc", pc)
                     ann.pointer("port", e.port.value)
@@ -398,6 +438,12 @@ def _():
     class TrackEvent:
         def __init__(self, event):
             self.event = event
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, type, value, traceback):
+            pass
 
         def annotation(self, name):
             ann = self.event.debug_annotations.add()
