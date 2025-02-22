@@ -58,6 +58,12 @@ def _(ftd3xx, mft):
     return Ft600Device, ctypes
 
 
+@app.cell
+def _():
+    from contextlib import ExitStack
+    return (ExitStack,)
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""# Collect Data from SHARP PC-G850 System Bus""")
@@ -253,7 +259,7 @@ def _(
         ROM_ADDR_START = 0x8000
         BANK_ADDR_START = 0xC000
         BANK_SIZE = 0x4000
-        STACK_SIZE = 0x1000
+        STACK_SIZE = 0x400
 
         def is_stack_addr(self, addr):
             return addr < self.ROM_ADDR_START and addr > self.ROM_ADDR_START - self.STACK_SIZE
@@ -294,24 +300,28 @@ def _(
                 instr = None
                 port = None
                 bank = None
-                if type == Type.FETCH:
-                    if prefix_opcode is None:                    
-                        pc, bank = self.full_addr(addr)
-                        addr = pc
-                        if val in OPCODE_MULTI_PREFIX:
-                            instr = InstructionType.MULTI_PREFIX
-                        elif val in OPCODE_CALL_PREFIX:
-                            instr = InstructionType.CALL
-                        elif val in OPCODE_CONDITIONAL_CALL_PREFIX:
-                            instr = InstructionType.CALL_CONDITIONAL
-                        elif val in OPCODE_RET_PREFIX:
-                            instr = InstructionType.RET
-                        elif val in OPCODE_CONDITIONAL_RET_PREFIX:
-                            instr = InstructionType.RET_CONDITIONAL
 
+                # handle second byte of the instruction when M1 is low twice in a row
+                if prefix_opcode is not None and type == Type.FETCH:
+                    type = Type.READ
+
+                if type == Type.FETCH:
                     last_call_conditional = None
                     last_ret_conditional = None
                     prefix_opcode = None
+
+                    pc, bank = self.full_addr(addr)
+                    addr = pc
+                    if val in OPCODE_MULTI_PREFIX:
+                        instr = InstructionType.MULTI_PREFIX
+                    elif val in OPCODE_CALL_PREFIX:
+                        instr = InstructionType.CALL
+                    elif val in OPCODE_CONDITIONAL_CALL_PREFIX:
+                        instr = InstructionType.CALL_CONDITIONAL
+                    elif val in OPCODE_RET_PREFIX:
+                        instr = InstructionType.RET
+                    elif val in OPCODE_CONDITIONAL_RET_PREFIX:
+                        instr = InstructionType.RET_CONDITIONAL
                 elif type in [Type.READ, Type.WRITE]:
                     prefix_opcode = None
 
@@ -406,7 +416,7 @@ def _(pandas, parsed):
 
 
 @app.cell
-def _(Type, z80):
+def _(Type, parsed, z80):
     class ProcessBusEvents:
         def __init__(self):
             self.pc = None
@@ -445,7 +455,7 @@ def _(Type, z80):
             for index, e in enumerate(parsed[start:end]):
                 # print(f"{index + start}: {e}")
                 if e.type == Type.FETCH:
-                    print(f'M:{hex(e.addr)} → {hex(e.val)} {e.instr if e.instr else ""}')
+                    print(f'M:{hex(e.addr)} → {hex(e.val)}{" " + str(e.instr) if e.instr else ""}')
                     self.fetch(e.addr, e.val)
                 elif e.type == Type.READ:
                     print(f'R:{hex(e.addr)} → {hex(e.val)}')
@@ -461,14 +471,25 @@ def _(Type, z80):
                 elif e.type == Type.WRITE_STACK:
                     print(f"S:{hex(e.addr)} ← {hex(e.val)}")
 
-    # ProcessBusEvents().analyze_portion_of_trace(parsed, [235603, 235626 + 5])
+    ProcessBusEvents().analyze_portion_of_trace(parsed, [411265, 411355 + 5])
     return (ProcessBusEvents,)
+
+
+@app.cell
+def _(df, df_valh):
+    df_valh(df[df['addr'] == 0x7900])
+    return
 
 
 @app.cell
 def _():
     # PC-G850
-    FUNCTIONS = {0xba36: 'set_rom_bank'}
+    FUNCTIONS = {
+        0xba36: 'set_rom_bank',
+        # modifies stack
+        0x93cd: 'jump_after_set_rom_bank',
+        0x93f3: 'jump_after_set_rom_bank_cleanup',
+    }
 
     def get_function_name(addr: int):
         if addr in FUNCTIONS:
@@ -495,102 +516,99 @@ def _(
         pc: int
         expected_return_addr: int
 
-    def create_perfetto_trace(data):
-        current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        builder = PerfettoTraceBuilder(current_date_time_str)
-        last_stack_event = None
-        last_stack_event_index = None
+    class PerfettoTraceCreator:
+        def __init__(self):
+            pass
+
+        def create_perfetto_trace(self, data):
+            current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.builder = PerfettoTraceBuilder(current_date_time_str)
+            self.last_stack_event = None
+            self.last_stack_event_index = None
+            
+            ts = 0
+            pc = None
+            stack = []
+            for index, e in enumerate(data):
+                ts += 1
+                if e.type == Type.FETCH:
+                    pc = e.addr
         
-        ts = 0
-        pc = None
-        stack = []
-        for index, e in enumerate(data):
-            ts += 1
-            if e.type == Type.FETCH:
-                pc = e.addr
-
-                # if the last event was a CALL/RET, then we need to create a slice event
-                if last_stack_event is not None:
-                    if last_stack_event.instr == InstructionType.CALL:
-                        with builder.add_slice_event(ts, 'begin', get_function_name(pc)) as begin_event:
-                            expected_return_addr = last_stack_event.addr + 3
-                            stack.append(PerfettoStack(begin_event, caller=last_stack_event.addr, pc=pc, expected_return_addr=expected_return_addr))
-
-                            with begin_event.annotation('call') as ann:
-                                ann.int("index", last_stack_event_index)
-                                ann.pointer("pc", pc)
-                                ann.pointer("caller", last_stack_event.addr)
-                                if e.bank:
-                                    ann.int('bank', e.bank)
-                                if last_stack_event.bank:
-                                    ann.int('last_bank', last_stack_event.bank)
-                    else:
-                        if len(stack) > 0:
-                            s = stack.pop()
-                            begin_event = s.begin_event
-                            builder.add_slice_event(ts, 'end')
-
-                            if pc != s.expected_return_addr:
-                                with builder.add_instant_event(ts, 'BAD_RET').annotation('ret') as ann:
-                                    ann.int("index", index)                                
+                    # if the last event was a CALL/RET, then we need to create a slice event
+                    if self.last_stack_event is not None:
+                        if self.last_stack_event.instr == InstructionType.CALL:
+                            with self.builder.add_slice_event(ts, 'begin', get_function_name(pc)) as begin_event:
+                                expected_return_addr = self.last_stack_event.addr + 3
+                                stack.append(PerfettoStack(begin_event, caller=self.last_stack_event.addr, pc=pc, expected_return_addr=expected_return_addr))
+        
+                                with begin_event.annotation('call') as ann:
+                                    ann.int("index", self.last_stack_event_index)
                                     ann.pointer("pc", pc)
-                                    ann.pointer("expected_return_addr", s.expected_return_addr)
-                                # print(f'Returning from {hex(s.caller)} to {hex(pc)}:')
-                                # print(f"Expected return address {hex(s.expected_return_addr)}, got {hex(pc)}")
-                                # print(f'caller={hex(s.caller)} pc={hex(s.pc)}')
-                                # while len(stack) > 0:
-                                #     s = stack.pop()
-                                #     print(f'> caller={hex(s.caller)} pc={hex(s.pc)} expected_return_addr={hex(s.expected_return_addr)}')
-                                # break
-                            
-                            with begin_event.annotation('ret') as ann:
-                                ann.int("index", last_stack_event_index)
-                                ann.pointer("pc", pc)
-                                ann.pointer("caller", last_stack_event.addr)
-                                if e.bank:
-                                    ann.int('bank', e.bank)
-                                if last_stack_event.bank:
-                                    ann.int('last_bank', last_stack_event.bank)
+                                    ann.pointer("caller", self.last_stack_event.addr)
+                                    if e.bank:
+                                        ann.int('bank', e.bank)
+                                    if self.last_stack_event.bank:
+                                        ann.int('last_bank', self.last_stack_event.bank)
                         else:
-                            with builder.add_instant_event(ts, 'UNDERFLOW').annotation('ret') as ann:
-                                ann.int("index", index)
-                                ann.pointer("pc", pc)
-                                ann.pointer("caller", last_stack_event.addr)
-                                if e.bank:
-                                    ann.int('bank', e.bank)
-                                if last_stack_event.bank:
-                                    ann.int('last_bank', last_stack_event.bank)
+                            if len(stack) > 0:
+                                s = stack.pop()
+                                begin_event = s.begin_event
+                                self.builder.add_slice_event(ts, 'end')
         
-                    last_stack_event = None
-                    last_stack_event_index = None
+                                if pc != s.expected_return_addr:
+                                    with self.builder.add_instant_event(ts, 'BAD_RET').annotation('ret') as ann:
+                                        ann.int("index", index)                                
+                                        ann.pointer("pc", pc)
+                                        ann.pointer("expected_return_addr", s.expected_return_addr)
+                                
+                                with begin_event.annotation('ret') as ann:
+                                    ann.int("index", self.last_stack_event_index)
+                                    ann.pointer("pc", pc)
+                                    ann.pointer("caller", self.last_stack_event.addr)
+                                    if e.bank:
+                                        ann.int('bank', e.bank)
+                                    if self.last_stack_event.bank:
+                                        ann.int('last_bank', self.last_stack_event.bank)
+                            else:
+                                with self.builder.add_instant_event(ts, 'UNDERFLOW').annotation('ret') as ann:
+                                    ann.int("index", index)
+                                    ann.pointer("pc", pc)
+                                    ann.pointer("caller", self.last_stack_event.addr)
+                                    if e.bank:
+                                        ann.int('bank', e.bank)
+                                    if self.last_stack_event.bank:
+                                        ann.int('last_bank', self.last_stack_event.bank)
+            
+                        self.last_stack_event = None
+                        self.last_stack_event_index = None
+        
+                elif e.type in [Type.IN_PORT, Type.OUT_PORT]:
+                    direction = 'in' if e.type == Type.IN_PORT else 'out'
+                    name = f'{e.port.name} {direction} {hex(e.val)}'
+                    with self.builder.add_instant_event(ts, name).annotation('call') as ann:
+                        ann.int("index", index)
+                        ann.pointer("pc", pc)
+                        ann.pointer("port", e.port.value)
+                        ann.pointer("val", e.val)
+                elif e.type in [Type.READ_STACK, Type.WRITE_STACK]:
+                    direction = 'POP' if e.type == Type.READ_STACK else 'PUSH'
+                    name = f'{direction} {hex(e.val)}'
+                    with self.builder.add_instant_event(ts, name).annotation('stack') as ann:
+                        ann.int("index", index)
+                        ann.pointer("pc", pc)
+                        ann.pointer("addr", e.addr)
+                        ann.pointer("val", e.val)
+        
+                if e.instr in [InstructionType.CALL, InstructionType.RET]:
+                    self.last_stack_event = e
+                    self.last_stack_event_index = index
+        
+            return self.builder
 
-            elif e.type in [Type.IN_PORT, Type.OUT_PORT]:
-                direction = 'in' if e.type == Type.IN_PORT else 'out'
-                name = f'{e.port.name} {direction} {hex(e.val)}'
-                with builder.add_instant_event(ts, name).annotation('call') as ann:
-                    ann.int("index", index)
-                    ann.pointer("pc", pc)
-                    ann.pointer("port", e.port.value)
-                    ann.pointer("val", e.val)
-            elif e.type in [Type.READ_STACK, Type.WRITE_STACK]:
-                direction = 'POP' if e.type == Type.READ_STACK else 'PUSH'
-                name = f'{direction} {hex(e.val)}'
-                with builder.add_instant_event(ts, name).annotation('stack') as ann:
-                    ann.int("index", index)
-                    ann.pointer("pc", pc)
-                    ann.pointer("addr", e.addr)
-                    ann.pointer("val", e.val)
-
-            if e.instr in [InstructionType.CALL, InstructionType.RET]:
-                last_stack_event = e
-                last_stack_event_index = index
-
-        return builder
-
-    ppp = create_perfetto_trace(parsed)
+    ppp = PerfettoTraceCreator().create_perfetto_trace(parsed)
     with open('perfetto-test2.pb', 'wb') as ff:
         ff.write(ppp.serialize())
-    return PerfettoStack, create_perfetto_trace, ff, ppp
+    return PerfettoStack, PerfettoTraceCreator, ff, ppp
 
 
 @app.cell(hide_code=True)
@@ -996,6 +1014,7 @@ def _(df):
 def _(Type):
     def df_valh(df):
         df2 = df.copy()
+        df2['pch'] = df2['pc'].apply(lambda x: hex(x))
         df2['addrh'] = df2['addr'].apply(lambda x: hex(x))
         df2['valh'] = df2['val'].apply(lambda x: hex(x))
         return df2
