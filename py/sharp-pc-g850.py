@@ -416,7 +416,7 @@ def _(pandas, parsed):
 
 
 @app.cell
-def _(Type, parsed, z80):
+def _(Type, z80):
     class ProcessBusEvents:
         def __init__(self):
             self.pc = None
@@ -471,7 +471,7 @@ def _(Type, parsed, z80):
                 elif e.type == Type.WRITE_STACK:
                     print(f"S:{hex(e.addr)} ← {hex(e.val)}")
 
-    ProcessBusEvents().analyze_portion_of_trace(parsed, [411265, 411355 + 5])
+    # ProcessBusEvents().analyze_portion_of_trace(parsed, [411265, 411355 + 5])
     return (ProcessBusEvents,)
 
 
@@ -489,12 +489,19 @@ def _():
         # modifies stack
         0x93cd: 'jump_after_set_rom_bank',
         0x93f3: 'jump_after_set_rom_bank_cleanup',
+
+        # https://www.akiyan.com/pc-g850_technical_data
+        0x8440: 'draw_char', # BE62h
+        0x8738: 'draw_char_continuous', # BFEEh
+        0x84bf: 'draw_string', # BFF1h
+        0x89be: 'is_key_down', # BE53h
+        0x88c1: 'wait_for_key_down', # BCFDh
     }
 
     def get_function_name(addr: int):
         if addr in FUNCTIONS:
             return FUNCTIONS[addr]
-        return f'func_{hex(addr)}'
+        return f'sub_{hex(addr)[2:]}'
     return FUNCTIONS, get_function_name
 
 
