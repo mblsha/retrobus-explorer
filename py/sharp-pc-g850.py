@@ -163,7 +163,7 @@ def _(Ft600Device, collect_data_button, mo):
 
 @app.cell
 def _():
-    # with open('g5500-bank-03.bin', 'wb') as f:
+    # with open('on-off_m1-pipeline-4.bin', 'wb') as f:
     #     f.write(data_concat)
     return
 
@@ -189,13 +189,10 @@ def _():
 
 
 @app.cell
-def _(z80):
-    z80.decode(b'\xCB\xE7', 0).status
-    return
-
-
-@app.cell
 def _():
+    # for some opcodes the processor will set M1 low twice, if unhandled we can misclassify the second M1 as CALL/RET
+    OPCODE_MULTI_PREFIX = set([0xCB, 0xDD, 0xED, 0xFD])
+
     # https://clrhome.org/table/#call
     OPCODE_CALL_PREFIX = set([0xCD])
     OPCODE_CONDITIONAL_CALL_PREFIX = set([0xC4, 0xCC, 0xD4, 0xDC, 0xE4, 0xEC, 0xF4, 0xFC])
@@ -206,6 +203,7 @@ def _():
         OPCODE_CALL_PREFIX,
         OPCODE_CONDITIONAL_CALL_PREFIX,
         OPCODE_CONDITIONAL_RET_PREFIX,
+        OPCODE_MULTI_PREFIX,
         OPCODE_RET_PREFIX,
     )
 
@@ -217,9 +215,9 @@ def _(
     OPCODE_CALL_PREFIX,
     OPCODE_CONDITIONAL_CALL_PREFIX,
     OPCODE_CONDITIONAL_RET_PREFIX,
+    OPCODE_MULTI_PREFIX,
     OPCODE_RET_PREFIX,
     Optional,
-    data_concat,
     dataclass,
     struct,
 ):
@@ -249,6 +247,7 @@ def _(
         CALL_CONDITIONAL = 2
         RET = 3
         RET_CONDITIONAL = 4
+        MULTI_PREFIX = 5
 
     class RawDataParser:
         ROM_ADDR_START = 0x8000
@@ -260,7 +259,7 @@ def _(
             return addr < self.ROM_ADDR_START and addr > self.ROM_ADDR_START - self.STACK_SIZE
         
         def full_addr(self, addr):
-            # bank 0 is at BANK_ADDR_START, bank 1 is at BANK_ADDR_START + 0x4000
+            # bank 1 is at BANK_ADDR_START, bank 2 is at BANK_ADDR_START + 0x4000
             if addr < self.BANK_ADDR_START:
                 return addr, None
 
@@ -276,6 +275,7 @@ def _(
             # indexes
             last_call_conditional = None
             last_ret_conditional = None
+            prefix_opcode = None
         
             offset = 0
             while offset < len(data):
@@ -295,20 +295,26 @@ def _(
                 port = None
                 bank = None
                 if type == Type.FETCH:
+                    if prefix_opcode is None:                    
+                        pc, bank = self.full_addr(addr)
+                        addr = pc
+                        if val in OPCODE_MULTI_PREFIX:
+                            instr = InstructionType.MULTI_PREFIX
+                        elif val in OPCODE_CALL_PREFIX:
+                            instr = InstructionType.CALL
+                        elif val in OPCODE_CONDITIONAL_CALL_PREFIX:
+                            instr = InstructionType.CALL_CONDITIONAL
+                        elif val in OPCODE_RET_PREFIX:
+                            instr = InstructionType.RET
+                        elif val in OPCODE_CONDITIONAL_RET_PREFIX:
+                            instr = InstructionType.RET_CONDITIONAL
+
                     last_call_conditional = None
                     last_ret_conditional = None
-                    
-                    pc, bank = self.full_addr(addr)
-                    addr = pc
-                    if val in OPCODE_CALL_PREFIX:
-                        instr = InstructionType.CALL
-                    elif val in OPCODE_CONDITIONAL_CALL_PREFIX:
-                        instr = InstructionType.CALL_CONDITIONAL
-                    elif val in OPCODE_RET_PREFIX:
-                        instr = InstructionType.RET
-                    elif val in OPCODE_CONDITIONAL_RET_PREFIX:
-                        instr = InstructionType.RET_CONDITIONAL
+                    prefix_opcode = None
                 elif type in [Type.READ, Type.WRITE]:
+                    prefix_opcode = None
+
                     addr, bank = self.full_addr(addr)
 
                     # we don't have visibility of the current flag status, so in order to determine whether
@@ -324,6 +330,8 @@ def _(
                                 r[last_call_conditional].instr = InstructionType.CALL
                     
                 elif type in [Type.IN_PORT, Type.OUT_PORT]:
+                    prefix_opcode = None
+
                     addr &= 0xFF
                     try:
                         port = IOPort(addr)
@@ -337,15 +345,58 @@ def _(
         
                 r.append(Event(type=type, val=val, addr=addr, pc=pc, port=port, instr=instr, bank=bank))
                 last_index = len(r) - 1
-                if instr == InstructionType.CALL_CONDITIONAL:
+                if instr == InstructionType.MULTI_PREFIX:
+                    prefix_opcode = last_index
+                elif instr == InstructionType.CALL_CONDITIONAL:
                     last_call_conditional = last_index
                 elif instr == InstructionType.RET_CONDITIONAL:
                     last_ret_conditional = last_index
             return r, errors
 
-    parsed, errors = RawDataParser().parse(data_concat)
-    len(parsed), errors
-    return Event, InstructionType, RawDataParser, Type, errors, parsed
+    def parse_binary_trace(filename):
+        with open(filename, 'rb') as f:
+            data = f.read()
+            parsed, errors = RawDataParser().parse(data)
+            return parsed
+
+    # parsed, errors = RawDataParser().parse(data_concat)
+    # len(parsed), errors
+
+    parsed = parse_binary_trace('on-off_m1-pipeline-6.bin')
+    return (
+        Event,
+        InstructionType,
+        RawDataParser,
+        Type,
+        parse_binary_trace,
+        parsed,
+    )
+
+
+@app.cell
+def _(parse_binary_trace):
+    def find_differences():
+        p4 = parse_binary_trace('on-off_m1-pipeline-4.bin')
+        p6 = parse_binary_trace('on-off_m1-pipeline-6.bin')
+        
+        # p4[0:10], p6[0:10]
+        # len(p4), len(p6)
+        
+        # for first 1000 items print differences
+        for i in range(40000):
+            if p4[i] != p6[i]:
+                # print only changed keys/values, use __dict__ to get all keys/values
+                diff = []
+                for key in p4[i].__dict__.keys():
+                    if key == 'pc':
+                        continue
+                    if p4[i].__dict__[key] != p6[i].__dict__[key]:
+                        diff.append(f'  {key}: {p4[i].__dict__[key]} != {p6[i].__dict__[key]}')
+        
+                if len(diff) > 0:
+                    print(f'{i}')
+                    print('\n'.join(diff))
+    return (find_differences,)
 
 
 @app.cell
@@ -355,7 +406,7 @@ def _(pandas, parsed):
 
 
 @app.cell
-def _(Type, parsed, z80):
+def _(Type, z80):
     class ProcessBusEvents:
         def __init__(self):
             self.pc = None
@@ -366,7 +417,7 @@ def _(Type, parsed, z80):
             disasm = z80.disasm(self.buf, self.pc)
             if len(disasm):
                 self.decoded = True
-                print(f'  {hex(self.pc)}: {disasm}')
+                print(f'  {hex(self.pc)}: {disasm} "{self.buf.hex()}"')
 
         def fetch(self, addr, val):
             self.pc = addr
@@ -376,7 +427,7 @@ def _(Type, parsed, z80):
 
         def read(self, addr, val):
             if self.decoded:
-                print(f'R:{hex(addr)} → {hex(val)}')
+                pass
             else:
                 self.buf += bytes([val])
                 self.decode()
@@ -394,8 +445,10 @@ def _(Type, parsed, z80):
             for index, e in enumerate(parsed[start:end]):
                 # print(f"{index + start}: {e}")
                 if e.type == Type.FETCH:
+                    print(f'M:{hex(e.addr)} → {hex(e.val)} {e.instr if e.instr else ""}')
                     self.fetch(e.addr, e.val)
                 elif e.type == Type.READ:
+                    print(f'R:{hex(e.addr)} → {hex(e.val)}')
                     self.read(e.addr, e.val)
                 elif e.type == Type.WRITE:
                     print(f"W:{hex(e.addr)} ← {hex(e.val)}")
@@ -408,7 +461,7 @@ def _(Type, parsed, z80):
                 elif e.type == Type.WRITE_STACK:
                     print(f"S:{hex(e.addr)} ← {hex(e.val)}")
 
-    ProcessBusEvents().analyze_portion_of_trace(parsed, [2059882-10, 2059919+10])
+    # ProcessBusEvents().analyze_portion_of_trace(parsed, [235603, 235626 + 5])
     return (ProcessBusEvents,)
 
 
@@ -429,11 +482,22 @@ def _(
     InstructionType,
     PerfettoTraceBuilder,
     Type,
+    dataclass,
+    datetime,
     get_function_name,
     parsed,
 ):
+    @dataclass
+    class PerfettoStack:
+        begin_event: object
+
+        caller: int
+        pc: int
+        expected_return_addr: int
+
     def create_perfetto_trace(data):
-        builder = PerfettoTraceBuilder()
+        current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        builder = PerfettoTraceBuilder(current_date_time_str)
         last_stack_event = None
         last_stack_event_index = None
         
@@ -445,10 +509,13 @@ def _(
             if e.type == Type.FETCH:
                 pc = e.addr
 
+                # if the last event was a CALL/RET, then we need to create a slice event
                 if last_stack_event is not None:
                     if last_stack_event.instr == InstructionType.CALL:
                         with builder.add_slice_event(ts, 'begin', get_function_name(pc)) as begin_event:
-                            stack.append(begin_event)
+                            expected_return_addr = last_stack_event.addr + 3
+                            stack.append(PerfettoStack(begin_event, caller=last_stack_event.addr, pc=pc, expected_return_addr=expected_return_addr))
+
                             with begin_event.annotation('call') as ann:
                                 ann.int("index", last_stack_event_index)
                                 ann.pointer("pc", pc)
@@ -459,8 +526,22 @@ def _(
                                     ann.int('last_bank', last_stack_event.bank)
                     else:
                         if len(stack) > 0:
-                            begin_event = stack.pop()
+                            s = stack.pop()
+                            begin_event = s.begin_event
                             builder.add_slice_event(ts, 'end')
+
+                            if pc != s.expected_return_addr:
+                                with builder.add_instant_event(ts, 'BAD_RET').annotation('ret') as ann:
+                                    ann.int("index", index)                                
+                                    ann.pointer("pc", pc)
+                                    ann.pointer("expected_return_addr", s.expected_return_addr)
+                                # print(f'Returning from {hex(s.caller)} to {hex(pc)}:')
+                                # print(f"Expected return address {hex(s.expected_return_addr)}, got {hex(pc)}")
+                                # print(f'caller={hex(s.caller)} pc={hex(s.pc)}')
+                                # while len(stack) > 0:
+                                #     s = stack.pop()
+                                #     print(f'> caller={hex(s.caller)} pc={hex(s.pc)} expected_return_addr={hex(s.expected_return_addr)}')
+                                # break
                             
                             with begin_event.annotation('ret') as ann:
                                 ann.int("index", last_stack_event_index)
@@ -472,7 +553,7 @@ def _(
                                     ann.int('last_bank', last_stack_event.bank)
                         else:
                             with builder.add_instant_event(ts, 'UNDERFLOW').annotation('ret') as ann:
-                                ann.int("index", last_stack_event_index)
+                                ann.int("index", index)
                                 ann.pointer("pc", pc)
                                 ann.pointer("caller", last_stack_event.addr)
                                 if e.bank:
@@ -491,6 +572,14 @@ def _(
                     ann.pointer("pc", pc)
                     ann.pointer("port", e.port.value)
                     ann.pointer("val", e.val)
+            elif e.type in [Type.READ_STACK, Type.WRITE_STACK]:
+                direction = 'POP' if e.type == Type.READ_STACK else 'PUSH'
+                name = f'{direction} {hex(e.val)}'
+                with builder.add_instant_event(ts, name).annotation('stack') as ann:
+                    ann.int("index", index)
+                    ann.pointer("pc", pc)
+                    ann.pointer("addr", e.addr)
+                    ann.pointer("val", e.val)
 
             if e.instr in [InstructionType.CALL, InstructionType.RET]:
                 last_stack_event = e
@@ -501,7 +590,7 @@ def _(
     ppp = create_perfetto_trace(parsed)
     with open('perfetto-test2.pb', 'wb') as ff:
         ff.write(ppp.serialize())
-    return create_perfetto_trace, ff, ppp
+    return PerfettoStack, create_perfetto_trace, ff, ppp
 
 
 @app.cell(hide_code=True)
@@ -555,7 +644,7 @@ def _():
             return DebugAnnotation(ann)
 
     class PerfettoTraceBuilder:
-        def __init__(self):
+        def __init__(self, thread_descriptor: str = "main"):
             self.trace = perfetto.Trace()
             self.track_uuid = 0xCA1C
             self.trusted_packet_sequence_id = 0x123
@@ -564,7 +653,7 @@ def _():
             self.tid = 5678
 
             self.add_process_descriptor("SHARP PC-G850")
-            self.add_thread_descriptor("main")
+            self.add_thread_descriptor(thread_descriptor)
 
         def add_process_descriptor(self, process_name: str):
             packet = self.trace.packet.add()
