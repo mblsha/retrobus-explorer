@@ -197,10 +197,17 @@ def _(z80):
 @app.cell
 def _():
     # https://clrhome.org/table/#call
-    OPCODE_CALL_PREFIX = set([0xC4, 0xCC, 0xCD, 0xD4, 0xDC, 0xE4, 0xEC, 0xF4, 0xFC])
+    OPCODE_CALL_PREFIX = set([0xCD])
+    OPCODE_CONDITIONAL_CALL_PREFIX = set([0xC4, 0xCC, 0xD4, 0xDC, 0xE4, 0xEC, 0xF4, 0xFC])
     # https://clrhome.org/table/#ret
-    OPCODE_RET_PREFIX = set([0xC0, 0xC8, 0xC9, 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8])
-    return OPCODE_CALL_PREFIX, OPCODE_RET_PREFIX
+    OPCODE_RET_PREFIX = set([0xC9])
+    OPCODE_CONDITIONAL_RET_PREFIX = set([0xC0, 0xC8, 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8])
+    return (
+        OPCODE_CALL_PREFIX,
+        OPCODE_CONDITIONAL_CALL_PREFIX,
+        OPCODE_CONDITIONAL_RET_PREFIX,
+        OPCODE_RET_PREFIX,
+    )
 
 
 @app.cell
@@ -208,6 +215,8 @@ def _(
     Enum,
     IOPort,
     OPCODE_CALL_PREFIX,
+    OPCODE_CONDITIONAL_CALL_PREFIX,
+    OPCODE_CONDITIONAL_RET_PREFIX,
     OPCODE_RET_PREFIX,
     Optional,
     data_concat,
@@ -221,6 +230,10 @@ def _(
         IN_PORT  = "r" # IO Read
         OUT_PORT = "w" # IO Write
 
+        # synthetic types not transmitted by the device
+        READ_STACK = "S" # Read from stack
+        WRITE_STACK = "s" # Write to stack
+
     @dataclass
     class Event:
         type: Type
@@ -233,12 +246,19 @@ def _(
 
     class InstructionType(Enum):
         CALL = 1
-        RET = 2
+        CALL_CONDITIONAL = 2
+        RET = 3
+        RET_CONDITIONAL = 4
 
     class RawDataParser:
+        ROM_ADDR_START = 0x8000
         BANK_ADDR_START = 0xC000
         BANK_SIZE = 0x4000
+        STACK_SIZE = 0x1000
 
+        def is_stack_addr(self, addr):
+            return addr < self.ROM_ADDR_START and addr > self.ROM_ADDR_START - self.STACK_SIZE
+        
         def full_addr(self, addr):
             # bank 0 is at BANK_ADDR_START, bank 1 is at BANK_ADDR_START + 0x4000
             if addr < self.BANK_ADDR_START:
@@ -252,6 +272,10 @@ def _(
             pc = None
             errors = []
             r = []
+
+            # indexes
+            last_call_conditional = None
+            last_ret_conditional = None
         
             offset = 0
             while offset < len(data):
@@ -271,14 +295,34 @@ def _(
                 port = None
                 bank = None
                 if type == Type.FETCH:
+                    last_call_conditional = None
+                    last_ret_conditional = None
+                    
                     pc, bank = self.full_addr(addr)
                     addr = pc
                     if val in OPCODE_CALL_PREFIX:
                         instr = InstructionType.CALL
+                    elif val in OPCODE_CONDITIONAL_CALL_PREFIX:
+                        instr = InstructionType.CALL_CONDITIONAL
                     elif val in OPCODE_RET_PREFIX:
                         instr = InstructionType.RET
+                    elif val in OPCODE_CONDITIONAL_RET_PREFIX:
+                        instr = InstructionType.RET_CONDITIONAL
                 elif type in [Type.READ, Type.WRITE]:
                     addr, bank = self.full_addr(addr)
+
+                    # we don't have visibility of the current flag status, so in order to determine whether
+                    # a conditional CALL/RET did actually CALL/RET we need to look whether the stack was written/read
+                    if self.is_stack_addr(addr):
+                        if type == Type.READ:
+                            type = Type.READ_STACK
+                            if last_ret_conditional is not None:
+                                r[last_ret_conditional].instr = InstructionType.RET
+                        else:
+                            type = Type.WRITE_STACK
+                            if last_call_conditional is not None:
+                                r[last_call_conditional].instr = InstructionType.CALL
+                    
                 elif type in [Type.IN_PORT, Type.OUT_PORT]:
                     addr &= 0xFF
                     try:
@@ -292,6 +336,11 @@ def _(
                         errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
         
                 r.append(Event(type=type, val=val, addr=addr, pc=pc, port=port, instr=instr, bank=bank))
+                last_index = len(r) - 1
+                if instr == InstructionType.CALL_CONDITIONAL:
+                    last_call_conditional = last_index
+                elif instr == InstructionType.RET_CONDITIONAL:
+                    last_ret_conditional = last_index
             return r, errors
 
     parsed, errors = RawDataParser().parse(data_concat)
@@ -306,10 +355,61 @@ def _(pandas, parsed):
 
 
 @app.cell
-def _(df):
-    df['bank'].unique()
-    # df.iloc[1370:]
-    return
+def _(Type, parsed, z80):
+    class ProcessBusEvents:
+        def __init__(self):
+            self.pc = None
+            self.buf = b''
+            self.decoded = False
+      
+        def decode(self):
+            disasm = z80.disasm(self.buf, self.pc)
+            if len(disasm):
+                self.decoded = True
+                print(f'  {hex(self.pc)}: {disasm}')
+
+        def fetch(self, addr, val):
+            self.pc = addr
+            self.buf = bytes([val])
+            self.decoded = False
+            self.decode()
+
+        def read(self, addr, val):
+            if self.decoded:
+                print(f'R:{hex(addr)} → {hex(val)}')
+            else:
+                self.buf += bytes([val])
+                self.decode()
+
+        def process_bus_events(self, df):            
+            for r in df.itertuples():
+                if r.type == Type.FETCH:
+                    self.fetch(r.addr, r.val)
+                elif r.type == Type.READ:
+                    self.read(r.addr, r.val)
+
+        def analyze_portion_of_trace(self, parsed, analyze_min_max):
+            start = min(analyze_min_max)
+            end = max(analyze_min_max)
+            for index, e in enumerate(parsed[start:end]):
+                # print(f"{index + start}: {e}")
+                if e.type == Type.FETCH:
+                    self.fetch(e.addr, e.val)
+                elif e.type == Type.READ:
+                    self.read(e.addr, e.val)
+                elif e.type == Type.WRITE:
+                    print(f"W:{hex(e.addr)} ← {hex(e.val)}")
+                elif e.type == Type.IN_PORT:
+                    print(f"  {e.port.name} {hex(e.val)}")
+                elif e.type == Type.OUT_PORT:
+                    print(f"  {e.port.name} {hex(e.val)}")
+                elif e.type == Type.READ_STACK:
+                    print(f"S:{hex(e.addr)} → {hex(e.val)}")
+                elif e.type == Type.WRITE_STACK:
+                    print(f"S:{hex(e.addr)} ← {hex(e.val)}")
+
+    ProcessBusEvents().analyze_portion_of_trace(parsed, [2059882-10, 2059919+10])
+    return (ProcessBusEvents,)
 
 
 @app.cell
@@ -335,11 +435,12 @@ def _(
     def create_perfetto_trace(data):
         builder = PerfettoTraceBuilder()
         last_stack_event = None
+        last_stack_event_index = None
         
         ts = 0
         pc = None
         stack = []
-        for e in data:
+        for index, e in enumerate(data):
             ts += 1
             if e.type == Type.FETCH:
                 pc = e.addr
@@ -349,6 +450,7 @@ def _(
                         with builder.add_slice_event(ts, 'begin', get_function_name(pc)) as begin_event:
                             stack.append(begin_event)
                             with begin_event.annotation('call') as ann:
+                                ann.int("index", last_stack_event_index)
                                 ann.pointer("pc", pc)
                                 ann.pointer("caller", last_stack_event.addr)
                                 if e.bank:
@@ -361,6 +463,7 @@ def _(
                             builder.add_slice_event(ts, 'end')
                             
                             with begin_event.annotation('ret') as ann:
+                                ann.int("index", last_stack_event_index)
                                 ann.pointer("pc", pc)
                                 ann.pointer("caller", last_stack_event.addr)
                                 if e.bank:
@@ -369,6 +472,7 @@ def _(
                                     ann.int('last_bank', last_stack_event.bank)
                         else:
                             with builder.add_instant_event(ts, 'UNDERFLOW').annotation('ret') as ann:
+                                ann.int("index", last_stack_event_index)
                                 ann.pointer("pc", pc)
                                 ann.pointer("caller", last_stack_event.addr)
                                 if e.bank:
@@ -377,20 +481,20 @@ def _(
                                     ann.int('last_bank', last_stack_event.bank)
         
                     last_stack_event = None
+                    last_stack_event_index = None
 
             elif e.type in [Type.IN_PORT, Type.OUT_PORT]:
                 direction = 'in' if e.type == Type.IN_PORT else 'out'
                 name = f'{e.port.name} {direction} {hex(e.val)}'
                 with builder.add_instant_event(ts, name).annotation('call') as ann:
+                    ann.int("index", index)
                     ann.pointer("pc", pc)
                     ann.pointer("port", e.port.value)
                     ann.pointer("val", e.val)
 
             if e.instr in [InstructionType.CALL, InstructionType.RET]:
                 last_stack_event = e
-
-            # if ts > 10000:
-            #     break
+                last_stack_event_index = index
 
         return builder
 
@@ -400,7 +504,7 @@ def _(
     return create_perfetto_trace, ff, ppp
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import perfetto_pb2 as perfetto
 
@@ -583,12 +687,6 @@ def _():
 
     rom_banks = read_rom_banks()
     return read_rom_banks, rom_banks
-
-
-@app.cell
-def _(rom_banks):
-    rom_banks
-    return
 
 
 @app.cell
@@ -795,40 +893,8 @@ def _(df, df_valh):
 
 
 @app.cell
-def _(Type, df, z80):
-    class ProcessBusEvents:
-        def decode(self):
-            disasm = z80.disasm(self.buf, self.pc)
-            if len(disasm):
-                print(f'{hex(self.pc)}: {disasm}')
-                self.i += 1
-                if self.i > 1000:
-                    return True
-            return False
-
-        def process_bus_events(self, df):
-            self.pc = None
-            self.buf = b''
-            self.i = 0
-                
-            for r in df.itertuples():
-                if r.type == Type.FETCH:
-                    self.pc = r.addr
-                    self.buf = b''
-                    if self.pc == 0xc000:
-                        print('<'*40)
-                    print(f'  {hex(self.pc)} {hex(r.val)}')
-                    self.buf += bytes([r.val])
-                    if self.decode():
-                        break
-                elif r.type == Type.READ:
-                    print(f'  {hex(self.pc)} {hex(r.val)}')
-                    self.buf += bytes([r.val])
-                    if self.decode():
-                        break
-
-    ProcessBusEvents().process_bus_events(df)
-    return (ProcessBusEvents,)
+def _():
+    return
 
 
 @app.cell
