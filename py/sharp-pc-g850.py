@@ -224,6 +224,7 @@ def _(
     OPCODE_MULTI_PREFIX,
     OPCODE_RET_PREFIX,
     Optional,
+    data_concat,
     dataclass,
     struct,
 ):
@@ -259,6 +260,7 @@ def _(
         ROM_ADDR_START = 0x8000
         BANK_ADDR_START = 0xC000
         BANK_SIZE = 0x4000
+        # not sure how big the stack is, this area is also used for variable storage
         STACK_SIZE = 0x400
 
         def is_stack_addr(self, addr):
@@ -267,6 +269,8 @@ def _(
         def full_addr(self, addr):
             # bank 1 is at BANK_ADDR_START, bank 2 is at BANK_ADDR_START + 0x4000
             if addr < self.BANK_ADDR_START:
+                if addr >= self.ROM_ADDR_START:
+                    return addr, 0
                 return addr, None
 
             return addr + self.BANK_SIZE * (self.rom_bank - 1), self.rom_bank
@@ -369,15 +373,15 @@ def _(
             parsed, errors = RawDataParser().parse(data)
             return parsed
 
-    # parsed, errors = RawDataParser().parse(data_concat)
-    # len(parsed), errors
-
-    parsed = parse_binary_trace('on-off_m1-pipeline-6.bin')
+    # parsed = parse_binary_trace('on-off_m1-pipeline-6.bin')
+    parsed, errors = RawDataParser().parse(data_concat)
+    len(parsed), errors
     return (
         Event,
         InstructionType,
         RawDataParser,
         Type,
+        errors,
         parse_binary_trace,
         parsed,
     )
@@ -514,7 +518,6 @@ def _(
     datetime,
     get_function_name,
     parsed,
-    s,
 ):
     @dataclass
     class PerfettoStack:
@@ -584,7 +587,7 @@ def _(
                 ))
                 self._annotate_common(begin_event, e, 'call')
 
-        def _handle_mismatched_ret_event(self, e):
+        def _handle_mismatched_ret_event(self, e, s):
             # sub_93cd hacks the return address after switching rom bank
             if self.last_stack_event.addr == 0x93f2:
                 self._handle_call_event(e)
@@ -603,7 +606,7 @@ def _(
                 self._annotate_common(s.begin_event, e, 'ret')
 
                 if self.pc != s.expected_return_addr:
-                    self._handle_mismatched_ret_event(e)
+                    self._handle_mismatched_ret_event(e, s)
             else:
                 underflow = self.builder.add_instant_event(self.ts, 'UNDERFLOW')
                 self._annotate_common(underflow, e, 'ret')
