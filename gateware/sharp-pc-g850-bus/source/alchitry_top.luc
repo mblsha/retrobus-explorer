@@ -64,7 +64,7 @@ module alchitry_top (
         //
         // NOTE: Delays are likely specific to PC-G850 and 100MHz FPGA clock,
         //       need to verify this assumption using logic analyzer.
-        #DEPTH(4) {
+        #DEPTH(5) {
             pipeline sync_mreq (.in(z80_mreq))
             pipeline sync_m1   (.in(z80_m1))
             pipeline sync_iorq (.in(z80_iorq))
