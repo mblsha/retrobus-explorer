@@ -507,6 +507,7 @@ def _(
     datetime,
     get_function_name,
     parsed,
+    s,
 ):
     @dataclass
     class PerfettoStack:
@@ -576,16 +577,26 @@ def _(
                 ))
                 self._annotate_common(begin_event, e, 'call')
 
+        def _handle_mismatched_ret_event(self, e):
+            # sub_93cd hacks the return address after switching rom bank
+            if self.last_stack_event.addr == 0x93f2:
+                self._handle_call_event(e)
+                self.stack[-1].expected_return_addr = 0x93f3
+                return
+            
+            with self.builder.add_instant_event(self.ts, 'BAD_RET').annotation('ret') as ann:
+                ann.int("index", self.index)
+                ann.pointer("pc", self.pc)
+                ann.pointer("expected_return_addr", s.expected_return_addr)
+
         def _handle_ret_event(self, e):
             if self.stack:
                 s = self.stack.pop()
                 self.builder.add_slice_event(self.ts, 'end')
-                if self.pc != s.expected_return_addr:
-                    with self.builder.add_instant_event(self.ts, 'BAD_RET').annotation('ret') as ann:
-                        ann.int("index", self.index)
-                        ann.pointer("pc", self.pc)
-                        ann.pointer("expected_return_addr", s.expected_return_addr)
                 self._annotate_common(s.begin_event, e, 'ret')
+
+                if self.pc != s.expected_return_addr:
+                    self._handle_mismatched_ret_event(e)
             else:
                 underflow = self.builder.add_instant_event(self.ts, 'UNDERFLOW')
                 self._annotate_common(underflow, e, 'ret')
