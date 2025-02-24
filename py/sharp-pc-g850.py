@@ -486,6 +486,12 @@ def _(df, df_valh):
 
 
 @app.cell
+def _(IOPort, df, df_valh):
+    df_valh(df[df['port'].isin([IOPort.SET_KEY_STROBE_HI])].groupby('pc').size().reset_index(name='event_count'))
+    return
+
+
+@app.cell
 def _():
     # PC-G850
     FUNCTIONS = {
@@ -1039,9 +1045,9 @@ def _(df):
 def _(Type):
     def df_valh(df):
         df2 = df.copy()
-        df2['pch'] = df2['pc'].apply(lambda x: hex(x))
-        df2['addrh'] = df2['addr'].apply(lambda x: hex(x))
-        df2['valh'] = df2['val'].apply(lambda x: hex(x))
+        for col in ['pc', 'addr', 'val']:
+            if col in df2.columns:
+                df2[col + 'h'] = df2[col].apply(lambda x: hex(x))
         return df2
 
     def io_df(df):
