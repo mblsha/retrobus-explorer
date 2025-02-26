@@ -1,25 +1,48 @@
-from .bus_parser import BusParser, Event, Type, IOPort
+from .bus_parser import BusParser, PipelineBusParser, Event, Type, IOPort
 from . import bus_parser
 
 from typing import List
 import struct
+import queue
+
+
+def pipeline_parse(input: bytes):
+    q = queue.Queue()
+    p = PipelineBusParser(q)
+
+    buf = b""
+    for b in input:
+        buf += bytes([b])
+        left_buf = p.parse(buf)
+        buf = left_buf
+
+    errors = p.errors
+    if len(buf) > 0:
+        errors.append(f"leftover: {buf}")
+
+    return list(q.queue), errors
+
+
+def normal_parse(b: bytes):
+    return pipeline_parse(b)
+    # return BusParser().parse(b)
 
 
 def parse(b: bytes) -> Event:
-    events, errors = BusParser().parse(b)
+    events, errors = normal_parse(b)
     assert not errors
     assert len(events) == 1
     return events[0]
 
 
 def not_parse(b: bytes) -> Event:
-    events, errors = BusParser().parse(b)
+    events, errors = normal_parse(b)
     assert len(events) == 0
     assert len(errors) > 0
 
 
 def parsel(b: bytes) -> List[Event]:
-    events, errors = BusParser().parse(b)
+    events, errors = normal_parse(b)
     assert not errors
     assert len(events) > 1
     return events
