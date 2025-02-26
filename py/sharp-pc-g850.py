@@ -265,7 +265,7 @@ def _(
 
         def is_stack_addr(self, addr):
             return addr < self.ROM_ADDR_START and addr > self.ROM_ADDR_START - self.STACK_SIZE
-        
+
         def full_addr(self, addr):
             # bank 1 is at BANK_ADDR_START, bank 2 is at BANK_ADDR_START + 0x4000
             if addr < self.BANK_ADDR_START:
@@ -286,7 +286,7 @@ def _(
             last_call_conditional = None
             last_ret_conditional = None
             prefix_opcode = None
-        
+
             offset = 0
             while offset < len(data):
                 try:
@@ -296,7 +296,7 @@ def _(
                     offset += 1
                     # raise ValueError(f"Invalid type at index {index}: {i}")
                     continue
-        
+
                 val  = struct.unpack("B", data[offset+1:offset+2])[0]
                 addr = struct.unpack("<H", data[offset+2:offset+4])[0]
                 offset += 4
@@ -342,7 +342,7 @@ def _(
                             type = Type.WRITE_STACK
                             if last_call_conditional is not None:
                                 r[last_call_conditional].instr = InstructionType.CALL
-                    
+
                 elif type in [Type.IN_PORT, Type.OUT_PORT]:
                     prefix_opcode = None
 
@@ -356,7 +356,7 @@ def _(
                             self.rom_bank = val & 0x0F
                     except:
                         errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
-        
+
                 r.append(Event(type=type, val=val, addr=addr, pc=pc, port=port, instr=instr, bank=bank))
                 last_index = len(r) - 1
                 if instr == InstructionType.MULTI_PREFIX:
@@ -392,10 +392,10 @@ def _(parse_binary_trace):
     def find_differences():
         p4 = parse_binary_trace('on-off_m1-pipeline-4.bin')
         p6 = parse_binary_trace('on-off_m1-pipeline-6.bin')
-        
+
         # p4[0:10], p6[0:10]
         # len(p4), len(p6)
-        
+
         # for first 1000 items print differences
         for i in range(40000):
             if p4[i] != p6[i]:
@@ -406,7 +406,7 @@ def _(parse_binary_trace):
                         continue
                     if p4[i].__dict__[key] != p6[i].__dict__[key]:
                         diff.append(f'  {key}: {p4[i].__dict__[key]} != {p6[i].__dict__[key]}')
-        
+
                 if len(diff) > 0:
                     print(f'{i}')
                     print('\n'.join(diff))
@@ -426,7 +426,7 @@ def _(Type, z80):
             self.pc = None
             self.buf = b''
             self.decoded = False
-      
+
         def decode(self):
             disasm = z80.disasm(self.buf, self.pc)
             if len(disasm):
@@ -495,24 +495,60 @@ def _(IOPort, df, df_valh):
 def _():
     # PC-G850
     FUNCTIONS = {
-        0xba36: 'set_rom_bank',
+        0xBA36: "set_rom_bank",
         # modifies stack
-        0x93cd: 'jump_after_set_rom_bank',
-        0x93f3: 'jump_after_set_rom_bank_cleanup',
-
+        0x93CD: "jump_after_set_rom_bank",
+        0x93F3: "jump_after_set_rom_bank_cleanup",
         # https://www.akiyan.com/pc-g850_technical_data
-        0x8440: 'draw_char', # BE62h
-        0x8738: 'draw_char_continuous', # BFEEh
-        0x84bf: 'draw_string', # BFF1h
-        0x89be: 'is_key_down', # BE53h
-        0x88c1: 'wait_for_key_down', # BCFDh
+        0x8440: "draw_char",  # BE62h
+        0x8738: "draw_char_continuous",  # BFEEh
+        0x84BF: "draw_string",  # BFF1h
+        0x89BE: "is_key_down",  # BE53h
+        0x88C1: "wait_for_key_down",  # BCFDh
     }
 
+    BNIDA_NAMES_RAW = {
+        "33856": "draw_char",
+        "33983": "draw_string",
+        "34027": "scroll_display_one_line_up",
+        "34091": "read_lcd_command_until_something?",
+        "34616": "draw_char_continuous",
+        "35009": "wait_for_key_down",
+        "35262": "is_key_down",
+        "35304": "scan_key_down?_wrap",
+        "35309": "scan_key_down?",
+        "35419": "key_something_halt?",
+        "35501": "wait_80",
+        "35510": "wait_332",
+        "35516": "wait",
+        "36431": "do_halt?",
+        "37610": "delay?",
+        "37893": "draw_after_reset?",
+        "41317": "draw_run_program_mode",
+        "42796": "error_in?",
+        "43005": "break_in?",
+        "43114": "get_lcd_row_to_draw_possibly_scroll",
+        "47117": "draw_string2?",
+        "47670": "set_rom_bank",
+        "48381": "wait_for_key_down_wrap",
+        "48441": "draw_after_reset_wrap",
+        "48723": "is_key_down_wrap",
+        "49131": "scroll_display_one_line_up_wrap",
+        "49134": "draw_char_continuous_wrap",
+        "49137": "draw_string_wrap",
+        "49152": "main?",
+        "65321": "do_reset_memory?",
+    }
+
+    BNIDA_NAMES = {int(k, 10): v for k, v in BNIDA_NAMES_RAW.items()}
+
     def get_function_name(addr: int):
+        if addr in BNIDA_NAMES:
+            return BNIDA_NAMES[addr]
         if addr in FUNCTIONS:
             return FUNCTIONS[addr]
-        return f'sub_{hex(addr)[2:]}'
-    return FUNCTIONS, get_function_name
+        return f"sub_{hex(addr)[2:]}"
+    return BNIDA_NAMES, BNIDA_NAMES_RAW, FUNCTIONS, get_function_name
 
 
 @app.cell
@@ -523,6 +559,7 @@ def _(
     dataclass,
     datetime,
     get_function_name,
+    mo,
     parsed,
 ):
     @dataclass
@@ -599,7 +636,7 @@ def _(
                 self._handle_call_event(e)
                 self.stack[-1].expected_return_addr = 0x93f3
                 return
-            
+
             with self.builder.add_instant_event(self.ts, 'BAD_RET').annotation('ret') as ann:
                 ann.int("index", self.index)
                 ann.pointer("pc", self.pc)
@@ -636,10 +673,26 @@ def _(
                 ann.pointer("val", e.val)
 
 
-    ppp = PerfettoTraceCreator().create_perfetto_trace(parsed)
-    with open("perfetto-test2.pb", "wb") as ff:
-        ff.write(ppp.serialize())
-    return PerfettoStack, PerfettoTraceCreator, ff, ppp
+    # ppp = PerfettoTraceCreator().create_perfetto_trace(parsed)
+    # with open("perfetto-test2.pb", "wb") as ff:
+    #     ff.write(ppp.serialize())
+
+    def get_perfetto_trace_data():
+        ppp = PerfettoTraceCreator().create_perfetto_trace(parsed)
+        return ppp.serialize()
+
+    download_perfetto = mo.download(
+        label='Download Perfetto Trace',
+        data=get_perfetto_trace_data,
+        filename="sharp-pc-g850-perfetto.pb",
+    )
+    download_perfetto
+    return (
+        PerfettoStack,
+        PerfettoTraceCreator,
+        download_perfetto,
+        get_perfetto_trace_data,
+    )
 
 
 @app.cell(hide_code=True)
@@ -655,12 +708,12 @@ def _():
 
         def __exit__(self, type, value, traceback):
             pass
-        
+
         def entry(self, name):
             entry = self.ann.dict_entries.add()
             entry.name = name
             return entry
-        
+
         def pointer(self, name, value):
             entry = self.entry(name)
             entry.pointer_value = value
@@ -1140,6 +1193,49 @@ def _(IOPort, df, get_parsed_lcd_commands_df, parse_lcd_commands):
 
 
 @app.cell
+def _(IOPort, df, mo):
+    def parse_key_events(df):
+        import math
+        strobe_hi = 0
+        strobe_lo = 0
+        cur = []
+        for r in df.itertuples():
+            if r.port == IOPort.SET_KEY_STROBE_HI:
+                strobe_hi = r.val & 0b11
+            elif r.port == IOPort.SET_KEY_STROBE_LO:
+                strobe_lo = r.val
+            elif r.port == IOPort.KEY_INPUT:
+                if r.val == 0:
+                    continue
+                strobe = (strobe_hi << 8) | strobe_lo
+                # column is the power of 2 of the strobe value, only has 1 bit set
+                column = int(math.log2(strobe))
+                for i in range(8):
+                    if r.val & (1 << i):
+                        row = i
+                        cur.append((column, i))
+            elif r.port == IOPort.SHIFT_KEY_INPUT:
+                # key matrix stanning ends with SHIFT_KEY_INPUT query
+                print(cur)
+                cur = []
+                pass
+
+    key_events = df[
+        df["port"].isin([
+                IOPort.KEY_INPUT,
+                IOPort.SHIFT_KEY_INPUT,
+                IOPort.SET_KEY_STROBE_LO,
+                IOPort.SET_KEY_STROBE_HI,
+        ])
+    ].copy().reset_index(drop=True)[['port', 'val', 'pc']]
+
+    key_events['pc'] = key_events['pc'].apply(lambda x: hex(x))
+    mo.ui.dataframe(key_events[3:28], page_size=50)
+    parse_key_events(key_events)
+    return key_events, parse_key_events
+
+
+@app.cell
 def _():
     # parsed_lcd_commands_filtered
     return
@@ -1209,6 +1305,8 @@ def _(SED1560):
                     self.display_on = value
                 case SED1560.CmdA(cmd=SED1560.CmdAType.SEGMENTS_DISPLAY_MODE, value=value):
                     self.segments_display_mode = value
+                case SED1560.SetColumnPart(is_high=is_high, value=value):
+                    pass
                 case SED1560.Unknown(addr=addr, value=value):
                     pass
                 case _:
@@ -1258,6 +1356,12 @@ def _(mo, parsed_lcd_commands_df):
     return get_lcd_commands_range, lcd_commands_range
 
 
+@app.cell(hide_code=True)
+def _(lcd_commands_range, parsed_lcd_commands):
+    parsed_lcd_commands_filtered = parsed_lcd_commands[lcd_commands_range.value['start']: lcd_commands_range.value['start'] + lcd_commands_range.value['length']]
+    return (parsed_lcd_commands_filtered,)
+
+
 @app.cell
 def _(SED1560Intepreter, draw_vram2, parsed_lcd_commands_filtered):
     display = SED1560Intepreter()
@@ -1276,6 +1380,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
         x_scale = alt.Scale(domain=(min_index, max_index))
 
         key_columns = ['KEY_INPUT', 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
+        # key_columns = []
 
         events_points = (
             alt.Chart(
@@ -1378,13 +1483,6 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
 
     mo.ui.altair_chart(plot_parsed_lcd_commands(filtered_lcd_commands(parsed_lcd_commands_df)))
     return (plot_parsed_lcd_commands,)
-
-
-@app.cell
-def _():
-    # 6641:6641+410
-    # mo.ui.dataframe(filtered_lcd_commands(parsed_lcd_commands_df), page_size=20)
-    return
 
 
 @app.cell(hide_code=True)
@@ -1505,18 +1603,6 @@ def _(Enum, dataclass):
     return SED1560, SED1560Parser
 
 
-@app.cell
-def _(SED1560Parser):
-    SED1560Parser.parse_out40(0xaf)
-    return
-
-
-@app.cell
-def _(lcd_commands_range, parsed_lcd_commands):
-    parsed_lcd_commands_filtered = parsed_lcd_commands[lcd_commands_range.value['start']: lcd_commands_range.value['start'] + lcd_commands_range.value['length']]
-    return (parsed_lcd_commands_filtered,)
-
-
 @app.cell(hide_code=True)
 def _(Image, ImageDraw):
     def draw_vram2(vram, zoom=4):
@@ -1524,7 +1610,7 @@ def _(Image, ImageDraw):
         on_color = (0, 255, 0)
 
         img_width = len(vram[0]) * zoom
-        img_height = len(vram) * 8 * zoom
+        img_height = len(vram) * 6 * zoom
         image = Image.new("RGB", (img_width, img_height), off_color)
         draw = ImageDraw.Draw(image)
 
