@@ -3,6 +3,9 @@ from enum import Enum
 from dataclasses import dataclass
 import struct
 
+import threading
+import queue
+
 
 # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
 class IOPort(Enum):
@@ -104,7 +107,7 @@ BANK_SIZE = 0x4000
 STACK_SIZE = 0x400
 
 
-class RawDataParser:
+class BusParser:
     def is_stack_addr(self, addr):
         return addr < ROM_ADDR_START and addr > ROM_ADDR_START - STACK_SIZE
 
@@ -221,3 +224,134 @@ class RawDataParser:
         if offset != len(data):
             errors.append(f"Trailing data at offset {offset}")
         return r, errors
+
+
+class PipelineBusParser:
+    def __init__(self, out_queue):
+        self.out_queue = out_queue
+
+        self.rom_bank = None
+        self.pc = None
+        self.errors = []
+
+        # these are events that are not yet complete
+        self.last_call_conditional = None
+        self.last_ret_conditional = None
+        self.prefix_opcode = None
+
+    def is_stack_addr(self, addr):
+        return addr < ROM_ADDR_START and addr > ROM_ADDR_START - STACK_SIZE
+
+    def full_addr(self, addr):
+        # bank 1 is at BANK_ADDR_START, bank 2 is at BANK_ADDR_START + 0x4000
+        if addr < BANK_ADDR_START:
+            if addr >= ROM_ADDR_START:
+                return addr, 0
+            return addr, None
+
+        return addr + BANK_SIZE * (self.rom_bank - 1), self.rom_bank
+
+    def flush_prefix_opcode(self):
+        if self.prefix_opcode is not None:
+            self.out_queue.put(self.prefix_opcode)
+            self.prefix_opcode = None
+
+    def flush_last_call_conditional(self):
+        if self.last_call_conditional is not None:
+            self.out_queue.put(self.last_call_conditional)
+            self.last_call_conditional = None
+
+    def flush_last_ret_conditional(self):
+        if self.last_ret_conditional is not None:
+            self.out_queue.put(self.last_ret_conditional)
+            self.last_ret_conditional = None
+
+    def event(self, type, val, addr):
+        instr = None
+        port = None
+        bank = None
+
+        # handle second byte of the instruction when M1 is low twice in a row
+        if self.prefix_opcode is not None and type == Type.FETCH:
+            type = Type.READ
+
+        if type == Type.FETCH:
+            self.pc, bank = self.full_addr(addr)
+            addr = self.pc
+            if val in OPCODE_MULTI_PREFIX:
+                instr = InstructionType.MULTI_PREFIX
+            elif val in OPCODE_CALL_PREFIX:
+                instr = InstructionType.CALL
+            elif val in OPCODE_CONDITIONAL_CALL_PREFIX:
+                instr = InstructionType.CALL_CONDITIONAL
+            elif val in OPCODE_RET_PREFIX:
+                instr = InstructionType.RET
+            elif val in OPCODE_CONDITIONAL_RET_PREFIX:
+                instr = InstructionType.RET_CONDITIONAL
+        elif type in [Type.READ, Type.WRITE]:
+            addr, bank = self.full_addr(addr)
+
+            # we don't have visibility of the current flag status, so in order to determine whether
+            # a conditional CALL/RET did actually CALL/RET we need to look whether the stack was written/read
+            if self.is_stack_addr(addr):
+                if type == Type.READ:
+                    type = Type.READ_STACK
+                    if self.last_ret_conditional is not None:
+                        self.last_ret_conditional.instr = InstructionType.RET
+                else:
+                    type = Type.WRITE_STACK
+                    if self.last_call_conditional is not None:
+                        self.last_call_conditional.instr = InstructionType.CALL
+
+        elif type in [Type.IN_PORT, Type.OUT_PORT]:
+            addr &= 0xFF
+            try:
+                port = IOPort(addr)
+
+                if port == IOPort.ROM_BANK:
+                    self.rom_bank = val
+                elif port == IOPort.ROM_EX_BANK:
+                    self.rom_bank = val & 0x0F
+            except:
+                self.errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
+
+        return Event(
+            type=type,
+            val=val,
+            addr=addr,
+            pc=self.pc,
+            port=port,
+            instr=instr,
+            bank=bank,
+        )
+
+    def parse(self, data):
+        while len(data) >= 4:
+            try:
+                type = Type(chr(data[0]))
+            except ValueError:
+                self.errors.append(f"Invalid type at offset {0}: {data[0]}")
+                data = data[1:]
+                continue
+
+            val = struct.unpack("B", data[1:2])[0]
+            addr = struct.unpack("<H", data[2:4])[0]
+            data = data[4:]
+
+            e = self.event(type, val, addr)
+
+            self.flush_last_call_conditional()
+            self.flush_last_ret_conditional()
+            self.flush_prefix_opcode()
+
+            if e.instr == InstructionType.MULTI_PREFIX:
+                self.prefix_opcode = e
+            elif e.instr == InstructionType.CALL_CONDITIONAL:
+                self.last_call_conditional = e
+            elif e.instr == InstructionType.RET_CONDITIONAL:
+                self.last_ret_conditional = e
+            else:
+                self.out_queue.put(e)
+
+        # return unprocessed data, it should be concatenated with the next batch
+        return data

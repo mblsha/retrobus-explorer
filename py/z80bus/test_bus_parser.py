@@ -1,4 +1,4 @@
-from .bus_parser import RawDataParser, Event, Type, IOPort
+from .bus_parser import BusParser, Event, Type, IOPort
 from . import bus_parser
 
 from typing import List
@@ -6,20 +6,20 @@ import struct
 
 
 def parse(b: bytes) -> Event:
-    events, errors = RawDataParser().parse(b)
+    events, errors = BusParser().parse(b)
     assert not errors
     assert len(events) == 1
     return events[0]
 
 
 def not_parse(b: bytes) -> Event:
-    events, errors = RawDataParser().parse(b)
+    events, errors = BusParser().parse(b)
     assert len(events) == 0
     assert len(errors) > 0
 
 
 def parsel(b: bytes) -> List[Event]:
-    events, errors = RawDataParser().parse(b)
+    events, errors = BusParser().parse(b)
     assert not errors
     assert len(events) > 1
     return events
