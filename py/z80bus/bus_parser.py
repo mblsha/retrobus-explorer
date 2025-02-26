@@ -108,6 +108,10 @@ STACK_SIZE = 0x400
 
 
 class BusParser:
+    def __init__(self):
+        self.rom_bank = None
+        self.pc = None
+
     def is_stack_addr(self, addr):
         return addr < ROM_ADDR_START and addr > ROM_ADDR_START - STACK_SIZE
 
@@ -121,9 +125,6 @@ class BusParser:
         return addr + BANK_SIZE * (self.rom_bank - 1), self.rom_bank
 
     def parse(self, data):
-        self.rom_bank = None
-
-        pc = None
         errors = []
         r = []
 
@@ -159,8 +160,8 @@ class BusParser:
                 last_ret_conditional = None
                 prefix_opcode = None
 
-                pc, bank = self.full_addr(addr)
-                addr = pc
+                self.pc, bank = self.full_addr(addr)
+                addr = self.pc
                 if val in OPCODE_MULTI_PREFIX:
                     instr = InstructionType.MULTI_PREFIX
                 elif val in OPCODE_CALL_PREFIX:
@@ -207,7 +208,7 @@ class BusParser:
                     type=type,
                     val=val,
                     addr=addr,
-                    pc=pc,
+                    pc=self.pc,
                     port=port,
                     instr=instr,
                     bank=bank,
@@ -313,7 +314,7 @@ class PipelineBusParser:
                 elif port == IOPort.ROM_EX_BANK:
                     self.rom_bank = val & 0x0F
             except:
-                self.errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
+                self.errors.append(f"Invalid port at {hex(addr)}")
 
         return Event(
             type=type,

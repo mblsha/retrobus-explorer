@@ -24,8 +24,8 @@ def pipeline_parse(input: bytes):
 
 
 def normal_parse(b: bytes):
-    return pipeline_parse(b)
-    # return BusParser().parse(b)
+    # return pipeline_parse(b)
+    return BusParser().parse(b)
 
 
 def parse(b: bytes) -> Event:

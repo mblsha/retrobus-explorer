@@ -64,6 +64,21 @@ def _():
     return (ExitStack,)
 
 
+@app.cell
+def _():
+    import threading
+    import queue
+    return queue, threading
+
+
+@app.cell
+def _():
+    from z80bus import bus_parser
+
+    IOPort = bus_parser.IOPort
+    return IOPort, bus_parser
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""# Collect Data from SHARP PC-G850 System Bus""")
@@ -77,8 +92,16 @@ def _(mo):
     return (collect_data_button,)
 
 
-@app.cell(hide_code=True)
-def _(Ft600Device, collect_data_button, mo):
+@app.cell
+def _(
+    Ft600Device,
+    bus_parser,
+    collect_data_button,
+    mo,
+    queue,
+    queueu,
+    threading,
+):
     mo.stop(not collect_data_button.value)
 
     import datetime
@@ -113,7 +136,7 @@ def _(Ft600Device, collect_data_button, mo):
                 self.status_update_bytes += len(data)
 
 
-    def GetBusData(num_seconds_before_timeout=5):
+    def GetBusData(q, num_seconds_before_timeout=5):
         # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
         # which results in some events being lost.
         read_size = 2**15
@@ -123,7 +146,7 @@ def _(Ft600Device, collect_data_button, mo):
             for i in range(100):
                 bytes = d.read(read_size)
 
-            data = []
+            # data = []
 
             with mo.status.spinner(subtitle="Collecting data ...") as _spinner:
                 start = datetime.datetime.now()
@@ -145,26 +168,93 @@ def _(Ft600Device, collect_data_button, mo):
                             break
                         continue
                     start = now
-                    data.append(bytes)
+                    # data.append(bytes)
+                    q.put(bytes)
 
-            return data
+            q.put(None)
+            # return data
 
             # print(d.write(b'--'))
             # print(d.write(b'++'))
 
+    raw_queue = queue.Queue()
+    parsed_queue = queue.Queue()
+    errors_queue = queueu.Queue()
 
-    data_lines = GetBusData()
-    data_concat = b"".join(data_lines)
-    mo.md(f"Received {humanize.naturalsize(len(data_concat), binary=True)}, ({len(data_lines)} packets)")
+    def parse_data_thread(input, output, errors):
+        # buf = b""
+        # parser = bus_parser.PipelineBusParser(output)
+        parser = bus_parser.BusParser()
+
+        while True:
+            data = input.get()
+            if data is None:
+                break
+
+            # buf += data
+            # buf = parser.parse(buf)
+            events, errors = parser.parse(data)
+            for e in events:
+                output.put(e)
+            for e in errors:
+                errors.put(e)
+
+    threads = [
+        threading.Thread(target=parse_data_thread, args=(raw_queue, parsed_queue, errors_queue)),
+    ]
+
+    for t in threads:
+        t.start()
+
+    GetBusData(raw_queue)
+
+    for t in threads:
+        t.join()
+
+    # data_lines = GetBusData()
+    # data_concat = b"".join(data_lines)
+    # mo.md(f"Received {humanize.naturalsize(len(data_concat), binary=True)}, ({len(data_lines)} packets)")
     return (
         GetBusData,
         TransferRateCalculator,
-        data_concat,
-        data_lines,
         datetime,
+        errors_queue,
         humanize,
+        parse_data_thread,
+        parsed_queue,
+        raw_queue,
+        t,
+        threads,
         time,
     )
+
+
+@app.cell
+def _(parsed_queue, raw_queue):
+    raw_queue.qsize(), parsed_queue.qsize()
+    return
+
+
+@app.cell
+def _(parsed_queue):
+    parsed = []
+    while not parsed_queue.empty():
+        parsed.append(parsed_queue.get())
+    return (parsed,)
+
+
+@app.cell
+def _(pandas, parsed):
+    df = pandas.DataFrame(parsed)
+    return (df,)
+
+
+@app.cell
+def _(df, parsed):
+    # df['port']
+    parsed[0:100]
+    df
+    return
 
 
 @app.cell
@@ -195,199 +285,6 @@ def _():
 
 
 @app.cell
-def _():
-    # for some opcodes the processor will set M1 low twice, if unhandled we can misclassify the second M1 as CALL/RET
-    OPCODE_MULTI_PREFIX = set([0xCB, 0xDD, 0xED, 0xFD])
-
-    # https://clrhome.org/table/#call
-    OPCODE_CALL_PREFIX = set([0xCD])
-    OPCODE_CONDITIONAL_CALL_PREFIX = set([0xC4, 0xCC, 0xD4, 0xDC, 0xE4, 0xEC, 0xF4, 0xFC])
-    # https://clrhome.org/table/#ret
-    OPCODE_RET_PREFIX = set([0xC9])
-    OPCODE_CONDITIONAL_RET_PREFIX = set([0xC0, 0xC8, 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8])
-    return (
-        OPCODE_CALL_PREFIX,
-        OPCODE_CONDITIONAL_CALL_PREFIX,
-        OPCODE_CONDITIONAL_RET_PREFIX,
-        OPCODE_MULTI_PREFIX,
-        OPCODE_RET_PREFIX,
-    )
-
-
-@app.cell
-def _(
-    Enum,
-    IOPort,
-    OPCODE_CALL_PREFIX,
-    OPCODE_CONDITIONAL_CALL_PREFIX,
-    OPCODE_CONDITIONAL_RET_PREFIX,
-    OPCODE_MULTI_PREFIX,
-    OPCODE_RET_PREFIX,
-    Optional,
-    data_concat,
-    dataclass,
-    struct,
-):
-    class Type(Enum):
-        FETCH = "M" # M1: Instruction Fetch
-        READ  = "R" # Memory Read
-        WRITE = "W" # Memory Write
-        IN_PORT  = "r" # IO Read
-        OUT_PORT = "w" # IO Write
-
-        # synthetic types not transmitted by the device
-        READ_STACK = "S" # Read from stack
-        WRITE_STACK = "s" # Write to stack
-
-    @dataclass
-    class Event:
-        type: Type
-        val:  int # uint8
-        addr: Optional[int] # uint16
-        bank: Optional[int]
-        pc: int # uint32
-        port: Optional[IOPort]
-        instr: Optional[InstructionType]
-
-    class InstructionType(Enum):
-        CALL = 1
-        CALL_CONDITIONAL = 2
-        RET = 3
-        RET_CONDITIONAL = 4
-        MULTI_PREFIX = 5
-
-    class RawDataParser:
-        ROM_ADDR_START = 0x8000
-        BANK_ADDR_START = 0xC000
-        BANK_SIZE = 0x4000
-        # not sure how big the stack is, this area is also used for variable storage
-        STACK_SIZE = 0x400
-
-        def is_stack_addr(self, addr):
-            return addr < self.ROM_ADDR_START and addr > self.ROM_ADDR_START - self.STACK_SIZE
-
-        def full_addr(self, addr):
-            # bank 1 is at BANK_ADDR_START, bank 2 is at BANK_ADDR_START + 0x4000
-            if addr < self.BANK_ADDR_START:
-                if addr >= self.ROM_ADDR_START:
-                    return addr, 0
-                return addr, None
-
-            return addr + self.BANK_SIZE * (self.rom_bank - 1), self.rom_bank
-
-        def parse(self, data):
-            self.rom_bank = None
-
-            pc = None
-            errors = []
-            r = []
-
-            # indexes
-            last_call_conditional = None
-            last_ret_conditional = None
-            prefix_opcode = None
-
-            offset = 0
-            while offset < len(data):
-                try:
-                    type = Type(chr(data[offset]))
-                except ValueError:
-                    errors.append(f"Invalid type at offset {offset}: {data[offset]}")
-                    offset += 1
-                    # raise ValueError(f"Invalid type at index {index}: {i}")
-                    continue
-
-                val  = struct.unpack("B", data[offset+1:offset+2])[0]
-                addr = struct.unpack("<H", data[offset+2:offset+4])[0]
-                offset += 4
-
-                instr = None
-                port = None
-                bank = None
-
-                # handle second byte of the instruction when M1 is low twice in a row
-                if prefix_opcode is not None and type == Type.FETCH:
-                    type = Type.READ
-
-                if type == Type.FETCH:
-                    last_call_conditional = None
-                    last_ret_conditional = None
-                    prefix_opcode = None
-
-                    pc, bank = self.full_addr(addr)
-                    addr = pc
-                    if val in OPCODE_MULTI_PREFIX:
-                        instr = InstructionType.MULTI_PREFIX
-                    elif val in OPCODE_CALL_PREFIX:
-                        instr = InstructionType.CALL
-                    elif val in OPCODE_CONDITIONAL_CALL_PREFIX:
-                        instr = InstructionType.CALL_CONDITIONAL
-                    elif val in OPCODE_RET_PREFIX:
-                        instr = InstructionType.RET
-                    elif val in OPCODE_CONDITIONAL_RET_PREFIX:
-                        instr = InstructionType.RET_CONDITIONAL
-                elif type in [Type.READ, Type.WRITE]:
-                    prefix_opcode = None
-
-                    addr, bank = self.full_addr(addr)
-
-                    # we don't have visibility of the current flag status, so in order to determine whether
-                    # a conditional CALL/RET did actually CALL/RET we need to look whether the stack was written/read
-                    if self.is_stack_addr(addr):
-                        if type == Type.READ:
-                            type = Type.READ_STACK
-                            if last_ret_conditional is not None:
-                                r[last_ret_conditional].instr = InstructionType.RET
-                        else:
-                            type = Type.WRITE_STACK
-                            if last_call_conditional is not None:
-                                r[last_call_conditional].instr = InstructionType.CALL
-
-                elif type in [Type.IN_PORT, Type.OUT_PORT]:
-                    prefix_opcode = None
-
-                    addr &= 0xFF
-                    try:
-                        port = IOPort(addr)
-
-                        if port == IOPort.ROM_BANK:
-                            self.rom_bank = val
-                        elif port == IOPort.ROM_EX_BANK:
-                            self.rom_bank = val & 0x0F
-                    except:
-                        errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
-
-                r.append(Event(type=type, val=val, addr=addr, pc=pc, port=port, instr=instr, bank=bank))
-                last_index = len(r) - 1
-                if instr == InstructionType.MULTI_PREFIX:
-                    prefix_opcode = last_index
-                elif instr == InstructionType.CALL_CONDITIONAL:
-                    last_call_conditional = last_index
-                elif instr == InstructionType.RET_CONDITIONAL:
-                    last_ret_conditional = last_index
-            return r, errors
-
-    def parse_binary_trace(filename):
-        with open(filename, 'rb') as f:
-            data = f.read()
-            parsed, errors = RawDataParser().parse(data)
-            return parsed
-
-    # parsed = parse_binary_trace('on-off_m1-pipeline-6.bin')
-    parsed, errors = RawDataParser().parse(data_concat)
-    len(parsed), errors
-    return (
-        Event,
-        InstructionType,
-        RawDataParser,
-        Type,
-        errors,
-        parse_binary_trace,
-        parsed,
-    )
-
-
-@app.cell
 def _(parse_binary_trace):
     def find_differences():
         p4 = parse_binary_trace('on-off_m1-pipeline-4.bin')
@@ -411,12 +308,6 @@ def _(parse_binary_trace):
                     print(f'{i}')
                     print('\n'.join(diff))
     return (find_differences,)
-
-
-@app.cell
-def _(pandas, parsed):
-    df = pandas.DataFrame(parsed)
-    return (df,)
 
 
 @app.cell
@@ -801,60 +692,6 @@ def _():
     return DebugAnnotation, PerfettoTraceBuilder, TrackEvent, perfetto
 
 
-@app.cell
-def _(Enum):
-    # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
-    class IOPort(Enum):
-        LCD_COMMAND = 0x40
-        LCD_OUT = 0x41
-
-        ROM_EX_BANK = 0x19
-        RAM_BANK = 0x1b
-        ROM_BANK = 0x69
-
-        # FIXME: what does it do??
-        SHIFT_KEY_INPUT = 0x13 # Read-only
-
-        KEY_INPUT = 0x10 # Read-only
-        SET_KEY_STROBE_LO = 0x11 # Write-only
-        SET_KEY_STROBE_HI = 0x12 # Write-only
-
-        TIMER = 0x14
-        XIN_ENABLED = 0x15
-        INTERRUPT_FLAGS = 0x16
-        INTERRUPT_MASK = 0x17
-
-        ON_CONTROL_BY_CD_SIGNAL = 0x64
-        WAIT_AFTER_M1 = 0x65
-        WAIT_AFTER_IO = 0x66
-        CPU_CLOCK_MODE = 0x67
-
-        SET_1S_TIMER_PERIOD = 0x68
-
-        GPIO_IO_OUTPUT = 0x18 # 11-pin connector
-        GET_GPIO_IO = 0x1f
-        GPIO_IO_MODE = 0x60
-        SET_PIO_DIRECTION = 0x61
-        PIO_REGISTER = 0x62
-
-        # According to https://ver0.sakura.ne.jp/doc/pcg850vuart.html the PC-G850V has different port
-        # definitions compared to the PC-G850/PC-G850S.
-        UART_FLOW_REGISTER = 0x63
-        UART_INPUT_SELECTION = 0x6b
-        SET_UART_MODE = 0x6c
-        SET_UART_COMMAND = 0x6d
-        GET_UART_STATUS = 0x6e
-        UART_DATA = 0x6f
-
-        SET_BOOTROM_OFF = 0x1a
-        RAM_CE_MODE = 0x1b # 0: CERAM1 (internal RAM), 1: CERAM2 (external RAM on system bus)
-        SET_IORESET = 0x1c
-
-        UNKNOWN_1D = 0x1d
-        UNKNOWN_1E = 0x1e # battery check mode?
-    return (IOPort,)
-
-
 @app.cell(hide_code=True)
 def _():
     def read_rom_banks():
@@ -1071,26 +908,8 @@ def _(alt, df, df_range, mo, pandas):
 
 
 @app.cell
-def _():
-    from z80dis import z80
-    z80.disasm(b'\xed\xb0', 10)
-    return (z80,)
-
-
-@app.cell
 def _(df, df_valh):
     df_valh(df)
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _(df):
-    df
     return
 
 
@@ -1193,6 +1012,30 @@ def _(IOPort, df, get_parsed_lcd_commands_df, parse_lcd_commands):
 
 
 @app.cell
+def _(IOPort, df):
+    df[
+        df["port"].isin(
+            [
+                IOPort.LCD_COMMAND,
+                IOPort.LCD_OUT,
+                IOPort.KEY_INPUT,
+                IOPort.SHIFT_KEY_INPUT,
+                IOPort.SET_KEY_STROBE_LO,
+                IOPort.SET_KEY_STROBE_HI,
+            ]
+        )
+    ].copy().reset_index(drop=True)
+    return
+
+
+@app.cell
+def _(IOPort, df):
+    df['port'].unique()
+    df[df['port'].isin([IOPort.LCD_COMMAND])]
+    return
+
+
+@app.cell
 def _(IOPort, df, mo):
     def parse_key_events(df):
         import math
@@ -1236,8 +1079,8 @@ def _(IOPort, df, mo):
 
 
 @app.cell
-def _():
-    # parsed_lcd_commands_filtered
+def _(parsed_lcd_commands_filtered):
+    parsed_lcd_commands_filtered
     return
 
 
@@ -1312,6 +1155,12 @@ def _(SED1560):
                 case _:
                     raise ValueError(f"Unhandled command: {cmd}")
     return (SED1560Intepreter,)
+
+
+@app.cell
+def _():
+    # parsed_lcd_commands_df
+    return
 
 
 @app.cell(hide_code=True)
