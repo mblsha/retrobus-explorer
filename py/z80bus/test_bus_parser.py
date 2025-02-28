@@ -24,16 +24,23 @@ def pipeline_parse(input: bytes):
         left_buf = p.parse(buf)
         buf = left_buf
 
+    p.flush()
+
     errors = p.errors
     if len(buf) > 0:
-        errors.append(f"leftover: {buf}")
+        errors.append(f"Trailing data")
 
     return list(q.queue), errors
 
 
 def normal_parse(b: bytes):
-    # return pipeline_parse(b)
-    return BusParser().parse(b)
+    normal_events, normal_errors = BusParser().parse(b)
+    pipe_events, pipe_errors = pipeline_parse(b)
+    assert len(normal_events) == len(pipe_events)
+    assert normal_events == pipe_events
+    assert len(normal_errors) == len(pipe_errors)
+    assert normal_errors == pipe_errors
+    return normal_events, normal_errors
 
 
 def parse(b: bytes) -> Event:
@@ -413,6 +420,10 @@ def test_conditional_ret() -> None:
 
 
 def test_call_unconditional():
+    # this test is relatively complicated as the CALL instruction needs
+    # three instructions to fetch, and only then it writes to the stack
+    # before jumping to the target address.
+
     # cc5b8a CALL Z,0x8A5B
     data = (
         fetch(0xCC, 0x895F)
@@ -424,9 +435,53 @@ def test_call_unconditional():
     # 3e00 LD A,0x00
     data += fetch(0x3E, 0x8A5B) + read(0x00, 0x8A5C)
 
-    # FIXME: needs to be decoded as an unconditional call
-    # r = parsel(data)
-    # for e in r:
-    #     print(e.stubname())
-    #     print(e)
-    # assert False
+    assert parsel(data) == [
+        Event(
+            type=Type.FETCH,
+            val=0xCC,
+            addr=0x895F,
+            pc=0x895F,
+            bank=0,
+            instr=bus_parser.InstructionType.CALL,
+        ),
+        Event(
+            type=Type.READ,
+            val=0x5B,
+            addr=0x8960,
+            bank=0,
+            pc=0x895F,
+        ),
+        Event(
+            type=Type.READ,
+            val=0x8A,
+            addr=0x8961,
+            bank=0,
+            pc=0x895F,
+        ),
+        Event(
+            type=Type.WRITE_STACK,
+            val=0x89,
+            addr=0x7FEF,
+            pc=0x895F,
+        ),
+        Event(
+            type=Type.WRITE_STACK,
+            val=0x62,
+            addr=0x7FEE,
+            pc=0x895F,
+        ),
+        Event(
+            type=Type.FETCH,
+            val=0x3E,
+            addr=0x8A5B,
+            bank=0,
+            pc=0x8A5B,
+        ),
+        Event(
+            type=Type.READ,
+            val=0x00,
+            addr=0x8A5C,
+            bank=0,
+            pc=0x8A5B,
+        ),
+    ]

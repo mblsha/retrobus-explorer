@@ -284,7 +284,7 @@ class BusParser:
                 last_ret_conditional = last_index
 
         if offset != len(data):
-            errors.append(f"Trailing data at offset {offset}")
+            errors.append(f"Trailing data")
         return r, errors
 
 
@@ -296,10 +296,22 @@ class PipelineBusParser:
         self.pc = None
         self.errors = []
 
+        # buffer for the current instruction
+        self.buf = []
+
         # these are events that are not yet complete
         self.last_call_conditional = None
         self.last_ret_conditional = None
         self.prefix_opcode = None
+
+    def flush(self):
+        for e in self.buf:
+            self.out_queue.put(e)
+        self.buf = []
+
+        self.prefix_opcode = None
+        self.last_call_conditional = None
+        self.last_ret_conditional = None
 
     def is_stack_addr(self, addr):
         return addr < ROM_ADDR_START and addr > ROM_ADDR_START - STACK_SIZE
@@ -312,21 +324,6 @@ class PipelineBusParser:
             return addr, None
 
         return addr + BANK_SIZE * (self.rom_bank - 1), self.rom_bank
-
-    def flush_prefix_opcode(self):
-        if self.prefix_opcode is not None:
-            self.out_queue.put(self.prefix_opcode)
-            self.prefix_opcode = None
-
-    def flush_last_call_conditional(self):
-        if self.last_call_conditional is not None:
-            self.out_queue.put(self.last_call_conditional)
-            self.last_call_conditional = None
-
-    def flush_last_ret_conditional(self):
-        if self.last_ret_conditional is not None:
-            self.out_queue.put(self.last_ret_conditional)
-            self.last_ret_conditional = None
 
     def event(self, type, val, addr):
         instr = None
@@ -408,10 +405,10 @@ class PipelineBusParser:
 
             e = self.event(type, val, addr)
 
-            # FIXME: there might be several reads before STACK read
-            self.flush_last_call_conditional()
-            self.flush_last_ret_conditional()
-            self.flush_prefix_opcode()
+            if e.type == Type.FETCH:
+                self.flush()
+
+            self.buf.append(e)
 
             if e.instr == InstructionType.MULTI_PREFIX:
                 self.prefix_opcode = e
@@ -419,8 +416,6 @@ class PipelineBusParser:
                 self.last_call_conditional = e
             elif e.instr == InstructionType.RET_CONDITIONAL:
                 self.last_ret_conditional = e
-            else:
-                self.out_queue.put(e)
 
         # return unprocessed data, it should be concatenated with the next batch
         return data
