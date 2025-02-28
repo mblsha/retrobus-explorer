@@ -1,4 +1,12 @@
-from .bus_parser import BusParser, PipelineBusParser, Event, Type, IOPort
+from .bus_parser import (
+    SimpleBusParser,
+    BusParser,
+    PipelineBusParser,
+    Event,
+    ErrorType,
+    Type,
+    IOPort,
+)
 from . import bus_parser
 
 from typing import List
@@ -74,6 +82,29 @@ def out_port(val: int, port: IOPort) -> bytes:
 
 def fetch(val: int, addr: int) -> bytes:
     return b"M" + struct.pack("B", val) + struct.pack("<H", addr)
+
+
+def error(type: ErrorType, value: int) -> bytes:
+    assert type == ErrorType.BUFFER_FULL
+    return (
+        b"E"
+        + struct.pack("B", value & 0xFF)
+        + struct.pack("B", (value >> 8) & 0xFF)
+        + struct.pack("B", (value >> 16) & 0xFF)
+    )
+
+
+def test_error() -> None:
+    assert parse(b"E\xfer\x00") == Event(
+        type=Type.ERROR,
+        val=0x72FE,
+        addr=0,
+    )
+    assert parse(error(ErrorType.BUFFER_FULL, 0x72FE)) == Event(
+        type=Type.ERROR,
+        val=0x72FE,
+        addr=0,
+    )
 
 
 def test_fetch() -> None:
@@ -379,3 +410,23 @@ def test_conditional_ret() -> None:
             pc=0x1000,
         ),
     ]
+
+
+def test_call_unconditional():
+    # cc5b8a CALL Z,0x8A5B
+    data = (
+        fetch(0xCC, 0x895F)
+        + read(0x5B, 0x8960)
+        + read(0x8A, 0x8961)
+        + write(0x89, 0x7FEF)
+        + write(0x62, 0x7FEE)
+    )
+    # 3e00 LD A,0x00
+    data += fetch(0x3E, 0x8A5B) + read(0x00, 0x8A5C)
+
+    # FIXME: needs to be decoded as an unconditional call
+    # r = parsel(data)
+    # for e in r:
+    #     print(e.stubname())
+    #     print(e)
+    # assert False

@@ -60,12 +60,19 @@ class IOPort(Enum):
     UNKNOWN_1E = 0x1E  # battery check mode?
 
 
+class ErrorType(Enum):
+    BUFFER_FULL = 0
+
+
 class Type(Enum):
     FETCH = "M"  # M1: Instruction Fetch
     READ = "R"  # Memory Read
     WRITE = "W"  # Memory Write
     IN_PORT = "r"  # IO Read
     OUT_PORT = "w"  # IO Write
+
+    # skipped data
+    ERROR = "E"
 
     # synthetic types not transmitted by the device
     READ_STACK = "S"  # Read from stack
@@ -90,6 +97,26 @@ class Event:
     port: Optional[IOPort] = None
     instr: Optional[InstructionType] = None
 
+    # convert to string, printing values in hex
+    def stubname(self):
+        # print the creation function for unittest
+        if self.type == Type.FETCH:
+            return f"fetch(0x{self.val:02X}, 0x{self.addr:04X})"
+        elif self.type == Type.READ:
+            return f"read(0x{self.val:02X}, 0x{self.addr:04X})"
+        elif self.type == Type.WRITE:
+            return f"write(0x{self.val:02X}, 0x{self.addr:04X})"
+        elif self.type == Type.IN_PORT:
+            return f"in_port(0x{self.val:02X}, IOPort.{self.port.name})"
+        elif self.type == Type.OUT_PORT:
+            return f"out_port(0x{self.val:02X}, IOPort.{self.port.name})"
+        elif self.type == Type.READ_STACK:
+            return f"read_stack(0x{self.val:02X}, 0x{self.addr:04X})"
+        elif self.type == Type.WRITE_STACK:
+            return f"write_stack(0x{self.val:02X}, 0x{self.addr:04X})"
+        else:
+            return f"{self.type.value} v:{self.val:02X} a:{self.addr:04X}"
+
 
 # for some opcodes the processor will set M1 low twice, if unhandled we can misclassify the second M1 as CALL/RET
 OPCODE_MULTI_PREFIX = set([0xCB, 0xDD, 0xED, 0xFD])
@@ -105,6 +132,34 @@ BANK_ADDR_START = 0xC000
 BANK_SIZE = 0x4000
 # not sure how big the stack is, this area is also used for variable storage
 STACK_SIZE = 0x400
+
+
+# like BusParser, but only parses type, val, addr
+class SimpleBusParser:
+    def parse(self, data):
+        r = []
+        offset = 0
+        while offset < len(data) and len(data) - offset >= 4:
+            try:
+                type = Type(chr(data[offset]))
+            except ValueError:
+                offset += 1
+                continue
+
+            val = struct.unpack("B", data[offset + 1 : offset + 2])[0]
+            addr = struct.unpack("<H", data[offset + 2 : offset + 4])[0]
+
+            if type == Type.ERROR:
+                addr = 0
+                b1 = data[offset+1]  # LSB of fifo_full_counter.q
+                b2 = data[offset+2]  # Middle byte
+                b3 = data[offset+3]  # MSB of fifo_full_counter.q
+                val = b1 | (b2 << 8) | (b3 << 16)
+
+            offset += 4
+
+            r.append(Event(type=type, val=val, addr=addr))
+        return r
 
 
 class BusParser:
@@ -145,6 +200,12 @@ class BusParser:
 
             val = struct.unpack("B", data[offset + 1 : offset + 2])[0]
             addr = struct.unpack("<H", data[offset + 2 : offset + 4])[0]
+            if type == Type.ERROR:
+                addr = 0
+                b1 = data[offset+1]  # LSB of fifo_full_counter.q
+                b2 = data[offset+2]  # Middle byte
+                b3 = data[offset+3]  # MSB of fifo_full_counter.q
+                val = b1 | (b2 << 8) | (b3 << 16)
             offset += 4
 
             instr = None
@@ -337,10 +398,17 @@ class PipelineBusParser:
 
             val = struct.unpack("B", data[1:2])[0]
             addr = struct.unpack("<H", data[2:4])[0]
+            if type == Type.ERROR:
+                addr = 0
+                b1 = data[1]  # LSB of fifo_full_counter.q
+                b2 = data[2]  # Middle byte
+                b3 = data[3]  # MSB of fifo_full_counter.q
+                val = b1 | (b2 << 8) | (b3 << 16)
             data = data[4:]
 
             e = self.event(type, val, addr)
 
+            # FIXME: there might be several reads before STACK read
             self.flush_last_call_conditional()
             self.flush_last_ret_conditional()
             self.flush_prefix_opcode()
