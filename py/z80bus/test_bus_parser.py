@@ -15,8 +15,9 @@ import queue
 
 
 def pipeline_parse(input: bytes):
-    q = queue.Queue()
-    p = PipelineBusParser(q)
+    errors_queue = queue.Queue()
+    out_ports_queue = queue.Queue()
+    p = PipelineBusParser(errors_queue, out_ports_queue)
 
     buf = b""
     for b in input:
@@ -26,11 +27,13 @@ def pipeline_parse(input: bytes):
 
     p.flush()
 
-    errors = p.errors
+    errors = []
+    while not errors_queue.empty():
+        errors.append(errors_queue.get())
     if len(buf) > 0:
         errors.append(f"Trailing data")
 
-    return list(q.queue), errors
+    return p.all_events, errors
 
 
 def normal_parse(b: bytes):

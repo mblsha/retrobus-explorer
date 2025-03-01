@@ -4,7 +4,10 @@ from enum import Enum
 from dataclasses import dataclass
 from PIL import Image, ImageDraw
 import multiprocessing as mp
+import threading
 import queue
+import datetime
+import copy
 
 from typing import List
 import pandas
@@ -292,39 +295,71 @@ class SED1560Interpreter:
         return image
 
 
-def interpret_lcd_thread(input, output):
+def interpret_lcd_thread(input_queue, display_queue, status_queue):
     last_output = None
     display = SED1560Interpreter()
+
+    status_num_evals = 0
+    status_num_empty_queue = 0
+    status_num_draws = 0
+    status_num_display_not_ready = 0
 
     while True:
         data = None
         try:
-            data = input.get(False, 1)
+            data = input_queue.get(False, 1)
         except queue.Empty:
+            status_num_empty_queue += 1
             continue
 
+        # print(f'LCD: got {data}')
         if data is None:
             break
 
-        for e in SED1560Parser.parse_bus_commands([data]):
-            display.eval(e)
+        try:
+            for e in SED1560Parser.parse_bus_commands([data]):
+                # print(e)
+                status_num_evals += 1
+                display.eval(e)
+        except Exception as e:
+            print(e)
+            continue
 
+        # print(f'LCD: {display.col} {display.page}')
+        # print(f'last_output is None: {last_output is None} or last_output != display.vram: {last_output != display.vram}')
         if last_output is None or last_output != display.vram:
-            if output.empty():
-                print('LCD: putting')
-                last_output = display.vram.copy()
-                output.put(display.vram_image())
+            if display_queue.empty():
+                print("LCD: putting")
+                status_num_draws += 1
+                last_output = copy.deepcopy(display.vram)
+                display_queue.put_nowait(display.vram_image())
+            else:
+                status_num_display_not_ready += 1
 
-    print('interpret_lcd_thread done')
+    display_queue.put(None)
+    status_queue.put(
+        {
+            "num_evals": status_num_evals,
+            "num_draws": status_num_draws,
+            "num_display_not_ready": status_num_display_not_ready,
+            "num_empty_queue": status_num_empty_queue,
+        }
+    )
+    print("interpret_lcd_thread done")
 
 
 class DrawLCDContext:
-    def __init__(self, input_queue, output_queue):
+    def __init__(self, input_queue, display_queue):
         self.input_queue = input_queue
-        self.output_queue = output_queue
+        self.display_queue = display_queue
+        self.status_queue = mp.Queue()
         self.process = mp.Process(
-            target=interpret_lcd_thread, args=(input_queue, output_queue)
+            target=interpret_lcd_thread,
+            args=(input_queue, display_queue, self.status_queue),
         )
+        # self.process = threading.Thread(
+        #     target=interpret_lcd_thread, args=(input_queue, display_queue)
+        # )
 
     def __enter__(self):
         self.process.start()
@@ -332,6 +367,9 @@ class DrawLCDContext:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.input_queue.put(None)
+        print(f"DrawLCDContext: exit1 {datetime.datetime.now()}")
         self.process.join(1)
+        print(f"DrawLCDContext: exit2 {datetime.datetime.now()}")
 
-        self.output_queue.put(None)
+        print(self.status_queue.get())
+        self.display_queue.put(None)

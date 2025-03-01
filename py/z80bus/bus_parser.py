@@ -3,6 +3,7 @@ from enum import Enum
 from dataclasses import dataclass
 import struct
 import multiprocessing as mp
+import threading
 import queue
 import time
 import datetime
@@ -291,7 +292,11 @@ class BusParser:
 
 class PipelineBusParser:
     def __init__(self, errors_queue, out_ports_queue):
+        self.status_num_errors = 0
+        self.status_num_errors_full_buffer = 0
         self.errors_queue = errors_queue
+        self.status_num_out_ports = 0
+        self.status_num_out_ports_full_buffer = 0
         self.out_ports_queue = out_ports_queue
 
         self.rom_bank = None
@@ -311,11 +316,20 @@ class PipelineBusParser:
         for e in self.buf:
             self.all_events.append(e)
             if e.type in [Type.IN_PORT, Type.OUT_PORT]:
-                self.out_ports_queue.put_nowait(e)
+                # print(f">> putting {e}\n")
+                if self.out_ports_queue.full():
+                    self.status_num_out_ports_full_buffer += 1
+                else:
+                    self.status_num_out_ports += 1
+                    self.out_ports_queue.put(e)
         self.buf = []
 
         for e in self.errors:
-            self.errors_queue.put_nowait(e)
+            if self.errors_queue.full():
+                self.status_num_errors_full_buffer += 1
+            else:
+                self.status_num_errors += 1
+                self.errors_queue.put(e)
         self.errors = []
 
         self.prefix_opcode = None
@@ -431,8 +445,13 @@ class PipelineBusParser:
         return data
 
 
-def parse_data_thread(input_queue, all_events_output, errors_output, ports_output):
+def parse_data_thread(
+    input_queue, all_events_output, errors_output, ports_output, status_queue
+):
     parser = PipelineBusParser(errors_queue=errors_output, out_ports_queue=ports_output)
+
+    status_num_input_data = 0
+    status_num_empty_queue = 0
 
     buf = b""
     while True:
@@ -440,11 +459,13 @@ def parse_data_thread(input_queue, all_events_output, errors_output, ports_outpu
         try:
             data = input_queue.get(False, 1)
         except queue.Empty:
+            status_num_empty_queue += 1
             continue
 
         if data is None:
             break
 
+        status_num_input_data += 1
         buf += data
         buf = parser.parse(buf)
 
@@ -452,6 +473,17 @@ def parse_data_thread(input_queue, all_events_output, errors_output, ports_outpu
     parser.flush()
 
     all_events_output.put(parser.all_events)
+    status_queue.put(
+        {
+            "len_all_events": len(parser.all_events),
+            "num_input_data": status_num_input_data,
+            "num_errors": parser.status_num_errors,
+            "num_out_ports": parser.status_num_out_ports,
+            "num_empty_queue": status_num_empty_queue,
+            "num_errors_full_buffer": parser.status_num_errors_full_buffer,
+            "num_out_ports_full_buffer": parser.status_num_out_ports_full_buffer,
+        }
+    )
 
 
 class ParseContext:
@@ -460,9 +492,20 @@ class ParseContext:
         self.all_events_output = all_events_output
         self.errors_output = errors_output
         self.ports_output = ports_output
+        self.status_queue = mp.Queue()
         self.process = mp.Process(
-            target=parse_data_thread, args=(input_queue, all_events_output, errors_output, ports_output)
+            target=parse_data_thread,
+            args=(
+                input_queue,
+                all_events_output,
+                errors_output,
+                ports_output,
+                self.status_queue,
+            ),
         )
+        # self.process = threading.Thread(
+        #     target=parse_data_thread, args=(input_queue, all_events_output, errors_output, ports_output)
+        # )
 
     def __enter__(self):
         self.process.start()
@@ -470,7 +513,10 @@ class ParseContext:
 
     def __exit__(self, type, value, traceback):
         self.input_queue.put(None)
+        print(f"ParseContext: exit1 {datetime.datetime.now()}")
         self.process.join(1)
+        print(f"ParseContext: exit2 {datetime.datetime.now()}")
+        print(self.status_queue.get())
 
         self.all_events_output.put(None)
         self.errors_output.put(None)
