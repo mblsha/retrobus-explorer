@@ -244,7 +244,7 @@ def test_set_rom_bank() -> None:
 
 # want two FETCH events to be transformed to FETCH+READ
 def test_multi_prefix() -> None:
-    assert parsel(fetch(0xCB, 0x1000) + fetch(0xCB, 0x1001)) == [
+    assert parsel(fetch(0xCB, 0x1000) + fetch(0xCB, 0x1001) + fetch(0xCB, 0x1002)) == [
         Event(
             type=Type.FETCH,
             val=0xCB,
@@ -257,6 +257,13 @@ def test_multi_prefix() -> None:
             val=0xCB,
             addr=0x1001,
             pc=0x1000,
+        ),
+        Event(
+            type=Type.FETCH,
+            val=0xCB,
+            addr=0x1002,
+            pc=0x1002,
+            instr=bus_parser.InstructionType.MULTI_PREFIX,
         ),
     ]
 

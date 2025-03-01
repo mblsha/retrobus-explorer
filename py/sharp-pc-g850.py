@@ -15,7 +15,20 @@ def _():
     import time
     import humanize
     import time
-    return alt, datetime, duckdb, humanize, mo, pandas, polars, time
+    import asyncio
+    import websockets
+    return (
+        alt,
+        asyncio,
+        datetime,
+        duckdb,
+        humanize,
+        mo,
+        pandas,
+        polars,
+        time,
+        websockets,
+    )
 
 
 @app.cell
@@ -110,18 +123,14 @@ def _(mo):
 
 
 @app.cell
-def _(
+async def _(
     Ft600Device,
-    Queue,
-    bus_parser,
     collect_data_button,
     datetime,
     humanize,
     mo,
-    mp,
-    parser_worker,
-    ray,
-    sed1560,
+    time,
+    websockets,
 ):
     mo.stop(not collect_data_button.value)
 
@@ -152,123 +161,55 @@ def _(
                 self.status_update_bytes += len(data)
 
 
-    def GetBusData(queues, display_queue, num_seconds_before_timeout=3):
+    # def GetBusData(queues, display_queue, num_seconds_before_timeout=3):
+    async def GetBusData(num_seconds_before_timeout=3):
         # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
         # which results in some events being lost.
         read_size = 2**15
 
-        with Ft600Device() as d:
-            # clear input buffer
-            for i in range(100):
-                bytes = d.read(read_size)
-
-            status_num_queue_full_buffer = 0
-
-            with mo.status.spinner(subtitle="Collecting data ...") as _spinner:
-                start = datetime.datetime.now()
-                rate_calculator = TransferRateCalculator(
-                    lambda rate: _spinner.update(
-                        subtitle=f"Collecting data ... {rate}"
-                    )
-                )
-
-                while True:
-                    # time.sleep(0.01)
+        uri = 'ws://localhost:8000/ws'
+        async with websockets.connect(uri) as websocket:
+            with Ft600Device() as d:
+                # clear input buffer
+                for i in range(100):
                     bytes = d.read(read_size)
-                    rate_calculator.update(bytes)
 
-                    if not display_queue.empty():
-                        d = display_queue.get()
-                        print(f"Display: {d}")
+                status_num_packets_sent = 0
+                status_num_bytes_sent = 0
+        
+                with mo.status.spinner(subtitle="Collecting data ...") as _spinner:
+                    start = datetime.datetime.now()
+                    rate_calculator = TransferRateCalculator(
+                        lambda rate: _spinner.update(
+                            subtitle=f"Collecting data ... {rate}"
+                        )
+                    )
+        
+                    while True:
+                        bytes = d.read(read_size)
+                        rate_calculator.update(bytes)
+        
+                        now = datetime.datetime.now()
+                        if bytes is None:
+                            if (
+                                now - start
+                            ).total_seconds() > num_seconds_before_timeout:
+                                break
+                            continue
+                        start = now
 
-                    now = datetime.datetime.now()
-                    if bytes is None:
-                        if (
-                            now - start
-                        ).total_seconds() > num_seconds_before_timeout:
-                            break
-                        continue
-                    start = now
+                        await websocket.send(bytes)
+                        status_num_packets_sent += 1
+                        status_num_bytes_sent += len(bytes)
 
-                    # data.append(bytes)
-                    for q in queues:
-                        # if q.full():
-                        #     status_num_queue_full_buffer += 1
-                        # else:
-                        q.put(bytes)
+                    time.sleep(0.1)
+                    return {
+                        "status_num_packets_sent": status_num_packets_sent,
+                        "status_num_bytes_sent": status_num_bytes_sent,
+                    }
 
-            for q in queues:
-                print(f"put None {datetime.datetime.now()}")
-                q.put(None)
-            return {'num_queue_full_buffer': status_num_queue_full_buffer}
-
-
-    def get_data_queue():
-        raw_queue = mp.SimpleQueue()
-        all_events_queue = mp.SimpleQueue()
-        errors_queue = mp.SimpleQueue()
-        ports_queue = mp.SimpleQueue()
-        display_queue = mp.SimpleQueue()
-
-        parsed = []
-        errors = []
-
-        with sed1560.DrawLCDContext(ports_queue, display_queue):
-            with bus_parser.ParseContext(raw_queue, all_events_queue, errors_queue, ports_queue):
-                status = GetBusData([raw_queue], display_queue)
-                print(status)
-
-        while not all_events_queue.empty():
-            data = all_events_queue.get()
-            if data is not None:
-                print(f'<<< all_events_queue: {len(data)}')
-                parsed = data
-
-        while not errors_queue.empty():
-            data = errors_queue.get()
-            if data is None:
-                break
-            errors.append(data)
-
-        return parsed, errors
-
-
-    def get_data_ray():
-        raw_queue = Queue()
-        all_events_output = Queue()
-        errors_output = Queue()
-        ports_output = Queue()
-        status_queue = Queue()
-        display_queue = Queue()
-
-        parser_future = parser_worker.remote(raw_queue, all_events_output, errors_output, ports_output, status_queue)
-
-        status = GetBusData([raw_queue], display_queue)
-        print(status)
-        print(f'now: {datetime.datetime.now()}')
-
-        parsed = ray.get(parser_future)
-        print(f'got ray: {datetime.datetime.now()}')
-        return parsed, []
-
-    def get_data_later():
-        raw_data_items = GetBusData([])
-        data_concat = b"".join(raw_data_items)
-        parsed, errors = bus_parser.BusParser().parse(data_concat)
-        return parsed, errors
-
-
-    parsed, errors = get_data_queue()
-    # parsed, errors = get_data_ray()
-    return (
-        GetBusData,
-        TransferRateCalculator,
-        errors,
-        get_data_later,
-        get_data_queue,
-        get_data_ray,
-        parsed,
-    )
+    await GetBusData()
+    return GetBusData, TransferRateCalculator
 
 
 @app.cell

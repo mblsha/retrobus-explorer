@@ -12,7 +12,7 @@ import copy
 from typing import List
 import pandas
 
-from .bus_parser import (
+from bus_parser import (
     Event,
     ErrorType,
     Type,

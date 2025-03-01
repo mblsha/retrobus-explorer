@@ -294,10 +294,8 @@ class BusParser:
 class PipelineBusParser:
     def __init__(self, errors_queue, out_ports_queue):
         self.status_num_errors = 0
-        self.status_num_errors_full_buffer = 0
         self.errors_queue = errors_queue
         self.status_num_out_ports = 0
-        self.status_num_out_ports_full_buffer = 0
         self.out_ports_queue = out_ports_queue
 
         self.rom_bank = None
@@ -313,27 +311,26 @@ class PipelineBusParser:
         self.last_ret_conditional = None
         self.prefix_opcode = None
 
+    def stats(self):
+        return {
+            "len_all_events": len(self.all_events),
+            "num_out_ports": self.status_num_out_ports,
+            "num_errors": self.status_num_errors,
+        }
+
     def flush(self):
         for e in self.buf:
             self.all_events.append(e)
             if e.type in [Type.IN_PORT, Type.OUT_PORT]:
-                # print(f">> putting {e}\n")
-                # if self.out_ports_queue.full():
-                #     self.status_num_out_ports_full_buffer += 1
-                # else:
-                #     self.status_num_out_ports += 1
+                self.status_num_out_ports += 1
                 self.out_ports_queue.put(e)
         self.buf = []
 
         for e in self.errors:
-            # if self.errors_queue.full():
-            #     self.status_num_errors_full_buffer += 1
-            # else:
-            #     self.status_num_errors += 1
+            self.status_num_errors += 1
             self.errors_queue.put(e)
         self.errors = []
 
-        self.prefix_opcode = None
         self.last_call_conditional = None
         self.last_ret_conditional = None
 
@@ -357,6 +354,7 @@ class PipelineBusParser:
         # handle second byte of the instruction when M1 is low twice in a row
         if self.prefix_opcode is not None and type == Type.FETCH:
             type = Type.READ
+            self.prefix_opcode = None
 
         if type == Type.FETCH:
             self.pc, bank = self.full_addr(addr)
