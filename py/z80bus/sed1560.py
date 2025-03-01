@@ -3,8 +3,11 @@
 from enum import Enum
 from dataclasses import dataclass
 from PIL import Image, ImageDraw
+import multiprocessing as mp
+import queue
 
 from typing import List
+import pandas
 
 from .bus_parser import (
     Event,
@@ -131,30 +134,45 @@ class SED1560Parser:
         return SED1560.VRAMWrite(value=x)
 
     @staticmethod
-    def parse_bus_commands(events: List[Event]):
+    def parse_bus_commands(events):
         commands = []
-        for r in events:
+
+        def iterate(r):
             parsed = None
             if r.port == IOPort.LCD_COMMAND:
                 parsed = SED1560Parser.parse_out40(r.val)
             elif r.port == IOPort.LCD_OUT:
                 parsed = SED1560Parser.parse_out41(r.val)
-            # else:
-            #     parsed = SED1560.Unknown(addr=r.port.value, value=r.val)
+            else:
+                parsed = SED1560.Unknown(addr=r.port.value, value=r.val)
             commands.append(parsed)
+
+        # events is either dataframe or List[Event]
+        if isinstance(events, pandas.DataFrame):
+            for r in events.itertuples():
+                iterate(r)
+        else:
+            for r in events:
+                iterate(r)
 
         processed = []
         i = 0
         while i < len(commands):
-            match commands[i:i+3]:
+            match commands[i : i + 3]:
                 # for some reason InitialDisplayLine is always between two SetColumnPart commands
-                case [SED1560.SetColumnPart(is_high=False, value=low), cmd,
-                      SED1560.SetColumnPart(is_high=True, value=high)]:
+                case [
+                    SED1560.SetColumnPart(is_high=False, value=low),
+                    cmd,
+                    SED1560.SetColumnPart(is_high=True, value=high),
+                ]:
                     processed.append(SED1560.SetColumn(value=low | high))
                     processed.append(cmd)
                     i += 3
-                case [SED1560.SetColumnPart(is_high=True, value=high), cmd,
-                      SED1560.SetColumnPart(is_high=False, value=low)]:
+                case [
+                    SED1560.SetColumnPart(is_high=True, value=high),
+                    cmd,
+                    SED1560.SetColumnPart(is_high=False, value=low),
+                ]:
                     processed.append(SED1560.SetColumn(value=low | high))
                     processed.append(cmd)
                     i += 3
@@ -164,21 +182,17 @@ class SED1560Parser:
         return processed
 
     @staticmethod
-    def get_parsed_lcd_commands_df(processed):
+    def parsed_commands_to_df(processed):
         result = []
         for index, parsed in enumerate(processed):
             parsed_type = type(parsed).__name__
             # if CmdA, then get type from parsed.cmd
-            if parsed_type == 'CmdA':
+            if parsed_type == "CmdA":
                 parsed_type = parsed.cmd.name
-            if parsed_type == 'Unknown':
+            if parsed_type == "Unknown":
                 parsed_type = IOPort(parsed.addr).name
 
-            result.append({
-                "index": index,
-                "type": parsed_type,
-                **vars(parsed)
-            })
+            result.append({"index": index, "type": parsed_type, **vars(parsed)})
         return pandas.DataFrame(result)
 
 
@@ -212,7 +226,6 @@ class SED1560Interpreter:
         self.vram = [[0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)]
 
     def eval(self, cmd):
-        print(cmd)
         match cmd:
             case SED1560.InitialDisplayLine(value=com0):
                 self.com0 = com0
@@ -277,3 +290,48 @@ class SED1560Interpreter:
                     )
 
         return image
+
+
+def interpret_lcd_thread(input, output):
+    last_output = None
+    display = SED1560Interpreter()
+
+    while True:
+        data = None
+        try:
+            data = input.get(False, 1)
+        except queue.Empty:
+            continue
+
+        if data is None:
+            break
+
+        for e in SED1560Parser.parse_bus_commands([data]):
+            display.eval(e)
+
+        if last_output is None or last_output != display.vram:
+            if output.empty():
+                print('LCD: putting')
+                last_output = display.vram.copy()
+                output.put(display.vram_image())
+
+    print('interpret_lcd_thread done')
+
+
+class DrawLCDContext:
+    def __init__(self, input_queue, output_queue):
+        self.input_queue = input_queue
+        self.output_queue = output_queue
+        self.process = mp.Process(
+            target=interpret_lcd_thread, args=(input_queue, output_queue)
+        )
+
+    def __enter__(self):
+        self.process.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.input_queue.put(None)
+        self.process.join(1)
+
+        self.output_queue.put(None)

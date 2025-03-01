@@ -290,13 +290,15 @@ class BusParser:
 
 
 class PipelineBusParser:
-    def __init__(self, out_queue):
-        self.out_queue = out_queue
+    def __init__(self, errors_queue, out_ports_queue):
+        self.errors_queue = errors_queue
+        self.out_ports_queue = out_ports_queue
 
         self.rom_bank = None
         self.pc = None
         self.errors = []
 
+        self.all_events = []
         # buffer for the current instruction
         self.buf = []
 
@@ -307,8 +309,14 @@ class PipelineBusParser:
 
     def flush(self):
         for e in self.buf:
-            self.out_queue.put_nowait(e)
+            self.all_events.append(e)
+            if e.type in [Type.IN_PORT, Type.OUT_PORT]:
+                self.out_ports_queue.put_nowait(e)
         self.buf = []
+
+        for e in self.errors:
+            self.errors_queue.put_nowait(e)
+        self.errors = []
 
         self.prefix_opcode = None
         self.last_call_conditional = None
@@ -351,8 +359,9 @@ class PipelineBusParser:
         elif type in [Type.READ, Type.WRITE]:
             addr, bank = self.full_addr(addr)
 
-            # we don't have visibility of the current flag status, so in order to determine whether
-            # a conditional CALL/RET did actually CALL/RET we need to look whether the stack was written/read
+            # we don't have visibility of the current flag status, so in order
+            # to determine whether a conditional CALL/RET did actually CALL/RET
+            # we need to look whether the stack was written/read
             if self.is_stack_addr(addr):
                 if type == Type.READ:
                     type = Type.READ_STACK
@@ -422,15 +431,14 @@ class PipelineBusParser:
         return data
 
 
-def parse_data_thread(input, output, errors):
-    parser = PipelineBusParser(output)
+def parse_data_thread(input_queue, all_events_output, errors_output, ports_output):
+    parser = PipelineBusParser(errors_queue=errors_output, out_ports_queue=ports_output)
 
-    empty_ts = datetime.datetime.now()
     buf = b""
     while True:
-        ts = datetime.datetime.now()
+        data = None
         try:
-            data = input.get(False, 1)
+            data = input_queue.get(False, 1)
         except queue.Empty:
             continue
 
@@ -443,17 +451,17 @@ def parse_data_thread(input, output, errors):
     buf = parser.parse(buf)
     parser.flush()
 
-    for error in parser.errors:
-        errors.put(error)
+    all_events_output.put(parser.all_events)
 
 
 class ParseContext:
-    def __init__(self, input_queue, output_queue, error_queue):
+    def __init__(self, input_queue, all_events_output, errors_output, ports_output):
         self.input_queue = input_queue
-        self.output_queue = output_queue
-        self.error_queue = error_queue
+        self.all_events_output = all_events_output
+        self.errors_output = errors_output
+        self.ports_output = ports_output
         self.process = mp.Process(
-            target=parse_data_thread, args=(input_queue, output_queue, error_queue)
+            target=parse_data_thread, args=(input_queue, all_events_output, errors_output, ports_output)
         )
 
     def __enter__(self):
@@ -462,7 +470,8 @@ class ParseContext:
 
     def __exit__(self, type, value, traceback):
         self.input_queue.put(None)
-        print(f'joining {datetime.datetime.now()}')
         self.process.join(1)
-        self.output_queue.put(None)
-        self.error_queue.put(None)
+
+        self.all_events_output.put(None)
+        self.errors_output.put(None)
+        self.ports_output.put(None)
