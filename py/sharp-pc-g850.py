@@ -20,13 +20,13 @@ def _():
     # NOTE: expect d3xx/libftd3xx.dylib to be present
     import ftd3xx
     import _ftd3xx_linux as mft
-    return ftd3xx, mft, sys
+
+    import ctypes
+    return ctypes, ftd3xx, mft, sys
 
 
 @app.cell(hide_code=True)
-def _(ftd3xx, mft):
-    import ctypes
-
+def _(ctypes, ftd3xx, mft):
     class Ft600Device():
         def __init__(self):
             self.channel = 0
@@ -55,7 +55,7 @@ def _(ftd3xx, mft):
             if bytesTransferred.value == 0:
                 return None
             return data.raw[:bytesTransferred.value]
-    return Ft600Device, ctypes
+    return (Ft600Device,)
 
 
 @app.cell
@@ -66,9 +66,14 @@ def _():
 
 @app.cell
 def _():
+    import multiprocessing as mp
     import threading
-    import queue
-    return queue, threading
+    return mp, threading
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell
@@ -93,15 +98,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    Ft600Device,
-    bus_parser,
-    collect_data_button,
-    mo,
-    queue,
-    queueu,
-    threading,
-):
+def _(Ft600Device, bus_parser, collect_data_button, mo, mp, threading):
     mo.stop(not collect_data_button.value)
 
     import datetime
@@ -109,7 +106,7 @@ def _(
     import humanize
 
 
-    class TransferRateCalculator():
+    class TransferRateCalculator:
         def __init__(self, callback):
             self.start = datetime.datetime.now()
             self.status_update_time = self.start
@@ -136,7 +133,7 @@ def _(
                 self.status_update_bytes += len(data)
 
 
-    def GetBusData(q, num_seconds_before_timeout=5):
+    def GetBusData(queues, num_seconds_before_timeout=3):
         # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
         # which results in some events being lost.
         read_size = 2**15
@@ -146,8 +143,6 @@ def _(
             for i in range(100):
                 bytes = d.read(read_size)
 
-            # data = []
-
             with mo.status.spinner(subtitle="Collecting data ...") as _spinner:
                 start = datetime.datetime.now()
                 rate_calculator = TransferRateCalculator(
@@ -155,6 +150,8 @@ def _(
                         subtitle=f"Collecting data ... {rate}"
                     )
                 )
+
+                data = []
 
                 while True:
                     bytes = d.read(read_size)
@@ -168,79 +165,74 @@ def _(
                             break
                         continue
                     start = now
-                    # data.append(bytes)
-                    q.put(bytes)
 
-            q.put(None)
-            # return data
+                    data.append(bytes)
+                    for q in queues:
+                        q.put_nowait(bytes)
 
-            # print(d.write(b'--'))
-            # print(d.write(b'++'))
+            for q in queues:
+                print(f"put None {datetime.datetime.now()}")
+                q.put(None)
 
-    raw_queue = queue.Queue()
-    parsed_queue = queue.Queue()
-    errors_queue = queueu.Queue()
+            return data
 
-    def parse_data_thread(input, output, errors):
-        # buf = b""
-        # parser = bus_parser.PipelineBusParser(output)
-        parser = bus_parser.BusParser()
 
-        while True:
-            data = input.get()
-            if data is None:
-                break
+    def get_data_queue():
+        raw_queue = mp.Queue()
+        parsed_queue = mp.Queue()
+        errors_queue = mp.Queue()
 
-            # buf += data
-            # buf = parser.parse(buf)
-            events, errors = parser.parse(data)
-            for e in events:
-                output.put(e)
-            for e in errors:
-                errors.put(e)
+        parsed = []
+        errors = []
 
-    threads = [
-        threading.Thread(target=parse_data_thread, args=(raw_queue, parsed_queue, errors_queue)),
-    ]
+        def fetch_parsed(input_queue):
+            while True:
+                data = input_queue.get()
+                if data is None:
+                    break
 
-    for t in threads:
-        t.start()
+                parsed.append(data)
+            print(f"stopping fetch_parsed")
 
-    GetBusData(raw_queue)
+        threads = [threading.Thread(target=fetch_parsed, args=(parsed_queue,))]
 
-    for t in threads:
-        t.join()
+        for t in threads:
+            t.start()
 
-    # data_lines = GetBusData()
-    # data_concat = b"".join(data_lines)
-    # mo.md(f"Received {humanize.naturalsize(len(data_concat), binary=True)}, ({len(data_lines)} packets)")
+        with bus_parser.ParseContext(raw_queue, parsed_queue, errors_queue):
+            raw_data_items = GetBusData([raw_queue])
+
+        for t in threads:
+            t.join()
+
+        return parsed, errors
+
+
+    def get_data_later():
+        raw_data_items = GetBusData([])
+        data_concat = b"".join(raw_data_items)
+        parsed, errors = bus_parser.BusParser().parse(data_concat)
+        return parsed, errors
+
+
+    parsed, errors = get_data_later()
     return (
         GetBusData,
         TransferRateCalculator,
         datetime,
-        errors_queue,
+        errors,
+        get_data_later,
+        get_data_queue,
         humanize,
-        parse_data_thread,
-        parsed_queue,
-        raw_queue,
-        t,
-        threads,
+        parsed,
         time,
     )
 
 
 @app.cell
-def _(parsed_queue, raw_queue):
-    raw_queue.qsize(), parsed_queue.qsize()
+def _(bus_parser, df):
+    df[df['type'].isin([bus_parser.Type.ERROR])]
     return
-
-
-@app.cell
-def _(parsed_queue):
-    parsed = []
-    while not parsed_queue.empty():
-        parsed.append(parsed_queue.get())
-    return (parsed,)
 
 
 @app.cell
@@ -250,18 +242,26 @@ def _(pandas, parsed):
 
 
 @app.cell
-def _(df, parsed):
-    # df['port']
-    parsed[0:100]
+def _(df):
     df
     return
 
 
 @app.cell
-def _():
-    # with open('on-off_m1-pipeline-4.bin', 'wb') as f:
-    #     f.write(data_concat)
-    return
+def _(parsed, parsed_reference):
+    def compare_with_reference():
+        num_diffs = 0
+        for i in range(min(len(parsed_reference), len(parsed))):
+            ref = parsed_reference[i]
+            p = parsed[i]
+            if ref != p:
+                num_diffs += 1
+                if num_diffs > 10:
+                    break
+                print(f"{i}:\n{ref} !=\n{p}")
+
+    # compare_with_reference()
+    return (compare_with_reference,)
 
 
 @app.cell
@@ -285,16 +285,9 @@ def _():
 
 
 @app.cell
-def _(parse_binary_trace):
-    def find_differences():
-        p4 = parse_binary_trace('on-off_m1-pipeline-4.bin')
-        p6 = parse_binary_trace('on-off_m1-pipeline-6.bin')
-
-        # p4[0:10], p6[0:10]
-        # len(p4), len(p6)
-
-        # for first 1000 items print differences
-        for i in range(40000):
+def _():
+    def find_differences(p4, p6):
+        for i in range(min(len(p4), len(p6))):
             if p4[i] != p6[i]:
                 # print only changed keys/values, use __dict__ to get all keys/values
                 diff = []
@@ -310,7 +303,7 @@ def _(parse_binary_trace):
     return (find_differences,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Type, z80):
     class ProcessBusEvents:
         def __init__(self):
@@ -368,18 +361,6 @@ def _(Type, z80):
 
     # ProcessBusEvents().analyze_portion_of_trace(parsed, [411265, 411355 + 5])
     return (ProcessBusEvents,)
-
-
-@app.cell
-def _(df, df_valh):
-    df_valh(df[df['addr'] == 0x7900])
-    return
-
-
-@app.cell
-def _(IOPort, df, df_valh):
-    df_valh(df[df['port'].isin([IOPort.SET_KEY_STROBE_HI])].groupby('pc').size().reset_index(name='event_count'))
-    return
 
 
 @app.cell
@@ -442,7 +423,7 @@ def _():
     return BNIDA_NAMES, BNIDA_NAMES_RAW, FUNCTIONS, get_function_name
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     InstructionType,
     PerfettoTraceBuilder,
@@ -908,12 +889,6 @@ def _(alt, df, df_range, mo, pandas):
 
 
 @app.cell
-def _(df, df_valh):
-    df_valh(df)
-    return
-
-
-@app.cell
 def _(Type):
     def df_valh(df):
         df2 = df.copy()
@@ -983,60 +958,34 @@ def _(IOPort, SED1560, SED1560Parser, pandas):
 
 @app.cell
 def _(IOPort, df, get_parsed_lcd_commands_df, parse_lcd_commands):
-    # # FIXME: what does it do??
-    # SHIFT_KEY_INPUT = 0x13 # Read-only
-
-    # KEY_INPUT = 0x10 # Read-only
-    # SET_KEY_STROBE_LO = 0x11 # Write-only
-    # SET_KEY_STROBE_HI = 0x12 # Write-only
-
-
-    parsed_lcd_commands = parse_lcd_commands(
-        df[
-            df["port"].isin(
-                [
-                    IOPort.LCD_COMMAND,
-                    IOPort.LCD_OUT,
-                    IOPort.KEY_INPUT,
-                    IOPort.SHIFT_KEY_INPUT,
-                    IOPort.SET_KEY_STROBE_LO,
-                    IOPort.SET_KEY_STROBE_HI,
-                ]
-            )
-        ]
-        .copy()
-        .reset_index(drop=True)
-    )
-    parsed_lcd_commands_df = get_parsed_lcd_commands_df(parsed_lcd_commands)
-    return parsed_lcd_commands, parsed_lcd_commands_df
-
-
-@app.cell
-def _(IOPort, df):
-    df[
-        df["port"].isin(
-            [
-                IOPort.LCD_COMMAND,
-                IOPort.LCD_OUT,
-                IOPort.KEY_INPUT,
-                IOPort.SHIFT_KEY_INPUT,
-                IOPort.SET_KEY_STROBE_LO,
-                IOPort.SET_KEY_STROBE_HI,
+    def do_parse_lcd_commsnds(df):
+        return parse_lcd_commands(
+            df[
+                df["port"].isin(
+                    [
+                        IOPort.LCD_COMMAND,
+                        IOPort.LCD_OUT,
+                        IOPort.KEY_INPUT,
+                        IOPort.SHIFT_KEY_INPUT,
+                        IOPort.SET_KEY_STROBE_LO,
+                        IOPort.SET_KEY_STROBE_HI,
+                    ]
+                )
             ]
-        )
-    ].copy().reset_index(drop=True)
-    return
+            .copy()
+            .reset_index(drop=True))
+
+    parsed_lcd_commands = do_parse_lcd_commsnds(df)
+    parsed_lcd_commands_df = get_parsed_lcd_commands_df(parsed_lcd_commands)
+    return (
+        do_parse_lcd_commsnds,
+        parsed_lcd_commands,
+        parsed_lcd_commands_df,
+    )
 
 
 @app.cell
 def _(IOPort, df):
-    df['port'].unique()
-    df[df['port'].isin([IOPort.LCD_COMMAND])]
-    return
-
-
-@app.cell
-def _(IOPort, df, mo):
     def parse_key_events(df):
         import math
         strobe_hi = 0
@@ -1072,16 +1021,10 @@ def _(IOPort, df, mo):
         ])
     ].copy().reset_index(drop=True)[['port', 'val', 'pc']]
 
-    key_events['pc'] = key_events['pc'].apply(lambda x: hex(x))
-    mo.ui.dataframe(key_events[3:28], page_size=50)
-    parse_key_events(key_events)
+    # key_events['pc'] = key_events['pc'].apply(lambda x: hex(x))
+    # mo.ui.dataframe(key_events[3:28], page_size=50)
+    # parse_key_events(key_events)
     return key_events, parse_key_events
-
-
-@app.cell
-def _(parsed_lcd_commands_filtered):
-    parsed_lcd_commands_filtered
-    return
 
 
 @app.cell

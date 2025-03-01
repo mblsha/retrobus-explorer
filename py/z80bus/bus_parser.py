@@ -2,9 +2,10 @@ from typing import NamedTuple, Optional, List
 from enum import Enum
 from dataclasses import dataclass
 import struct
-
-import threading
+import multiprocessing as mp
 import queue
+import time
+import datetime
 
 
 # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
@@ -151,9 +152,9 @@ class SimpleBusParser:
 
             if type == Type.ERROR:
                 addr = 0
-                b1 = data[offset+1]  # LSB of fifo_full_counter.q
-                b2 = data[offset+2]  # Middle byte
-                b3 = data[offset+3]  # MSB of fifo_full_counter.q
+                b1 = data[offset + 1]  # LSB of fifo_full_counter.q
+                b2 = data[offset + 2]  # Middle byte
+                b3 = data[offset + 3]  # MSB of fifo_full_counter.q
                 val = b1 | (b2 << 8) | (b3 << 16)
 
             offset += 4
@@ -202,9 +203,9 @@ class BusParser:
             addr = struct.unpack("<H", data[offset + 2 : offset + 4])[0]
             if type == Type.ERROR:
                 addr = 0
-                b1 = data[offset+1]  # LSB of fifo_full_counter.q
-                b2 = data[offset+2]  # Middle byte
-                b3 = data[offset+3]  # MSB of fifo_full_counter.q
+                b1 = data[offset + 1]  # LSB of fifo_full_counter.q
+                b2 = data[offset + 2]  # Middle byte
+                b3 = data[offset + 3]  # MSB of fifo_full_counter.q
                 val = b1 | (b2 << 8) | (b3 << 16)
             offset += 4
 
@@ -306,7 +307,7 @@ class PipelineBusParser:
 
     def flush(self):
         for e in self.buf:
-            self.out_queue.put(e)
+            self.out_queue.put_nowait(e)
         self.buf = []
 
         self.prefix_opcode = None
@@ -419,3 +420,49 @@ class PipelineBusParser:
 
         # return unprocessed data, it should be concatenated with the next batch
         return data
+
+
+def parse_data_thread(input, output, errors):
+    parser = PipelineBusParser(output)
+
+    empty_ts = datetime.datetime.now()
+    buf = b""
+    while True:
+        ts = datetime.datetime.now()
+        try:
+            data = input.get(False, 1)
+        except queue.Empty:
+            continue
+
+        if data is None:
+            break
+
+        buf += data
+        buf = parser.parse(buf)
+
+    buf = parser.parse(buf)
+    parser.flush()
+
+    for error in parser.errors:
+        errors.put(error)
+
+
+class ParseContext:
+    def __init__(self, input_queue, output_queue, error_queue):
+        self.input_queue = input_queue
+        self.output_queue = output_queue
+        self.error_queue = error_queue
+        self.process = mp.Process(
+            target=parse_data_thread, args=(input_queue, output_queue, error_queue)
+        )
+
+    def __enter__(self):
+        self.process.start()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.input_queue.put(None)
+        print(f'joining {datetime.datetime.now()}')
+        self.process.join(1)
+        self.output_queue.put(None)
+        self.error_queue.put(None)
