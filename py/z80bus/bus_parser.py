@@ -7,6 +7,7 @@ import threading
 import queue
 import time
 import datetime
+import debugpy
 
 
 # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
@@ -317,19 +318,19 @@ class PipelineBusParser:
             self.all_events.append(e)
             if e.type in [Type.IN_PORT, Type.OUT_PORT]:
                 # print(f">> putting {e}\n")
-                if self.out_ports_queue.full():
-                    self.status_num_out_ports_full_buffer += 1
-                else:
-                    self.status_num_out_ports += 1
-                    self.out_ports_queue.put(e)
+                # if self.out_ports_queue.full():
+                #     self.status_num_out_ports_full_buffer += 1
+                # else:
+                #     self.status_num_out_ports += 1
+                self.out_ports_queue.put(e)
         self.buf = []
 
         for e in self.errors:
-            if self.errors_queue.full():
-                self.status_num_errors_full_buffer += 1
-            else:
-                self.status_num_errors += 1
-                self.errors_queue.put(e)
+            # if self.errors_queue.full():
+            #     self.status_num_errors_full_buffer += 1
+            # else:
+            #     self.status_num_errors += 1
+            self.errors_queue.put(e)
         self.errors = []
 
         self.prefix_opcode = None
@@ -448,6 +449,7 @@ class PipelineBusParser:
 def parse_data_thread(
     input_queue, all_events_output, errors_output, ports_output, status_queue
 ):
+    debugpy.listen(("localhost", 5679))  # Different port for child
     parser = PipelineBusParser(errors_queue=errors_output, out_ports_queue=ports_output)
 
     status_num_input_data = 0
@@ -455,13 +457,7 @@ def parse_data_thread(
 
     buf = b""
     while True:
-        data = None
-        try:
-            data = input_queue.get(False, 1)
-        except queue.Empty:
-            status_num_empty_queue += 1
-            continue
-
+        data = input_queue.get()
         if data is None:
             break
 
@@ -472,7 +468,7 @@ def parse_data_thread(
     buf = parser.parse(buf)
     parser.flush()
 
-    all_events_output.put(parser.all_events)
+    # all_events_output.put(parser.all_events)
     status_queue.put(
         {
             "len_all_events": len(parser.all_events),
@@ -509,12 +505,14 @@ class ParseContext:
 
     def __enter__(self):
         self.process.start()
+        print(f'ParseContext pid: {self.process.pid}')
         return self
 
     def __exit__(self, type, value, traceback):
         self.input_queue.put(None)
+
         print(f"ParseContext: exit1 {datetime.datetime.now()}")
-        self.process.join(1)
+        self.process.join()
         print(f"ParseContext: exit2 {datetime.datetime.now()}")
         print(self.status_queue.get())
 

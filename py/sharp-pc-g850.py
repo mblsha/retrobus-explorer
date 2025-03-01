@@ -9,7 +9,13 @@ def _():
     import marimo as mo
     import altair as alt
     import pandas
-    return alt, mo, pandas
+    import polars
+    import duckdb
+    import datetime
+    import time
+    import humanize
+    import time
+    return alt, datetime, duckdb, humanize, mo, pandas, polars, time
 
 
 @app.cell
@@ -84,6 +90,12 @@ def _():
     return IOPort, bus_parser
 
 
+@app.cell
+def _():
+    from z80bus import sed1560
+    return (sed1560,)
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""# Collect Data from SHARP PC-G850 System Bus""")
@@ -98,13 +110,20 @@ def _(mo):
 
 
 @app.cell
-def _(Ft600Device, bus_parser, collect_data_button, mo, mp, threading):
+def _(
+    Ft600Device,
+    Queue,
+    bus_parser,
+    collect_data_button,
+    datetime,
+    humanize,
+    mo,
+    mp,
+    parser_worker,
+    ray,
+    sed1560,
+):
     mo.stop(not collect_data_button.value)
-
-    import datetime
-    import time
-    import humanize
-
 
     class TransferRateCalculator:
         def __init__(self, callback):
@@ -133,7 +152,7 @@ def _(Ft600Device, bus_parser, collect_data_button, mo, mp, threading):
                 self.status_update_bytes += len(data)
 
 
-    def GetBusData(queues, num_seconds_before_timeout=3):
+    def GetBusData(queues, display_queue, num_seconds_before_timeout=3):
         # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
         # which results in some events being lost.
         read_size = 2**15
@@ -143,6 +162,8 @@ def _(Ft600Device, bus_parser, collect_data_button, mo, mp, threading):
             for i in range(100):
                 bytes = d.read(read_size)
 
+            status_num_queue_full_buffer = 0
+
             with mo.status.spinner(subtitle="Collecting data ...") as _spinner:
                 start = datetime.datetime.now()
                 rate_calculator = TransferRateCalculator(
@@ -151,11 +172,14 @@ def _(Ft600Device, bus_parser, collect_data_button, mo, mp, threading):
                     )
                 )
 
-                data = []
-
                 while True:
+                    # time.sleep(0.01)
                     bytes = d.read(read_size)
                     rate_calculator.update(bytes)
+
+                    if not display_queue.empty():
+                        d = display_queue.get()
+                        print(f"Display: {d}")
 
                     now = datetime.datetime.now()
                     if bytes is None:
@@ -166,47 +190,66 @@ def _(Ft600Device, bus_parser, collect_data_button, mo, mp, threading):
                         continue
                     start = now
 
-                    data.append(bytes)
+                    # data.append(bytes)
                     for q in queues:
-                        q.put_nowait(bytes)
+                        # if q.full():
+                        #     status_num_queue_full_buffer += 1
+                        # else:
+                        q.put(bytes)
 
             for q in queues:
                 print(f"put None {datetime.datetime.now()}")
                 q.put(None)
-
-            return data
+            return {'num_queue_full_buffer': status_num_queue_full_buffer}
 
 
     def get_data_queue():
-        raw_queue = mp.Queue()
-        parsed_queue = mp.Queue()
-        errors_queue = mp.Queue()
+        raw_queue = mp.SimpleQueue()
+        all_events_queue = mp.SimpleQueue()
+        errors_queue = mp.SimpleQueue()
+        ports_queue = mp.SimpleQueue()
+        display_queue = mp.SimpleQueue()
 
         parsed = []
         errors = []
 
-        def fetch_parsed(input_queue):
-            while True:
-                data = input_queue.get()
-                if data is None:
-                    break
+        with sed1560.DrawLCDContext(ports_queue, display_queue):
+            with bus_parser.ParseContext(raw_queue, all_events_queue, errors_queue, ports_queue):
+                status = GetBusData([raw_queue], display_queue)
+                print(status)
 
-                parsed.append(data)
-            print(f"stopping fetch_parsed")
+        while not all_events_queue.empty():
+            data = all_events_queue.get()
+            if data is not None:
+                print(f'<<< all_events_queue: {len(data)}')
+                parsed = data
 
-        threads = [threading.Thread(target=fetch_parsed, args=(parsed_queue,))]
-
-        for t in threads:
-            t.start()
-
-        with bus_parser.ParseContext(raw_queue, parsed_queue, errors_queue):
-            raw_data_items = GetBusData([raw_queue])
-
-        for t in threads:
-            t.join()
+        while not errors_queue.empty():
+            data = errors_queue.get()
+            if data is None:
+                break
+            errors.append(data)
 
         return parsed, errors
 
+
+    def get_data_ray():
+        raw_queue = Queue()
+        all_events_output = Queue()
+        errors_output = Queue()
+        ports_output = Queue()
+        status_queue = Queue()
+        display_queue = Queue()
+
+        parser_future = parser_worker.remote(raw_queue, all_events_output, errors_output, ports_output, status_queue)
+
+        status = GetBusData([raw_queue], display_queue)
+        print(status)
+        print(f'now: {datetime.datetime.now()}')
+
+        parsed = ray.get(parser_future)
+        print(f'got ray: {datetime.datetime.now()}')
+        return parsed, []
 
     def get_data_later():
         raw_data_items = GetBusData([])
@@ -215,17 +258,16 @@ def _(Ft600Device, bus_parser, collect_data_button, mo, mp, threading):
         return parsed, errors
 
 
-    parsed, errors = get_data_later()
+    parsed, errors = get_data_queue()
+    # parsed, errors = get_data_ray()
     return (
         GetBusData,
         TransferRateCalculator,
-        datetime,
         errors,
         get_data_later,
         get_data_queue,
-        humanize,
+        get_data_ray,
         parsed,
-        time,
     )
 
 
@@ -271,17 +313,7 @@ def _():
     import struct
 
     from typing import NamedTuple, Optional, List
-    from PIL import Image, ImageDraw
-    return (
-        Enum,
-        Image,
-        ImageDraw,
-        List,
-        NamedTuple,
-        Optional,
-        dataclass,
-        struct,
-    )
+    return Enum, List, NamedTuple, Optional, dataclass, struct
 
 
 @app.cell
@@ -904,62 +936,14 @@ def _(Type):
 
 
 @app.cell(hide_code=True)
-def _(IOPort, SED1560, SED1560Parser, pandas):
-    def parse_lcd_commands(df):
-        commands = []
-        for r in df.itertuples():
-            parsed = None
-            if r.port == IOPort.LCD_COMMAND:
-                parsed = SED1560Parser.parse_out40(r.val)
-            elif r.port == IOPort.LCD_OUT:
-                parsed = SED1560Parser.parse_out41(r.val)
-            else:
-                parsed = SED1560.Unknown(addr=r.port.value, value=r.val)
-            commands.append(parsed)
-
-        processed = []
-        i = 0
-        while i < len(commands):
-            match commands[i:i+3]:
-                # for some reason InitialDisplayLine is always between two SetColumnPart commands
-                case [SED1560.SetColumnPart(is_high=False, value=low), cmd,
-                      SED1560.SetColumnPart(is_high=True, value=high)]:
-                    processed.append(SED1560.SetColumn(value=low | high))
-                    processed.append(cmd)
-                    i += 3
-                case [SED1560.SetColumnPart(is_high=True, value=high), cmd,
-                      SED1560.SetColumnPart(is_high=False, value=low)]:
-                    processed.append(SED1560.SetColumn(value=low | high))
-                    processed.append(cmd)
-                    i += 3
-                case _:
-                    processed.append(commands[i])
-                    i += 1
-        return processed
-
-    def get_parsed_lcd_commands_df(processed):
-        result = []
-        for index, parsed in enumerate(processed):
-            parsed_type = type(parsed).__name__
-            # if CmdA, then get type from parsed.cmd
-            if parsed_type == 'CmdA':
-                parsed_type = parsed.cmd.name
-            if parsed_type == 'Unknown':
-                parsed_type = IOPort(parsed.addr).name
-
-            result.append({
-                "index": index,
-                "type": parsed_type,
-                **vars(parsed)
-            })
-        return pandas.DataFrame(result)
-    return get_parsed_lcd_commands_df, parse_lcd_commands
+def _():
+    return
 
 
 @app.cell
-def _(IOPort, df, get_parsed_lcd_commands_df, parse_lcd_commands):
+def _(IOPort, df, sed1560):
     def do_parse_lcd_commsnds(df):
-        return parse_lcd_commands(
+        return sed1560.SED1560Parser.parse_bus_commands(
             df[
                 df["port"].isin(
                     [
@@ -976,7 +960,7 @@ def _(IOPort, df, get_parsed_lcd_commands_df, parse_lcd_commands):
             .reset_index(drop=True))
 
     parsed_lcd_commands = do_parse_lcd_commsnds(df)
-    parsed_lcd_commands_df = get_parsed_lcd_commands_df(parsed_lcd_commands)
+    parsed_lcd_commands_df = sed1560.SED1560Parser.parsed_commands_to_df(parsed_lcd_commands)
     return (
         do_parse_lcd_commsnds,
         parsed_lcd_commands,
@@ -1035,69 +1019,8 @@ def _():
 
 
 @app.cell(hide_code=True)
-def _(SED1560):
-    # TODO: use info from https://www.akiyan.com/pc-g850_technical_data
-    # to implement the remaining commands.
-    class SED1560Intepreter:
-        # VRAM: 166 x 65 bits (last page is 1-bit high)
-
-        # 8 pages of 8 lines, last 9th page of 1 line
-        PAGE_HEIGHT = 8  # pixels
-        NUM_PAGES = 9
-
-        LCD_WIDTH = 166
-        LCD_HEIGHT = 8
-
-        # When the Select ADC command is used to select inverse display operation, the column address decoder inverts the relationship between the RAM column data and the display segment outputs.
-
-        def __init__(self):
-            self.page = 0
-            self.col = 0  # x coordinate
-
-            self.com0 = 0  # Initial Display Line register, 6 bits
-
-            self.display_on = None
-            self.power_on = None
-            self.contrast = None
-            self.scanning_direction = None
-            self.segments_display_mode = None
-
-            # Initialize VRAM as a 2D array of bytes (each row is a list of LCD_WIDTH bytes)
-            self.vram = [
-                [0 for _ in range(self.LCD_WIDTH)] for _ in range(self.LCD_HEIGHT)
-            ]
-
-        def eval(self, cmd):
-            match cmd:
-                case SED1560.InitialDisplayLine(value=com0):
-                    self.com0 = com0
-                case SED1560.SetColumn(value=x):
-                    self.col = x
-                case SED1560.SetPageAddress(value=page):
-                    self.page = page
-                case SED1560.VRAMWrite(value=x):
-                    self.vram[self.page][self.col] = x
-                    # The counter automatically stops at the highest address, A6H.
-                    self.col = min(self.col + 1, self.LCD_WIDTH - 1)
-                case SED1560.SetCommonSegmentOutput(scanning_direction=direction, case=case):
-                    self.scanning_direction = direction
-                case SED1560.Contrast(contrast=contrast):
-                    self.contrast = contrast
-                case SED1560.PowerOn(on=on):
-                    self.power_on = on
-                case SED1560.PowerOnComplete():
-                    pass
-                case SED1560.CmdA(cmd=SED1560.CmdAType.DISPLAY_ON, value=value):
-                    self.display_on = value
-                case SED1560.CmdA(cmd=SED1560.CmdAType.SEGMENTS_DISPLAY_MODE, value=value):
-                    self.segments_display_mode = value
-                case SED1560.SetColumnPart(is_high=is_high, value=value):
-                    pass
-                case SED1560.Unknown(addr=addr, value=value):
-                    pass
-                case _:
-                    raise ValueError(f"Unhandled command: {cmd}")
-    return (SED1560Intepreter,)
+def _():
+    return
 
 
 @app.cell
@@ -1155,12 +1078,12 @@ def _(lcd_commands_range, parsed_lcd_commands):
 
 
 @app.cell
-def _(SED1560Intepreter, draw_vram2, parsed_lcd_commands_filtered):
-    display = SED1560Intepreter()
+def _(parsed_lcd_commands_filtered, sed1560):
+    display = sed1560.SED1560Interpreter()
     for cmd in parsed_lcd_commands_filtered:
         display.eval(cmd)
 
-    draw_vram2(display.vram)
+    display.vram_image()
     return cmd, display
 
 
@@ -1275,150 +1198,6 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
 
     mo.ui.altair_chart(plot_parsed_lcd_commands(filtered_lcd_commands(parsed_lcd_commands_df)))
     return (plot_parsed_lcd_commands,)
-
-
-@app.cell(hide_code=True)
-def _(Enum, dataclass):
-    class SED1560:
-        class CmdAType(Enum):
-            SET_RAM_SEGMENT_OUTPUT = 0x0  # 0: Normal, 1: Inverse
-            DISPLAY_ON = 0xE              # 0: Off, 1: On
-            DISPLAY_MODE = 0x6            # 0: Normal, 1: Inverse
-            SEGMENTS_DISPLAY_MODE = 0x4   # 0: Normal, 1: All display segments On
-            LCD_CONTROLLER_DUTY1 = 0x8    # See Table 5.3
-            LCD_CONTROLLER_DUTY2 = 0xA
-
-        @dataclass
-        class InitialDisplayLine:
-            value: int
-
-        @dataclass
-        class Contrast:
-            contrast: int
-
-        @dataclass
-        class PowerOn:
-            on: bool
-
-        @dataclass
-        class PowerOnComplete:
-            pass
-
-        @dataclass
-        class SetPageAddress:
-            value: int
-
-        @dataclass
-        class CmdA:
-            cmd: 'SED1560.CmdAType'
-            value: int
-
-        @dataclass
-        class SetCommonSegmentOutput:
-            scanning_direction: int
-            case: int
-
-        @dataclass
-        class SetColumnPart:
-            is_high: bool  # True if updating the high nibble, False for low nibble
-            value: int
-
-        @dataclass
-        class SetColumn:
-            value: int
-
-        @dataclass
-        class VRAMWrite:
-            value: int
-
-        @dataclass
-        class Unknown:
-            addr: int
-            value: int
-
-    class SED1560Parser:
-        @staticmethod
-        def parse_out40(x: int):
-            high = (x & 0xF0) >> 4
-            low = x & 0x0F
-
-            if (x >> 6) == 1:
-                # Initial Display Line command
-                com0 = x & 0x3F
-                return SED1560.InitialDisplayLine(value=com0)
-            elif (x >> 5) == 0b100:
-                # Contrast command: lower 5 bits hold the contrast value
-                contrast = x & 0b11111
-                return SED1560.Contrast(contrast=contrast)
-            elif (x >> 1) == 0b10010:
-                # PSU On command: LSB determines state (0 or 1)
-                on = bool(x & 0b1)
-                return SED1560.PowerOn(on=on)
-            elif x == 0b11101101:
-                # Power on complete command
-                return SED1560.PowerOnComplete()
-            elif high == 0xB:
-                # Set Page Address command
-                return SED1560.SetPageAddress(value=low)
-            elif high == 0xA:
-                #  A: low nibble split into command and value
-                command_a = SED1560.CmdAType(low & 0b1110)
-                value = low & 0b1
-                return SED1560.CmdA(cmd=command_a, value=value)
-            elif high == 0xC:
-                # Set Common and Segment Output Status Register command
-                scanning_direction = low >> 3
-                case = low & 0b111
-                if case != 0b111:
-                    raise ValueError(
-                        f"Unhandled case: {bin(case)}, only SEG166 is supported"
-                    )
-                return SED1560.SetCommonSegmentOutput(
-                    scanning_direction=scanning_direction,
-                    case=case
-                )
-            elif high in [0x0, 0x1]:
-                # Column address command: update column based on high/low nibble.
-                if high:  # high nibble update
-                    col = low << 4
-                    is_high = True
-                else:     # low nibble update
-                    col = low
-                    is_high = False
-                return SED1560.SetColumnPart(is_high=is_high, value=col)
-            else:
-                raise SED1560.Unknown(addr=0x40, value=x)
-
-        @staticmethod
-        def parse_out41(x: int):
-            return SED1560.VRAMWrite(value=x)
-    return SED1560, SED1560Parser
-
-
-@app.cell(hide_code=True)
-def _(Image, ImageDraw):
-    def draw_vram2(vram, zoom=4):
-        off_color = (0, 0, 0)
-        on_color = (0, 255, 0)
-
-        img_width = len(vram[0]) * zoom
-        img_height = len(vram) * 6 * zoom
-        image = Image.new("RGB", (img_width, img_height), off_color)
-        draw = ImageDraw.Draw(image)
-
-        for row in range(len(vram)):
-            for col in range(len(vram[row])):
-                byte = vram[row][col]
-                for bit in range(8):
-                    pixel_state = (byte >> bit) & 1
-                    color = on_color if pixel_state else off_color
-
-                    dx = col
-                    dy = row * 8 + bit
-                    draw.rectangle([dx * zoom, dy * zoom, dx * zoom + zoom - 1, dy * zoom + zoom - 1], fill=color)
-
-        return image
-    return (draw_vram2,)
 
 
 if __name__ == "__main__":

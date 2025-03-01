@@ -305,13 +305,7 @@ def interpret_lcd_thread(input_queue, display_queue, status_queue):
     status_num_display_not_ready = 0
 
     while True:
-        data = None
-        try:
-            data = input_queue.get(False, 1)
-        except queue.Empty:
-            status_num_empty_queue += 1
-            continue
-
+        data = input_queue.get()
         # print(f'LCD: got {data}')
         if data is None:
             break
@@ -332,7 +326,7 @@ def interpret_lcd_thread(input_queue, display_queue, status_queue):
                 print("LCD: putting")
                 status_num_draws += 1
                 last_output = copy.deepcopy(display.vram)
-                display_queue.put_nowait(display.vram_image())
+                display_queue.put(display.vram_image())
             else:
                 status_num_display_not_ready += 1
 
@@ -363,13 +357,14 @@ class DrawLCDContext:
 
     def __enter__(self):
         self.process.start()
+        print(f'DrawLCDContext: pid {self.process.pid}')
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.input_queue.put(None)
         print(f"DrawLCDContext: exit1 {datetime.datetime.now()}")
-        self.process.join(1)
+        self.process.join()
         print(f"DrawLCDContext: exit2 {datetime.datetime.now()}")
 
-        print(self.status_queue.get())
         self.display_queue.put(None)
+        print(self.status_queue.get())

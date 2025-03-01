@@ -48,10 +48,10 @@ def test_draw_lcd_context():
         except queue.Empty:
             pass
 
-    with bus_parser.ParseContext(
-        raw_queue, all_events_queue, errors_queue, ports_queue
-    ):
-        with sed1560.DrawLCDContext(ports_queue, display_queue):
+    with sed1560.DrawLCDContext(ports_queue, display_queue):
+        with bus_parser.ParseContext(
+            raw_queue, all_events_queue, errors_queue, ports_queue
+        ):
             assert_display_queue_empty()
 
             raw_queue.put(out_port(0x02, bus_parser.IOPort.LCD_COMMAND))
@@ -83,4 +83,4 @@ def test_draw_lcd_context():
             raw_queue.put(fetch(0x00, 0x1234))
             assert type(display_queue.get()) == PIL.Image.Image
             assert_display_queue_empty()
-    assert False
+    # assert False
