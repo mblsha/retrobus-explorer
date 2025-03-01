@@ -66,11 +66,13 @@ def _(ctypes, ftd3xx, mft):
             bytesWritten = self.D3XX.writePipe(self.channel, buf, len(data))
             return bytesWritten
 
+        # benchmarks:
+        # 100: ~5000 packets/sec, ~7MB/sec when mashing buttons; up to ~46% CPU load
         def read(self, datalen):
             bytesTransferred = mft.ULONG()
             data = ctypes.create_string_buffer(datalen)
             status = ftd3xx.call_ft(mft.FT_ReadPipeEx, self.D3XX.handle, mft.UCHAR(self.channel), data, mft.ULONG(datalen),
-                                    ctypes.byref(bytesTransferred), 1)
+                                    ctypes.byref(bytesTransferred), 100)
             if bytesTransferred.value == 0:
                 return None
             return data.raw[:bytesTransferred.value]
@@ -88,11 +90,6 @@ def _():
     import multiprocessing as mp
     import threading
     return mp, threading
-
-
-@app.cell
-def _():
-    return
 
 
 @app.cell
@@ -168,23 +165,33 @@ async def _(
         read_size = 2**15
 
         uri = 'ws://localhost:8000/ws'
-        async with websockets.connect(uri) as websocket:
+        async with websockets.connect(uri, ping_interval=None) as websocket:
             with Ft600Device() as d:
-                # clear input buffer
-                for i in range(100):
-                    bytes = d.read(read_size)
-
-                status_num_packets_sent = 0
-                status_num_bytes_sent = 0
+                with mo.status.spinner(subtitle="Waiting for buffer to clear ...") as _spinner:
+                    # clear input buffer
+                    empty_count = 0
+                    while True:
+                        bytes = d.read(read_size)
+                        if bytes == None or len(bytes) == 0:
+                            empty_count += 1
+                        else:
+                            empty_count = 0
+                        if empty_count > 2:
+                            break
         
-                with mo.status.spinner(subtitle="Collecting data ...") as _spinner:
+                    status_num_packets_sent = 0
+                    status_num_bytes_sent = 0
+        
                     start = datetime.datetime.now()
                     rate_calculator = TransferRateCalculator(
                         lambda rate: _spinner.update(
                             subtitle=f"Collecting data ... {rate}"
                         )
                     )
-        
+
+                    transmission_buf = b''
+                    last_transmission_time = None
+                    _spinner.update(subtitle="Collecting data ...")
                     while True:
                         bytes = d.read(read_size)
                         rate_calculator.update(bytes)
@@ -198,9 +205,12 @@ async def _(
                             continue
                         start = now
 
-                        await websocket.send(bytes)
-                        status_num_packets_sent += 1
-                        status_num_bytes_sent += len(bytes)
+                        transmission_buf += bytes
+                        if not last_transmission_time or (last_transmission_time - now) > datetime.timedelta(milliseconds=100):
+                            await websocket.send(transmission_buf)
+                            status_num_packets_sent += 1
+                            status_num_bytes_sent += len(bytes)
+                            transmission_buf = b''
 
                     time.sleep(0.1)
                     return {

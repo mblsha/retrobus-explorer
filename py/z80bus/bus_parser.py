@@ -7,7 +7,6 @@ import threading
 import queue
 import time
 import datetime
-import debugpy
 
 
 # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
@@ -320,7 +319,8 @@ class PipelineBusParser:
 
     def flush(self):
         for e in self.buf:
-            self.all_events.append(e)
+            # self.all_events.append(e)
+
             if e.type in [Type.IN_PORT, Type.OUT_PORT]:
                 self.status_num_out_ports += 1
                 self.out_ports_queue.put(e)
@@ -447,7 +447,6 @@ class PipelineBusParser:
 def parse_data_thread(
     input_queue, all_events_output, errors_output, ports_output, status_queue
 ):
-    debugpy.listen(("localhost", 5679))  # Different port for child
     parser = PipelineBusParser(errors_queue=errors_output, out_ports_queue=ports_output)
 
     status_num_input_data = 0
