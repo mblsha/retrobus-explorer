@@ -3,12 +3,28 @@ import copy
 import math
 
 
+KEY_MATRIX = [
+    ["OFF", "Q", "W", "E", "R", "T", "Y", "U"],
+    ["A", "S", "D", "F", "G", "H", "J", "K"],
+    ["Z", "X", "C", "V", "B", "N", "M", ","],
+    ["BASIC", "TEXT", "CAPS", "カナ", "⇥", "␣", "↓", "↑"],
+    ["←", "→", "ANS", "0", ".", "=", "+", "↩"],
+    ["L", ";", "CONST", "1", "2", "3", "−", "M+"],
+    ["I", "O", "INS", "4", "5", "6", "∗", "R•CM"],
+    ["P", "⌫", "π", "7", "8", "9", "/", ")"],
+    ["nPr", "→DEG", "√", "x²", "yˣ∧", "(", "1/x", "MDF"],
+    ["2nd F", "SIN", "COS", "ln", "LOG", "TAN", "F↔E", "CLS"],
+]
+
+
 class KeyMatrixInterpreter:
     def __init__(self):
+        # strobing rows
         self.strobe_hi = 0
         self.strobe_lo = 0
         self.cur = []
         self.last_full_state = []
+        self.last_shift_state = False
 
     def __eq__(self, other):
         return (
@@ -19,7 +35,12 @@ class KeyMatrixInterpreter:
         )
 
     def pressed_keys(self):
-        return self.last_full_state
+        r = []
+        if self.last_shift_state:
+            r.append('"SHIFT"')
+        for row, column in self.last_full_state:
+            r.append(f'"{KEY_MATRIX[row][column]}"')
+        return ', '.join(r)
 
     def eval(self, event: Event):
         match event.port:
@@ -32,13 +53,13 @@ class KeyMatrixInterpreter:
                 strobe = (self.strobe_hi << 8) | self.strobe_lo
                 if event.val == 0 or strobe == 0:
                     return
-                # column is the power of 2 of the strobe value, only has 1 bit set
-                column = int(math.log2(strobe))
+                # row is the power of 2 of the strobe value, only has 1 bit set
+                row = int(math.log2(strobe))
                 for i in range(8):
                     if event.val & (1 << i):
-                        row = i
-                        self.cur.append((column, i))
+                        self.cur.append((row, i))
             case IOPort.SHIFT_KEY_INPUT:
                 # key matrix scanning ends with SHIFT_KEY_INPUT query
                 self.last_full_state = copy.deepcopy(self.cur)
+                self.last_shift_state = event.val
                 self.cur = []

@@ -12,7 +12,7 @@ import copy
 from typing import List
 import pandas
 
-from .bus_parser import (
+from z80bus.bus_parser import (
     Event,
     ErrorType,
     Type,
@@ -292,7 +292,7 @@ class SED1560Interpreter:
                         fill=color,
                     )
 
-        return image
+        return image, draw
 
 
 def interpret_lcd_thread(input_queue, display_queue, status_queue):

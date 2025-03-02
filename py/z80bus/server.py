@@ -11,11 +11,14 @@ import uvicorn
 import sys
 import os
 
+from PIL import ImageFont, ImageDraw
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from z80bus.sed1560 import SED1560Parser, SED1560Interpreter
 from z80bus.bus_parser import PipelineBusParser
+from z80bus.key_matrix import KeyMatrixInterpreter
 
 
 class ParseRenderManager:
@@ -30,7 +33,9 @@ class ParseRenderManager:
         return cls._instance
 
     def reset(self):
-        self.lcd_interpreter = SED1560Interpreter()
+        self.lcd = SED1560Interpreter()
+        self.key_matrix = KeyMatrixInterpreter()
+        self.font = ImageFont.load_default()
         self.out_ports_queue = queue.SimpleQueue()
         self.errors_queue = queue.SimpleQueue()
         self.parser = PipelineBusParser(self.errors_queue, self.out_ports_queue)
@@ -49,10 +54,12 @@ class ParseRenderManager:
         while not self.out_ports_queue.empty():
             events.append(self.out_ports_queue.get_nowait())
             self.status_num_out_ports += 1
+        for e in events:
+            self.key_matrix.eval(e)
         commands = SED1560Parser.parse_bus_commands(events)
         for c in commands:
             self.status_num_lcd_commands += 1
-            self.lcd_interpreter.eval(c)
+            self.lcd.eval(c)
 
     def process_raw_data(self, data: bytes) -> list:
         self.buf += data
@@ -82,7 +89,12 @@ class ParseRenderManager:
         return self.parser.all_events
 
     def get_lcd_image_bytes(self) -> bytes:
-        img = self.lcd_interpreter.vram_image()
+        img, draw = self.lcd.vram_image()
+        pos = (0, img.height - 30)
+        draw.text(
+            pos, str(self.key_matrix.pressed_keys()), font=self.font, fill="white"
+        )
+
         img_bytes_io = io.BytesIO()
         img.save(img_bytes_io, format="PNG")
         img_bytes_io.seek(0)

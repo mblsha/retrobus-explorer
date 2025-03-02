@@ -237,11 +237,6 @@ async def _(
 
 
 @app.cell
-def _():
-    return
-
-
-@app.cell
 def _(bus_parser, df):
     df[df['type'].isin([bus_parser.Type.ERROR])]
     return
@@ -936,49 +931,6 @@ def _(IOPort, df, sed1560):
         parsed_lcd_commands,
         parsed_lcd_commands_df,
     )
-
-
-@app.cell
-def _(IOPort, df):
-    def parse_key_events(df):
-        import math
-        strobe_hi = 0
-        strobe_lo = 0
-        cur = []
-        for r in df.itertuples():
-            if r.port == IOPort.SET_KEY_STROBE_HI:
-                strobe_hi = r.val & 0b11
-            elif r.port == IOPort.SET_KEY_STROBE_LO:
-                strobe_lo = r.val
-            elif r.port == IOPort.KEY_INPUT:
-                if r.val == 0:
-                    continue
-                strobe = (strobe_hi << 8) | strobe_lo
-                # column is the power of 2 of the strobe value, only has 1 bit set
-                column = int(math.log2(strobe))
-                for i in range(8):
-                    if r.val & (1 << i):
-                        row = i
-                        cur.append((column, i))
-            elif r.port == IOPort.SHIFT_KEY_INPUT:
-                # key matrix stanning ends with SHIFT_KEY_INPUT query
-                print(cur)
-                cur = []
-                pass
-
-    key_events = df[
-        df["port"].isin([
-                IOPort.KEY_INPUT,
-                IOPort.SHIFT_KEY_INPUT,
-                IOPort.SET_KEY_STROBE_LO,
-                IOPort.SET_KEY_STROBE_HI,
-        ])
-    ].copy().reset_index(drop=True)[['port', 'val', 'pc']]
-
-    # key_events['pc'] = key_events['pc'].apply(lambda x: hex(x))
-    # mo.ui.dataframe(key_events[3:28], page_size=50)
-    # parse_key_events(key_events)
-    return key_events, parse_key_events
 
 
 @app.cell
