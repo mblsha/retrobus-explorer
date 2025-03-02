@@ -118,13 +118,50 @@ def _():
     return IOPort, InstructionType, Type, bus_parser, key_matrix, sed1560
 
 
+@app.cell
+def _():
+    from pyftdi.ftdi import Ftdi
+    Ftdi.show_devices()
+
+    return (Ftdi,)
+
+
+@app.cell
+def _():
+    # myftdi = Ftdi()
+    # myftdi.open_from_url(url='ftdi://ftdi:2232:FT4ZS6I3/2')
+    # myftdi.set_baudrate(1_000_000)
+    # myftdi.baudrate
+    # myftdi.write_data(b'0000000')
+    # ftdi_result = myftdi.read_data(size=100)
+    # myftdi.close()
+    # ftdi_result
+    return
+
+
+@app.cell
+def _(Ft600Device):
+    def test_ft600_writes():
+        with Ft600Device() as d:
+            # bytes = d.read(read_size)
+            d.write(b'S+')
+
+    test_ft600_writes()
+    return (test_ft600_writes,)
+
+
+@app.cell
+def _():
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""# Collect Data from SHARP PC-G850 System Bus""")
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Enum, mo):
     class CollectDataType(Enum):
         STREAM_TO_FASTAPI = 0
@@ -186,7 +223,7 @@ def _(collect_data_type, collect_date_timeout, mo):
     return (collect_data_button,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 async def _(
     CollectDataType,
     Ft600Device,
@@ -212,12 +249,6 @@ async def _(
             uri = "ws://localhost:8000/ws"
             self.websocket = await websockets.connect(uri, ping_interval=None)
 
-        def __enter__(self):
-            return self.websocket
-
-        def __exit__(self, type, value, traceback):
-            pass
-
         async def all_events(self):
             await self.websocket.close()
             return []
@@ -240,16 +271,8 @@ async def _(
         async def start(self):
             pass
 
-        def stop(self):
-            self.parser.flush()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, type, value, traceback):
-            self.stop()
-
         async def all_events(self):
+            self.parser.flush()
             return self.parser.all_events
 
 
@@ -263,15 +286,6 @@ async def _(
 
         async def start(self):
             pass
-
-        def stop(self):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, type, value, traceback):
-            self.stop()
 
         async def all_events(self):
             self.parser = bus_parser.PipelineBusParser(
@@ -296,65 +310,68 @@ async def _(
         with mo.status.spinner(
             subtitle="Waiting for buffer to clear ..."
         ) as _spinner:
-            with inst as websocket:
-                with Ft600Device() as d:
-                    # clear input buffer
-                    empty_count = 0
-                    while True:
-                        bytes = d.read(read_size)
-                        if bytes == None or len(bytes) == 0:
-                            empty_count += 1
-                        else:
-                            empty_count = 0
-                        if empty_count > 2:
-                            break
+            with Ft600Device() as d:
+                # clear input buffer
+                empty_count = 0
+                while True:
+                    bytes = d.read(read_size)
+                    if bytes == None or len(bytes) == 0:
+                        empty_count += 1
+                    else:
+                        empty_count = 0
+                    if empty_count > 2:
+                        break
 
-                    status_num_packets_sent = 0
-                    status_num_bytes_sent = 0
+                status_num_packets_sent = 0
+                status_num_bytes_sent = 0
 
-                    start = datetime.datetime.now()
-                    rate_calculator = TransferRateCalculator(
-                        lambda rate: _spinner.update(
-                            subtitle=f"Collecting data ... {rate}"
-                        )
+                start = datetime.datetime.now()
+                rate_calculator = TransferRateCalculator(
+                    lambda rate: _spinner.update(
+                        subtitle=f"Collecting data ... {rate}"
                     )
+                )
 
-                    image_index = 1
-                    transmission_buf = b""
-                    last_transmission_time = None
-                    _spinner.update(subtitle="Collecting data ...")
-                    while True:
-                        bytes = d.read(read_size)
-                        rate_calculator.update(bytes)
+                d.write(b'S+')
 
-                        now = datetime.datetime.now()
-                        if bytes is None:
-                            if (
-                                now - start
-                            ).total_seconds() > num_seconds_before_timeout:
-                                break
-                            continue
-                        start = now
+                image_index = 1
+                transmission_buf = b""
+                last_transmission_time = None
+                _spinner.update(subtitle="Collecting data ...")
+                while True:
+                    bytes = d.read(read_size)
+                    rate_calculator.update(bytes)
 
-                        transmission_buf += bytes
-                        if not last_transmission_time or (
-                            last_transmission_time - now
-                        ) > datetime.timedelta(milliseconds=100):
-                            await websocket.send(transmission_buf)
-                            status_num_packets_sent += 1
-                            status_num_bytes_sent += len(bytes)
-                            transmission_buf = b""
+                    now = datetime.datetime.now()
+                    if bytes is None:
+                        if (
+                            now - start
+                        ).total_seconds() > num_seconds_before_timeout:
+                            break
+                        continue
+                    start = now
 
-                            if (
-                                collect_data_type.value
-                                == CollectDataType.STREAM_TO_FASTAPI
-                            ):
-                                mo.output.replace(
-                                    mo.image(
-                                        f"http://localhost:8000/lcd?force_redraw={image_index}"
-                                    )
+                    transmission_buf += bytes
+                    if not last_transmission_time or (
+                        last_transmission_time - now
+                    ) > datetime.timedelta(milliseconds=100):
+                        await inst.send(transmission_buf)
+                        status_num_packets_sent += 1
+                        status_num_bytes_sent += len(bytes)
+                        transmission_buf = b""
+
+                        if (
+                            collect_data_type.value
+                            == CollectDataType.STREAM_TO_FASTAPI
+                        ):
+                            mo.output.replace(
+                                mo.image(
+                                    f"http://localhost:8000/lcd?force_redraw={image_index}"
                                 )
-                                image_index += 1
+                            )
+                            image_index += 1
+
+                d.write(b'S-')
 
             _spinner.update(subtitle="Collecting data ...")
             return await inst.all_events()
@@ -688,10 +705,6 @@ def _(
                 ann.pointer("val", e.val)
 
 
-    # ppp = PerfettoTraceCreator().create_perfetto_trace(parsed)
-    # with open("perfetto-test2.pb", "wb") as ff:
-    #     ff.write(ppp.serialize())
-
     def get_perfetto_trace_data():
         ppp = PerfettoTraceCreator().create_perfetto_trace(parsed)
         return ppp.serialize()
@@ -711,7 +724,7 @@ def _(
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import perfetto_pb2 as perfetto
 
@@ -1050,11 +1063,6 @@ def _(Type):
     return df_valh, io_df
 
 
-@app.cell(hide_code=True)
-def _():
-    return
-
-
 @app.cell
 def _(IOPort, df, sed1560):
     def do_parse_lcd_commsnds(df):
@@ -1081,24 +1089,6 @@ def _(IOPort, df, sed1560):
         parsed_lcd_commands,
         parsed_lcd_commands_df,
     )
-
-
-@app.cell
-def _():
-    # Key Code table: https://ver0.sakura.ne.jp/doc/pcg800iocs.html
-    # If you press the SHIFT key at the same time, the most significant bit becomes 1.
-    return
-
-
-@app.cell(hide_code=True)
-def _():
-    return
-
-
-@app.cell
-def _():
-    # parsed_lcd_commands_df
-    return
 
 
 @app.cell(hide_code=True)
@@ -1166,7 +1156,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
         max_index = df['index'].max()
         x_scale = alt.Scale(domain=(min_index, max_index))
 
-        key_columns = ['KEY_INPUT', 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
+        key_columns = ['KEY_INPUT'] #, 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
         # key_columns = []
 
         events_points = (

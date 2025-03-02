@@ -25,7 +25,9 @@ class IOPort(Enum):
     SET_KEY_STROBE_LO = 0x11  # Write-only
     SET_KEY_STROBE_HI = 0x12  # Write-only
 
+    SET_1S_TIMER_PERIOD = 0x68
     TIMER = 0x14
+
     XIN_ENABLED = 0x15
     INTERRUPT_FLAGS = 0x16
     INTERRUPT_MASK = 0x17
@@ -34,8 +36,6 @@ class IOPort(Enum):
     WAIT_AFTER_M1 = 0x65
     WAIT_AFTER_IO = 0x66
     CPU_CLOCK_MODE = 0x67
-
-    SET_1S_TIMER_PERIOD = 0x68
 
     GPIO_IO_OUTPUT = 0x18  # 11-pin connector
     GET_GPIO_IO = 0x1F
@@ -298,7 +298,10 @@ class PipelineBusParser:
         self.status_num_out_ports = 0
         self.out_ports_queue = out_ports_queue
 
-        self.rom_bank = None
+        # if we start recording before the calculator is turned on then it'll
+        # fetch the rom_bank number before trying to jump there. Otherwise
+        # we'll likely crash in the full_addr function.
+        self.rom_bank = 0
         self.pc = None
         self.errors = []
 

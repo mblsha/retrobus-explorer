@@ -279,20 +279,25 @@ module alchitry_top (
             fifo_full_counter.d = 0
         }
 
-        if (rx.new_data) {
-            if (rx.data == "1") {
+        if (!ft.ui_dout_empty) {
+            ft.ui_dout_get = 1
+            if (ft.ui_dout[0+:8] == "S" && ft.ui_dout[8+:8] == "+") {
                 ft_enabled.d = 1 // enable decoded bus streaming
                 if (!tx.busy) {
                     tx.new_data = 1
                     tx.data = "+"
                 }
-            } else if (rx.data == "0") {
+            } else if (ft.ui_dout[0+:8] == "S" && ft.ui_dout[8+:8] == "-") {
                 ft_enabled.d = 0 // disable decoded bus streaming
                 if (!tx.busy) {
                     tx.new_data = 1
                     tx.data = "-"
                 }
-            } else if (rx.data == "s") {
+            }
+        }
+
+        if (rx.new_data) {
+            if (rx.data == "s") {
                 saleae_state.d = SaleaeStates.SYNC_SIGNALS
                 if (!tx.busy) {
                     tx.new_data = 1

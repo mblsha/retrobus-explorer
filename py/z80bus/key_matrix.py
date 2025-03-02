@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from typing import List
 
+# https://ver0.sakura.ne.jp/doc/pcg800iocs.html shows how the keycodes are mapped
+# to the key matrix.
 
 # SET_KEY_STROBE are rows
 # KEY_INPUT are columns
