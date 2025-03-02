@@ -410,7 +410,8 @@ class PipelineBusParser:
             bank=bank,
         )
 
-    def parse(self, data):
+    def parse(self, full_data):
+        data = memoryview(full_data)
         while len(data) >= 4:
             try:
                 type = Type(chr(data[0]))
@@ -444,7 +445,7 @@ class PipelineBusParser:
                 self.last_ret_conditional = e
 
         # return unprocessed data, it should be concatenated with the next batch
-        return data
+        return bytes(data)
 
 
 def parse_data_thread(

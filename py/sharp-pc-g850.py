@@ -121,10 +121,12 @@ def _(Enum, mo):
     class CollectDataType(Enum):
         STREAM_TO_FASTAPI = 0
         LOCAL_BUFFER = 1
+        LOCAL_PIPELINE = 2
 
     collect_data_type = mo.ui.radio(
         options={
             "Stream to local FastAPI worker": CollectDataType.STREAM_TO_FASTAPI,
+            "Local Pipeline (results in data loss)": CollectDataType.LOCAL_PIPELINE,
             "Local Buffer": CollectDataType.LOCAL_BUFFER,
         },
         value='Local Buffer',
@@ -213,7 +215,7 @@ async def _(
             return []
 
 
-    class LocalBufferAdapter:
+    class LocalPipelineAdapter:
         def __init__(self):
             self.errors_queue = queue.Queue()
             self.parser = bus_parser.PipelineBusParser(
@@ -243,6 +245,38 @@ async def _(
             return self.parser.all_events
 
 
+    class LocalBufferAdapter:
+        def __init__(self):
+            self.errors_queue = queue.Queue()
+            self.buffer = []
+
+        async def send(self, data):
+            self.buffer.append(data)
+
+        async def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, type, value, traceback):
+            self.stop()
+
+        async def all_events(self):
+            self.parser = bus_parser.PipelineBusParser(
+                errors_queue=self.errors_queue,
+                out_ports_queue=None,
+                save_all_events=True,
+            )
+            combined_buffer = b''.join(self.buffer)
+            self.parser.parse(combined_buffer)
+            self.parser.flush()
+            return self.parser.all_events
+
+
     async def GetBusData(streamer, num_seconds_before_timeout=3):
         # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
         # which results in some events being lost.
@@ -250,11 +284,12 @@ async def _(
 
         inst = streamer()
         await inst.start()
-        with inst as websocket:
-            with Ft600Device() as d:
-                with mo.status.spinner(
-                    subtitle="Waiting for buffer to clear ..."
-                ) as _spinner:
+
+        with mo.status.spinner(
+            subtitle="Waiting for buffer to clear ..."
+        ) as _spinner:
+            with inst as websocket:
+                with Ft600Device() as d:
                     # clear input buffer
                     empty_count = 0
                     while True:
@@ -313,19 +348,26 @@ async def _(
                                 )
                                 image_index += 1
 
-        return await inst.all_events()
-        time.sleep(0.1)
-        return {
-            "status_num_packets_sent": status_num_packets_sent,
-            "status_num_bytes_sent": status_num_bytes_sent,
-        }
+            _spinner.update(subtitle="Collecting data ...")
+            return await inst.all_events()
+            time.sleep(0.1)
+            return {
+                "status_num_packets_sent": status_num_packets_sent,
+                "status_num_bytes_sent": status_num_bytes_sent,
+            }
 
-
-    streamer = WebsocketAdapter if collect_data_type.value == CollectDataType.STREAM_TO_FASTAPI else LocalBufferAdapter
+    match collect_data_type.value:
+        case CollectDataType.STREAM_TO_FASTAPI:
+            streamer = WebsocketAdapter
+        case CollectDataType.LOCAL_BUFFER:
+            streamer = LocalBufferAdapter
+        case CollectDataType.LOCAL_PIPELINE:
+            streamer = LocalPipelineAdapter
     parsed = await GetBusData(streamer, collect_date_timeout.value)
     return (
         GetBusData,
         LocalBufferAdapter,
+        LocalPipelineAdapter,
         WebsocketAdapter,
         parsed,
         streamer,
