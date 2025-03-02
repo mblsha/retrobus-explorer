@@ -131,6 +131,7 @@ async def _(
 ):
     mo.stop(not collect_data_button.value)
 
+
     class TransferRateCalculator:
         def __init__(self, callback):
             self.start = datetime.datetime.now()
@@ -164,10 +165,12 @@ async def _(
         # which results in some events being lost.
         read_size = 2**15
 
-        uri = 'ws://localhost:8000/ws'
+        uri = "ws://localhost:8000/ws"
         async with websockets.connect(uri, ping_interval=None) as websocket:
             with Ft600Device() as d:
-                with mo.status.spinner(subtitle="Waiting for buffer to clear ...") as _spinner:
+                with mo.status.spinner(
+                    subtitle="Waiting for buffer to clear ..."
+                ) as _spinner:
                     # clear input buffer
                     empty_count = 0
                     while True:
@@ -178,10 +181,10 @@ async def _(
                             empty_count = 0
                         if empty_count > 2:
                             break
-        
+
                     status_num_packets_sent = 0
                     status_num_bytes_sent = 0
-        
+
                     start = datetime.datetime.now()
                     rate_calculator = TransferRateCalculator(
                         lambda rate: _spinner.update(
@@ -189,13 +192,14 @@ async def _(
                         )
                     )
 
-                    transmission_buf = b''
+                    image_index = 1
+                    transmission_buf = b""
                     last_transmission_time = None
                     _spinner.update(subtitle="Collecting data ...")
                     while True:
                         bytes = d.read(read_size)
                         rate_calculator.update(bytes)
-        
+
                         now = datetime.datetime.now()
                         if bytes is None:
                             if (
@@ -206,11 +210,20 @@ async def _(
                         start = now
 
                         transmission_buf += bytes
-                        if not last_transmission_time or (last_transmission_time - now) > datetime.timedelta(milliseconds=100):
+                        if not last_transmission_time or (
+                            last_transmission_time - now
+                        ) > datetime.timedelta(milliseconds=100):
                             await websocket.send(transmission_buf)
                             status_num_packets_sent += 1
                             status_num_bytes_sent += len(bytes)
-                            transmission_buf = b''
+                            transmission_buf = b""
+
+                            mo.output.replace(
+                                mo.image(
+                                    f"http://localhost:8000/lcd?force_redraw={image_index}"
+                                )
+                            )
+                            image_index += 1
 
                     time.sleep(0.1)
                     return {
@@ -218,8 +231,14 @@ async def _(
                         "status_num_bytes_sent": status_num_bytes_sent,
                     }
 
+
     await GetBusData()
     return GetBusData, TransferRateCalculator
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell
