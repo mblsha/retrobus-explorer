@@ -325,7 +325,8 @@ class PipelineBusParser:
 
             if e.type in [Type.IN_PORT, Type.OUT_PORT]:
                 self.status_num_out_ports += 1
-                self.out_ports_queue.put(e)
+                if self.out_ports_queue is not None:
+                    self.out_ports_queue.put(e)
         self.buf = []
 
         for e in self.errors:

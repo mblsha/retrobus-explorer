@@ -1,4 +1,4 @@
-from .bus_parser import (
+from z80bus.bus_parser import (
     SimpleBusParser,
     BusParser,
     PipelineBusParser,
@@ -7,7 +7,7 @@ from .bus_parser import (
     Type,
     IOPort,
 )
-from . import bus_parser
+import z80bus.bus_parser as bus_parser
 
 from typing import List, Tuple
 import struct

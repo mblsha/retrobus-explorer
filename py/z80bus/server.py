@@ -70,7 +70,7 @@ class ParseRenderManager:
         out_ports_queue_size_before = self.out_ports_queue.qsize()
 
         self.buf = self.parser.parse(self.buf)
-        # self.parser.flush()
+        self.parser.flush()
         self.process_queues()
 
         out_ports_queue_size_after = self.out_ports_queue.qsize()
@@ -91,9 +91,7 @@ class ParseRenderManager:
     def get_lcd_image_bytes(self) -> bytes:
         img, draw = self.lcd.vram_image()
         pos = (0, img.height - 30)
-        draw.text(
-            pos, str(self.key_matrix.pressed_keys()), font=self.font, fill="white"
-        )
+        draw.text(pos, str(self.key_matrix), font=self.font, fill="white")
 
         img_bytes_io = io.BytesIO()
         img.save(img_bytes_io, format="PNG")
@@ -149,5 +147,5 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     uvicorn.run(
-        app, host="0.0.0.0", port=8000, ws_ping_interval=None, ws_ping_timeout=None
+        app, host="127.0.0.1", port=8000, ws_ping_interval=None, ws_ping_timeout=None
     )

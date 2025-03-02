@@ -1,4 +1,4 @@
-from z80bus.key_matrix import KeyMatrixInterpreter
+from z80bus.key_matrix import KeyMatrixInterpreter, PressedKey
 from z80bus.bus_parser import IOPort
 from z80bus.test_bus_parser import in_port, out_port, normal_parse
 
@@ -32,27 +32,27 @@ def test_key_matrix():
     assert eval(
         out_port(0x01, IOPort.SET_KEY_STROBE_LO)
         + in_port(0x01, IOPort.KEY_INPUT)
-    ).cur == [(0, 0)]
+    ).cur == [PressedKey(row=0, col=0)]
     assert eval(
         out_port(0x01, IOPort.SET_KEY_STROBE_LO)
         + in_port(0x02, IOPort.KEY_INPUT)
-    ).cur == [(0, 1)]
+    ).cur == [PressedKey(row=0, col=1)]
     assert eval(
         out_port(0x01, IOPort.SET_KEY_STROBE_LO)
         + in_port(0x03, IOPort.KEY_INPUT)
-    ).cur == [(0, 0), (0, 1)]
+    ).cur == [PressedKey(row=0, col=0), PressedKey(row=0, col=1)]
     assert eval(
         out_port(0x02, IOPort.SET_KEY_STROBE_LO)
         + in_port(0x02, IOPort.KEY_INPUT)
-    ).cur == [(1, 1)]
+    ).cur == [PressedKey(row=1, col=1)]
 
     assert eval(
         out_port(0x02, IOPort.SET_KEY_STROBE_LO)
         + in_port(0x02, IOPort.KEY_INPUT)
         + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
     ).cur == []
-    assert eval(
+    assert str(eval(
         out_port(0x02, IOPort.SET_KEY_STROBE_LO)
         + in_port(0x02, IOPort.KEY_INPUT)
         + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
-    ).pressed_keys() == '"S"'
+    )) == 'S'

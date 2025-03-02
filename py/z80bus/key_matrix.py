@@ -1,8 +1,12 @@
 from z80bus.bus_parser import IOPort, Event, Type
 import copy
 import math
+from dataclasses import dataclass
+from typing import List
 
 
+# SET_KEY_STROBE are rows
+# KEY_INPUT are columns
 KEY_MATRIX = [
     ["OFF", "Q", "W", "E", "R", "T", "Y", "U"],
     ["A", "S", "D", "F", "G", "H", "J", "K"],
@@ -15,6 +19,21 @@ KEY_MATRIX = [
     ["nPr", "→DEG", "√", "x²", "yˣ∧", "(", "1/x", "MDF"],
     ["2nd F", "SIN", "COS", "ln", "LOG", "TAN", "F↔E", "CLS"],
 ]
+
+
+@dataclass
+class PressedKey:
+    row: int
+    col: int
+
+    def __str__(self):
+        return KEY_MATRIX[self.row][self.col]
+
+
+@dataclass
+class KeyMatrixState:
+    pressed_keys: List[PressedKey]
+    shift_pressed: bool
 
 
 class KeyMatrixInterpreter:
@@ -35,12 +54,17 @@ class KeyMatrixInterpreter:
         )
 
     def pressed_keys(self):
+        return self.pressed_keys
+
+    def __str__(self):
         r = []
         if self.last_shift_state:
-            r.append('"SHIFT"')
-        for row, column in self.last_full_state:
-            r.append(f'"{KEY_MATRIX[row][column]}"')
-        return ', '.join(r)
+            r.append('SHIFT')
+        for k in self.last_full_state:
+            r.append(str(k))
+        return ", ".join(r)
+
+    # string representation
 
     def eval(self, event: Event):
         match event.port:
@@ -57,9 +81,9 @@ class KeyMatrixInterpreter:
                 row = int(math.log2(strobe))
                 for i in range(8):
                     if event.val & (1 << i):
-                        self.cur.append((row, i))
+                        self.cur.append(PressedKey(row=row, col=i))
             case IOPort.SHIFT_KEY_INPUT:
                 # key matrix scanning ends with SHIFT_KEY_INPUT query
-                self.last_full_state = copy.deepcopy(self.cur)
+                self.last_full_state = self.cur.copy()
                 self.last_shift_state = event.val
                 self.cur = []
