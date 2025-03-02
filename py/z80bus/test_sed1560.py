@@ -1,7 +1,7 @@
-from .sed1560 import SED1560, SED1560Parser, SED1560Interpreter
-from . import sed1560
-from .bus_parser import IOPort
-from .test_bus_parser import in_port, out_port, normal_parse
+from z80bus.sed1560 import SED1560, SED1560Parser, SED1560Interpreter
+import z80bus.sed1560
+from z80bus.bus_parser import IOPort
+from z80bus.test_bus_parser import in_port, out_port, normal_parse
 from typing import List
 
 

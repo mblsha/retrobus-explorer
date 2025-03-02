@@ -1,4 +1,4 @@
-from .bus_parser import IOPort, Event, Type
+from z80bus.bus_parser import IOPort, Event, Type
 import copy
 import math
 

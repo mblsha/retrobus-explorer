@@ -1,6 +1,6 @@
-from .key_matrix import KeyMatrixInterpreter
-from .bus_parser import IOPort
-from .test_bus_parser import in_port, out_port, normal_parse
+from z80bus.key_matrix import KeyMatrixInterpreter
+from z80bus.bus_parser import IOPort
+from z80bus.test_bus_parser import in_port, out_port, normal_parse
 
 
 def eval(data: bytes) -> KeyMatrixInterpreter:

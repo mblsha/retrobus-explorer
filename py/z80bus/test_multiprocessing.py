@@ -3,10 +3,10 @@ import queue
 import time
 import PIL
 
-from . import bus_parser
-from . import sed1560
-from .bus_parser import IOPort, Event, Type
-from .test_bus_parser import fetch, in_port, out_port, normal_parse
+import z80bus.bus_parser
+import z80bus.sed1560
+from z80bus.bus_parser import IOPort, Event, Type
+from z80bus.test_bus_parser import fetch, in_port, out_port, normal_parse
 
 
 def test_parse_context():

@@ -1,3 +1,5 @@
+# pypy server.py -m z80bus
+
 import io
 import threading
 import queue
@@ -12,8 +14,8 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from sed1560 import SED1560Parser, SED1560Interpreter
-from bus_parser import PipelineBusParser
+from z80bus.sed1560 import SED1560Parser, SED1560Interpreter
+from z80bus.bus_parser import PipelineBusParser
 
 
 class ParseRenderManager:
