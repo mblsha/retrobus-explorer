@@ -70,3 +70,10 @@ their respective terms.
   Name: FTDI SuperSpeed-FIFO Bridge
   Product ID: 0x601e
   Vendor ID:  0x0403  (Future Technology Devices International Limited)
+
+# Thanks
+
+A big thank you (in alphabetical order) to Louis, Nikolai, and
+[Peter](https://taricorp.net) for teaching me the dark magic of hardware and
+low-level development, as well as for patiently answering my countless
+questions. This project would not exist without your help.
