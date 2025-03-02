@@ -17,8 +17,11 @@ def _():
     import time
     import asyncio
     import websockets
+    import queue
+    from contextlib import asynccontextmanager
     return (
         alt,
+        asynccontextmanager,
         asyncio,
         datetime,
         duckdb,
@@ -26,6 +29,7 @@ def _():
         mo,
         pandas,
         polars,
+        queue,
         time,
         websockets,
     )
@@ -112,26 +116,25 @@ def _(mo):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    collect_data_button = mo.ui.run_button(label='Collect Bus Data')
-    collect_data_button
-    return (collect_data_button,)
-
-
 @app.cell
-async def _(
-    Ft600Device,
-    collect_data_button,
-    datetime,
-    humanize,
-    mo,
-    time,
-    websockets,
-):
-    mo.stop(not collect_data_button.value)
+def _(Enum, mo):
+    class CollectDataType(Enum):
+        STREAM_TO_FASTAPI = 0
+        LOCAL_BUFFER = 1
+
+    collect_data_type = mo.ui.radio(
+        options={
+            "Stream to local FastAPI worker": CollectDataType.STREAM_TO_FASTAPI,
+            "Local Buffer": CollectDataType.LOCAL_BUFFER,
+        },
+        value='Local Buffer',
+    )
+    collect_date_timeout = mo.ui.number(start=1, stop=10, value=3, step=1, label='Timeout (seconds)')
+    return CollectDataType, collect_data_type, collect_date_timeout
 
 
+@app.cell(hide_code=True)
+def _(datetime, humanize):
     class TransferRateCalculator:
         def __init__(self, callback):
             self.start = datetime.datetime.now()
@@ -157,16 +160,97 @@ async def _(
             if data is not None:
                 self.status_update_packets += 1
                 self.status_update_bytes += len(data)
+    return (TransferRateCalculator,)
 
 
-    # def GetBusData(queues, display_queue, num_seconds_before_timeout=3):
-    async def GetBusData(num_seconds_before_timeout=3):
+@app.cell(hide_code=True)
+def _(collect_data_type, collect_date_timeout, mo):
+    collect_data_button = mo.ui.run_button(label="Collect Bus Data", disabled=collect_data_type.value is None)
+    mo.vstack(
+        [
+            mo.hstack([collect_date_timeout, mo.plain_text('Stop capture after there\'s no activity for selected amount of seconds')], justify='start'),
+            collect_data_type,
+            collect_data_button,
+        ]
+    )
+    return (collect_data_button,)
+
+
+@app.cell
+async def _(
+    CollectDataType,
+    Ft600Device,
+    TransferRateCalculator,
+    bus_parser,
+    collect_data_button,
+    collect_data_type,
+    collect_date_timeout,
+    datetime,
+    mo,
+    queue,
+    time,
+    websockets,
+):
+    mo.stop(not collect_data_button.value)
+
+
+    class WebsocketAdapter:
+        def __init__(self):
+            self.websocket = None
+
+        async def start(self):
+            uri = "ws://localhost:8000/ws"
+            self.websocket = await websockets.connect(uri, ping_interval=None)
+
+        def __enter__(self):
+            return self.websocket
+
+        def __exit__(self, type, value, traceback):
+            pass
+
+        async def all_events(self):
+            await self.websocket.close()
+            return []
+
+
+    class LocalBufferAdapter:
+        def __init__(self):
+            self.errors_queue = queue.Queue()
+            self.parser = bus_parser.PipelineBusParser(
+                errors_queue=self.errors_queue,
+                out_ports_queue=None,
+                save_all_events=True,
+            )
+            self.buf = b""
+
+        async def send(self, data):
+            self.buf += data
+            self.buf = self.parser.parse(self.buf)
+
+        async def start(self):
+            pass
+
+        def stop(self):
+            self.parser.flush()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, type, value, traceback):
+            self.stop()
+
+        async def all_events(self):
+            return self.parser.all_events
+
+
+    async def GetBusData(streamer, num_seconds_before_timeout=3):
         # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
         # which results in some events being lost.
         read_size = 2**15
 
-        uri = "ws://localhost:8000/ws"
-        async with websockets.connect(uri, ping_interval=None) as websocket:
+        inst = streamer()
+        await inst.start()
+        with inst as websocket:
             with Ft600Device() as d:
                 with mo.status.spinner(
                     subtitle="Waiting for buffer to clear ..."
@@ -218,34 +302,46 @@ async def _(
                             status_num_bytes_sent += len(bytes)
                             transmission_buf = b""
 
-                            mo.output.replace(
-                                mo.image(
-                                    f"http://localhost:8000/lcd?force_redraw={image_index}"
+                            if (
+                                collect_data_type.value
+                                == CollectDataType.STREAM_TO_FASTAPI
+                            ):
+                                mo.output.replace(
+                                    mo.image(
+                                        f"http://localhost:8000/lcd?force_redraw={image_index}"
+                                    )
                                 )
-                            )
-                            image_index += 1
+                                image_index += 1
 
-                    time.sleep(0.1)
-                    return {
-                        "status_num_packets_sent": status_num_packets_sent,
-                        "status_num_bytes_sent": status_num_bytes_sent,
-                    }
-
-
-    await GetBusData()
-    return GetBusData, TransferRateCalculator
+        return await inst.all_events()
+        time.sleep(0.1)
+        return {
+            "status_num_packets_sent": status_num_packets_sent,
+            "status_num_bytes_sent": status_num_bytes_sent,
+        }
 
 
-@app.cell
-def _(bus_parser, df):
-    df[df['type'].isin([bus_parser.Type.ERROR])]
-    return
+    streamer = WebsocketAdapter if collect_data_type.value == CollectDataType.STREAM_TO_FASTAPI else LocalBufferAdapter
+    parsed = await GetBusData(streamer, collect_date_timeout.value)
+    return (
+        GetBusData,
+        LocalBufferAdapter,
+        WebsocketAdapter,
+        parsed,
+        streamer,
+    )
 
 
 @app.cell
 def _(pandas, parsed):
     df = pandas.DataFrame(parsed)
     return (df,)
+
+
+@app.cell
+def _(bus_parser, df):
+    df[df['type'].isin([bus_parser.Type.ERROR])]
+    return
 
 
 @app.cell
