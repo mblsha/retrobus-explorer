@@ -37,6 +37,16 @@ def _():
 
 @app.cell
 def _():
+    from enum import Enum
+    from dataclasses import dataclass
+    import struct
+
+    from typing import NamedTuple, Optional, List
+    return Enum, List, NamedTuple, Optional, dataclass, struct
+
+
+@app.cell
+def _():
     import sys
     sys.path.append("d3xx")
 
@@ -99,15 +109,13 @@ def _():
 @app.cell
 def _():
     from z80bus import bus_parser
+    from z80bus import sed1560
+    from z80bus import key_matrix
 
     IOPort = bus_parser.IOPort
-    return IOPort, bus_parser
-
-
-@app.cell
-def _():
-    from z80bus import sed1560
-    return (sed1560,)
+    Type = bus_parser.Type
+    InstructionType = bus_parser.InstructionType
+    return IOPort, InstructionType, Type, bus_parser, key_matrix, sed1560
 
 
 @app.cell(hide_code=True)
@@ -178,7 +186,7 @@ def _(collect_data_type, collect_date_timeout, mo):
     return (collect_data_button,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 async def _(
     CollectDataType,
     Ft600Device,
@@ -393,33 +401,6 @@ def _(df):
 
 
 @app.cell
-def _(parsed, parsed_reference):
-    def compare_with_reference():
-        num_diffs = 0
-        for i in range(min(len(parsed_reference), len(parsed))):
-            ref = parsed_reference[i]
-            p = parsed[i]
-            if ref != p:
-                num_diffs += 1
-                if num_diffs > 10:
-                    break
-                print(f"{i}:\n{ref} !=\n{p}")
-
-    # compare_with_reference()
-    return (compare_with_reference,)
-
-
-@app.cell
-def _():
-    from enum import Enum
-    from dataclasses import dataclass
-    import struct
-
-    from typing import NamedTuple, Optional, List
-    return Enum, List, NamedTuple, Optional, dataclass, struct
-
-
-@app.cell
 def _():
     def find_differences(p4, p6):
         for i in range(min(len(p4), len(p6))):
@@ -558,7 +539,7 @@ def _():
     return BNIDA_NAMES, BNIDA_NAMES_RAW, FUNCTIONS, get_function_name
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
     InstructionType,
     PerfettoTraceBuilder,
@@ -566,6 +547,7 @@ def _(
     dataclass,
     datetime,
     get_function_name,
+    key_matrix,
     mo,
     parsed,
 ):
@@ -588,9 +570,18 @@ def _(
             self.index = None
             self.builder = None
 
+            self.main_thread = None
+            self.keys_thread = None
+
+            self.key_matrix = key_matrix.KeyMatrixInterpreter()
+            self.last_pressed_keys = []
+
         def create_perfetto_trace(self, data):
             current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.builder = PerfettoTraceBuilder(current_date_time_str)
+            self.builder = PerfettoTraceBuilder(f'SHARP PC-G850 {current_date_time_str}')
+
+            self.main_thread = self.builder.add_thread_descriptor("main")
+            self.keys_thread = self.builder.add_thread_descriptor("keys")
 
             for index, e in enumerate(data):
                 self.index = index
@@ -607,6 +598,11 @@ def _(
                     self.last_stack_event_index = None
                 elif e.type in [Type.IN_PORT, Type.OUT_PORT]:
                     self._handle_port_event(e)
+
+                    self.key_matrix.eval(e)
+                    if self.last_pressed_keys != self.key_matrix.pressed_keys():
+                        self._handle_pressed_keys(self.last_pressed_keys, self.key_matrix.pressed_keys())
+                        self.last_pressed_keys = self.key_matrix.pressed_keys()
                 elif e.type in [Type.READ_STACK, Type.WRITE_STACK]:
                     self._handle_stack_event(e)
 
@@ -616,6 +612,18 @@ def _(
                     self.last_stack_event_index = index
 
             return self.builder
+
+        # FIXME: ideally want separate tracks for the items, as they're independent and not nested
+        def _handle_pressed_keys(self, last, curr):
+            # first need to close the slices for the keys that are no longer pressed
+            stop_pressed = set(last) - set(curr)
+            for k in stop_pressed:
+                self.builder.add_slice_event(self.keys_thread, self.ts, 'end')
+
+            # then open slices for keys that weren't pressed before and are pressed now
+            start_pressed = set(curr) - set(last)
+            for k in start_pressed:
+                self.builder.add_slice_event(self.keys_thread, self.ts, 'begin', f'key {k}')
 
         def _annotate_common(self, be, e, name):
             with be.annotation(name) as ann:
@@ -627,7 +635,7 @@ def _(
 
         def _handle_call_event(self, e):
             function_name = get_function_name(self.pc)
-            with self.builder.add_slice_event(self.ts, 'begin', function_name) as begin_event:
+            with self.builder.add_slice_event(self.main_thread, self.ts, 'begin', function_name) as begin_event:
                 expected_return_addr = self.last_stack_event.addr + 3
                 self.stack.append(PerfettoStack(
                     begin_event=begin_event,
@@ -644,7 +652,7 @@ def _(
                 self.stack[-1].expected_return_addr = 0x93f3
                 return
 
-            with self.builder.add_instant_event(self.ts, 'BAD_RET').annotation('ret') as ann:
+            with self.builder.add_instant_event(self.main_thread, self.ts, 'BAD_RET').annotation('ret') as ann:
                 ann.int("index", self.index)
                 ann.pointer("pc", self.pc)
                 ann.pointer("expected_return_addr", s.expected_return_addr)
@@ -652,19 +660,19 @@ def _(
         def _handle_ret_event(self, e):
             if self.stack:
                 s = self.stack.pop()
-                self.builder.add_slice_event(self.ts, 'end')
+                self.builder.add_slice_event(self.main_thread, self.ts, 'end')
                 self._annotate_common(s.begin_event, e, 'ret')
 
                 if self.pc != s.expected_return_addr:
                     self._handle_mismatched_ret_event(e, s)
             else:
-                underflow = self.builder.add_instant_event(self.ts, 'UNDERFLOW')
+                underflow = self.builder.add_instant_event(self.main_thread, self.ts, 'UNDERFLOW')
                 self._annotate_common(underflow, e, 'ret')
 
         def _handle_port_event(self, e):
             direction = 'in' if e.type == Type.IN_PORT else 'out'
             name = f'{e.port.name} {direction} {hex(e.val)}'
-            with self.builder.add_instant_event(self.ts, name).annotation('call') as ann:
+            with self.builder.add_instant_event(self.main_thread, self.ts, name).annotation('call') as ann:
                 ann.int("index", self.index)
                 ann.pointer("pc", self.pc)
                 ann.pointer("port", e.port.value)
@@ -673,7 +681,7 @@ def _(
         def _handle_stack_event(self, e):
             direction = 'POP' if e.type == Type.READ_STACK else 'PUSH'
             name = f'{direction} {hex(e.val)}'
-            with self.builder.add_instant_event(self.ts, name).annotation('stack') as ann:
+            with self.builder.add_instant_event(self.main_thread, self.ts, name).annotation('stack') as ann:
                 ann.int("index", self.index)
                 ann.pointer("pc", self.pc)
                 ann.pointer("addr", e.addr)
@@ -694,6 +702,7 @@ def _(
         filename="sharp-pc-g850-perfetto.pb",
     )
     download_perfetto
+    # len(get_perfetto_trace_data())
     return (
         PerfettoStack,
         PerfettoTraceCreator,
@@ -702,7 +711,7 @@ def _(
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _():
     import perfetto_pb2 as perfetto
 
@@ -753,16 +762,16 @@ def _():
             return DebugAnnotation(ann)
 
     class PerfettoTraceBuilder:
-        def __init__(self, thread_descriptor: str = "main"):
+        def __init__(self, process_name: str):
             self.trace = perfetto.Trace()
-            self.track_uuid = 0xCA1C
+            self.last_track_uuid = 0
             self.trusted_packet_sequence_id = 0x123
             self.process_uuid = 0x456
             self.pid = 1234
             self.tid = 5678
 
-            self.add_process_descriptor("SHARP PC-G850")
-            self.add_thread_descriptor(thread_descriptor)
+            self.add_process_descriptor(process_name)
+            # self.add_thread_descriptor(thread_descriptor)
 
         def add_process_descriptor(self, process_name: str):
             packet = self.trace.packet.add()
@@ -770,15 +779,18 @@ def _():
             packet.track_descriptor.process.pid = self.pid
             packet.track_descriptor.process.process_name = process_name
 
-        def add_thread_descriptor(self, thread_name: str):
+        def add_thread_descriptor(self, thread_name: str = "main"):
+            self.last_track_uuid += 1
+            track_uuid = self.last_track_uuid
             packet = self.trace.packet.add()
-            packet.track_descriptor.uuid = self.track_uuid
+            packet.track_descriptor.uuid = track_uuid
             packet.track_descriptor.parent_uuid = self.process_uuid
             packet.track_descriptor.thread.pid = self.pid
             packet.track_descriptor.thread.tid = self.tid
             packet.track_descriptor.thread.thread_name = thread_name
+            return track_uuid
 
-        def add_slice_event(self, timestamp: int, event_type: str, name: str = None):
+        def add_slice_event(self, track_uuid, timestamp: int, event_type: str, name: str = None):
             packet = self.trace.packet.add()
             packet.timestamp = timestamp
 
@@ -790,15 +802,15 @@ def _():
             else:
                 raise ValueError("event_type must be either 'begin' or 'end'.")
 
-            packet.track_event.track_uuid = self.track_uuid
+            packet.track_event.track_uuid = track_uuid
             packet.trusted_packet_sequence_id = self.trusted_packet_sequence_id
             return TrackEvent(packet.track_event)
 
-        def add_instant_event(self, timestamp: int, name: str):
+        def add_instant_event(self, track_uuid, timestamp: int, name: str):
             packet = self.trace.packet.add()
             packet.timestamp = timestamp
             packet.track_event.type = perfetto.TrackEvent.TYPE_INSTANT
-            packet.track_event.track_uuid = self.track_uuid
+            packet.track_event.track_uuid = track_uuid
             packet.track_event.name = name
             packet.trusted_packet_sequence_id = self.trusted_packet_sequence_id
             return TrackEvent(packet.track_event)

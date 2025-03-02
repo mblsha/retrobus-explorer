@@ -26,7 +26,12 @@ class PressedKey:
     row: int
     col: int
 
+    def __hash__(self):
+        return hash((self.row, self.col))
+
     def __str__(self):
+        if self.row == 0xff and self.col == 0xff:
+            return "SHIFT"
         return KEY_MATRIX[self.row][self.col]
 
 
@@ -54,7 +59,9 @@ class KeyMatrixInterpreter:
         )
 
     def pressed_keys(self):
-        return self.pressed_keys
+        if self.last_shift_state:
+            return self.last_full_state + [PressedKey(row=0xff, col=0xff)]
+        return self.last_full_state
 
     def __str__(self):
         r = []
