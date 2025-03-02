@@ -18,7 +18,7 @@ class IOPort(Enum):
     RAM_BANK = 0x1B
     ROM_BANK = 0x69
 
-    # FIXME: what does it do??
+    # seems to be used both for Shift key and CE0/CE1 rom banks?
     SHIFT_KEY_INPUT = 0x13  # Read-only
 
     KEY_INPUT = 0x10  # Read-only
@@ -291,7 +291,8 @@ class BusParser:
 
 
 class PipelineBusParser:
-    def __init__(self, errors_queue, out_ports_queue):
+    def __init__(self, errors_queue, out_ports_queue, save_all_events=False):
+        self.save_all_events = save_all_events
         self.status_num_errors = 0
         self.errors_queue = errors_queue
         self.status_num_out_ports = 0
@@ -319,7 +320,8 @@ class PipelineBusParser:
 
     def flush(self):
         for e in self.buf:
-            # self.all_events.append(e)
+            if self.save_all_events:
+                self.all_events.append(e)
 
             if e.type in [Type.IN_PORT, Type.OUT_PORT]:
                 self.status_num_out_ports += 1

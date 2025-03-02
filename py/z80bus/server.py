@@ -12,13 +12,8 @@ import os
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-# Import components from your module.
 from sed1560 import SED1560Parser, SED1560Interpreter
 from bus_parser import PipelineBusParser
-
-# ------------------------------------------------------------------------------
-# Global Singleton: ParseRenderManager
-# ------------------------------------------------------------------------------
 
 
 class ParseRenderManager:
@@ -57,7 +52,6 @@ class ParseRenderManager:
             self.status_num_lcd_commands += 1
             self.lcd_interpreter.eval(c)
 
-
     def process_raw_data(self, data: bytes) -> list:
         self.buf += data
         self.buf = self.parser.parse(self.buf)
@@ -94,10 +88,6 @@ class ParseRenderManager:
 
 
 manager = ParseRenderManager()
-
-# ------------------------------------------------------------------------------
-# FastAPI Application
-# ------------------------------------------------------------------------------
 
 app = FastAPI(
     title="retrobus-explorer",
@@ -144,4 +134,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, ws_ping_interval=None, ws_ping_timeout=None)
+    uvicorn.run(
+        app, host="0.0.0.0", port=8000, ws_ping_interval=None, ws_ping_timeout=None
+    )

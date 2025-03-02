@@ -9,7 +9,7 @@ from .bus_parser import (
 )
 from . import bus_parser
 
-from typing import List
+from typing import List, Tuple
 import struct
 import queue
 
@@ -17,7 +17,7 @@ import queue
 def pipeline_parse(input: bytes):
     errors_queue = queue.Queue()
     out_ports_queue = queue.Queue()
-    p = PipelineBusParser(errors_queue, out_ports_queue)
+    p = PipelineBusParser(errors_queue, out_ports_queue, save_all_events=True)
 
     buf = b""
     for b in input:
@@ -36,7 +36,7 @@ def pipeline_parse(input: bytes):
     return p.all_events, errors
 
 
-def normal_parse(b: bytes):
+def normal_parse(b: bytes) -> Tuple[List[Event], List[str]]:
     normal_events, normal_errors = BusParser().parse(b)
     pipe_events, pipe_errors = pipeline_parse(b)
     assert len(normal_events) == len(pipe_events)
