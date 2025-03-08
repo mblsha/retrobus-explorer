@@ -533,12 +533,20 @@ def _():
     return BNIDA_NAMES, BNIDA_NAMES_RAW, FUNCTIONS, get_function_name
 
 
-@app.cell(hide_code=True)
+@app.cell
+def _():
+    import dataclasses
+    return (dataclasses,)
+
+
+@app.cell
 def _(
     InstructionType,
     PerfettoTraceBuilder,
+    Pyz80Runner,
     Type,
     dataclass,
+    dataclasses,
     datetime,
     get_function_name,
     key_matrix,
@@ -567,8 +575,23 @@ def _(
             self.main_thread = None
             self.keys_thread = None
 
+            self.runner = Pyz80Runner()
             self.key_matrix = key_matrix.KeyMatrixInterpreter()
             self.last_pressed_keys = []
+
+            self.enrichment = {
+                # draw_char
+                0x8440: {'A': 'char', 'D': 'y', 'E': 'x'},
+                0xbe62: {'A': 'char', 'D': 'y', 'E': 'x'},
+                # draw_char_continuous
+                0x8738: {'A': 'char', 'B': 'num_char', 'D': 'y', 'E': 'x'},
+                0xbfee: {'A': 'char', 'B': 'num_char', 'D': 'y', 'E': 'x'},
+                # draw_string
+                0x84bf: {'B': 'num_char', 'D': 'y', 'E': 'x', 'HL': 'str_ptr'},
+                0xbff1: {'B': 'num_char', 'D': 'y', 'E': 'x', 'HL': 'str_ptr'},
+            }
+        
+            self.interesting_functions = set(self.enrichment.keys())
 
         def create_perfetto_trace(self, data):
             current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -581,8 +604,13 @@ def _(
                 self.index = index
                 self.ts += 1
 
+                self.runner.eval(e)
+
                 if e.type == Type.FETCH:
                     self.pc = e.addr
+                    if self.runner.last_pc in self.interesting_functions:
+                        self.enrich_interesting_function(self.runner.last_pc)
+                
                     if self.last_stack_event is not None:
                         if self.last_stack_event.instr == InstructionType.CALL:
                             self._handle_call_event(e)
@@ -639,6 +667,27 @@ def _(
                 ))
                 self._annotate_common(begin_event, e, 'call')
 
+        # runner.eval() will move the pc to the last_pc
+        def enrich_interesting_function(self, addr):
+            assert len(self.stack) > 0
+            s = self.stack[-1]
+            if addr in self.enrichment:
+                with s.begin_event.annotation("enrich") as ann:
+                    for reg, field in self.enrichment[addr].items():
+                        if len(reg) == 2:
+                            high = getattr(self.runner.reg(), reg[0])
+                            low = getattr(self.runner.reg(), reg[1])
+                            ann.pointer(field, (high << 8) | low)
+                        else:
+                            ann.int(field, getattr(self.runner.reg(), reg))
+            else:   
+                with s.begin_event.annotation("reg") as ann:
+                    reg = self.runner.reg()
+                    # iterate over all fields in RegisterPair and add them to the annotation as pointers
+                    for field in dataclasses.fields(reg):
+                        ann.pointer(field.name, getattr(reg, field.name))
+ 
+    
         def _handle_mismatched_ret_event(self, e, s):
             # sub_93cd hacks the return address after switching rom bank
             if self.last_stack_event.addr == 0x93f2:
@@ -691,7 +740,7 @@ def _(
         data=get_perfetto_trace_data,
         filename="sharp-pc-g850-perfetto.pb",
     )
-    # len(get_perfetto_trace_data())
+    len(get_perfetto_trace_data())
     download_perfetto
     return (
         PerfettoStack,
@@ -1265,7 +1314,7 @@ def _(rom_banks):
 
 
 @app.cell
-def _(IOPort, Type, bus_parser, dataclass, df, pyz80, rom_banks):
+def _(IOPort, Type, bus_parser, dataclass, parsed, pyz80, rom_banks):
     @dataclass
     class RegisterPair:
         A: int
@@ -1417,13 +1466,13 @@ def _(IOPort, Type, bus_parser, dataclass, df, pyz80, rom_banks):
 
         def run_trace(self, df):
             self.index = 0
-            for r in df.itertuples():
+            for r in df:
                 self.eval(r)
 
             return self.reg()
 
     runner = Pyz80Runner()
-    runner.run_trace(df)
+    runner.run_trace(parsed)
     return Pyz80Runner, RegisterPair, runner
 
 
