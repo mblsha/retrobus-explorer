@@ -121,8 +121,9 @@ def _():
 @app.cell
 def _():
     from pyftdi.ftdi import Ftdi
+    # Ftdi.add_custom_product(Ftdi.DEFAULT_VENDOR, 0xdc01)
+    Ftdi.add_custom_vendor(0x0416)
     Ftdi.show_devices()
-
     return (Ftdi,)
 
 
@@ -137,17 +138,6 @@ def _():
     # myftdi.close()
     # ftdi_result
     return
-
-
-@app.cell
-def _(Ft600Device):
-    def test_ft600_writes():
-        with Ft600Device() as d:
-            # bytes = d.read(read_size)
-            d.write(b'S+')
-
-    test_ft600_writes()
-    return (test_ft600_writes,)
 
 
 @app.cell
@@ -597,8 +587,8 @@ def _(
             current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.builder = PerfettoTraceBuilder(f'SHARP PC-G850 {current_date_time_str}')
 
-            self.main_thread = self.builder.add_thread_descriptor("main")
-            self.keys_thread = self.builder.add_thread_descriptor("keys")
+            self.main_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "main")
+            self.keys_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "keys")
 
             for index, e in enumerate(data):
                 self.index = index
@@ -714,8 +704,8 @@ def _(
         data=get_perfetto_trace_data,
         filename="sharp-pc-g850-perfetto.pb",
     )
-    download_perfetto
     # len(get_perfetto_trace_data())
+    download_perfetto
     return (
         PerfettoStack,
         PerfettoTraceCreator,
@@ -724,7 +714,7 @@ def _(
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _():
     import perfetto_pb2 as perfetto
 
@@ -779,25 +769,30 @@ def _():
             self.trace = perfetto.Trace()
             self.last_track_uuid = 0
             self.trusted_packet_sequence_id = 0x123
-            self.process_uuid = 0x456
+            # self.process_uuid = 0x456
             self.pid = 1234
             self.tid = 5678
 
-            self.add_process_descriptor(process_name)
+            self.process_uuid = self.add_process_descriptor(process_name)
             # self.add_thread_descriptor(thread_descriptor)
 
         def add_process_descriptor(self, process_name: str):
-            packet = self.trace.packet.add()
-            packet.track_descriptor.uuid = self.process_uuid
-            packet.track_descriptor.process.pid = self.pid
-            packet.track_descriptor.process.process_name = process_name
-
-        def add_thread_descriptor(self, thread_name: str = "main"):
             self.last_track_uuid += 1
             track_uuid = self.last_track_uuid
+
+            packet = self.trace.packet.add()
+            packet.track_descriptor.uuid = track_uuid # self.process_uuid
+            packet.track_descriptor.process.pid = self.pid
+            packet.track_descriptor.process.process_name = process_name
+            return track_uuid
+
+        def add_thread_descriptor(self, process_uuid: int, thread_name: str):
+            self.last_track_uuid += 1
+            track_uuid = self.last_track_uuid
+
             packet = self.trace.packet.add()
             packet.track_descriptor.uuid = track_uuid
-            packet.track_descriptor.parent_uuid = self.process_uuid
+            packet.track_descriptor.parent_uuid = process_uuid
             packet.track_descriptor.thread.pid = self.pid
             packet.track_descriptor.thread.tid = self.tid
             packet.track_descriptor.thread.thread_name = thread_name
