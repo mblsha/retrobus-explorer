@@ -5,6 +5,43 @@
 
 namespace py = pybind11;
 
+class PyRegisterPair {
+ private:
+  Z80::RegisterPair p;
+
+ public:
+  PyRegisterPair(const Z80::RegisterPair& val) : p(val) {}
+
+  unsigned char A() const { return p.A; }
+  unsigned char F() const { return p.F; }
+  unsigned char B() const { return p.B; }
+  unsigned char C() const { return p.C; }
+  unsigned char D() const { return p.D; }
+  unsigned char E() const { return p.E; }
+  unsigned char H() const { return p.H; }
+  unsigned char L() const { return p.L; }
+};
+
+class PyRegister {
+  private:
+    Z80::Register r;
+  public:
+    PyRegister(const Z80::Register& val) : r(val) {}
+
+    PyRegisterPair pair() const { return PyRegisterPair(r.pair); }
+    PyRegisterPair back() const { return PyRegisterPair(r.back); }
+    unsigned short PC() const { return r.PC; }
+    unsigned short SP() const { return r.SP; }
+    unsigned short IX() const { return r.IX; }
+    unsigned short IY() const { return r.IY; }
+    unsigned short interruptVector() const { return r.interruptVector; }
+    unsigned short interruptAddrN() const { return r.interruptAddrN; }
+    unsigned short WZ() const { return r.WZ; }
+    unsigned char R() const { return r.R; }
+    unsigned char I() const { return r.I; }
+    unsigned char IFF() const { return r.IFF; }
+};
+
 class PyZ80 {
  public:
   Z80 z80;
@@ -58,10 +95,39 @@ class PyZ80 {
       clock_callback(clocks);
     });
   }
+
+  PyRegister reg() const { return PyRegister(z80.reg); }
+
+  unsigned short PC() const { return z80.reg.PC; }
+  void setPC(unsigned short value) { z80.reg.PC = value; }
 };
 
 PYBIND11_MODULE(pyz80, m) {
   m.doc() = "Python wrapper for the SUZUKI PLAN Z80 Emulator using pybind11";
+
+  py::class_<PyRegisterPair>(m, "RegisterPair")
+      .def_property_readonly("A", &PyRegisterPair::A)
+      .def_property_readonly("F", &PyRegisterPair::F)
+      .def_property_readonly("B", &PyRegisterPair::B)
+      .def_property_readonly("C", &PyRegisterPair::C)
+      .def_property_readonly("D", &PyRegisterPair::D)
+      .def_property_readonly("E", &PyRegisterPair::E)
+      .def_property_readonly("H", &PyRegisterPair::H)
+      .def_property_readonly("L", &PyRegisterPair::L);
+
+  py::class_<PyRegister>(m, "Register")
+      .def_property_readonly("pair", &PyRegister::pair)
+      .def_property_readonly("back", &PyRegister::back)
+      .def_property_readonly("PC", &PyRegister::PC)
+      .def_property_readonly("SP", &PyRegister::SP)
+      .def_property_readonly("IX", &PyRegister::IX)
+      .def_property_readonly("IY", &PyRegister::IY)
+      .def_property_readonly("interruptVector", &PyRegister::interruptVector)
+      .def_property_readonly("interruptAddrN", &PyRegister::interruptAddrN)
+      .def_property_readonly("WZ", &PyRegister::WZ)
+      .def_property_readonly("R", &PyRegister::R)
+      .def_property_readonly("I", &PyRegister::I)
+      .def_property_readonly("IFF", &PyRegister::IFF);
 
   py::class_<PyZ80>(m, "Z80")
       .def(py::init<py::function, py::function, py::function, py::function,
@@ -77,6 +143,8 @@ PYBIND11_MODULE(pyz80, m) {
       .def("set_debug_message", &PyZ80::set_debug_message,
            "Set a debug message callback")
       .def("set_consume_clock_callback", &PyZ80::set_consume_clock_callback,
-           "Set the clock consumption callback");
+           "Set the clock consumption callback")
+      .def_property_readonly("reg", &PyZ80::reg, "Get the current register state")
+      .def_property("PC", &PyZ80::PC, &PyZ80::setPC, "Get or set the PC");
 }
 
