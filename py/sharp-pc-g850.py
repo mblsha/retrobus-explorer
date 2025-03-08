@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.11.5"
+__generated_with = "0.11.17"
 app = marimo.App(width="medium")
 
 
@@ -9,8 +9,6 @@ def _():
     import marimo as mo
     import altair as alt
     import pandas
-    import polars
-    import duckdb
     import datetime
     import time
     import humanize
@@ -24,11 +22,9 @@ def _():
         asynccontextmanager,
         asyncio,
         datetime,
-        duckdb,
         humanize,
         mo,
         pandas,
-        polars,
         queue,
         time,
         websockets,
@@ -120,15 +116,6 @@ def _():
 
 @app.cell
 def _():
-    from pyftdi.ftdi import Ftdi
-    # Ftdi.add_custom_product(Ftdi.DEFAULT_VENDOR, 0xdc01)
-    Ftdi.add_custom_vendor(0x0416)
-    Ftdi.show_devices()
-    return (Ftdi,)
-
-
-@app.cell
-def _():
     # myftdi = Ftdi()
     # myftdi.open_from_url(url='ftdi://ftdi:2232:FT4ZS6I3/2')
     # myftdi.set_baudrate(1_000_000)
@@ -213,7 +200,7 @@ def _(collect_data_type, collect_date_timeout, mo):
     return (collect_data_button,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 async def _(
     CollectDataType,
     Ft600Device,
@@ -546,7 +533,7 @@ def _():
     return BNIDA_NAMES, BNIDA_NAMES_RAW, FUNCTIONS, get_function_name
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(
     InstructionType,
     PerfettoTraceBuilder,
@@ -714,7 +701,7 @@ def _(
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import perfetto_pb2 as perfetto
 
@@ -1079,11 +1066,7 @@ def _(IOPort, df, sed1560):
 
     parsed_lcd_commands = do_parse_lcd_commsnds(df)
     parsed_lcd_commands_df = sed1560.SED1560Parser.parsed_commands_to_df(parsed_lcd_commands)
-    return (
-        do_parse_lcd_commsnds,
-        parsed_lcd_commands,
-        parsed_lcd_commands_df,
-    )
+    return do_parse_lcd_commsnds, parsed_lcd_commands, parsed_lcd_commands_df
 
 
 @app.cell(hide_code=True)
@@ -1255,6 +1238,204 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
 
     mo.ui.altair_chart(plot_parsed_lcd_commands(filtered_lcd_commands(parsed_lcd_commands_df)))
     return (plot_parsed_lcd_commands,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""# Trying to use pyz80 to run emulator alongside the trace""")
+    return
+
+
+@app.cell
+def _():
+    import pyz80
+    return (pyz80,)
+
+
+@app.cell
+def _(df, df_valh):
+    df_valh(df)
+    return
+
+
+@app.cell
+def _(rom_banks):
+    rom_banks
+    return
+
+
+@app.cell
+def _(IOPort, Type, bus_parser, dataclass, df, pyz80, rom_banks):
+    @dataclass
+    class RegisterPair:
+        A: int
+        F: int
+        B: int
+        C: int
+        D: int
+        E: int
+        H: int
+        L: int
+
+    class Pyz80Runner:
+        # after we get out of bootrom this is where the execution is expected to start
+        START_ADDR = 0xC000
+
+        def __init__(self):
+            # Initial state variables
+            self.last_pc = None
+            self.pc = self.START_ADDR
+            self.rom_bank = 0
+
+            self.index = 0
+            self.ready_to_eval = False
+            self.at_least_one_instruction_is_executed = False
+
+            self.expected_reads = {}
+            self.expected_writes = {}
+            self.actual_reads = {}
+            self.actual_writes = {}
+            self.io_reads = {}
+            self.io_writes = {}
+
+            # Instantiate the Z80 processor with callback methods
+            self.z80 = pyz80.Z80(
+                self.read_byte,
+                self.write_byte,
+                self.in_port,
+                self.out_port,
+                returnPortAs16Bits=False,
+            )
+            # self.z80.set_debug_message(self.debug_message)
+            self.z80.PC = self.pc
+
+        def read_byte(self, addr):
+            try:
+                ret = self.expected_reads[addr]
+            except Exception as e:
+                if addr >= 0x87B7 and addr <= 0x87C0:
+                    return rom_banks[0][addr - 0x8000]
+                raise ValueError(
+                    f"{self.index} Expected read at {hex(addr)} not found (rom_bank: {self.rom_bank})"
+                ) from e
+            self.actual_reads[addr] = ret
+            return ret
+
+        def write_byte(self, addr, value):
+            self.actual_writes[addr] = value
+
+        def in_port(self, port):
+            return self.io_reads[port]
+
+        def out_port(self, port, value):
+            self.io_writes[port] = value
+
+        def debug_message(self, msg):
+            # print("DEBUG:", msg)
+            pass
+
+        def print_dict_hex(self, d):
+            return {hex(k): hex(v) for k, v in d.items()}
+
+        def debug_expected_state(self):
+            print(
+                f"reads: {self.print_dict_hex(self.expected_reads)}; "
+                f"writes: {self.print_dict_hex(self.expected_writes)}; "
+                f"io_reads: {self.print_dict_hex(self.io_reads)}; "
+                f"io_writes: {self.print_dict_hex(self.io_writes)}"
+            )
+
+        def run_z80(self):
+            if not self.at_least_one_instruction_is_executed:
+                return
+
+            # print(f"run {hex(self.last_pc)} ({hex(self.pc)})")
+            # self.debug_expected_state()
+
+            # FIXME: sub_87b7 results in desyncing, also it appears to skip some memory reads on the bus???
+            # if self.z80.PC != self.last_pc:
+            #     raise ValueError(f"Expected PC {hex(self.last_pc)}, got {hex(self.z80.PC)}")
+            self.z80.PC = self.last_pc
+
+            # print(f"z80.PC: {hex(self.z80.PC)}, pc: {hex(self.last_pc)}")
+            self.z80.execute(1)
+
+            # Clear expected and actual operations after an instruction finishes
+            self.expected_reads.clear()
+            self.expected_writes.clear()
+            self.actual_reads.clear()
+            self.actual_writes.clear()
+            self.io_reads.clear()
+            self.io_writes.clear()
+
+        def reverse_full_addr(self, full_address):
+            if self.rom_bank is None or self.rom_bank == 0:
+                return full_address  # No transformation was applied
+
+            if full_address < bus_parser.BANK_ADDR_START:
+                return full_address
+
+            return full_address - (bus_parser.BANK_SIZE * (self.rom_bank - 1))
+
+        def _eval(self, r):
+            self.index += 1
+            if r.type == Type.FETCH:
+                if r.addr != 0xC000:
+                    self.at_least_one_instruction_is_executed = True
+                self.last_pc = self.pc
+                self.pc = self.reverse_full_addr(r.addr)
+                self.run_z80()
+
+                self.expected_reads[self.reverse_full_addr(r.addr)] = r.val
+            elif r.type in [Type.READ, Type.READ_STACK]:
+                self.expected_reads[self.reverse_full_addr(r.addr)] = r.val
+            elif r.type in [Type.WRITE, Type.WRITE_STACK]:
+                self.expected_writes[self.reverse_full_addr(r.addr)] = r.val
+            elif r.type == Type.IN_PORT:
+                self.io_reads[r.port.value] = r.val
+            elif r.type == Type.OUT_PORT:
+                if r.port == IOPort.ROM_BANK:
+                    self.rom_bank = r.val
+                elif r.port == IOPort.ROM_EX_BANK:
+                    self.rom_bank = r.val & 0x0F
+
+                self.io_writes[r.port.value] = r.val
+            else:
+                print(f"{self.index}: {r.type} {hex(r.addr)} {r.val}")
+
+        def reg(self):
+            p = self.z80.reg.pair
+            return RegisterPair(A=p.A, F=p.F, B=p.B, C=p.C, D=p.D, E=p.E, H=p.H, L=p.L)
+
+        def eval(self, r):
+            if r.type == Type.FETCH:
+                if r.addr == self.START_ADDR:
+                    self.ready_to_eval = True
+    
+            if self.ready_to_eval:
+                self._eval(r)
+
+        def run_trace(self, df):
+            self.index = 0
+            for r in df.itertuples():
+                self.eval(r)
+
+            return self.reg()
+
+    runner = Pyz80Runner()
+    runner.run_trace(df)
+    return Pyz80Runner, RegisterPair, runner
+
+
+@app.cell
+def _(df):
+    df.shape[0]
+    return
+
+
+@app.cell
+def _():
+    return
 
 
 if __name__ == "__main__":
