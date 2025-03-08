@@ -540,8 +540,71 @@ def _():
 
 
 @app.cell
+def _():
+    ord('A')
+    return
+
+
+@app.cell
+def _():
+    # for A to Z
+    for i in range(26):
+        print(f'{i+33}: \'{chr(65+i)}\',')
+    return (i,)
+
+
+@app.cell
+def _():
+    class DrawCharInterpreter:
+        CHAR_NAMES = {
+            0: "␣",
+            33: "A",
+            34: "B",
+            35: "C",
+            36: "D",
+            37: "E",
+            38: "F",
+            39: "G",
+            40: "H",
+            41: "I",
+            42: "J",
+            43: "K",
+            44: "L",
+            45: "M",
+            46: "N",
+            47: "O",
+            48: "P",
+            49: "Q",
+            50: "R",
+            51: "S",
+            52: "T",
+            53: "U",
+            54: "V",
+            55: "W",
+            56: "X",
+            57: "Y",
+            58: "Z",
+            0x1e: '>',
+        }
+
+        @staticmethod
+        def char_name(char):
+            if char in DrawCharInterpreter.CHAR_NAMES:
+                return DrawCharInterpreter.CHAR_NAMES[char]
+            return hex(char)
+    return (DrawCharInterpreter,)
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
 def _(
+    DrawCharInterpreter,
     InstructionType,
+    Optional,
     PerfettoTraceBuilder,
     Pyz80Runner,
     Type,
@@ -552,10 +615,13 @@ def _(
     key_matrix,
     mo,
     parsed,
+    pyz80,
 ):
     @dataclass
     class PerfettoStack:
         begin_event: object
+        begin_ts: int
+        reg: Optional[pyz80.RegisterPair]
 
         caller: int
         pc: int
@@ -574,6 +640,8 @@ def _(
 
             self.main_thread = None
             self.keys_thread = None
+            self.draw_char_thread = None
+            self.draw_char_addr = {0x8440, 0xbe62}
 
             self.runner = Pyz80Runner()
             self.key_matrix = key_matrix.KeyMatrixInterpreter()
@@ -599,6 +667,7 @@ def _(
 
             self.main_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "main")
             self.keys_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "keys")
+            self.draw_char_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "draw_char")
 
             for index, e in enumerate(data):
                 self.index = index
@@ -608,6 +677,12 @@ def _(
 
                 if e.type == Type.FETCH:
                     self.pc = e.addr
+
+                    # it might be useful later
+                    if len(self.stack) > 0 and not self.stack[-1].reg:
+                        self.stack[-1].reg = self.runner.reg()
+
+                    # self.runner.eval(e) will move the pc to the last_pc
                     if self.runner.last_pc in self.interesting_functions:
                         self.enrich_interesting_function(self.runner.last_pc)
                 
@@ -661,13 +736,14 @@ def _(
                 expected_return_addr = self.last_stack_event.addr + 3
                 self.stack.append(PerfettoStack(
                     begin_event=begin_event,
+                    begin_ts=self.ts,
+                    reg=None,
                     caller=self.last_stack_event.addr,
                     pc=self.pc,
                     expected_return_addr=expected_return_addr
                 ))
                 self._annotate_common(begin_event, e, 'call')
 
-        # runner.eval() will move the pc to the last_pc
         def enrich_interesting_function(self, addr):
             assert len(self.stack) > 0
             s = self.stack[-1]
@@ -686,7 +762,15 @@ def _(
                     # iterate over all fields in RegisterPair and add them to the annotation as pointers
                     for field in dataclasses.fields(reg):
                         ann.pointer(field.name, getattr(reg, field.name))
- 
+
+        def create_draw_char_slice(self, s, e):
+            char = DrawCharInterpreter.char_name(s.reg.A)
+            begin = self.builder.add_slice_event(self.draw_char_thread, s.begin_ts, 'begin', char)
+            with begin.annotation('draw_char') as ann:
+                ann.pointer("char", s.reg.A)
+                ann.pointer("x", s.reg.E)
+                ann.pointer("y", s.reg.D)
+            self.builder.add_slice_event(self.draw_char_thread, self.ts, 'end')
     
         def _handle_mismatched_ret_event(self, e, s):
             # sub_93cd hacks the return address after switching rom bank
@@ -703,6 +787,10 @@ def _(
         def _handle_ret_event(self, e):
             if self.stack:
                 s = self.stack.pop()
+
+                if s.pc in self.draw_char_addr:
+                    self.create_draw_char_slice(s, e)
+
                 self.builder.add_slice_event(self.main_thread, self.ts, 'end')
                 self._annotate_common(s.begin_event, e, 'ret')
 
@@ -750,7 +838,7 @@ def _(
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _():
     import perfetto_pb2 as perfetto
 
@@ -807,7 +895,8 @@ def _():
             self.trusted_packet_sequence_id = 0x123
             # self.process_uuid = 0x456
             self.pid = 1234
-            self.tid = 5678
+            self.last_tid = 1
+            # self.tid = 5678
 
             self.process_uuid = self.add_process_descriptor(process_name)
             # self.add_thread_descriptor(thread_descriptor)
@@ -830,7 +919,8 @@ def _():
             packet.track_descriptor.uuid = track_uuid
             packet.track_descriptor.parent_uuid = process_uuid
             packet.track_descriptor.thread.pid = self.pid
-            packet.track_descriptor.thread.tid = self.tid
+            packet.track_descriptor.thread.tid = self.last_tid
+            self.last_tid += 1
             packet.track_descriptor.thread.thread_name = thread_name
             return track_uuid
 
