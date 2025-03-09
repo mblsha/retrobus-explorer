@@ -512,3 +512,4 @@ def test_extend_address():
     assert bus_parser.extend_address(0xC000, 0xC100) == 0xC100
     assert bus_parser.extend_address(0xC000, 0xFFFF) == 0xFFFF
     assert bus_parser.extend_address(0xC000 + 1 * bus_parser.BANK_SIZE, 0xFFFF) == 0xFFFF + 1 * bus_parser.BANK_SIZE
+    assert bus_parser.extend_address(0x1445a, 0xBFCD) == 0xBFCD
