@@ -541,16 +541,31 @@ def _():
 
 @app.cell
 def _():
-    ord('A')
+    # for A to Z
+    for i in range(26):
+        print(f'{i+33}: \'{chr(65+i)}\',')
+    return (i,)
+
+
+@app.cell
+def _():
+    ord('d')-ord('a')
     return
 
 
 @app.cell
 def _():
-    # for A to Z
-    for i in range(26):
-        print(f'{i+33}: \'{chr(65+i)}\',')
-    return (i,)
+    ord('a')
+    return
+
+
+@app.cell
+def _():
+    def print_be5f():
+        for i in range(26):
+            print(f'{hex(i+0x61)}: \'{chr(ord("a")+i)}\',')
+    print_be5f()
+    return (print_be5f,)
 
 
 @app.cell
@@ -584,20 +599,83 @@ def _():
             56: "X",
             57: "Y",
             58: "Z",
-            0x1e: '>',
+            0x1E: ">",
+        }
+
+        CHAR_NAMES_BE5F = {
+            0x20: "␣",
+            0x2A: "*",
+            0x41: "A",
+            0x42: "B",
+            0x43: "C",
+            0x44: "D",
+            0x45: "E",
+            0x46: "F",
+            0x47: "G",
+            0x48: "H",
+            0x49: "I",
+            0x4A: "J",
+            0x4B: "K",
+            0x4C: "L",
+            0x4D: "M",
+            0x4E: "N",
+            0x4F: "O",
+            0x50: "P",
+            0x51: "Q",
+            0x52: "R",
+            0x53: "S",
+            0x54: "T",
+            0x55: "U",
+            0x56: "V",
+            0x57: "W",
+            0x58: "X",
+            0x59: "Y",
+            0x5A: "Z",
+            0x61: "a",
+            0x62: "b",
+            0x63: "c",
+            0x64: "d",
+            0x65: "e",
+            0x66: "f",
+            0x67: "g",
+            0x68: "h",
+            0x69: "i",
+            0x6A: "j",
+            0x6B: "k",
+            0x6C: "l",
+            0x6D: "m",
+            0x6E: "n",
+            0x6F: "o",
+            0x70: "p",
+            0x71: "q",
+            0x72: "r",
+            0x73: "s",
+            0x74: "t",
+            0x75: "u",
+            0x76: "v",
+            0x77: "w",
+            0x78: "x",
+            0x79: "y",
+            0x7A: "z",
         }
 
         @staticmethod
-        def char_name(char):
+        def char_num(char, func_addr):
+            if func_addr == 0xBE5F:
+                char += 0x10
+            return char
+
+        @staticmethod
+        def char_name(char, func_addr):
+            if func_addr == 0xBE5F:
+                if char in DrawCharInterpreter.CHAR_NAMES_BE5F:
+                    return DrawCharInterpreter.CHAR_NAMES_BE5F[char]
+                return hex(char)
+
             if char in DrawCharInterpreter.CHAR_NAMES:
                 return DrawCharInterpreter.CHAR_NAMES[char]
             return hex(char)
     return (DrawCharInterpreter,)
-
-
-@app.cell
-def _():
-    return
 
 
 @app.cell
@@ -641,7 +719,7 @@ def _(
             self.main_thread = None
             self.keys_thread = None
             self.draw_char_thread = None
-            self.draw_char_addr = {0x8440, 0xbe62}
+            self.draw_char_addr = {0x8440, 0xbe62, 0xbe5f}
 
             self.runner = Pyz80Runner()
             self.key_matrix = key_matrix.KeyMatrixInterpreter()
@@ -650,6 +728,7 @@ def _(
             self.enrichment = {
                 # draw_char
                 0x8440: {'A': 'char', 'D': 'y', 'E': 'x'},
+                0xbe5f: {'A': 'char', 'D': 'y', 'E': 'x'},
                 0xbe62: {'A': 'char', 'D': 'y', 'E': 'x'},
                 # draw_char_continuous
                 0x8738: {'A': 'char', 'B': 'num_char', 'D': 'y', 'E': 'x'},
@@ -658,8 +737,9 @@ def _(
                 0x84bf: {'B': 'num_char', 'D': 'y', 'E': 'x', 'HL': 'str_ptr'},
                 0xbff1: {'B': 'num_char', 'D': 'y', 'E': 'x', 'HL': 'str_ptr'},
             }
-        
+
             self.interesting_functions = set(self.enrichment.keys())
+            self.interesting_functions.add(0xbe5f)
 
         def create_perfetto_trace(self, data):
             current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -685,7 +765,7 @@ def _(
                     # self.runner.eval(e) will move the pc to the last_pc
                     if self.runner.last_pc in self.interesting_functions:
                         self.enrich_interesting_function(self.runner.last_pc)
-                
+
                     if self.last_stack_event is not None:
                         if self.last_stack_event.instr == InstructionType.CALL:
                             self._handle_call_event(e)
@@ -764,14 +844,14 @@ def _(
                         ann.pointer(field.name, getattr(reg, field.name))
 
         def create_draw_char_slice(self, s, e):
-            char = DrawCharInterpreter.char_name(s.reg.A)
+            char = DrawCharInterpreter.char_name(s.reg.A, s.pc)
             begin = self.builder.add_slice_event(self.draw_char_thread, s.begin_ts, 'begin', char)
             with begin.annotation('draw_char') as ann:
                 ann.pointer("char", s.reg.A)
                 ann.pointer("x", s.reg.E)
                 ann.pointer("y", s.reg.D)
             self.builder.add_slice_event(self.draw_char_thread, self.ts, 'end')
-    
+
         def _handle_mismatched_ret_event(self, e, s):
             # sub_93cd hacks the return address after switching rom bank
             if self.last_stack_event.addr == 0x93f2:
@@ -838,7 +918,7 @@ def _(
     )
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import perfetto_pb2 as perfetto
 
@@ -1201,11 +1281,278 @@ def _(IOPort, df, sed1560):
                 )
             ]
             .copy()
-            .reset_index(drop=True))
+            # .reset_index(drop=True)
+        )
 
     parsed_lcd_commands = do_parse_lcd_commsnds(df)
     parsed_lcd_commands_df = sed1560.SED1560Parser.parsed_commands_to_df(parsed_lcd_commands)
     return do_parse_lcd_commsnds, parsed_lcd_commands, parsed_lcd_commands_df
+
+
+@app.cell
+def _(IOPort, df, lcd_commands_range):
+    dfports = df[
+        df["port"].isin(
+            [
+                IOPort.LCD_COMMAND,
+                IOPort.LCD_OUT,
+                IOPort.KEY_INPUT,
+                IOPort.SHIFT_KEY_INPUT,
+                IOPort.SET_KEY_STROBE_LO,
+                IOPort.SET_KEY_STROBE_HI,
+            ]
+        )
+    ]
+
+    # df_valh(dfports[lcd_commands_range.value['start']:lcd_commands_range.value['start']+lcd_commands_range.value['length']])
+    # print the original index that corresponds to lcd_commands_range.value['start']
+    orig_start = dfports.index[lcd_commands_range.value['start']]
+    orig_end = dfports.index[lcd_commands_range.value['start']+lcd_commands_range.value['length']]
+    orig_start, orig_end
+    return dfports, orig_end, orig_start
+
+
+@app.cell
+def _(IOPort, Type, bus_parser, dataclass, rom_banks):
+    # Pyz80Runner
+
+    import pyz80
+
+    @dataclass
+    class RegisterPair:
+        A: int
+        F: int
+        B: int
+        C: int
+        D: int
+        E: int
+        H: int
+        L: int
+
+    class Pyz80Runner:
+        # after we get out of bootrom this is where the execution is expected to start
+        START_ADDR = 0xC000
+
+        def __init__(self, debug_index_start=None, debug_index_end=None):
+            # Initial state variables
+            self.last_pc = None
+            self.pc = self.START_ADDR
+            self.rom_bank = 0
+
+            self.debug_index_start = debug_index_start
+            self.debug_index_end = debug_index_end
+
+            self.index = 0
+            self.ready_to_eval = False
+            self.at_least_one_instruction_is_executed = False
+
+            self.expected_reads = {}
+            self.expected_writes = {}
+            self.actual_reads = {}
+            self.actual_writes = {}
+            self.io_reads = {}
+            self.io_writes = {}
+
+            # Instantiate the Z80 processor with callback methods
+            self.z80 = pyz80.Z80(
+                self.read_byte,
+                self.write_byte,
+                self.in_port,
+                self.out_port,
+                returnPortAs16Bits=False,
+            )
+            if self.debug_index_start is not None:
+                assert self.debug_index_end is not None
+                print(f"Debugging from {self.debug_index_start} to {self.debug_index_end}")
+                self.z80.set_debug_message(self.debug_message)
+            self.z80.PC = self.pc
+
+        def read_byte(self, addr):
+            try:
+                ret = self.expected_reads[addr]
+            except KeyError as e:
+                if addr >= 0x87B7 and addr <= 0x87C0:
+                    return rom_banks[0][addr - 0x8000]
+            
+                # FIXME: why stack could become misaligned?
+                if addr < bus_parser.ROM_ADDR_START and addr >= bus_parser.ROM_ADDR_START - bus_parser.STACK_SIZE:
+                    return 0
+
+                if addr >= bus_parser.ROM_ADDR_START and addr < bus_parser.BANK_ADDR_START:
+                    return rom_banks[0][addr - bus_parser.ROM_ADDR_START]
+                if addr > bus_parser.BANK_ADDR_START:
+                    return rom_banks[self.rom_bank][addr - bus_parser.BANK_ADDR_START]
+
+                self.debug_expected_state()
+                # raise ValueError(
+                #     f"{self.index} {hex(self.last_pc)} Expected read at {hex(addr)} not found (rom_bank: {self.rom_bank})"
+                # ) from e
+                ret = 0
+            self.actual_reads[addr] = ret
+            return ret
+
+        def write_byte(self, addr, value):
+            self.actual_writes[addr] = value
+
+        def in_port(self, port):
+            try:
+                return self.io_reads[port]
+            except KeyError as e:
+                # FIXME
+                return 0
+
+        def out_port(self, port, value):
+            self.io_writes[port] = value
+
+        def debug_message(self, msg):
+            if self.index >= self.debug_index_start and self.index < self.debug_index_end:
+                print(f"{self.index} DEBUG:", msg)
+
+        def print_dict_hex(self, d):
+            return {hex(k): hex(v) for k, v in d.items()}
+
+        def debug_expected_state(self):
+            print(
+                f"reads: {self.print_dict_hex(self.expected_reads)}; "
+                f"writes: {self.print_dict_hex(self.expected_writes)}; "
+                f"io_reads: {self.print_dict_hex(self.io_reads)}; "
+                f"io_writes: {self.print_dict_hex(self.io_writes)}"
+            )
+
+        def run_z80(self):
+            if not self.at_least_one_instruction_is_executed:
+                return
+
+            # print(f"run {hex(self.last_pc)} ({hex(self.pc)})")
+            # self.debug_expected_state()
+
+            # FIXME: sub_87b7 results in desyncing, also it appears to skip some memory reads on the bus???
+            # if self.z80.PC != self.last_pc:
+            #     raise ValueError(f"Expected PC {hex(self.last_pc)}, got {hex(self.z80.PC)}")
+            self.z80.PC = self.last_pc
+
+            # don't try to execute HALT, as it'll prevent further analysis
+            if self.expected_reads[self.last_pc] != 0x76: # HALT
+                # print(f"z80.PC: {hex(self.z80.PC)}, pc: {hex(self.last_pc)}")
+                try:
+                    self.z80.execute(1)
+                except RuntimeError as e:
+                    self.debug_expected_state()
+                    raise ValueError(
+                        f"{self.index} {hex(self.last_pc)} (rom_bank: {self.rom_bank})"
+                    ) from e
+
+            # Clear expected and actual operations after an instruction finishes
+            self.expected_reads.clear()
+            self.expected_writes.clear()
+            self.actual_reads.clear()
+            self.actual_writes.clear()
+            self.io_reads.clear()
+            self.io_writes.clear()
+
+        def reverse_full_addr(self, full_address):
+            if self.rom_bank is None or self.rom_bank == 0:
+                return full_address  # No transformation was applied
+
+            if full_address < bus_parser.BANK_ADDR_START:
+                return full_address
+
+            return full_address - (bus_parser.BANK_SIZE * (self.rom_bank - 1))
+
+        # this is expected to be called only after we get to the START_ADDR execution
+        def _eval(self, r):
+            if r.type == Type.FETCH:
+                # need to wait until the next instruction before running the first one
+                if r.addr != self.START_ADDR:
+                    self.at_least_one_instruction_is_executed = True
+
+                self.last_pc = self.pc
+                self.pc = self.reverse_full_addr(r.addr)
+                self.run_z80()
+
+                self.expected_reads[self.reverse_full_addr(r.addr)] = r.val
+            elif r.type in [Type.READ, Type.READ_STACK]:
+                self.expected_reads[self.reverse_full_addr(r.addr)] = r.val
+            elif r.type in [Type.WRITE, Type.WRITE_STACK]:
+                self.expected_writes[self.reverse_full_addr(r.addr)] = r.val
+            elif r.type == Type.IN_PORT:
+                self.io_reads[r.port.value] = r.val
+            elif r.type == Type.OUT_PORT:
+                if r.port == IOPort.ROM_BANK:
+                    self.rom_bank = r.val
+                elif r.port == IOPort.ROM_EX_BANK:
+                    self.rom_bank = r.val & 0x0F
+
+                self.io_writes[r.port.value] = r.val
+            else:
+                print(f"{self.index}: {r.type} {hex(r.addr)} {r.val}")
+
+        def reg(self):
+            p = self.z80.reg.pair
+            return RegisterPair(A=p.A, F=p.F, B=p.B, C=p.C, D=p.D, E=p.E, H=p.H, L=p.L)
+
+        def eval(self, r):
+            self.index += 1
+            if r.type == Type.FETCH:
+                # don't try to execute what's in the bootrom
+                if r.addr == self.START_ADDR:
+                    self.ready_to_eval = True
+
+            if self.ready_to_eval:
+                self._eval(r)
+
+        def run_trace(self, df):
+            self.index = 0
+            for r in df:
+                self.eval(r)
+
+            return self.reg()
+
+    # runner = Pyz80Runner()
+    # runner.run_trace(parsed)
+    return Pyz80Runner, RegisterPair, pyz80
+
+
+@app.cell
+def _():
+    # df_valh(dfports[lcd_commands_range.value['start']:lcd_commands_range.value['start']+lcd_commands_range.value['length']])
+    return
+
+
+@app.cell
+def _(df, df_valh, orig_end, orig_start):
+    df_valh(df[orig_start+1:orig_end])
+    return
+
+
+@app.cell
+def _(df, df_valh):
+    df_valh(df[412722-20:])
+    return
+
+
+@app.cell
+def _(Pyz80Runner, df, orig_end, orig_start):
+    runner = Pyz80Runner(debug_index_start=orig_start, debug_index_end=orig_end)
+    for index, r in enumerate(df.itertuples()):
+        # print(index)
+        runner.eval(r)
+    print(runner.index)
+    return index, r, runner
+
+
+app._unparsable_cell(
+    r"""
+    df[]
+    """,
+    name="_"
+)
+
+
+@app.cell
+def _(dfports, lcd_commands_range):
+    dfports.iloc[lcd_commands_range.value['start']:lcd_commands_range.value['start']+1]
+    return
 
 
 @app.cell(hide_code=True)
@@ -1273,7 +1620,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
         max_index = df['index'].max()
         x_scale = alt.Scale(domain=(min_index, max_index))
 
-        key_columns = ['KEY_INPUT'] #, 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
+        key_columns = [] # 'KEY_INPUT'] #, 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
         # key_columns = []
 
         events_points = (
@@ -1377,204 +1724,6 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
 
     mo.ui.altair_chart(plot_parsed_lcd_commands(filtered_lcd_commands(parsed_lcd_commands_df)))
     return (plot_parsed_lcd_commands,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""# Trying to use pyz80 to run emulator alongside the trace""")
-    return
-
-
-@app.cell
-def _():
-    import pyz80
-    return (pyz80,)
-
-
-@app.cell
-def _(df, df_valh):
-    df_valh(df)
-    return
-
-
-@app.cell
-def _(rom_banks):
-    rom_banks
-    return
-
-
-@app.cell
-def _(IOPort, Type, bus_parser, dataclass, parsed, pyz80, rom_banks):
-    @dataclass
-    class RegisterPair:
-        A: int
-        F: int
-        B: int
-        C: int
-        D: int
-        E: int
-        H: int
-        L: int
-
-    class Pyz80Runner:
-        # after we get out of bootrom this is where the execution is expected to start
-        START_ADDR = 0xC000
-
-        def __init__(self):
-            # Initial state variables
-            self.last_pc = None
-            self.pc = self.START_ADDR
-            self.rom_bank = 0
-
-            self.index = 0
-            self.ready_to_eval = False
-            self.at_least_one_instruction_is_executed = False
-
-            self.expected_reads = {}
-            self.expected_writes = {}
-            self.actual_reads = {}
-            self.actual_writes = {}
-            self.io_reads = {}
-            self.io_writes = {}
-
-            # Instantiate the Z80 processor with callback methods
-            self.z80 = pyz80.Z80(
-                self.read_byte,
-                self.write_byte,
-                self.in_port,
-                self.out_port,
-                returnPortAs16Bits=False,
-            )
-            # self.z80.set_debug_message(self.debug_message)
-            self.z80.PC = self.pc
-
-        def read_byte(self, addr):
-            try:
-                ret = self.expected_reads[addr]
-            except Exception as e:
-                if addr >= 0x87B7 and addr <= 0x87C0:
-                    return rom_banks[0][addr - 0x8000]
-                raise ValueError(
-                    f"{self.index} Expected read at {hex(addr)} not found (rom_bank: {self.rom_bank})"
-                ) from e
-            self.actual_reads[addr] = ret
-            return ret
-
-        def write_byte(self, addr, value):
-            self.actual_writes[addr] = value
-
-        def in_port(self, port):
-            return self.io_reads[port]
-
-        def out_port(self, port, value):
-            self.io_writes[port] = value
-
-        def debug_message(self, msg):
-            # print("DEBUG:", msg)
-            pass
-
-        def print_dict_hex(self, d):
-            return {hex(k): hex(v) for k, v in d.items()}
-
-        def debug_expected_state(self):
-            print(
-                f"reads: {self.print_dict_hex(self.expected_reads)}; "
-                f"writes: {self.print_dict_hex(self.expected_writes)}; "
-                f"io_reads: {self.print_dict_hex(self.io_reads)}; "
-                f"io_writes: {self.print_dict_hex(self.io_writes)}"
-            )
-
-        def run_z80(self):
-            if not self.at_least_one_instruction_is_executed:
-                return
-
-            # print(f"run {hex(self.last_pc)} ({hex(self.pc)})")
-            # self.debug_expected_state()
-
-            # FIXME: sub_87b7 results in desyncing, also it appears to skip some memory reads on the bus???
-            # if self.z80.PC != self.last_pc:
-            #     raise ValueError(f"Expected PC {hex(self.last_pc)}, got {hex(self.z80.PC)}")
-            self.z80.PC = self.last_pc
-
-            # print(f"z80.PC: {hex(self.z80.PC)}, pc: {hex(self.last_pc)}")
-            self.z80.execute(1)
-
-            # Clear expected and actual operations after an instruction finishes
-            self.expected_reads.clear()
-            self.expected_writes.clear()
-            self.actual_reads.clear()
-            self.actual_writes.clear()
-            self.io_reads.clear()
-            self.io_writes.clear()
-
-        def reverse_full_addr(self, full_address):
-            if self.rom_bank is None or self.rom_bank == 0:
-                return full_address  # No transformation was applied
-
-            if full_address < bus_parser.BANK_ADDR_START:
-                return full_address
-
-            return full_address - (bus_parser.BANK_SIZE * (self.rom_bank - 1))
-
-        def _eval(self, r):
-            self.index += 1
-            if r.type == Type.FETCH:
-                if r.addr != 0xC000:
-                    self.at_least_one_instruction_is_executed = True
-                self.last_pc = self.pc
-                self.pc = self.reverse_full_addr(r.addr)
-                self.run_z80()
-
-                self.expected_reads[self.reverse_full_addr(r.addr)] = r.val
-            elif r.type in [Type.READ, Type.READ_STACK]:
-                self.expected_reads[self.reverse_full_addr(r.addr)] = r.val
-            elif r.type in [Type.WRITE, Type.WRITE_STACK]:
-                self.expected_writes[self.reverse_full_addr(r.addr)] = r.val
-            elif r.type == Type.IN_PORT:
-                self.io_reads[r.port.value] = r.val
-            elif r.type == Type.OUT_PORT:
-                if r.port == IOPort.ROM_BANK:
-                    self.rom_bank = r.val
-                elif r.port == IOPort.ROM_EX_BANK:
-                    self.rom_bank = r.val & 0x0F
-
-                self.io_writes[r.port.value] = r.val
-            else:
-                print(f"{self.index}: {r.type} {hex(r.addr)} {r.val}")
-
-        def reg(self):
-            p = self.z80.reg.pair
-            return RegisterPair(A=p.A, F=p.F, B=p.B, C=p.C, D=p.D, E=p.E, H=p.H, L=p.L)
-
-        def eval(self, r):
-            if r.type == Type.FETCH:
-                if r.addr == self.START_ADDR:
-                    self.ready_to_eval = True
-    
-            if self.ready_to_eval:
-                self._eval(r)
-
-        def run_trace(self, df):
-            self.index = 0
-            for r in df:
-                self.eval(r)
-
-            return self.reg()
-
-    runner = Pyz80Runner()
-    runner.run_trace(parsed)
-    return Pyz80Runner, RegisterPair, runner
-
-
-@app.cell
-def _(df):
-    df.shape[0]
-    return
-
-
-@app.cell
-def _():
-    return
 
 
 if __name__ == "__main__":

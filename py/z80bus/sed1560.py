@@ -158,6 +158,9 @@ class SED1560Parser:
             for r in events:
                 iterate(r)
 
+        # skip SetColumnPart stitching
+        return commands
+
         processed = []
         i = 0
         while i < len(commands):
