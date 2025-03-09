@@ -136,6 +136,23 @@ BANK_SIZE = 0x4000
 STACK_SIZE = 0x400
 
 
+# if instruction_addr >= BANK_ADDR_START then try to determine bank number
+def bank_number_for_address(instruction_addr):
+    if instruction_addr < BANK_ADDR_START:
+        if instruction_addr >= ROM_ADDR_START:
+            return 0
+        return None
+
+    return 1 + (instruction_addr - BANK_ADDR_START) // BANK_SIZE
+
+
+def extend_address(instruction_addr, addr):
+    bank = bank_number_for_address(instruction_addr)
+    if bank is None or bank == 0:
+        return addr
+    return addr + BANK_SIZE * (bank - 1)
+
+
 # like BusParser, but only parses type, val, addr
 class SimpleBusParser:
     def parse(self, data):
@@ -509,7 +526,7 @@ class ParseContext:
 
     def __enter__(self):
         self.process.start()
-        print(f'ParseContext pid: {self.process.pid}')
+        print(f"ParseContext pid: {self.process.pid}")
         return self
 
     def __exit__(self, type, value, traceback):

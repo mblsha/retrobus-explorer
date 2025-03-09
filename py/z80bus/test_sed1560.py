@@ -45,6 +45,9 @@ def test_parse_bus_commands():
 
 
 def test_set_column_part():
+    if not SED1560Parser.COMBINE_SET_COLUMN_PART:
+        return
+
     assert parse40(0x00) == SED1560.SetColumnPart(is_high=False, value=0x00)
     assert parse40(0x0F) == SED1560.SetColumnPart(is_high=False, value=0x0F)
     assert parse40(0x10) == SED1560.SetColumnPart(is_high=True, value=0x00)

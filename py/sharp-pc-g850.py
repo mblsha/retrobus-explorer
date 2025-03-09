@@ -210,6 +210,7 @@ async def _(
     collect_data_type,
     collect_date_timeout,
     datetime,
+    humanize,
     mo,
     queue,
     time,
@@ -271,6 +272,8 @@ async def _(
                 save_all_events=True,
             )
             combined_buffer = b''.join(self.buffer)
+            expect_num_events = len(combined_buffer) / 4
+            print(f'Buffer size: {humanize.naturalsize(len(combined_buffer), binary=True)}; expected number of events: {expect_num_events}')
             self.parser.parse(combined_buffer)
             self.parser.flush()
             return self.parser.all_events
@@ -541,26 +544,6 @@ def _():
 
 @app.cell
 def _():
-    # for A to Z
-    for i in range(26):
-        print(f'{i+33}: \'{chr(65+i)}\',')
-    return (i,)
-
-
-@app.cell
-def _():
-    ord('d')-ord('a')
-    return
-
-
-@app.cell
-def _():
-    ord('a')
-    return
-
-
-@app.cell
-def _():
     def print_be5f():
         for i in range(26):
             print(f'{hex(i+0x61)}: \'{chr(ord("a")+i)}\',')
@@ -679,6 +662,12 @@ def _():
 
 
 @app.cell
+def _(bus_parser):
+    hex(0xd34f + bus_parser.BANK_SIZE * 2), hex(0xd00c + bus_parser.BANK_SIZE * 2)
+    return
+
+
+@app.cell
 def _(
     DrawCharInterpreter,
     InstructionType,
@@ -739,7 +728,7 @@ def _(
             }
 
             self.interesting_functions = set(self.enrichment.keys())
-            self.interesting_functions.add(0xbe5f)
+            self.interesting_functions.add(0x14000) # alternative string draw?
 
         def create_perfetto_trace(self, data):
             current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -763,8 +752,8 @@ def _(
                         self.stack[-1].reg = self.runner.reg()
 
                     # self.runner.eval(e) will move the pc to the last_pc
-                    if self.runner.last_pc in self.interesting_functions:
-                        self.enrich_interesting_function(self.runner.last_pc)
+                    if self.runner.last_pc_full in self.interesting_functions:
+                        self.enrich_interesting_function(self.runner.last_pc_full)
 
                     if self.last_stack_event is not None:
                         if self.last_stack_event.instr == InstructionType.CALL:
@@ -1336,7 +1325,9 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
         def __init__(self, debug_index_start=None, debug_index_end=None):
             # Initial state variables
             self.last_pc = None
+            self.last_pc_full = None
             self.pc = self.START_ADDR
+            self.pc_full = self.pc
             self.rom_bank = 0
 
             self.debug_index_start = debug_index_start
@@ -1466,8 +1457,10 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
                 if r.addr != self.START_ADDR:
                     self.at_least_one_instruction_is_executed = True
 
+                self.last_pc_full = self.pc_full
                 self.last_pc = self.pc
-                self.pc = self.reverse_full_addr(r.addr)
+                self.pc_full = r.addr
+                self.pc = self.reverse_full_addr(self.pc_full)
                 self.run_z80()
 
                 self.expected_reads[self.reverse_full_addr(r.addr)] = r.val

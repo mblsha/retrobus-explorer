@@ -81,6 +81,10 @@ class SED1560:
 
 
 class SED1560Parser:
+    # Disabling it is better to match the LCD command by index with all the
+    # events. Enabling is better for visualizing the column on the chart.
+    COMBINE_SET_COLUMN_PART = False
+
     @staticmethod
     def parse_out40(x: int):
         high = (x & 0xF0) >> 4
@@ -158,8 +162,8 @@ class SED1560Parser:
             for r in events:
                 iterate(r)
 
-        # skip SetColumnPart stitching
-        return commands
+        if not SED1560Parser.COMBINE_SET_COLUMN_PART:
+            return commands
 
         processed = []
         i = 0

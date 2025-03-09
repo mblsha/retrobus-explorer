@@ -495,3 +495,20 @@ def test_call_unconditional():
             pc=0x8A5B,
         ),
     ]
+
+
+def test_bank_number_for_address():
+    assert bus_parser.bank_number_for_address(0x4000) == None
+    assert bus_parser.bank_number_for_address(0x8000) == 0
+    assert bus_parser.bank_number_for_address(0xC000) == 1
+    assert bus_parser.bank_number_for_address(0xC000 + 0x100) == 1
+    assert bus_parser.bank_number_for_address(0xC000 + 1 * bus_parser.BANK_SIZE) == 2
+    assert bus_parser.bank_number_for_address(0xC000 + 2 * bus_parser.BANK_SIZE) == 3
+
+
+def test_extend_address():
+    assert bus_parser.extend_address(0x4000, 0x4000) == 0x4000
+    assert bus_parser.extend_address(0x8000, 0x8100) == 0x8100
+    assert bus_parser.extend_address(0xC000, 0xC100) == 0xC100
+    assert bus_parser.extend_address(0xC000, 0xFFFF) == 0xFFFF
+    assert bus_parser.extend_address(0xC000 + 1 * bus_parser.BANK_SIZE, 0xFFFF) == 0xFFFF + 1 * bus_parser.BANK_SIZE
