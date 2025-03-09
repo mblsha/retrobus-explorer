@@ -23,7 +23,7 @@ module alchitry_top (
     input z80_ioreset,
     input z80_iorq,
     input z80_int1,
-    input z80_wait,
+    output z80_wait,
     input z80_rd,
     input z80_wr,
 
@@ -36,6 +36,7 @@ module alchitry_top (
 ) {
     sig rst
 
+    enum SampleStates {SAMPLE_BUS, INSERT_WAIT}
     enum FtStates {GET_FIFO, STREAM}
     enum SaleaeStates {SYNC_SIGNALS, RAW_SIGNALS, DATA_SIGNALS, BUS_EVENTS, EDGE_SIGNALS, COUNTER}
 
@@ -110,6 +111,10 @@ module alchitry_top (
             dff saleae_state[$width(SaleaeStates)]
             dff saleae_counter[8]
 
+            dff sample_state[$width(SampleStates)]
+            dff wait_enabled[8]  // >0: enabled
+            dff wait_counter[128]
+
             dff last_addr[16]
             // `data` is supposed to be valid when both WR/RD go up
             // dff last_data[8]
@@ -123,7 +128,7 @@ module alchitry_top (
         rst = reset_cond.out    // conditioned reset
 
         led = c{ft.ui_din_full, !ft.ui_dout_empty, !ft_rxf, !ft_txe,
-                1b0, fifo.full, fifo.empty, ft_enabled.q}
+                sample_state.q == SampleStates.INSERT_WAIT, fifo.full, fifo.empty, ft_enabled.q}
         saleae_rw = 4h00
 
         usb_tx = tx.tx
@@ -160,6 +165,8 @@ module alchitry_top (
         rd_rise = rd_edge.out
         wr_rise = wr_edge.out
 
+        z80_wait = 1 // 1: no wait
+
         case (ft_state.q) {
             FtStates.GET_FIFO:
                 if (!fifo.empty) {
@@ -187,10 +194,29 @@ module alchitry_top (
                 }
         }
 
-        // Synchronize and capture bus address at the start of a bus cycle.
-        // Latch the address when either mreq or iorq goes active (falling edge).
-        if (mreq_fall || iorq_fall) {
-            last_addr.d = addr_sync
+        case (sample_state.q) {
+            SampleStates.SAMPLE_BUS:
+                // Synchronize and capture bus address at the start of a bus cycle.
+                // Latch the address when either mreq or iorq goes active (falling edge).
+                if (mreq_fall || iorq_fall) {
+                    last_addr.d = addr_sync
+
+                    if (wait_enabled.q > 0) {
+                        wait_counter.d = 0
+                        sample_state.d = SampleStates.INSERT_WAIT
+                    }
+                }
+
+            SampleStates.INSERT_WAIT:
+                wait_counter.d = wait_counter.q + 1
+                z80_wait = 0
+                if (wait_counter.q[(wait_enabled.q * 2)+:8] > 1) {
+                    sample_state.d = SampleStates.SAMPLE_BUS
+                    if (!tx.busy) {
+                        tx.new_data = 1
+                        tx.data = "."
+                    }
+                }
         }
 
         // FIXME: decode interrupt acknowledgement?
@@ -297,7 +323,14 @@ module alchitry_top (
         }
 
         if (rx.new_data) {
-            if (rx.data == "s") {
+            if (rx.data >= "0" && rx.data <= "9") {
+                wait_enabled.d = rx.data - "0"
+
+                if (!tx.busy) {
+                    tx.new_data = 1
+                    tx.data = rx.data
+                }
+            } else if (rx.data == "s") {
                 saleae_state.d = SaleaeStates.SYNC_SIGNALS
                 if (!tx.busy) {
                     tx.new_data = 1
@@ -360,7 +393,8 @@ module alchitry_top (
 
             // get decoded events (and extra signals) on the logic analyzer pins
             SaleaeStates.BUS_EVENTS:
-                saleae = c{z80_ioreset, z80_wait, z80_int1, z80_m1, saleae_rw}
+                // FIXME: having z80_wait would be useful here
+                saleae = c{z80_ioreset, 1b0, z80_int1, z80_m1, saleae_rw}
 
             // check that pins are read in the correct order
             SaleaeStates.COUNTER:
