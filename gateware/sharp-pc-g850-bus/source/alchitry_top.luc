@@ -249,7 +249,7 @@ module alchitry_top (
 
                     if (!tx_addr_fifo.full) {
                         tx_addr_fifo.wput = 1
-                        tx_addr_fifo.din = last_addr.q
+                        tx_addr_fifo.din = addr_sync
                     }
                 }
 
