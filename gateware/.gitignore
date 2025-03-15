@@ -1,2 +1,46 @@
 build
 
+# Vivado generated files to ignore
+*.jou
+*.log
+*.pb
+*.str
+*.dcp
+*.vds
+*.rpt
+*.wdf
+*.wpc
+*.bat
+*.sh
+*.js
+runme.*
+rundef.*
+
+# Simulation scripts and generated files
+sim_scripts/
+*.udo
+*.do
+*.tcl
+*.opt
+wave.do
+glbl.v
+xsim.ini
+vlog.prj
+
+# Cache & temporary files
+managed_ip_project.cache/
+managed_ip_project.hw/
+managed_ip_project.runs/
+wt/
+
+# IP Core generated files
+*.bmj
+*.xml
+*_sim_netlist.v
+*_sim_netlist.vhdl
+*_stub.v
+*_stub.vhdl
+*_bmstub.v
+*_clk_wiz.v
+mmcm_pll_drp_func_*.vh
+

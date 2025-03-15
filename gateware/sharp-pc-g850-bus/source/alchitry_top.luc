@@ -38,7 +38,9 @@ module alchitry_top (
 
     enum SampleStates {SAMPLE_BUS, INSERT_WAIT}
     enum FtStates {GET_FIFO, STREAM}
-    enum SaleaeStates {SYNC_SIGNALS, RAW_SIGNALS, DATA_SIGNALS, BUS_EVENTS, EDGE_SIGNALS, COUNTER}
+    enum SaleaeStates {DATA_SIGNALS, SYNC_SIGNALS, RAW_SIGNALS, BUS_EVENTS, EDGE_SIGNALS, COUNTER}
+
+    enum UartTxAddrStates {IDLE, TX1, TX2}
 
     sig z80_mreq_sync
     sig z80_m1_sync
@@ -52,6 +54,33 @@ module alchitry_top (
     sig iorq_fall
     sig rd_rise
     sig wr_rise
+
+    clk_wiz_0 clk_wiz
+    sig clk_uart
+    always {
+        clk_wiz.clk_in100 = clk
+        clk_uart = clk_wiz.clk_out400
+    }
+    #BAUD(100_000_000), #CLK_FREQ(400_000_000) {
+        uart_tx tx_addr(.rst(rst), .clk(clk_uart))
+    }
+    #WIDTH(8), #ENTRIES(4) {
+        async_fifo uart_tx_fifo(.wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
+    }
+    always {
+        uart_tx_fifo.rget = 0
+
+        tx_addr.block = 0
+        tx_addr.data = 8h00
+        tx_addr.new_data = 0
+
+        if (!tx_addr.busy && !uart_tx_fifo.empty) {
+            tx_addr.new_data = 1
+            tx_addr.data = uart_tx_fifo.dout
+
+            uart_tx_fifo.rget = 1
+        }
+    }
 
     .clk(clk) {
         reset_conditioner reset_cond
@@ -99,6 +128,8 @@ module alchitry_top (
                 uart_rx rx
             }
 
+            dff uart_tx_addr_state[$width(UartTxAddrStates)]
+
             fifo fifo(#WIDTH(32), #ENTRIES(32768))
             dff fifo_full_counter[24] // 8 bytes for the Err code
 
@@ -136,6 +167,9 @@ module alchitry_top (
         tx.block = 0
         tx.data = 8h00
         tx.new_data = 0
+
+        uart_tx_fifo.din = 0
+        uart_tx_fifo.wput = 0
 
         // fifo write
         fifo.wput = 0
@@ -205,6 +239,10 @@ module alchitry_top (
                         wait_counter.d = 0
                         sample_state.d = SampleStates.INSERT_WAIT
                     }
+
+                    if (uart_tx_addr_state.q == UartTxAddrStates.IDLE) {
+                        uart_tx_addr_state.d = UartTxAddrStates.TX1
+                    }
                 }
 
             SampleStates.INSERT_WAIT:
@@ -216,6 +254,26 @@ module alchitry_top (
                         tx.new_data = 1
                         tx.data = "."
                     }
+                }
+        }
+
+        case (uart_tx_addr_state.q) {
+            // UartTxAddrStates.IDLE:
+            //    uart_tx_fifo.wput = 0
+
+            UartTxAddrStates.TX1:
+                if (!uart_tx_fifo.full) {
+                    uart_tx_fifo.wput = 1
+                    // out HI byte first
+                    uart_tx_fifo.din = last_addr.q[8+:8]
+                    uart_tx_addr_state.d = UartTxAddrStates.TX2
+                }
+
+            UartTxAddrStates.TX2:
+                if (!tx_addr.busy) {
+                    uart_tx_fifo.wput = 1
+                    uart_tx_fifo.din = last_addr.q[0+:8]
+                    uart_tx_addr_state.d = UartTxAddrStates.IDLE
                 }
         }
 
@@ -369,7 +427,14 @@ module alchitry_top (
             }
         }
 
+        // NB: rightmost bit is pin0
         case (saleae_state.q) {
+            // z80_mreq_sync+z80_iorq_sync: save addr on (mreq_fall || iorq_fall)
+            // rd_rise+wr_rise+z80_m1_sync
+            SaleaeStates.DATA_SIGNALS:
+                saleae = c{tx_addr.tx, uart_tx_addr_state.q[0+:2], z80_m1_sync,
+                           z80_mreq_sync, z80_iorq_sync, z80_rd_sync, z80_wr_sync}
+
             // check the relative timing of the WR/RD/M1 vs MREQ/IORQ
             // NOTE: edge signals are delayed by ~4ns
             SaleaeStates.SYNC_SIGNALS:
@@ -379,11 +444,6 @@ module alchitry_top (
             // are fall/rise edges correctly handled?
             SaleaeStates.EDGE_SIGNALS:
                 saleae = c{z80_mreq_sync, z80_iorq_sync, z80_rd_sync, z80_wr_sync,
-                           mreq_fall, iorq_fall, rd_rise, wr_rise}
-
-            // are we saving last_addr / last_data at the correct time?
-            SaleaeStates.DATA_SIGNALS:
-                saleae = c{1b0, 1b0, 1b0, 1b0,
                            mreq_fall, iorq_fall, rd_rise, wr_rise}
 
             // are pipelines really improving the metastability?
@@ -396,7 +456,7 @@ module alchitry_top (
                 // FIXME: having z80_wait would be useful here
                 saleae = c{z80_ioreset, 1b0, z80_int1, z80_m1, saleae_rw}
 
-            // check that pins are read in the correct order
+            // check that pins are mapped/read in the correct order
             SaleaeStates.COUNTER:
                 saleae = saleae_counter.q
                 saleae_counter.d = saleae_counter.q + 1

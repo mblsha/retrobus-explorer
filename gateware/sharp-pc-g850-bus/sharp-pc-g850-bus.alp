@@ -92,6 +92,21 @@
                 }
             }
         ],
-        "ipCores": []
+        "ipCores": [
+            {
+                "name": "clk_wiz_0",
+                "stub": {
+                    "file": {
+                        "type": "DiskFile",
+                        "path": "cores\\clk_wiz_0\\clk_wiz_0_stub.v"
+                    }
+                },
+                "files": [
+                    {
+                        "path": "cores\\clk_wiz_0\\clk_wiz_0.xci"
+                    }
+                ]
+            }
+        ]
     }
 }
