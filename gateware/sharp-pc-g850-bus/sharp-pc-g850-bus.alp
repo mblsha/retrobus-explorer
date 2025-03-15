@@ -64,6 +64,12 @@
                     "type": "Component",
                     "path": "Pulses/edge_detector.luc"
                 }
+            },
+            {
+                "file": {
+                    "type": "DiskFile",
+                    "path": "source\\my_uart_tx.luc"
+                }
             }
         ],
         "constraintFiles": [

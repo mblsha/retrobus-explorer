@@ -1,0 +1,115 @@
+/**
+    "name": "My UART Tx"
+    "description": "UART (Serial) transmitter with configurable baud rate and customizable bit length."
+**/
+/******************************************************************************
+
+    The MIT License (MIT)
+
+    Copyright (c) 2025 Alchitry
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+    THE SOFTWARE.
+
+*******************************************************************************/
+
+module my_uart_tx #(
+    CLK_FREQ ~ 100_000_000 : CLK_FREQ > 0,            // clock frequency
+    BAUD     ~ 1_000_000   : BAUD > 0 && BAUD <= CLK_FREQ/2, // desired baud rate
+    DATA_WIDTH ~ 8       : DATA_WIDTH > 0             // customizable bit length
+)(
+    input clk,                           // clock
+    input rst,                           // reset active high
+    output tx,                           // TX output
+    input block,                         // block transmissions
+    output busy,                         // module is busy when 1
+    input data[DATA_WIDTH],              // data to send
+    input new_data                      // flag for new data
+) {
+
+    const CLK_PER_BIT = (CLK_FREQ + BAUD) / BAUD - 1 // clock cycles per bit
+    const CTR_SIZE    = $clog2(CLK_PER_BIT)            // bits required to store CLK_PER_BIT - 1
+
+    enum States { IDLE, START_BIT, DATA, STOP_BIT }
+
+    .clk(clk) {
+        .rst(rst) {
+            dff state[$width(States)](#INIT(States.IDLE)) // FSM state register
+        }
+        dff ctr[CTR_SIZE]                          // delay counter for baud rate timing
+        dff bit_ctr[$clog2(DATA_WIDTH)]             // bit counter for data bits
+        dff saved_data[DATA_WIDTH]                   // data register to hold the byte/word to be sent
+        dff tx_reg                                 // output buffer register
+        dff block_flag                             // buffer for the block control signal
+    }
+
+    always {
+        // Drive outputs
+        tx   = tx_reg.q
+        busy = 1  // Default to busy unless idle
+
+        block_flag.d = block  // latch the block signal
+
+        /* 
+            When new data is available, we save it. The transmitter first sends 
+            a start bit (0), followed by the data bits (from LSB to MSB), and finally 
+            a stop bit (1) to ensure idle state between transmissions. The baud rate 
+            is maintained by using a counter (ctr) that delays the transitions.
+        */
+        case (state.q) { // FSM
+            States.IDLE:
+                tx_reg.d = 1 // Idle state is high (UART standard)
+                if (!block_flag.q) {
+                    busy = 0         // Not busy when idle and not blocked
+                    bit_ctr.d = 0    // Reset data bit counter
+                    ctr.d     = 0    // Reset baud rate counter
+                    if (new_data) {  // New data ready to send?
+                        saved_data.d = data  // Latch the input data
+                        state.d = States.START_BIT // Move to start bit state
+                    }
+                }
+
+            States.START_BIT:
+                ctr.d = ctr.q + 1  // Increment baud counter
+                tx_reg.d = 0       // Transmit start bit (low)
+                if (ctr.q == CLK_PER_BIT - 1) { // Check if one bit duration elapsed
+                    ctr.d = 0                  // Reset counter
+                    state.d = States.DATA      // Transition to data transmission
+                }
+
+            States.DATA:
+                tx_reg.d = saved_data.q[bit_ctr.q] // Output the current data bit
+                ctr.d = ctr.q + 1                  // Increment baud counter
+                if (ctr.q == CLK_PER_BIT - 1) {     // Bit duration complete?
+                    ctr.d = 0                      // Reset counter
+                    bit_ctr.d = bit_ctr.q + 1      // Increment bit counter
+                    if (bit_ctr.q == DATA_WIDTH - 1) // All bits have been sent?
+                        state.d = States.STOP_BIT  // Transition to stop bit state
+                }
+
+            States.STOP_BIT:
+                tx_reg.d = 1              // Transmit stop bit (high)
+                ctr.d = ctr.q + 1         // Increment baud counter
+                if (ctr.q == CLK_PER_BIT - 1) { // End of stop bit duration?
+                    state.d = States.IDLE  // Return to idle state
+                }
+
+            default: state.d = States.IDLE  // Default fallback to idle state
+        }
+    }
+}

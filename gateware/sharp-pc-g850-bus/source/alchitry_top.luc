@@ -38,9 +38,7 @@ module alchitry_top (
 
     enum SampleStates {SAMPLE_BUS, INSERT_WAIT}
     enum FtStates {GET_FIFO, STREAM}
-    enum SaleaeStates {DATA_SIGNALS, SYNC_SIGNALS, RAW_SIGNALS, BUS_EVENTS, EDGE_SIGNALS, COUNTER}
-
-    enum UartTxAddrStates {IDLE, TX1, TX2}
+    enum SaleaeStates {DATA_SIGNALS, SYNC_SIGNALS, RAW_SIGNALS, EDGE_SIGNALS, COUNTER}
 
     sig z80_mreq_sync
     sig z80_m1_sync
@@ -62,23 +60,35 @@ module alchitry_top (
         clk_uart = clk_wiz.clk_out400
     }
     #BAUD(100_000_000), #CLK_FREQ(400_000_000) {
-        uart_tx tx_addr(.rst(rst), .clk(clk_uart))
+        my_uart_tx tx_addr(#DATA_WIDTH(16), .rst(rst), .clk(clk_uart))
+        my_uart_tx tx_event(#DATA_WIDTH(8), .rst(rst), .clk(clk_uart))
     }
-    #WIDTH(8), #ENTRIES(4) {
-        async_fifo uart_tx_fifo(.wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
+    #ENTRIES(4) {
+        async_fifo tx_addr_fifo(#WIDTH(16), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
+        async_fifo tx_event_fifo(#WIDTH(8), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
     }
     always {
-        uart_tx_fifo.rget = 0
+        tx_addr_fifo.rget = 0
+        tx_event_fifo.rget = 0
 
         tx_addr.block = 0
         tx_addr.data = 8h00
         tx_addr.new_data = 0
 
-        if (!tx_addr.busy && !uart_tx_fifo.empty) {
-            tx_addr.new_data = 1
-            tx_addr.data = uart_tx_fifo.dout
+        tx_event.block = 0
+        tx_event.data = 8h00
+        tx_event.new_data = 0
 
-            uart_tx_fifo.rget = 1
+        if (!tx_addr.busy && !tx_addr_fifo.empty) {
+            tx_addr.new_data = 1
+            tx_addr_fifo.rget = 1
+            tx_addr.data = tx_addr_fifo.dout
+        }
+
+        if (!tx_event.busy && !tx_event_fifo.empty) {
+            tx_event.new_data = 1
+            tx_event_fifo.rget = 1
+            tx_event.data = tx_event_fifo.dout
         }
     }
 
@@ -128,8 +138,6 @@ module alchitry_top (
                 uart_rx rx
             }
 
-            dff uart_tx_addr_state[$width(UartTxAddrStates)]
-
             fifo fifo(#WIDTH(32), #ENTRIES(32768))
             dff fifo_full_counter[24] // 8 bytes for the Err code
 
@@ -152,15 +160,12 @@ module alchitry_top (
         }
     }
 
-    sig saleae_rw[4]
-
     always {
         reset_cond.in = ~rst_n  // input raw inverted reset signal
         rst = reset_cond.out    // conditioned reset
 
         led = c{ft.ui_din_full, !ft.ui_dout_empty, !ft_rxf, !ft_txe,
                 sample_state.q == SampleStates.INSERT_WAIT, fifo.full, fifo.empty, ft_enabled.q}
-        saleae_rw = 4h00
 
         usb_tx = tx.tx
         rx.rx = usb_rx
@@ -168,8 +173,10 @@ module alchitry_top (
         tx.data = 8h00
         tx.new_data = 0
 
-        uart_tx_fifo.din = 0
-        uart_tx_fifo.wput = 0
+        tx_addr_fifo.din = 0
+        tx_addr_fifo.wput = 0
+        tx_event_fifo.din = 0
+        tx_event_fifo.wput = 0
 
         // fifo write
         fifo.wput = 0
@@ -240,8 +247,9 @@ module alchitry_top (
                         sample_state.d = SampleStates.INSERT_WAIT
                     }
 
-                    if (uart_tx_addr_state.q == UartTxAddrStates.IDLE) {
-                        uart_tx_addr_state.d = UartTxAddrStates.TX1
+                    if (!tx_addr_fifo.full) {
+                        tx_addr_fifo.wput = 1
+                        tx_addr_fifo.din = last_addr.q
                     }
                 }
 
@@ -257,26 +265,6 @@ module alchitry_top (
                 }
         }
 
-        case (uart_tx_addr_state.q) {
-            // UartTxAddrStates.IDLE:
-            //    uart_tx_fifo.wput = 0
-
-            UartTxAddrStates.TX1:
-                if (!uart_tx_fifo.full) {
-                    uart_tx_fifo.wput = 1
-                    // out HI byte first
-                    uart_tx_fifo.din = last_addr.q[8+:8]
-                    uart_tx_addr_state.d = UartTxAddrStates.TX2
-                }
-
-            UartTxAddrStates.TX2:
-                if (!tx_addr.busy) {
-                    uart_tx_fifo.wput = 1
-                    uart_tx_fifo.din = last_addr.q[0+:8]
-                    uart_tx_addr_state.d = UartTxAddrStates.IDLE
-                }
-        }
-
         // FIXME: decode interrupt acknowledgement?
         // https://github.com/MustBeArt/LAIR/tree/master?tab=readme-ov-file#theory-of-operation
 
@@ -287,7 +275,10 @@ module alchitry_top (
                 tx.data = "E"
             } else if (!z80_m1_sync) {
                 // M1: Instruction fetch (m1 is active low)
-                saleae_rw = b11
+                if (!tx_event_fifo.full) {
+                    tx_event_fifo.wput = 1
+                    tx_event_fifo.din = "M"
+                }
                 if (ft_enabled.q) {
                     if (!fifo.full) {
                         fifo.wput = 1
@@ -300,7 +291,10 @@ module alchitry_top (
                 }
             } else if (!z80_mreq_sync) {
                 // Memory read event (mreq is active low)
-                saleae_rw = b1
+                if (!tx_event_fifo.full) {
+                    tx_event_fifo.wput = 1
+                    tx_event_fifo.din = "R"
+                }
                 if (ft_enabled.q) {
                     if (!fifo.full) {
                         fifo.wput = 1
@@ -313,7 +307,10 @@ module alchitry_top (
                 }
             } else if (!z80_iorq_sync) {
                 // I/O read event (iorq is active low)
-                saleae_rw = b100
+                if (!tx_event_fifo.full) {
+                    tx_event_fifo.wput = 1
+                    tx_event_fifo.din = "r"
+                }
                 if (ft_enabled.q) {
                     if (!fifo.full) {
                         fifo.wput = 1
@@ -332,7 +329,10 @@ module alchitry_top (
                 tx.data = "e"
             } else if (!z80_mreq_sync) {
                 // Memory write event (mreq is active low)
-                saleae_rw = b10
+                if (!tx_event_fifo.full) {
+                    tx_event_fifo.wput = 1
+                    tx_event_fifo.din = "W"
+                }
                 if (ft_enabled.q) {
                     if (!fifo.full) {
                         fifo.wput = 1
@@ -345,7 +345,10 @@ module alchitry_top (
                 }
             } else if (!z80_iorq_sync) {
                 // I/O write event (iorq is active low)
-                saleae_rw = b1000
+                if (!tx_event_fifo.full) {
+                    tx_event_fifo.wput = 1
+                    tx_event_fifo.din = "w"
+                }
                 if (ft_enabled.q) {
                     if (!fifo.full) {
                         fifo.wput = 1
@@ -412,12 +415,6 @@ module alchitry_top (
                     tx.new_data = 1
                     tx.data = "r"
                 }
-            } else if (rx.data == "b") {
-                saleae_state.d = SaleaeStates.BUS_EVENTS
-                if (!tx.busy) {
-                    tx.new_data = 1
-                    tx.data = "b"
-                }
             } else if (rx.data == "c") {
                 saleae_state.d = SaleaeStates.COUNTER
                 if (!tx.busy) {
@@ -432,7 +429,7 @@ module alchitry_top (
             // z80_mreq_sync+z80_iorq_sync: save addr on (mreq_fall || iorq_fall)
             // rd_rise+wr_rise+z80_m1_sync
             SaleaeStates.DATA_SIGNALS:
-                saleae = c{tx_addr.tx, uart_tx_addr_state.q[0+:2], z80_m1_sync,
+                saleae = c{tx_addr.tx, tx_event.tx, 1b0, z80_m1_sync,
                            z80_mreq_sync, z80_iorq_sync, z80_rd_sync, z80_wr_sync}
 
             // check the relative timing of the WR/RD/M1 vs MREQ/IORQ
@@ -450,11 +447,6 @@ module alchitry_top (
             SaleaeStates.RAW_SIGNALS:
                 saleae = c{z80_mreq_sync, z80_iorq_sync, z80_rd_sync, z80_wr_sync,
                            z80_mreq, z80_iorq, z80_rd, z80_wr}
-
-            // get decoded events (and extra signals) on the logic analyzer pins
-            SaleaeStates.BUS_EVENTS:
-                // FIXME: having z80_wait would be useful here
-                saleae = c{z80_ioreset, 1b0, z80_int1, z80_m1, saleae_rw}
 
             // check that pins are mapped/read in the correct order
             SaleaeStates.COUNTER:
