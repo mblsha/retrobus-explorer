@@ -1,6 +1,6 @@
 /**
-    "name": "My UART Tx"
-    "description": "UART (Serial) transmitter with configurable baud rate and customizable bit length."
+    "name": "UART Tx"
+    "description": "UART (Serial) transmitter with configurable baud rate."
 **/
 /******************************************************************************
 
@@ -26,90 +26,96 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
 
-*******************************************************************************/
+    *****************************************************************************/
 
 module my_uart_tx #(
     CLK_FREQ ~ 100_000_000 : CLK_FREQ > 0,            // clock frequency
-    BAUD     ~ 1_000_000   : BAUD > 0 && BAUD <= CLK_FREQ/2, // desired baud rate
-    DATA_WIDTH ~ 8       : DATA_WIDTH > 0             // customizable bit length
+    BAUD ~ 1_000_000 : BAUD > 0 && BAUD <= CLK_FREQ/2, // desired baud rate
+    DATA_WIDTH ~ 8 : DATA_WIDTH > 0                   // customizable bit length
 )(
-    input clk,                           // clock
-    input rst,                           // reset active high
-    output tx,                           // TX output
-    input block,                         // block transmissions
-    output busy,                         // module is busy when 1
-    input data[DATA_WIDTH],              // data to send
-    input new_data                      // flag for new data
+    input clk,          // clock
+    input rst,          // reset active high
+    output tx,          // TX output
+    input block,        // block transmissions
+    output busy,        // module is busy when 1
+    input data[DATA_WIDTH], // data to send
+    input new_data      // flag for new data
 ) {
 
     const CLK_PER_BIT = (CLK_FREQ + BAUD) / BAUD - 1 // clock cycles per bit
-    const CTR_SIZE    = $clog2(CLK_PER_BIT)            // bits required to store CLK_PER_BIT - 1
+    const CTR_SIZE = $clog2(CLK_PER_BIT) // bits required to store CLK_PER_BIT - 1
 
     enum States { IDLE, START_BIT, DATA, STOP_BIT }
 
     .clk(clk) {
         .rst(rst) {
-            dff state[$width(States)](#INIT(States.IDLE)) // FSM state register
+            dff state[$width(States)](#INIT(States.IDLE)) // FSM for transmitter
         }
-        dff ctr[CTR_SIZE]                          // delay counter for baud rate timing
-        dff bit_ctr[$clog2(DATA_WIDTH)]             // bit counter for data bits
-        dff saved_data[DATA_WIDTH]                   // data register to hold the byte/word to be sent
-        dff tx_reg                                 // output buffer register
-        dff block_flag                             // buffer for the block control signal
+        dff ctr[CTR_SIZE]  // delay counter
+        dff bit_ctr[$clog2(DATA_WIDTH)]  // bit counter
+        dff saved_data[DATA_WIDTH]  // transmission data
+        dff tx_reg         // output buffer
+        dff block_flag     // input buffer
     }
 
     always {
-        // Drive outputs
-        tx   = tx_reg.q
-        busy = 1  // Default to busy unless idle
+        // Outputs
+        tx = tx_reg.q
+        busy = 1                            // default to 1
 
-        block_flag.d = block  // latch the block signal
+        block_flag.d = block                 // connect to buffer
 
-        /* 
-            When new data is available, we save it. The transmitter first sends 
-            a start bit (0), followed by the data bits (from LSB to MSB), and finally 
-            a stop bit (1) to ensure idle state between transmissions. The baud rate 
-            is maintained by using a counter (ctr) that delays the transitions.
-        */
-        case (state.q) { // FSM
+        /* When a new byte is presented to send, that byte is saved so that
+            if the input changes the correct data is still sent. We first
+            have to send a 0, which is the start bit. Once the start bit
+            is sent, each data bit is sent out. The counter ctr is used to
+            delay between bits to get the correct baud rate. The counter
+            bit_counter is used to keep track of what bit to send. After
+            all eight bits are sent, we need to send 1, the stop bit.
+            This bit ensures that the line goes high between transmissions.
+            When the transmitter is sending out data, the output busy is
+            set to 1. To prevent the transmitter from sending data, set
+            block to 1. This can be used for flow control.                  */
+
+        case (state.q) {                           // FSM
             States.IDLE:
-                tx_reg.d = 1 // Idle state is high (UART standard)
+                tx_reg.d = 1                       // idle high (UART standard)
                 if (!block_flag.q) {
-                    busy = 0         // Not busy when idle and not blocked
-                    bit_ctr.d = 0    // Reset data bit counter
-                    ctr.d     = 0    // Reset baud rate counter
-                    if (new_data) {  // New data ready to send?
-                        saved_data.d = data  // Latch the input data
-                        state.d = States.START_BIT // Move to start bit state
+                    busy = 0                       // not busy
+                    bit_ctr.d = 0                  // reset counter
+                    ctr.d = 0                      // reset counter
+                    if (new_data) {                // request to send data?
+                        saved_data.d = data        // save the data
+                        state.d = States.START_BIT // switch states
                     }
                 }
 
             States.START_BIT:
-                ctr.d = ctr.q + 1  // Increment baud counter
-                tx_reg.d = 0       // Transmit start bit (low)
-                if (ctr.q == CLK_PER_BIT - 1) { // Check if one bit duration elapsed
-                    ctr.d = 0                  // Reset counter
-                    state.d = States.DATA      // Transition to data transmission
+                ctr.d = ctr.q + 1               // increment counter
+                tx_reg.d = 0                    // start bit is low
+                if (ctr.q == CLK_PER_BIT - 1){  // if ctr is the max value
+                    ctr.d = 0                   // reset counter
+                    state.d = States.DATA       // switch states
                 }
 
             States.DATA:
-                tx_reg.d = saved_data.q[bit_ctr.q] // Output the current data bit
-                ctr.d = ctr.q + 1                  // Increment baud counter
-                if (ctr.q == CLK_PER_BIT - 1) {     // Bit duration complete?
-                    ctr.d = 0                      // Reset counter
-                    bit_ctr.d = bit_ctr.q + 1      // Increment bit counter
-                    if (bit_ctr.q == DATA_WIDTH - 1) // All bits have been sent?
-                        state.d = States.STOP_BIT  // Transition to stop bit state
+                tx_reg.d = saved_data.q[bit_ctr.q] // output the data bit
+                ctr.d = ctr.q + 1                  // increment counter
+                if (ctr.q == CLK_PER_BIT - 1) {    // if ctr is the max value
+                    ctr.d = 0                      // reset counter
+                    bit_ctr.d = bit_ctr.q + 1      // increase bit counter
+                    if (bit_ctr.q == DATA_WIDTH - 1) // if we have sent all the bits
+                        state.d = States.STOP_BIT  // switch states
                 }
 
             States.STOP_BIT:
-                tx_reg.d = 1              // Transmit stop bit (high)
-                ctr.d = ctr.q + 1         // Increment baud counter
-                if (ctr.q == CLK_PER_BIT - 1) { // End of stop bit duration?
-                    state.d = States.IDLE  // Return to idle state
+                tx_reg.d = 1                     // stop bit is high
+                ctr.d = ctr.q + 1                // increase counter
+                if (ctr.q == CLK_PER_BIT - 1) {  // if ctr is the max value
+                    state.d = States.IDLE        // switch states
                 }
 
-            default: state.d = States.IDLE  // Default fallback to idle state
+            default: state.d = States.IDLE       // if state is invalid reset to idle
         }
     }
 }
