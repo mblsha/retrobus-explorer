@@ -22,14 +22,14 @@ public pcb-module saleae8 :
         net GND (gnd header[i].p[j + 1])
 
   port data : pin[8]
-  net SALEAE0 (data[0] header[0].p[2])
-  net SALEAE1 (data[1] header[0].p[4])
-  net SALEAE2 (data[2] header[0].p[6])
-  net SALEAE3 (data[3] header[0].p[8])
-  net SALEAE4 (data[4] header[1].p[2])
-  net SALEAE5 (data[5] header[1].p[4])
-  net SALEAE6 (data[6] header[1].p[6])
-  net SALEAE7 (data[7] header[1].p[8])
+  net SALEAE0 (data[0] header[1].p[8])
+  net SALEAE1 (data[1] header[1].p[6])
+  net SALEAE2 (data[2] header[1].p[4])
+  net SALEAE3 (data[3] header[1].p[2])
+  net SALEAE4 (data[4] header[0].p[8])
+  net SALEAE5 (data[5] header[0].p[6])
+  net SALEAE6 (data[6] header[0].p[4])
+  net SALEAE7 (data[7] header[0].p[2])
 
   ; https://support.saleae.com/datasheets-and-specifications/connector-dimensions
   val distance = 13.462 ; 0.53"
@@ -42,12 +42,12 @@ public pcb-module saleae8 :
   ; val foo = get-pins-physically-ordered(test)
 
   for i in 0 to 4 :
-    inst num : ocdb/artwork/board-text/text(to-string(i), 1.5, 0.0)
+    inst num : ocdb/artwork/board-text/text(to-string(7 - i), 1.5, 0.0)
     val offset = 2.54 * to-double(i)
     place(num) at loc(3.5, distance / 2.0 + 3.8 - offset) on Top
 
   for i in 0 to 4 :
-    inst num : ocdb/artwork/board-text/text(to-string(4 + i), 1.5, 0.0)
+    inst num : ocdb/artwork/board-text/text(to-string(3 - i), 1.5, 0.0)
     val offset = 2.54 * to-double(i)
     place(num) at loc(3.5, distance / -2.0 + 3.8 - offset) on Top
 
