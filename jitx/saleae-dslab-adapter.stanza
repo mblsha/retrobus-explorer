@@ -1,0 +1,114 @@
+#use-added-syntax(jitx)
+defpackage saleae-dslab-adapter :
+  import core
+  import jitx
+  import jitx/commands
+  import jitx/parts
+
+  import helpers
+  import jsl
+  import collections
+
+  import ocdb/utils/generic-components
+  import ocdb/utils/landpatterns
+  ; get-time-string
+  import utils/time
+
+pcb-landpattern lp :
+  val num_pads = 8
+  val num_rows = 2
+  val num_cols = num_pads / num_rows
+
+  val row_pitch = 1.27
+  val col_pitch = 1.27
+
+  val offset_x = (to-double(num_cols) - 1.0) * col_pitch / 2.0 * -1.0
+  val offset_y = (to-double(num_rows) - 1.0) * row_pitch / 2.0
+
+  var pin_number = 1
+  for col in 0 to num_cols :
+    val column_offset = 0.0
+
+    for row in 0 to num_rows :
+      val x = to-double(col) * col_pitch
+      val y = to-double(row) * row_pitch * -1.0 - column_offset
+
+      pad p[pin_number] : circle-pth-circle-pad(0.7, 1.0, mask = 0.9) at loc(x + offset_x, y + offset_y) on Top
+      pin_number = pin_number + 1
+
+  val case_width = 5.48
+  val case_height = 3.0
+  layer(Silkscreen("F-SilkS", Top)) = Polyline(0.2, [
+    Point(case_width / -2.0, case_height / -2.0),
+    Point(case_width / -2.0, case_height /  2.0),
+    Point(case_width /  2.0, case_height /  2.0),
+    Point(case_width /  2.0, case_height / -2.0),
+    Point(case_width / -2.0, case_height / -2.0)])
+
+public pcb-component dslab-component :
+  name = "C2935882"
+  description = "1.27mm 1.27mm Double Row 1A 8P Direct Insert 2x4P 3.4mm Top Square Hole Plugin,P=1.27mm Female Headers ROHS"
+  manufacturer = "DEALON"
+  mpn = "DW127R-22-08-34"
+  datasheet = "https://www.lcsc.com/datasheet/lcsc_datasheet_2411201840_DEALON-DW127R-22-08-34_C2935882.pdf"
+  reference-prefix = "J"
+
+  pin-properties :
+    [pin:Ref | pads:Ref ... | side:Dir]
+    [GND     | p[1] p[3] p[5] p[7] | Left]
+    [p0      | p[8] | Right ]
+    [p1      | p[6] | Right ]
+    [p2      | p[4] | Right ]
+    [p3      | p[2] | Right ]
+
+  val box = BoxSymbol(self)
+  assign-symbol $ create-symbol(box)
+
+  assign-landpattern(lp)
+
+val board-shape = RoundedRectangle(
+  25.0,
+  12.0, 1.0)
+
+pcb-module saleae-dslab-adapter :
+  inst saleae : components/Saleae/saleae8(text-angle = 270.0)
+  inst dsheader : dslab-component[2]
+
+  port gnd
+  net GND (gnd saleae.gnd dsheader[0].GND dsheader[1].GND)
+
+  net (dsheader[0].p0 saleae.data[0])
+  net (dsheader[0].p1 saleae.data[1])
+  net (dsheader[0].p2 saleae.data[2])
+  net (dsheader[0].p3 saleae.data[3])
+
+  net (dsheader[1].p0 saleae.data[4])
+  net (dsheader[1].p1 saleae.data[5])
+  net (dsheader[1].p2 saleae.data[6])
+  net (dsheader[1].p3 saleae.data[7])
+
+  val w = width(board-shape)
+  val h = height(board-shape)
+  val offset_y = -2.5
+  place(saleae) at loc(0.0, 0.0 + offset_y, 270.0) on Bottom
+
+  place(dsheader[0]) at loc(-6.5, 4.1 + offset_y, 0.0) on Bottom
+  place(dsheader[1]) at loc( 6.5, 4.1 + offset_y, 0.0) on Bottom
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val label-text = append("saleae-dslab ", mydate)
+  inst version-label : ocdb/artwork/board-text/text(label-text, 1.5, 0.0)
+  val label_y = height(board-shape) / 2.0 - 2.0
+  place(version-label) at loc(0.0, label_y, 0.0) on Top
+
+  ; geom(gnd) :
+  ;   copper-pour(LayerIndex(1),         isolate = 0.15, rank = 1) = board-shape
+  ;   copper-pour(LayerIndex(2),         isolate = 0.15, rank = 1) = board-shape
+
+setup-design("saleae-dslab-adapter", board-shape, signal-shrink = 0.5)
+set-main-module(saleae-dslab-adapter)
+view-schematic()
+view-board()
+export-to-cad()
+
+

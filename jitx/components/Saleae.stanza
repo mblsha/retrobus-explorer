@@ -12,7 +12,7 @@ defpackage components/Saleae :
   ; pin-header
   import ocdb/utils/generic-components
 
-public pcb-module saleae8 :
+public pcb-module saleae8 (-- text-angle:Double = 0.0) :
   inst header : pin-header(8, 2)[2]
 
   port gnd
@@ -44,12 +44,12 @@ public pcb-module saleae8 :
   for i in 0 to 4 :
     inst num : ocdb/artwork/board-text/text(to-string(7 - i), 1.5, 0.0)
     val offset = 2.54 * to-double(i)
-    place(num) at loc(3.5, distance / 2.0 + 3.8 - offset) on Top
+    place(num) at loc(3.5, distance / 2.0 + 3.8 - offset, text-angle) on Top
 
   for i in 0 to 4 :
     inst num : ocdb/artwork/board-text/text(to-string(3 - i), 1.5, 0.0)
     val offset = 2.54 * to-double(i)
-    place(num) at loc(3.5, distance / -2.0 + 3.8 - offset) on Top
+    place(num) at loc(3.5, distance / -2.0 + 3.8 - offset, text-angle) on Top
 
 
 ; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)

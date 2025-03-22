@@ -43,7 +43,7 @@ pcb-module alchitry-level-shifter :
   net VCC3V3 (vcc3v3 fpga.VCC3V3)
   net VCC5V (vcc5v ffc1.VCC5V ffc2.VCC5V)
 
-  inst saleae : components/Saleae/saleae8
+  inst saleae : components/Saleae/saleae8(text-angle = 90.0)
 
   val num_shifters = 6
   inst shift : components/LevelShifter/module[num_shifters]
