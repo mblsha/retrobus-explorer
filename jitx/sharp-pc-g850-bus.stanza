@@ -93,6 +93,12 @@ pcb-module module :
     val name = to-string("%_-DATA%_" % [bus-name, i])
     make-net(to-symbol(name), [data[i], ffc.data[i]])
 
+    if bus-name != "GND" :
+      var mapping = append("FPGA_MAP: ", to-string(i))
+      mapping = append(mapping, " → ")
+      mapping = append(mapping, to-string(ref(data[i])))
+      println(mapping)
+
   ; inst tp0 : gen-testpad(1.0)
   ; net (tp0.p ffc.data[0])
   ; place(tp0) at loc(1.27, 1.27 * 5.0) on Top (relative-to heads[0])

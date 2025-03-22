@@ -61,12 +61,18 @@ pcb-module alchitry-level-shifter :
   symbol(VCC5V) = PWR-SYMB
 
   defn do-shift (shiftno:Int, pinno:Int, high:JITXObject, low:JITXObject) :
-    ; println(to-string(ref(high)))
     var low-name = replace(to-string(ref(high)), "ffc1.data", "loDATA") as String
     low-name = replace(low-name, "[", "")
     low-name = replace(low-name, "]", "")
     net (high shift[shiftno].PT[pinno].B)
-    make-net(to-symbol(low-name), [low, shift[shiftno].PT[pinno].A])
+    val shifter = shift[shiftno].PT[pinno].A
+    ; println(to-string(ref(shifter)))
+    make-net(to-symbol(low-name), [low, shifter])
+
+    var mapping = append("FPGA_MAP: ", low-name)
+    mapping = append(mapping, " → ")
+    mapping = append(mapping, to-string(ref(low)))
+    println(mapping)
 
   defn gen-seq (start:Int) :
     val seq = Vector<Int>()
@@ -153,7 +159,7 @@ pcb-module alchitry-level-shifter :
   place(ffc2) at loc(2.3960, ffc_offset_y + ffc_distance / 2.0 + 5.0, 180.0) on Bottom
 
   val mydate:String = get-time-string("%Y-%m-%d")
-  inst name-label : ocdb/artwork/board-text/text("Level Shifter Element v1", 1.5, 0.0)
+  inst name-label : ocdb/artwork/board-text/text("Level Shifter Element (Au1) v2", 1.5, 0.0)
   inst version-label  : ocdb/artwork/board-text/text(append("(c) mblsha ", mydate), 1.5, 0.0)
   place(name-label)    at loc(w / 2.0 - 5.0, 0.0, 90.0) on Bottom
   place(version-label) at loc(w / 2.0 - 3.0, 0.0, 90.0) on Bottom

@@ -177,6 +177,12 @@ pcb-module module :
     val name = to-string("%_-DATA%_" % [bus-name, i])
     make-net(to-symbol(name), [data[i], ffc.data[i]])
 
+    if bus-name != "GND" :
+      var mapping = append("FPGA_MAP: ", to-string(i))
+      mapping = append(mapping, " → ")
+      mapping = append(mapping, to-string(ref(data[i])))
+      println(mapping)
+
   val dx = -0.0
   place(ffc) at loc(0.0, 0.0, 180.0) on Bottom
   place(bus) at loc(0.0, height(board-shape) / 2.0 - bigpad-h / 2.0) on Top

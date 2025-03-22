@@ -96,6 +96,11 @@ pcb-module module :
       make-net(to-symbol(name), [bus.C[bus-index] ffc.data[ffc-index]])
       bus-index = bus-index - 1
 
+      var mapping = append("FPGA_MAP: ", to-string(ffc-index))
+      mapping = append(mapping, " → ")
+      mapping = append(mapping, bus-name)
+      println(mapping)
+
     ffc-index = ffc-index - 1
 
   net GND (gnd ffc.GND)
