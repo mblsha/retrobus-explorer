@@ -17,7 +17,7 @@ analytics via a Marimo Notebook interface in the browser.
     **Visualization**:
 
      * SED1560 LCD controller: Basic functionality works
-     * Key Matrix: In Progress
+     * Key Matrix: Works (decodes key scanning with IO ports)
 
     **ROM Decoding**: In Progress ([Binary Ninja
     Plugin](https://github.com/mblsha/Z80/blob/master/SharpPCG850View.py))
