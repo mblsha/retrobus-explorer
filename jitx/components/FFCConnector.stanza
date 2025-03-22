@@ -42,10 +42,11 @@ public pcb-module module (-- flip_pins:True|False = false) :
       make-net(to-symbol(name), [data[out_index], c.p[pin_index]])
       out_index = out_index + 1
 
+  val diameter = 1.0
   if flip_pins :
-    layer(Silkscreen("F-SilkS", Top)) = Circle(Point(ffc-width / -2.0 + 2.6, 0.5), 0.3)
+    layer(Silkscreen("F-SilkS", Top)) = Circle(Point(ffc-width / -2.0 + 1.5, 0.0), diameter)
   else:
-    layer(Silkscreen("F-SilkS", Top)) = Circle(Point(ffc-width / 2.0 - 2.6, 0.5), 0.3)
+    layer(Silkscreen("F-SilkS", Top)) = Circle(Point(ffc-width / 2.0 - 1.5, 0.0), diameter)
 
   place(c) at loc(0.0, 2.8, 0.0) on Top
 
