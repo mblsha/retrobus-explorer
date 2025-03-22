@@ -22,6 +22,9 @@ analytics via a Marimo Notebook interface in the browser.
     **ROM Decoding**: In Progress ([Binary Ninja
     Plugin](https://github.com/mblsha/Z80/blob/master/SharpPCG850View.py))
 
+    **External ROM Emulation**: Can stream data in ext banks 0 and 1 from USB3
+    continuously, this could be used for video playback
+
 # Hardware
 
 Project is built on top of [Alchitry Au FPGA board](https://www.sparkfun.com/alchitry-au-fpga-development-board-xilinx-artix-7.html) and [Ft Element board](https://www.sparkfun.com/alchitry-ft-element-board.html).

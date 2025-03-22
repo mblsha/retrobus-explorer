@@ -1,0 +1,323 @@
+module alchitry_top (
+    input clk,              // 100MHz clock
+    input rst_n,            // reset button (active low)
+    output led[8],          // 8 user controllable LEDs
+    input usb_rx,           // USB->Serial input
+    output usb_tx,          // USB->Serial output
+
+    // Ft Element
+    input ft_clk,
+    input ft_rxf,
+    input ft_txe,
+    inout ft_data[16],
+    inout ft_be[2],
+    output ft_rd,
+    output ft_wr,
+    output ft_oe,
+
+    output saleae[8],
+
+    // PC-G850 System Bus
+    input z80_mreq,
+    input z80_m1,
+    input z80_ioreset,
+    input z80_iorq,
+    input z80_int1,
+    input z80_wait,
+    input z80_rd,
+    input z80_wr,
+
+    inout data[8],
+    input addr[16],
+
+    // 0-3 range
+    input addr_bnk[2],
+    input addr_ceram2,
+    input addr_cerom2
+) {
+    sig rst
+
+    const ROM_BANK_SIZE = h4000
+    const NUM_BANKS = 2
+
+    enum ReadStates {INIT, FILL_BANK0, FILL_BANK1, READY, HOLD_DATA} // read from calculator
+    enum StreamingStates {READY, REQUEST_DATA, GET_SIZE, FILL_BANK, FILL_BANK2, DONE} // streaming from Ft
+
+    sig z80_mreq_sync
+    sig z80_m1_sync
+    sig z80_iorq_sync
+    sig z80_rd_sync
+    sig z80_wr_sync
+
+    sig addr_sync[16]
+    sig addr_bnk_sync[2]
+    sig addr_ceram2_sync
+    sig addr_cerom2_sync
+
+    sig mreq_fall
+    sig mreq_rise
+    sig iorq_fall
+    sig rd_rise
+    sig wr_rise
+
+    clk_wiz_0 clk_wiz
+    sig clk_uart
+    always {
+        clk_wiz.clk_in100 = clk
+        clk_uart = clk_wiz.clk_out400
+    }
+    #BAUD(100_000_000), #CLK_FREQ(400_000_000) {
+        my_uart_tx tx_addr(#DATA_WIDTH(16), .rst(rst), .clk(clk_uart))
+        my_uart_tx tx_bank(#DATA_WIDTH(8), .rst(rst), .clk(clk_uart))
+    }
+    #ENTRIES(4) {
+        async_fifo tx_addr_fifo(#WIDTH(16), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
+        async_fifo tx_bank_fifo(#WIDTH(8), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
+    }
+    always {
+        tx_addr_fifo.rget = 0
+        tx_bank_fifo.rget = 0
+
+        tx_addr.block = 0
+        tx_addr.data = 8h00
+        tx_addr.new_data = 0
+
+        if (!tx_addr.busy && !tx_addr_fifo.empty) {
+            tx_addr.new_data = 1
+            tx_addr_fifo.rget = 1
+            tx_addr.data = tx_addr_fifo.dout
+        }
+
+        tx_bank.block = 0
+        tx_bank.data = 8h00
+        tx_bank.new_data = 0
+
+        if (!tx_bank.busy && !tx_bank_fifo.empty) {
+            tx_bank.new_data = 1
+            tx_bank_fifo.rget = 1
+            tx_bank.data = tx_bank_fifo.dout
+        }
+    }
+
+    .clk(clk) {
+        reset_conditioner reset_cond
+
+        // Fix potential metastability issues with help of pipelines.
+        // NOTE: Shared with sharp-pc-g850-bus
+        #DEPTH(6) {
+            pipeline sync_m1   (.in(z80_m1))
+        }
+        #DEPTH(4) {
+            pipeline sync_mreq (.in(z80_mreq))
+            pipeline sync_iorq (.in(z80_iorq))
+        }
+        #DEPTH(2) {
+            pipeline sync_rd   (.in(z80_rd))
+            pipeline sync_wr   (.in(z80_wr))
+
+            pipeline sync_addr[16] (.in(addr))
+            pipeline sync_addr_bnk[2] (.in(addr_bnk))
+            pipeline sync_addr_ceram2 (.in(addr_ceram2))
+            // pipeline needs to be shorter than MREQ here
+            pipeline sync_addr_cerom2 (.in(addr_cerom2))
+        }
+
+        edge_detector mreq_edge_fall(#RISE(0), #FALL(1), .in(z80_mreq_sync)) // want fall
+        edge_detector mreq_edge_rise(#RISE(1), #FALL(0), .in(z80_mreq_sync)) // want rise
+        edge_detector iorq_edge(#RISE(0), #FALL(1), .in(z80_iorq_sync)) // want fall
+
+        edge_detector rd_edge  (#RISE(1), #FALL(0), .in(z80_rd_sync))   // want rise
+        edge_detector wr_edge  (#RISE(1), #FALL(0), .in(z80_wr_sync))   // want rise
+
+        .rst(rst) {
+            #BAUD(1_000_000), #CLK_FREQ(100_000_000) {
+                uart_tx tx
+                uart_rx rx
+            }
+
+            ft ft(#BUS_WIDTH(16), #RX_BUFFER(16384), .ft_clk(ft_clk), .ft_rxf(ft_rxf), .ft_txe(ft_txe), .ft_data(ft_data), .ft_be(ft_be))
+
+            dff read_state[$width(ReadStates)]
+            dff streaming_state[$width(StreamingStates)]
+            dff num_data_request[16]
+            dff num_streaming_bank[2]
+            dff streaming_data_size[16]
+            dff streaming_index[16]
+
+            dff last_bank[2]
+            dff last_addr[16]
+        }
+    }
+
+    simple_dual_port_ram rom_bank(#ENTRIES(NUM_BANKS * ROM_BANK_SIZE), .wclk(clk), .rclk(clk))
+    dff write_byte2[8] (.rst(rst), .clk(clk))
+
+    always {
+        reset_cond.in = ~rst_n  // input raw inverted reset signal
+        rst = reset_cond.out    // conditioned reset
+
+        usb_tx = tx.tx
+        rx.rx = usb_rx
+        tx.block = 0
+        tx.data = 8h00
+        tx.new_data = 0
+
+        tx_addr_fifo.din = 0
+        tx_addr_fifo.wput = 0
+
+        tx_bank_fifo.din = 0
+        tx_bank_fifo.wput = 0
+
+        ft_rd = ft.ft_rd
+        ft_wr = ft.ft_wr
+        ft_oe = ft.ft_oe
+        ft.ui_din = 0
+        ft.ui_din_be = 0
+        ft.ui_din_valid = 0
+        ft.ui_dout_get = 0
+
+        z80_mreq_sync = sync_mreq.out
+        z80_m1_sync = sync_m1.out
+        z80_iorq_sync = sync_iorq.out
+        z80_rd_sync = sync_rd.out
+        z80_wr_sync = sync_wr.out
+        addr_sync = sync_addr.out
+        addr_bnk_sync = sync_addr_bnk.out
+        addr_ceram2_sync = sync_addr_ceram2.out
+        addr_cerom2_sync = sync_addr_cerom2.out
+
+        mreq_fall = mreq_edge_fall.out
+        mreq_rise = mreq_edge_rise.out
+        iorq_fall = iorq_edge.out
+        rd_rise = rd_edge.out
+        wr_rise = wr_edge.out
+
+        data = 8x{1bz}
+        rom_bank.raddr = 0
+        rom_bank.waddr = 0
+        rom_bank.write_data = 0
+        rom_bank.write_enable = 0
+
+        led = c{1b0, streaming_state.q[0+:3], 1b0, read_state.q[0+:3]}
+
+        case (read_state.q) {
+            ReadStates.INIT:
+                read_state.d = ReadStates.FILL_BANK0
+                // read_state.d = ReadStates.READY
+
+            ReadStates.FILL_BANK0:
+                if (streaming_state.q == StreamingStates.READY) {
+                    num_streaming_bank.d = 0
+                    streaming_state.d = StreamingStates.REQUEST_DATA
+                } else if (streaming_state.q == StreamingStates.DONE) {
+                    streaming_state.d = StreamingStates.READY
+                    read_state.d = ReadStates.FILL_BANK1
+                }
+
+            ReadStates.FILL_BANK1:
+                if (streaming_state.q == StreamingStates.READY) {
+                    num_streaming_bank.d = 1
+                    streaming_state.d = StreamingStates.REQUEST_DATA
+                } else if (streaming_state.q == StreamingStates.DONE) {
+                    streaming_state.d = StreamingStates.READY
+                    read_state.d = ReadStates.READY
+                }
+
+            ReadStates.READY:
+                if (mreq_fall && (!z80_rd_sync || !z80_wr_sync)) {
+                    if (!tx_addr_fifo.full) {
+                        tx_addr_fifo.wput = 1
+                        tx_addr_fifo.din = addr_sync
+                    }
+                } else if (iorq_fall && (!z80_rd_sync || !z80_wr_sync)) {
+                    if (!tx_addr_fifo.full) {
+                        tx_addr_fifo.wput = 1
+                        tx_addr_fifo.din = c{8b0, addr_sync[0+:8]}
+                    }
+                }
+
+                if (mreq_fall && !addr_cerom2_sync) {
+                    last_bank.d = addr_bnk_sync
+                    last_addr.d = addr_sync - h8000
+
+                    if (addr_bnk_sync == num_streaming_bank.q) {
+                        if (num_streaming_bank.q == 0) {
+                            num_streaming_bank.d = 1
+                        } else {
+                            num_streaming_bank.d = 0
+                        }
+                        // expect that streaming_state.q would be READY or DONE
+                        streaming_state.d = StreamingStates.REQUEST_DATA
+                    }
+
+                    if (!tx_bank_fifo.full) {
+                        tx_bank_fifo.wput = 1
+                        tx_bank_fifo.din = c{4b0, addr_ceram2_sync, addr_cerom2_sync, addr_bnk_sync}
+                    }
+
+                    read_state.d = ReadStates.HOLD_DATA
+                }
+
+            ReadStates.HOLD_DATA:
+                if (mreq_rise) {
+                    read_state.d = ReadStates.READY
+                } else {
+                    rom_bank.raddr = (last_bank.q * ROM_BANK_SIZE) + last_addr.q
+                    data = rom_bank.read_data
+                }
+        }
+
+        case (streaming_state.q) {
+            // StreamingStates.READY:
+
+            StreamingStates.REQUEST_DATA:
+               if (!ft.ui_din_full) {
+                    ft.ui_din = num_data_request.q
+                    ft.ui_din_be = b11
+                    ft.ui_din_valid = 1
+
+                    num_data_request.d = num_data_request.q + 1
+                    streaming_state.d = StreamingStates.GET_SIZE
+                }
+
+            StreamingStates.GET_SIZE:
+                if (!ft.ui_dout_empty) {
+                    ft.ui_dout_get = 1
+                    streaming_data_size.d = ft.ui_dout
+                    streaming_index.d = 0
+
+                    streaming_state.d = StreamingStates.FILL_BANK
+                }
+
+            StreamingStates.FILL_BANK:
+                if (streaming_index.q < streaming_data_size.q) {
+                    if (!ft.ui_dout_empty) {
+                        ft.ui_dout_get = 1
+
+                        rom_bank.waddr = (num_streaming_bank.q * ROM_BANK_SIZE) + streaming_index.q
+                        rom_bank.write_data = ft.ui_dout[0+:8]
+                        write_byte2.d = ft.ui_dout[8+:8]
+                        rom_bank.write_enable = 1
+                        streaming_index.d = streaming_index.q + 1
+                        streaming_state.d = StreamingStates.FILL_BANK2
+                    }
+                } else {
+                    streaming_state.d = StreamingStates.DONE
+                }
+
+            StreamingStates.FILL_BANK2:
+                rom_bank.waddr = (num_streaming_bank.q * ROM_BANK_SIZE) + streaming_index.q
+                rom_bank.write_data = write_byte2.q
+                rom_bank.write_enable = 1
+                streaming_index.d = streaming_index.q + 1
+                streaming_state.d = StreamingStates.FILL_BANK
+
+            // StreamingStates.DONE:
+        }
+
+        // NB: rightmost bit is pin0
+        saleae = c{tx_addr.tx, tx_bank.tx, addr_cerom2_sync, z80_m1_sync,
+                   z80_mreq_sync, z80_iorq_sync, z80_rd_sync, z80_wr_sync}
+        // saleae = c{tx_addr.tx, tx_bank.tx, z80_iorq_sync, z80_mreq_sync, addr_ceram2_sync, addr_cerom2_sync, addr_bnk_sync}
+    }
+}
