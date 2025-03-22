@@ -1,0 +1,175 @@
+#use-added-syntax(jitx)
+defpackage components/JC20-C45S-F1-A1:
+  import core
+  import jitx
+  import jitx/commands
+
+  import jsl
+
+  ; HashTable
+  import collections
+
+  ; setup-design
+  import helpers
+
+val pad_width = 0.50
+public val pad_height = 5.0
+
+val case_width = 46.0
+val case_height = 4.0
+
+pcb-pad capsule-smd-pad :
+  name = "capsule-smd-pad"
+  type = SMD
+
+  val _w = pad_width
+  val _h = pad_height
+  val _reduce = 0.1 ; not sure why it's needed: JITX seems to reduce shape from SolderMask and Paste layers by a small amount
+
+  shape = Rectangle(_w - _reduce, _h - _reduce)
+  layer(SolderMask(Top)) = Rectangle(_w, _h)
+  layer(Paste(Top))      = Rectangle(_w, _h)
+
+pcb-landpattern lp :
+  val num_pads = 45
+  val pad_span = 44.0
+  val pad_pitch = pad_span / (to-double(num_pads) - 1.0)
+  val pad_offset_x = pad_span / -2.0
+
+  val y = 0.0
+  for i in 0 to num_pads do:
+    val x = pad_offset_x + (pad_pitch * to-double(i))
+    pad p[i] : capsule-smd-pad at loc(x, y) on Top
+
+public pcb-component card-component :
+  name = "JC20-C45S-F1-A1"
+  description = "Connector"
+  manufacturer = "JAE"
+  reference-prefix = "J"
+
+  pin-properties :
+    [pin:Ref      | pads:Int ... | side:Dir ]
+    [C[0]  | 0  | Left ]
+    [C[1]  | 1  | Left ]
+    [C[2]  | 2  | Left ]
+    [C[3]  | 3  | Left ]
+    [C[4]  | 4  | Left ]
+    [C[5]  | 5  | Left ]
+    [C[6]  | 6  | Left ]
+    [C[7]  | 7  | Left ]
+    [C[8]  | 8  | Left ]
+    [C[9]  | 9  | Left ]
+    [C[10] | 10 | Left ]
+    [C[11] | 11 | Left ]
+    [C[12] | 12 | Left ]
+    [C[13] | 13 | Left ]
+    [C[14] | 14 | Left ]
+    [C[15] | 15 | Left ]
+    [C[16] | 16 | Left ]
+    [C[17] | 17 | Left ]
+    [C[18] | 18 | Left ]
+    [C[19] | 19 | Left ]
+    [C[20] | 20 | Left ]
+    [C[21] | 21 | Left ]
+    [C[22] | 22 | Left ]
+    [C[23] | 23 | Left ]
+    [C[24] | 24 | Left ]
+    [C[25] | 25 | Left ]
+    [C[26] | 26 | Left ]
+    [C[27] | 27 | Left ]
+    [C[28] | 28 | Left ]
+    [C[29] | 29 | Left ]
+    [C[30] | 30 | Left ]
+    [C[31] | 31 | Left ]
+    [C[32] | 32 | Left ]
+    [C[33] | 33 | Left ]
+    [C[34] | 34 | Left ]
+    [C[35] | 35 | Left ]
+    [C[36] | 36 | Left ]
+    [C[37] | 37 | Left ]
+    [C[38] | 38 | Left ]
+    [C[39] | 39 | Left ]
+    [C[40] | 40 | Left ]
+    [C[41] | 41 | Left ]
+    [C[42] | 42 | Left ]
+    [C[43] | 43 | Left ]
+    [C[44] | 44 | Left ]
+
+  val box = BoxSymbol(self)
+  val symb = create-symbol(box)
+  assign-symbol(symb)
+
+  assign-landpattern(lp)
+
+public pcb-component sharp-organizer-component :
+  name = "JC20-C45S-F1-A1"
+  description = "Connector"
+  manufacturer = "JAE"
+  reference-prefix = "J"
+
+  ; view from the front of the calculator with the display at front-left
+  ; VCC is on the left side, GND is on the right side
+  ;
+  ; https://github.com/mamedev/mame/blob/master/hash/wizard_cart.xml
+  pin-properties :
+    [pin:Ref | pads:Int ... | side:Dir ]
+    [VCC    | 0  | Left ]
+    [NC02   | 1  | Left ]
+    [NC03   | 2  | Left ]
+    [VBATT  | 3  | Left ]
+    [NC05   | 4  | Left ]
+    [A15    | 5  | Left ]
+    [A14    | 6  | Left ]
+    [A13    | 7  | Left ]
+    [A12    | 8  | Left ]
+    [A11    | 9  | Left ]
+    [A10    | 10 | Left ]
+    [A9     | 11 | Left ]
+    [A8     | 12 | Left ]
+    [A7     | 13 | Left ]
+    [A6     | 14 | Left ]
+    [A5     | 15 | Left ]
+    [A4     | 16 | Left ]
+    [A3     | 17 | Left ]
+    [A2     | 18 | Left ]
+    [A1     | 19 | Left ]
+    [A0     | 20 | Left ]
+    [D0     | 21 | Left ]
+    [D1     | 22 | Left ]
+    [D2     | 23 | Left ]
+    [D3     | 24 | Left ]
+    [D4     | 25 | Left ]
+    [D5     | 26 | Left ]
+    [D6     | 27 | Left ]
+    [D7     | 28 | Left ]
+    [MSKROM | 29 | Left ]
+    [SRAM1  | 30 | Left ]
+    [SRAM2  | 31 | Left ]
+    [EPROM  | 32 | Left ]
+    [WR     | 33 | Left ]
+    [OE     | 34 | Left ]
+    [NC36   | 35 | Left ]
+    [A18    | 36 | Left ]
+    [A17    | 37 | Left ]
+    [A16    | 38 | Left ]
+    [NC40   | 39 | Left ]
+    [NC41   | 40 | Left ]
+    [NC42   | 41 | Left ]
+    [NC43   | 42 | Left ]
+    [NC44   | 43 | Left ]
+    [GND    | 44 | Left ]
+
+  val box = BoxSymbol(self)
+  val symb = create-symbol(box)
+  assign-symbol(symb)
+
+  assign-landpattern(lp)
+
+
+view(card-component)
+
+; val board-shape = RoundedRectangle(element_width, element_height, 3.0)
+; setup-design("alchitry_element_bottom", board-shape, signal-shrink = 0.5)
+; set-main-module(alchitry_element_bottom)
+; view-schematic()
+; view-board()

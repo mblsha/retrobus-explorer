@@ -1,0 +1,138 @@
+#use-added-syntax(jitx)
+defpackage sharp-organizer-card :
+  import core
+  import jitx
+  import jitx/commands
+  import jitx/parts
+
+  import helpers
+  import jsl
+  import collections
+
+  ; gen-testpad
+  import ocdb/utils/generic-components
+  ; get-time-string
+  import utils/time
+
+val board-shape = RoundedRectangle(
+  46.0,
+  48.0, 1.0)
+val board-thickness = 0.4 ; JC20-C45S-F1-A1 datasheet recommends 0.2mm
+
+val narrow-width = 42.8
+val top-notch-height = 7.8
+
+pcb-module module :
+  ; NOTE: need to use inverted FFC cable to match the pins on the
+  ; level-shifter element
+  inst ffc : components/FFCConnector/module(flip_pins = false)
+
+  inst bus : components/JC20-C45S-F1-A1/card-component
+  val bus-height = components/JC20-C45S-F1-A1/pad_height
+
+  val ordered_bus_pins = [
+    "_"
+    "NC02"
+    "NC03"
+    "VBATT"
+    "NC05"
+    "A15"
+    "A14"
+    "A13"
+    "A12"
+    "A11"
+    "A10"
+    "A9"
+    "A8"
+    "A7"
+    "A6"
+    "A5"
+    "A4"
+    "A3"
+    "A2"
+    "A1"
+    "A0"
+    "D0"
+    "D1"
+    "D2"
+    "D3"
+    "D4"
+    "D5"
+    "D6"
+    "D7"
+    "MSKROM"
+    "SRAM1"
+    "SRAM2"
+    "EPROM"
+    "WR"
+    "OE"
+    "NC36"
+    "A18"
+    "A17"
+    "A16"
+    "NC40"
+    "NC41"
+    "NC42"
+    "NC43"
+    "NC44"
+    "_"
+    "_"
+    "_"
+    "_"
+  ]
+
+  port gnd
+  port vcc
+
+  ; the card will be inserted upside down, so we need to reverse the order
+  var bus-index = 43 ; skip VCC and GND, route them manually
+  var ffc-index = 47
+  for i in 0 to length(ordered_bus_pins) do :
+    val bus-name = ordered_bus_pins[i]
+    if bus-name == "_" :
+      net (gnd ffc.data[ffc-index])
+    else :
+      val name = to-string("%_-DATA%_" % [bus-name, i])
+      make-net(to-symbol(name), [bus.C[bus-index] ffc.data[ffc-index]])
+      bus-index = bus-index - 1
+
+    ffc-index = ffc-index - 1
+
+  net GND (gnd ffc.GND)
+  net VCC (vcc ffc.VCC5V)
+
+  net (gnd bus.C[0])
+  net (vcc bus.C[44])
+
+  val dx = -0.0
+  place(ffc) at loc(0.0, -15.0, 180.0) on Top
+  place(bus) at loc(0.0, height(board-shape) / 2.0 - bus-height / 2.0, 0.0) on Top
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val version-text = append("(c) mblsha ", mydate)
+  val name-text = "SHARP Organizer Card adapter v1"
+  inst name-label : ocdb/artwork/board-text/text(name-text, 1.5, 0.0)
+  inst version-label : ocdb/artwork/board-text/text(version-text, 1.5, 0.0)
+  val label_y = 0.0
+  val label_distance = 1.5
+  place(name-label) at loc(0.0, label_y + label_distance, 0.0) on Bottom
+  place(version-label) at loc(0.0, label_y - label_distance, 0.0) on Bottom
+
+  ; do two cutouts on the sides, should look like thick T, and the horizontal
+  ; beam height is top-notch-height. width in the middle is narrow-width
+  var start-x = width(board-shape) / -2.0
+  val side-width = (width(board-shape) - narrow-width) / 2.0
+  val start-y = height(board-shape) / -2.0
+  val end-y = height(board-shape) / 2.0 - top-notch-height
+  layer(Cutout()) = Rectangle(start-x, start-y, start-x + side-width, end-y)
+  start-x = width(board-shape) / 2.0 - side-width
+  layer(Cutout()) = Rectangle(start-x, start-y, start-x + side-width, end-y)
+
+  ; geom(gnd) :
+  ;   copper-pour(LayerIndex(0, Top), isolate = 0.15, rank = 1) = board-shape
+
+setup-design("sharp-organizer-card", board-shape, signal-shrink = 0.5)
+set-main-module(module)
+view-schematic()
+view-board()
+export-to-cad()
