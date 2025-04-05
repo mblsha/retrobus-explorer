@@ -380,49 +380,38 @@ def _(mo):
 def _():
     # sharp-pc-e500-bus.stanza (print pin mapping)
     sharp_pc_e500_bus_mapping = """
-    FPGA_MAP: 46 → NC02
-    FPGA_MAP: 45 → NC03
-    FPGA_MAP: 44 → VBATT
-    FPGA_MAP: 43 → NC05
-    FPGA_MAP: 42 → A15
-    FPGA_MAP: 41 → A14
-    FPGA_MAP: 40 → A13
-    FPGA_MAP: 39 → A12
-    FPGA_MAP: 38 → A11
-    FPGA_MAP: 37 → A10
-    FPGA_MAP: 36 → A9
-    FPGA_MAP: 35 → A8
-    FPGA_MAP: 34 → A7
-    FPGA_MAP: 33 → A6
-    FPGA_MAP: 32 → A5
-    FPGA_MAP: 31 → A4
-    FPGA_MAP: 30 → A3
-    FPGA_MAP: 29 → A2
-    FPGA_MAP: 28 → A1
-    FPGA_MAP: 27 → A0
-    FPGA_MAP: 26 → D0
-    FPGA_MAP: 25 → D1
-    FPGA_MAP: 24 → D2
-    FPGA_MAP: 23 → D3
-    FPGA_MAP: 22 → D4
-    FPGA_MAP: 21 → D5
-    FPGA_MAP: 20 → D6
-    FPGA_MAP: 19 → D7
-    FPGA_MAP: 18 → MSKROM
-    FPGA_MAP: 17 → SRAM1
-    FPGA_MAP: 16 → SRAM2
-    FPGA_MAP: 15 → EPROM
-    FPGA_MAP: 14 → WR
-    FPGA_MAP: 13 → OE
-    FPGA_MAP: 12 → NC36
-    FPGA_MAP: 11 → A18
-    FPGA_MAP: 10 → A17
-    FPGA_MAP: 9 → A16
-    FPGA_MAP: 8 → NC40
-    FPGA_MAP: 7 → NC41
-    FPGA_MAP: 6 → NC42
-    FPGA_MAP: 5 → NC43
-    FPGA_MAP: 4 → NC44
+    FPGA_MAP: 2 → bus.RW
+    FPGA_MAP: 3 → bus.A0
+    FPGA_MAP: 4 → bus.A1
+    FPGA_MAP: 6 → bus.A2
+    FPGA_MAP: 7 → bus.A3
+    FPGA_MAP: 8 → bus.A4
+    FPGA_MAP: 10 → bus.A5
+    FPGA_MAP: 11 → bus.A6
+    FPGA_MAP: 12 → bus.A7
+    FPGA_MAP: 14 → bus.A8
+    FPGA_MAP: 15 → bus.A9
+    FPGA_MAP: 16 → bus.A10
+    FPGA_MAP: 18 → bus.A11
+    FPGA_MAP: 19 → bus.A12
+    FPGA_MAP: 20 → bus.A13
+    FPGA_MAP: 22 → bus.A14
+    FPGA_MAP: 23 → bus.A15
+    FPGA_MAP: 24 → bus.A16
+    FPGA_MAP: 26 → bus.A17
+    FPGA_MAP: 27 → bus.VCC2
+    FPGA_MAP: 28 → bus.D0
+    FPGA_MAP: 30 → bus.D1
+    FPGA_MAP: 31 → bus.D2
+    FPGA_MAP: 33 → bus.D3
+    FPGA_MAP: 34 → bus.D4
+    FPGA_MAP: 35 → bus.D5
+    FPGA_MAP: 37 → bus.D6
+    FPGA_MAP: 38 → bus.D7
+    FPGA_MAP: 39 → bus.CE1
+    FPGA_MAP: 41 → bus.CE6
+    FPGA_MAP: 42 → bus.NC
+    FPGA_MAP: 43 → bus.OE
     """
     return (sharp_pc_e500_bus_mapping,)
 
@@ -438,7 +427,7 @@ def _(sharp_pc_e500_bus_mapping):
         for line in sharp_pc_e500_bus_mapping.split('\n'):
             if not line:
                 continue
-            m = re.match(r"FPGA_MAP: (\d+) → (\w+)", line)
+            m = re.match(r"FPGA_MAP: (\d+) → bus\.(\w+)", line)
             # print(line.split(' '))
             # print(m)
             # print(m.groups())

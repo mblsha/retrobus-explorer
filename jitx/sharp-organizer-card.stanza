@@ -30,12 +30,13 @@ pcb-module module :
   inst bus : components/JC20-C45S-F1-A1/card-component
   val bus-height = components/JC20-C45S-F1-A1/pad_height
 
+  ; From IQ-9200 techmical reference manual
   val ordered_bus_pins = [
-    "_"
+    "_" ; VCC
     "NC02"
-    "NC03"
+    "STNBY"
     "VBATT"
-    "NC05"
+    "VPP"
     "A15"
     "A14"
     "A13"
@@ -60,22 +61,22 @@ pcb-module module :
     "D5"
     "D6"
     "D7"
-    "MSKROM"
-    "SRAM1"
-    "SRAM2"
-    "EPROM"
-    "WR"
+    "MSKROM" ; EXROM?
+    "SRAM1"  ; EXRAM1?
+    "SRAM2"  ; EXRAM2?
+    "EPROM"  ; EX_CE0
+    "RW"
     "OE"
-    "NC36"
+    "A19"
     "A18"
     "A17"
     "A16"
-    "NC40"
-    "NC41"
+    "CI" ; S1
+    "E2" ; S2
     "NC42"
     "NC43"
     "NC44"
-    "_"
+    "_" ; GND
     "_"
     "_"
     "_"
@@ -132,6 +133,14 @@ pcb-module module :
   layer(Cutout()) = Rectangle(start-x, start-y, start-x + side-width, end-y)
   start-x = width(board-shape) / 2.0 - side-width
   layer(Cutout()) = Rectangle(start-x, start-y, start-x + side-width, end-y)
+
+  ; layer(ForbidCopper(LayerIndex(0, Top))) =
+  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
+  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
+
+  ; layer(ForbidVia()) =
+  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
+  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
 
   ; geom(gnd) :
   ;   copper-pour(LayerIndex(0, Top), isolate = 0.15, rank = 1) = board-shape
