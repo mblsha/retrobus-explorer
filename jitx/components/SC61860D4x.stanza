@@ -46,6 +46,7 @@ val SC61860_QFN = QFN(
     thermal-lead? = false,
   )
 
+; https://github.com/utz82/SC61860-Instruction-Set
 public pcb-component device :
   name = "SC61860D4x"
   description = "SC61860 CPU"
@@ -53,13 +54,97 @@ public pcb-component device :
   reference-prefix = "U"
 
   pin-properties :
-    [pin:Ref  | pads:Int ... | stm32-pin-name:String ]
-    [ PIN01   |   1 | "PE2"            ]
+    [pin:Ref  | pads:Int ... ]
+    [ A[0]    |   1 ] ; Address bus
+    [ RW      |   2 ] ; Write clock
+    [ AL      |   3 ] ; Address Latch
+    [ TEST    |   4 ] ; Test pin, normally set low
+    [ OSC_I   |   5 ] ; Oscillator input
+    [ OSC_O   |   6 ] ; Oscillator output
+    [ RESET   |   7 ] ; Reset input, active high
+    [ XIN     |   8 ] ; Cassette signal input
+    [ KON     |   9 ] ; On/BRK key input
+    [ XOUT    |  10 ] ; Out Cassette signal and buzzer signal output
+    [ DIS     |  11 ] ; Out LCD driver control
+    [ HA      |  12 ] ; LCD driver sync clock
+    [ IA[7]   |  13 ] ; Key input
+    [ IA[6]   |  14 ] ; Key input
+    [ IA[5]   |  15 ] ; Key input
+    [ IA[4]   |  16 ] ; Key input
+    [ IA[3]   |  17 ] ; Key input
+    [ IA[2]   |  18 ] ; Key input
+    [ IA[1]   |  19 ] ; Key input
+    [ IA[0]   |  20 ] ; Key input
+    [ IB[7]   |  21 ] ; SIO CD (request to send from the other end)
+    [ IB[6]   |  22 ] ; SIO CS (send enabled from the other end)
+    [ IB[5]   |  23 ] ; SIO RD (receive data)
+    [ IB[4]   |  24 ] ; ACK input on 11-pin interface
+    [ IB[3]   |  25 ] ; DIN input on 11-pin interface
+    [ IB[2]   |  26 ] ; DOUT input on 11-pin interface
+    [ IB[1]   |  27 ] ; IO2 input on 11-pin interface
+    [ IB[0]   |  28 ] ; IO1 input on 11-pin interface
+    [ VM      |  29 ] ; LCD drive power supply
+    [ VA      |  30 ] ; LCD drive power supply
+    [ GND     |  31 ] ; FIXME: (+) power supply
+    [ H[0]    |  32 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[1]    |  33 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[2]    |  34 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[3]    |  35 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[4]    |  36 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[5]    |  37 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[6]    |  38 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[7]    |  39 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[8]    |  40 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[9]    |  41 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[10]   |  42 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[11]   |  43 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[12]   |  44 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[13]   |  45 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[14]   |  46 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ H[15]   |  47 ] ; LCD blackplate, 4-level pulse (1/16 duty) during displaying
+    [ VB      |  48 ] ; LCD drive power supply
+    [ VDIS    |  49 ] ; LCD drive power supply
+    [ VCC     |  50 ] ; LCD drive power supply
+    [ VDC     |  51 ] ; LCD drive power supply
+    [ VGG     |  52 ] ; FIXME: (-) power supply
+    [ D[7]    |  53 ] ; Data bus
+    [ D[6]    |  54 ] ; Data bus
+    [ D[5]    |  55 ] ; Data bus
+    [ D[4]    |  56 ] ; Data bus
+    [ D[3]    |  57 ] ; Data bus
+    [ D[2]    |  58 ] ; Data bus
+    [ D[1]    |  59 ] ; Data bus
+    [ D[0]    |  60 ] ; Data bus
+    [ FO[4]   |  61 ] ; RAM, LCD driver, system ROM chip enable (CEC)
+    [ FO[3]   |  62 ] ; RAM card chip enable (CER)
+    [ FO[2]   |  63 ] ; RAM card bank select (BA)
+    [ FO[1]   |  64 ] ; SIO SD (send data)
+    [ FO[0]   |  65 ] ; ??? chip select
+    [ A[15]   |  66 ] ; Address bus
+    [ A[14]   |  67 ] ; Address bus
+    [ A[13]   |  68 ] ; Address bus
+    [ A[12]   |  69 ] ; Address bus
+    [ A[11]   |  70 ] ; Address bus
+    [ A[10]   |  71 ] ; Address bus
+    [ A[9]    |  72 ] ; Address bus
+    [ A[8]    |  73 ] ; Address bus
+    [ A[7]    |  74 ] ; Address bus
+    [ A[6]    |  75 ] ; Address bus
+    [ A[5]    |  76 ] ; Address bus
+    [ A[4]    |  77 ] ; Address bus
+    [ A[3]    |  78 ] ; Address bus
+    [ A[2]    |  79 ] ; Address bus
+    [ A[1]    |  80 ] ; Address bus
+
+
+
 
   assign-landpattern $ create-landpattern(SC61860_QFN)
 
   val box = BoxSymbol(self)
   assign-symbol $ create-symbol(box)
+
+  ; TODO: add cutout for the interposer to fit the CPU
 
 public pcb-module module :
   inst d : device
