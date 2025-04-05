@@ -18,6 +18,7 @@ defpackage components/SC61860D4x :
 val mylead-length = 1.0
 val gullwing-offset = 1.0
 val mylead = QFN-Lead(
+    ; lead-type = ConcaveChipArrayLeads(), ; LeadlessConcaveCastellated(), ; QuadFlatNoLeads(),
     length = tol(mylead-length),
     width = tol(0.5),
   )
