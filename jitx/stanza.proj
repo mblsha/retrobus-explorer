@@ -19,4 +19,4 @@ package components/_0_5K-1_2X-60PWB defined-in "components/_0_5K-1_2X-60PWB.stan
 package components/LevelShifter defined-in "components/LevelShifter.stanza"
 package components/Saleae defined-in "components/Saleae.stanza"
 package components/GndTestpads defined-in "components/GndTestpads.stanza"
-
+package components/SC61860D4x defined-in "components/SC61860D4x.stanza"

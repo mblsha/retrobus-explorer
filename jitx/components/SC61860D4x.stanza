@@ -1,0 +1,71 @@
+
+#use-added-syntax(jitx)
+defpackage components/SC61860D4x :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+
+  import jsl
+  import jsl/examples/landpatterns/board
+
+  ; setup-design
+  import helpers
+  import pose-helpers
+  ; pin-header
+  import ocdb/utils/generic-components
+
+val mylead-length = 1.0
+val gullwing-offset = 1.0
+val mylead = QFN-Lead(
+    length = tol(mylead-length),
+    width = tol(0.5),
+  )
+val mypitch = 0.8
+val SC61860_QFN = QFN(
+    num-leads = 80,
+    lead-profile = Quad-Lead-Profile(
+      x-leads = Lead-Profile(
+        span =  tol(17.2 + mylead-length + gullwing-offset),
+        pitch = mypitch,
+        lead = mylead
+      ),
+      x-count = 24,
+      y-leads = Lead-Profile(
+        span = tol(23.2 + mylead-length + gullwing-offset),
+        pitch = mypitch,
+        lead = mylead
+      ),
+      y-count = 16,
+    ),
+    package-body = PackageBody(
+      width = tol(14.0),
+      length = tol(20.0),
+      height = tol(2.0)
+    ),
+    thermal-lead? = false,
+  )
+
+public pcb-component device :
+  name = "SC61860D4x"
+  description = "SC61860 CPU"
+  manufacturer = "Hitachi?"
+  reference-prefix = "U"
+
+  pin-properties :
+    [pin:Ref  | pads:Int ... | stm32-pin-name:String ]
+    [ PIN01   |   1 | "PE2"            ]
+
+  assign-landpattern $ create-landpattern(SC61860_QFN)
+
+  val box = BoxSymbol(self)
+  assign-symbol $ create-symbol(box)
+
+public pcb-module module :
+  inst d : device
+
+val board-shape = RoundedRectangle(50.0, 50.0, 0.25)
+setup-design("sc61860d4x-module", board-shape, signal-shrink = 0.5)
+set-main-module(module)
+view-schematic()
+view-board()
