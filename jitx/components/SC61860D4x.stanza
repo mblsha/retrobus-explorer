@@ -68,19 +68,6 @@ defmethod build-cut-out (pkg:QFN, vp:VirtualLP) -> False :
   ; Return false as per the build-* method convention
   false
 
-public pcb-landpattern lp :
-  name = name(SC61860_QFN) ; Use the name generated from the package
-  description = "Landpattern for SC61860 QFN with custom cutouts"
-
-  ; Call the individual make-* generators for the standard parts
-  make-pads(SC61860_QFN)
-  make-silkscreen(SC61860_QFN)
-  make-courtyard(SC61860_QFN)
-  make-keep-out(SC61860_QFN) ; Call even if default is empty, for future-proofing
-  ; We are defining the cutout manually, so we DON'T call make-cut-out
-  make-conformal-mask(SC61860_QFN) ; Call if needed / for completeness
-
-
 ; https://github.com/utz82/SC61860-Instruction-Set
 public pcb-component interposer :
   name = "SC61860D4x"
@@ -177,10 +164,4 @@ public pcb-component interposer :
   val box = BoxSymbol(self)
   assign-symbol $ create-symbol(box)
 
-; view(device)
-
-; val board-shape = RoundedRectangle(50.0, 50.0, 0.25)
-; setup-design("sc61860d4x-interposer", board-shape, signal-shrink = 0.5)
-; set-main-module(interposer)
-; view-schematic()
-; view-board()
+; view(interposer)

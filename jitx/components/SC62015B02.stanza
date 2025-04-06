@@ -1,0 +1,86 @@
+
+#use-added-syntax(jitx)
+defpackage components/SC62015B02 :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+
+  import jsl
+  import jsl/examples/landpatterns/board
+
+  ; setup-design
+  import helpers
+  import pose-helpers
+  ; pin-header
+  import ocdb/utils/generic-components
+
+val mylead-length = 1.0
+val gullwing-offset = 1.0
+val mylead = QFN-Lead(
+    ; lead-type = ConcaveChipArrayLeads(), ; LeadlessConcaveCastellated(), ; QuadFlatNoLeads(),
+    length = tol(mylead-length),
+    width = tol(0.3),
+  )
+val mypitch = 0.65
+val SC62015B02_QFN = QFN(
+    num-leads = 100,
+    lead-profile = Quad-Lead-Profile(
+      x-leads = Lead-Profile(
+        span =  tol(17.2 + mylead-length + gullwing-offset),
+        pitch = mypitch,
+        lead = mylead
+      ),
+      x-count = 30,
+      y-leads = Lead-Profile(
+        span = tol(23.2 + mylead-length + gullwing-offset),
+        pitch = mypitch,
+        lead = mylead
+      ),
+      y-count = 20,
+    ),
+    package-body = PackageBody(
+      width = tol(14.0),
+      length = tol(20.0),
+      height = tol(2.0)
+    ),
+    thermal-lead? = false,
+  )
+
+defmethod build-cut-out (pkg:QFN, vp:VirtualLP) -> False :
+  val body-to-lead-offset = 1.6
+  val x-width = 14.0
+  val y-width = 20.0
+  val x-span = 20.0 * mypitch
+  val y-span = 30.0 * mypitch
+
+  add-cutout(vp, Polygon([
+    Point(x-width / -2.0 - body-to-lead-offset, y-span / -2.0),
+    Point(x-width / -2.0 - body-to-lead-offset, y-span /  2.0),
+    Point(x-span / -2.0, y-width / 2.0 + body-to-lead-offset),
+    Point(x-span /  2.0, y-width / 2.0 + body-to-lead-offset),
+    Point(x-width / 2.0 + body-to-lead-offset, y-span /  2.0),
+    Point(x-width / 2.0 + body-to-lead-offset, y-span / -2.0),
+    Point(x-span /  2.0, y-width / -2.0 - body-to-lead-offset),
+    Point(x-span / -2.0, y-width / -2.0 - body-to-lead-offset),
+  ]))
+
+  ; Return false as per the build-* method convention
+  false
+
+public pcb-component interposer :
+  name = "SC62015B02"
+  description = "SC62015 CPU"
+  manufacturer = "Hitachi?"
+  reference-prefix = "U"
+
+  pin-properties :
+    [pin:Ref  | pads:Int ... ]
+    [ A[0]    |   1 ] ; Address bus
+
+  assign-landpattern $ create-landpattern(SC62015B02_QFN)
+
+  val box = BoxSymbol(self)
+  assign-symbol $ create-symbol(box)
+
+view(interposer)
