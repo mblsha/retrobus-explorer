@@ -15,11 +15,8 @@ defpackage sharp-sc62015-interposer :
   import utils/time
 
 val board-shape = RoundedRectangle(
-  100.0,
-  100.0, 0.0)
-
-val narrow-width = 42.8
-val top-notch-height = 7.8
+  40.0,
+  50.0, 0.0)
 
 pcb-module module :
   ; NOTE: need to use inverted FFC cable to match the pins on the
@@ -36,28 +33,44 @@ pcb-module module :
   net (gnd cpu.GND)
   net (vcc cpu.VCC)
 
-  val data = [
-    cpu.RD,
-    cpu.WR,
-    cpu.ACLK,
-    cpu.TEST,
-    cpu.ON,
-    cpu.RESET,
-    cpu.MRQ,
-    cpu.DIS,
-    cpu.RXD,
-    cpu.TXD,
-    cpu.OUT,
-    cpu.DCLK,
+  inst tp_gnd : gen-testpad(3.0)
+  net (gnd tp_gnd.p)
+  inst tp_vcc : gen-testpad(3.0)
+  net (vcc tp_vcc.p)
 
-    cpu.D[7],
-    cpu.D[6],
-    cpu.D[5],
-    cpu.D[4],
-    cpu.D[3],
-    cpu.D[2],
-    cpu.D[1],
+  val data = [
+
     cpu.D[0],
+    cpu.D[1],
+    cpu.D[2],
+    cpu.D[3],
+    cpu.D[4],
+    cpu.D[5],
+    cpu.D[6],
+    cpu.D[7],
+
+    cpu.A[0],
+    cpu.A[1],
+    cpu.A[2],
+    cpu.A[3],
+    cpu.A[4],
+    cpu.A[5],
+    cpu.A[6],
+    cpu.A[7],
+    cpu.A[8],
+    cpu.A[9],
+    cpu.A[10],
+    cpu.A[11],
+    cpu.A[12],
+    cpu.A[13],
+    cpu.A[14],
+    cpu.A[15],
+    cpu.A[16],
+    cpu.A[17],
+    cpu.A[18],
+
+    cpu.DCLK,
+    cpu.OUT,
 
     cpu.CE[7],
     cpu.CE[6],
@@ -68,25 +81,17 @@ pcb-module module :
     cpu.CE[1],
     cpu.CE[0],
 
-    cpu.A[18],
-    cpu.A[17],
-    cpu.A[16],
-    cpu.A[15],
-    cpu.A[14],
-    cpu.A[13],
-    cpu.A[12],
-    cpu.A[11],
-    cpu.A[10],
-    cpu.A[9],
-    cpu.A[8],
-    cpu.A[7],
-    cpu.A[6],
-    cpu.A[5],
-    cpu.A[4],
-    cpu.A[3],
-    cpu.A[2],
-    cpu.A[1],
-    cpu.A[0],
+    cpu.ACLK,
+    cpu.DIS,
+    cpu.RD,
+    cpu.RXD,
+    cpu.TXD,
+
+    cpu.RESET,
+    cpu.TEST,
+    cpu.ON,
+    cpu.WR,
+    cpu.MRQ,
 
     cpu.GND,
   ]
@@ -101,7 +106,15 @@ pcb-module module :
       mapping = append(mapping, to-string(ref(data[i])))
       println(mapping)
 
-  place(cpu) at loc(0.0, 0.0, 90.0) on Top
+  place(ffc) at loc(0.0, 19.0, 0.0) on Top
+  place(tp_gnd) at loc(-17.0, 16.0, 0.0) on Top
+  place(tp_vcc) at loc( 17.0, 16.0, 0.0) on Top
+  place(cpu) at loc(-3.0, -11.0, 90.0) on Top
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val label-text = append("SC62015 v1 (c) mblsha ", mydate)
+  inst version-label : ocdb/artwork/board-text/text(label-text, 1.5, 0.0)
+  place(version-label) at loc(0.0, 5.0, 0.0) on Top
 
 ; FIXME: use FFC board type in order to have proper clearance specs for JLCPCB
 setup-design-flex("sharp-sc62015-interposer", board-shape, signal-shrink = 0.5)

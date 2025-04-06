@@ -15,11 +15,8 @@ defpackage sharp-sc61860-interposer :
   import utils/time
 
 val board-shape = RoundedRectangle(
-  100.0,
-  100.0, 0.0)
-
-val narrow-width = 42.8
-val top-notch-height = 7.8
+  40.0,
+  50.0, 0.0)
 
 pcb-module module :
   ; NOTE: need to use inverted FFC cable to match the pins on the
@@ -35,6 +32,11 @@ pcb-module module :
 
   net (gnd cpu.GND)
   net (vcc cpu.VGG)
+
+  inst tp_gnd : gen-testpad(3.0)
+  net (gnd tp_gnd.p)
+  inst tp_vcc : gen-testpad(3.0)
+  net (vcc tp_vcc.p)
 
   val data = [
 
@@ -104,7 +106,15 @@ pcb-module module :
       mapping = append(mapping, to-string(ref(data[i])))
       println(mapping)
 
-  place(cpu) at loc(0.0, 0.0, 90.0) on Top
+  place(ffc) at loc(0.0, 19.0, 0.0) on Top
+  place(tp_gnd) at loc(-17.0, 16.0, 0.0) on Top
+  place(tp_vcc) at loc( 17.0, 16.0, 0.0) on Top
+  place(cpu) at loc(2.0, -11.0, 90.0) on Top
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val label-text = append("SC61860 v1 (c) mblsha ", mydate)
+  inst version-label : ocdb/artwork/board-text/text(label-text, 1.5, 0.0)
+  place(version-label) at loc(0.0, 5.0, 0.0) on Top
 
 ; FIXME: use FFC board type in order to have proper clearance specs for JLCPCB
 setup-design-flex("sharp-sc61860-interposer", board-shape, signal-shrink = 0.5)

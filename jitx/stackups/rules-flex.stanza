@@ -30,7 +30,7 @@ public pcb-rules jlcpcb-rules-flex-1oz-finished :
   ; Note: Physical layer is Coverlay, often laser-cut or punched. Tolerances differ from LPI soldermask.
   solder-mask-registration = 0.1 ; Coverlay pullback/expansion from pad edge. Verify flex specs.
   min-soldermask-opening = 0.3 ; Smallest opening achievable in coverlay. Verify flex specs.
-  min-soldermask-bridge = 0.15 ; Minimum web/dam of coverlay material between openings. Verify flex specs.
+  min-soldermask-bridge = 0.5 ; Minimum web/dam of coverlay material between openings. Verify flex specs.
 
   ; --- Silkscreen Rules ---
   min-silkscreen-width = 0.2 ; (~8mil) Slightly larger for better adhesion/resolution on flex. Verify.
