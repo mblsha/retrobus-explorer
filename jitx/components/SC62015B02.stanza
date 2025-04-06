@@ -76,7 +76,106 @@ public pcb-component interposer :
 
   pin-properties :
     [pin:Ref  | pads:Int ... ]
-    [ A[0]    |   1 ] ; Address bus
+    [ X1      |   1 ] ; Ceramic oscillation output
+    [ X2      |   2 ] ; Ceramic oscillation input
+    [ X3      |   3 ] ; CR oscillation output
+    [ X4      |   4 ] ; CR oscillation input
+    [ VDD     |   5 ] ; Display power (converter) control output
+    [ VCC     |   6 ] ; (+) power input terminal
+    [ RESET   |   7 ] ; Reset input
+    [ GND     |   8 ] ; (-) power input terminal
+    [ TEST    |   9 ] ; Test input
+    [ CI      |  10 ] ; Cassette signal input terminal
+    [ CO      |  11 ] ; Cassette signal output terminal
+    [ ON      |  12 ] ; ON key input terminal. Normally pulled down to low level.
+    [ WR      |  13 ] ; Write clock. Normally high level.
+    [ MRQ     |  14 ] ; Memory Request / Address Latch?
+    [ K[10]   |  15 ] ; Key input
+    [ K[11]   |  16 ] ; Key input
+    [ K[12]   |  17 ] ; Key input
+    [ K[13]   |  18 ] ; Key input
+    [ K[14]   |  19 ] ; Key input
+    [ K[15]   |  20 ] ; Key input
+    [ K[16]   |  21 ] ; Key input
+    [ K[17]   |  22 ] ; Key input
+    [ DIO[0]  |  23 ] ; Data bus
+    [ DIO[1]  |  24 ] ; Data bus
+    [ DIO[2]  |  25 ] ; Data bus
+    [ DIO[3]  |  26 ] ; Data bus
+    [ DIO[4]  |  27 ] ; Data bus
+    [ DIO[5]  |  28 ] ; Data bus
+    [ DIO[6]  |  29 ] ; Data bus
+    [ DIO[7]  |  30 ] ; Data bus
+    [ A[0]    |  31 ] ; Address bus
+    [ A[1]    |  32 ] ; Address bus
+    [ A[2]    |  33 ] ; Address bus
+    [ A[3]    |  34 ] ; Address bus
+    [ A[4]    |  35 ] ; Address bus
+    [ A[5]    |  36 ] ; Address bus
+    [ A[6]    |  37 ] ; Address bus
+    [ A[7]    |  38 ] ; Address bus
+    [ A[8]    |  39 ] ; Address bus
+    [ A[9]    |  40 ] ; Address bus
+    [ A[10]   |  41 ] ; Address bus
+    [ A[11]   |  42 ] ; Address bus
+    [ A[12]   |  43 ] ; Address bus
+    [ A[13]   |  44 ] ; Address bus
+    [ A[14]   |  45 ] ; Address bus
+    [ A[15]   |  46 ] ; Address bus
+    [ A[16]   |  47 ] ; Address bus
+    [ A[17]   |  48 ] ; Address bus
+    [ A[18]   |  49 ] ; Address bus
+    [ VDISP   |  50 ]
+    [ VA      |  51 ]
+    [ DCLK    |  52 ] ; Clock output for display chip
+    [ KO[15]  |  53 ] ; SIO PRQ
+    [ KO[14]  |  54 ] ; SIO ER, high level with OPEN command
+    [ KO[13]  |  55 ] ; SIO RR, reception in the main body side allowed
+    [ KO[12]  |  56 ] ; SIO RS, send request in the main body side
+    [ KO[11]  |  57 ] ; Key strobe
+    [ KO[10]  |  58 ] ; Key strobe
+    [ IRQ     |  59 ] ; Low battery detection input
+    [ OUT     |  60 ] ; ???
+    [ CE[7]   |  61 ] ;
+    [ CE[6]   |  62 ] ; ROM card chip select
+    [ CE[5]   |  63 ] ; Chip select for display chip
+    [ CE[4]   |  64 ] ;
+    [ CE[3]   |  65 ] ;
+    [ CE[2]   |  66 ] ; Internal ROM chip enable
+    [ CE[1]   |  67 ] ; RAM card chip enable
+    [ CE[0]   |  68 ] ; Internal RAM chip enable
+    [ PHI_A   |  69 ] ;
+    [ DIS     |  70 ] ;
+    [ HA      |  71 ] ;
+    [ RD      |  72 ] ; ???
+    [ KO[9]   |  73 ] ; Key strobe
+    [ KO[8]   |  74 ] ; Key strobe
+    [ KO[7]   |  75 ] ; Key strobe
+    [ KO[6]   |  76 ] ; Key strobe
+    [ KO[5]   |  77 ] ; Key strobe
+    [ KO[4]   |  78 ] ; Key strobe
+    [ KO[3]   |  79 ] ; Key strobe
+    [ KO[2]   |  80 ] ; Key strobe
+    [ KO[1]   |  81 ] ; Key strobe
+    [ KO[0]   |  82 ] ; Key strobe
+    [ RXD     |  83 ] ; SIO RD (Receive data)
+    [ TXD     |  84 ] ; SIO SD (Send data)
+    [ E[15]   |  85 ] ; CE-140F data input
+    [ E[14]   |  86 ] ; CE-140F data input
+    [ E[13]   |  87 ] ; CE-140F data input
+    [ E[12]   |  88 ] ; CE-140F data input
+    [ E[11]   |  89 ] ; 11 pin DIN
+    [ E[10]   |  90 ] ; 11 pin DOUT
+    [ E[9]    |  91 ] ; 11 pin IO2
+    [ E[8]    |  92 ] ; 11 pin IO1
+    [ E[7]    |  93 ] ; 11 pin ACK
+    [ E[6]    |  94 ] ; 11 pin BUSY
+    [ E[5]    |  95 ] ;
+    [ E[4]    |  96 ] ; Display power (converter) control signal
+    [ E[3]    |  97 ] ; Low battery voltage control signal
+    [ E[2]    |  98 ] ; SIO CS (opponent side send enable)
+    [ E[1]    |  99 ] ; SIO CD (opponent side send request)
+    [ E[0]    | 100 ] ; SIO PAK
 
   assign-landpattern $ create-landpattern(SC62015B02_QFN)
 
