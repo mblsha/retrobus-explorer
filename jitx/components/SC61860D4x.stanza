@@ -137,21 +137,32 @@ public pcb-component device :
     [ A[2]    |  79 ] ; Address bus
     [ A[1]    |  80 ] ; Address bus
 
-
-
-
   assign-landpattern $ create-landpattern(SC61860_QFN)
 
   val box = BoxSymbol(self)
   assign-symbol $ create-symbol(box)
 
-  ; TODO: add cutout for the interposer to fit the CPU
-
-public pcb-module module :
+public pcb-module interposer :
   inst d : device
 
+  place(d) at loc(0.0, 0.0, 90.0) on Top
+  val body-to-lead-offset = 1.6
+  val x-span = 24.0 * mypitch
+  val y-span = 16.0 * mypitch
+  layer(Cutout()) = Polygon([
+    Point(-10.0 - body-to-lead-offset, y-span / -2.0),
+    Point(-10.0 - body-to-lead-offset, y-span /  2.0),
+    Point(x-span / -2.0, 7.0 + body-to-lead-offset),
+    Point(x-span /  2.0, 7.0 + body-to-lead-offset),
+    Point(10.0 + body-to-lead-offset, y-span /  2.0),
+    Point(10.0 + body-to-lead-offset, y-span / -2.0),
+    Point(x-span /  2.0, -7.0 - body-to-lead-offset),
+    Point(x-span / -2.0, -7.0 - body-to-lead-offset),
+  ])
+
+
 val board-shape = RoundedRectangle(50.0, 50.0, 0.25)
-setup-design("sc61860d4x-module", board-shape, signal-shrink = 0.5)
-set-main-module(module)
+setup-design("sc61860d4x-interposer", board-shape, signal-shrink = 0.5)
+set-main-module(interposer)
 view-schematic()
 view-board()
