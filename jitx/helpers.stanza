@@ -78,6 +78,7 @@ public defn setup-bill-of-materials (qty:Int, vendors:Tuple<String|AuthorizedVen
 ; Setup the board information using https://github.com/JITx-Inc/jlc-pcb.git
 ; ====================
 public val substrate = jlc-pcb/stackups/JLC04161H-1080/JLC04161H-1080()
+public val substrate-flex = stackups/JLC-Flex-2L/JLC-Flex-2L()
 
 ; ============
 ; setup-design
@@ -93,6 +94,22 @@ public defn setup-design (name:String, board-shape:Shape
   setup-part-query(vendors = vendors)
   set-board(make-board-def(substrate, board-shape, signal-shrink = signal-shrink))
   set-rules(jlc-pcb/rules/multi_1oz/jlcpcb-rules-multi-1oz)
+  setup-bill-of-materials(quantity, vendors)
+  set-paper(paper-size)
+  set-use-layout-groups()
+  set-export-backend(`kicad) ; set the CAD software for export to be kicad (also supported: `altium)
+
+public defn setup-design-flex (name:String, board-shape:Shape
+                          --
+                          signal-shrink:Double = ?
+                          vendors:Tuple<String|AuthorizedVendor> = jsl/design/settings/APPROVED-DISTRIBUTOR-LIST
+                          quantity:Int = jsl/design/settings/DESIGN-QUANTITY
+                          paper-size:Paper = ANSI-A
+                          ) :
+  set-current-design(name)
+  setup-part-query(vendors = vendors)
+  set-board(make-board-def(substrate, board-shape, signal-shrink = signal-shrink))
+  set-rules(stackups/rules-flex/jlcpcb-rules-flex-1oz-finished)
   setup-bill-of-materials(quantity, vendors)
   set-paper(paper-size)
   set-use-layout-groups()

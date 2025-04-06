@@ -7,6 +7,11 @@ package pose-helpers defined-in "pose-helpers.stanza"
 
 ; packages components/* defined-in "components/*"
 
+package stackups/materials-flex defined-in "stackups/materials-flex.stanza"
+package stackups/rules-flex defined-in "stackups/rules-flex.stanza"
+package stackups/vias-flex defined-in "stackups/vias-flex.stanza"
+package stackups/JLC-Flex-2L defined-in "stackups/JLC-Flex-2L.stanza"
+
 package components/JC20-C45S-F1-A1 defined-in "components/JC20-C45S-F1-A1.stanza"
 package components/FPGAHeader defined-in "components/FPGAHeader.stanza"
 package components/HED40LP03BK defined-in "components/HED40LP03BK.stanza"

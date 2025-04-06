@@ -1,0 +1,57 @@
+#use-added-syntax(jitx)
+doc:\<DOC>
+@brief JLC-PCB Flex PCB Manufacturing Rules (Representative)
+@description Rules based on typical 2-layer flex processes with ~1oz finished outer copper.
+             Uses JITX standard 'solder-mask' terminology, but values are adjusted
+             for typical Flex PCB **coverlay** constraints.
+             **IMPORTANT:** Verify all values against the current JLCPCB Flex PCB
+             capabilities page before ordering: https://jlcpcb.com/capabilities/flex-pcb-capabilities
+             These values are representative and subject to change.
+Note: All metrics are in mm.
+<DOC>
+defpackage stackups/rules-flex :
+  import core
+  import jitx
+
+doc: \<DOC>
+Default rule set for ~1oz finished Copper on 2-layer Flex PCBs from JLCPCB.
+Uses standard JITX 'solder-mask' parameters, but values reflect typical **coverlay** tolerances.
+Assumes standard polyimide base and coverlay construction.
+**Verify all constraints before fabrication.**
+<DOC>
+public pcb-rules jlcpcb-rules-flex-1oz-finished :
+  ; --- Copper Rules ---
+  min-copper-width = 0.1 ; (~4mil) Common minimum for standard flex. Verify.
+  min-copper-copper-space = 0.1 ; (~4mil) Common minimum for standard flex. Verify.
+  min-copper-hole-space = 0.25 ; Clearance from trace edge to via/pad hole edge. Verify.
+  min-copper-edge-space = 0.4 ; Clearance from copper features to the routed board edge. Verify flex specs.
+
+  ; --- Solder Mask Rules (Mapping to physical Coverlay) ---
+  ; Note: Physical layer is Coverlay, often laser-cut or punched. Tolerances differ from LPI soldermask.
+  solder-mask-registration = 0.1 ; Coverlay pullback/expansion from pad edge. Verify flex specs.
+  min-soldermask-opening = 0.3 ; Smallest opening achievable in coverlay. Verify flex specs.
+  min-soldermask-bridge = 0.15 ; Minimum web/dam of coverlay material between openings. Verify flex specs.
+
+  ; --- Silkscreen Rules ---
+  min-silkscreen-width = 0.2 ; (~8mil) Slightly larger for better adhesion/resolution on flex. Verify.
+  min-silk-solder-mask-space = 0.15 ; Clearance from silkscreen to edge of coverlay opening. Verify flex specs.
+  min-silkscreen-text-height = 1.0 ; Minimum height for legible text.
+
+  ; --- Via/Drill Rules ---
+  min-annular-ring = 0.15 ; **Must match via definition.** Crucial for flex reliability.
+  min-drill-diameter = 0.2 ; **Must match via definition.** Smallest allowed drill hole.
+
+  ; --- Pitch Rules ---
+  ; Note: Fine pitch can be challenging on standard flex. Verify capability.
+  min-pitch-leaded = 0.5 ; Center-to-center for leaded components (e.g., SOIC). Safer default for flex. Verify.
+  min-pitch-bga = 0.5 ; Center-to-center for BGA pads. 0.4mm is often advanced flex. Verify.
+
+  ; --- Pad Rules ---
+  min-hole-to-hole = 0.5 ; Clearance between edges of two plated holes (different nets).
+  min-pth-pin-solder-clearance = 0.1 ; Ensure coverlay opening clears PTH pin sufficiently (maps to solder-mask-opening-expansion). Verify flex specs.
+  min-th-pad-expand-outer = 0.2 ; Minimum clearance from through-hole pad edge to outer layer copper trace.
+
+  ; --- Board Rules ---
+  ; Note: Max dimensions for Flex may be smaller than rigid. Verify.
+  max-board-width = 400.0 ; Representative max dimension for Flex. **Verify.**
+  max-board-height = 250.0 ; Representative max dimension for Flex. **Verify.**

@@ -107,7 +107,7 @@ pcb-module module :
   place(cpu) at loc(0.0, 0.0, 90.0) on Top
 
 ; FIXME: use FFC board type in order to have proper clearance specs for JLCPCB
-setup-design("sharp-sc61860-interposer", board-shape, signal-shrink = 0.5)
+setup-design-flex("sharp-sc61860-interposer", board-shape, signal-shrink = 0.5)
 set-main-module(module)
 view-schematic()
 view-board()

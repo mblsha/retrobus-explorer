@@ -1,0 +1,31 @@
+#use-added-syntax(jitx)
+defpackage stackups/vias-flex :
+  import core
+  import jitx
+  import jsl/layerstack
+
+; JLCPCB Flex PCB Capabilities (Representative Values - Verify!)
+; Min Drill Size: 0.2mm
+; Min Annular Ring (Pad radius - Drill radius): 0.15mm (Flex often requires larger AR)
+; Pad Diameter = Drill Size + 2 * Annular Ring = 0.2mm + 2 * 0.15mm = 0.5mm
+
+val min-drill = 0.2 ; mm
+val min-annular-ring = 0.15 ; mm
+val min-pad = min-drill + 2.0 * min-annular-ring
+
+; Standard Through-hole Via for Flex
+public pcb-via jlc_flex_th_via:
+  name = "JLC-Flex-TH-Via"
+  ; padstack = Padstack(
+  ;   layers = AllLayers, ; Applies to all layers it passes through
+  ;   hole-diameter = min-drill,
+  ;   pads = Circle(diameter = min-pad)
+  ; )
+  ; drill-file-identifier = default-drill-id
+
+  start = Top
+  stop = Bottom
+  diameter = min-pad
+  hole-diameter = min-drill
+  type = MechanicalDrill
+  via-in-pad = false

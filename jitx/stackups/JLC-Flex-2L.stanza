@@ -1,0 +1,140 @@
+#use-added-syntax(jitx)
+defpackage stackups/JLC-Flex-2L :
+  import core
+  import jitx
+
+  import jsl
+  import jsl/layerstack
+  ; import jsl/units
+  import maybe-utils
+
+  import stackups/materials-flex
+  import stackups/vias-flex
+
+; --- Configuration (Representative Values - Verify with JLCPCB) ---
+; Copper: Assume 1/2 oz base copper (0.018mm), plated up to ~1oz (0.035mm) finished thickness
+val finished-outer-copper-thickness = 0.035 ; mm (1 oz)
+
+; Dielectrics:
+; Base PI Core: Typically 1 mil (0.025mm) or 2 mil (0.05mm). Let's use 1 mil.
+val core-pi-thickness = 0.025 ; mm (1 mil)
+; Adhesive: Typically 0.5 mil (0.013mm) to 1 mil (0.025mm). Let's use 0.020mm.
+val adhesive-thickness = 0.020 ; mm
+; Coverlay: Typically 1 mil PI + Adhesive. Total ~ 0.045mm - 0.05mm. Let's use 0.045mm total.
+; Coverlay protects the outer copper layers.
+val coverlay-total-thickness = 0.045 ; mm (e.g., 0.025mm PI + 0.020mm Adhesive)
+
+; Manufacturing Constraints (Representative Values - Verify!)
+; Min Trace Width: 0.1mm (approx 4mil)
+; Min Trace Spacing (Clearance): 0.1mm (approx 4mil)
+val min-trace-width = 0.1 ; mm
+val min-clearance = 0.1 ; mm
+
+; ; --- Stackup Definition ---
+; ; Define the layer stack explicitly using LayerStack for clarity in Flex PCBs.
+; ; Note: This represents the physical layers. Coverlay acts as the outermost dielectric.
+; public val flex-stackup = LayerStack(
+;   name = "JLC-Flex-2L-Stackup",
+;   layers = [
+;     ; Top Side
+;     Dielectric("CoverlayTop", coverlay-total-thickness, PolyimideMaterial),
+;     CopperLayer("Top", finished-outer-copper-thickness),
+;     FlexAdhesiveLayer(adhesive-thickness, "AdhesiveTop"), ; Adhesive between Top Cu and Core PI
+;     ; Core
+;     PolyimideLayer(core-pi-thickness, "CorePI"),          ; Central Polyimide Core
+;     ; Bottom Side
+;     FlexAdhesiveLayer(adhesive-thickness, "AdhesiveBottom"), ; Adhesive between Core PI and Bottom Cu
+;     CopperLayer("Bottom", finished-outer-copper-thickness),
+;     Dielectric("CoverlayBottom", coverlay-total-thickness, PolyimideMaterial)
+;   ]
+; )
+
+; public val PI_half = PI(0.05, PolyimideMaterial, name = "polyimide-half")
+public val PI_half = FR4(0.05, PolyimideMaterial, name = "core")
+
+
+public val flex-stackup = make-layer-stack("JLC-Flex-2L-Stackup", outers) where:
+  val cu-1oz = Copper(0.035)
+  val cu-halfoz = Copper(0.0152)
+
+  val copper = cu-1oz
+  val outers = [
+    [ copper, PI_half ],
+    [ copper, PI_half ]
+  ]
+
+
+; --- Routing Rules ---
+
+; public pcb-routing-structure flex-default-rules:
+;   ; Define default routing rules based on minimum manufacturing constraints.
+;   ; Velocity calculation is approximate using core PI Er.
+;   val flex-velocity = phase-velocity(PI-Er) ; Simplification: Ignores adhesive, air etc.
+;   val default-layer-rules = RoutingStructureLayerConstraints(
+;       trace-width = min-trace-width,
+;       clearance = min-clearance,
+;       velocity = flex-velocity,
+;       insertion-loss = PI-Dk ; Using PI loss tangent as representative
+;     )
+;   name = "Flex-Default-Min-Rules"
+;   layer-constraints(Top) = default-layer-rules
+;   layer-constraints(Bottom) = default-layer-rules
+
+public defn se-flex-default (neckdown:Maybe<NeckDown> = None()) -> RoutingStructure:
+  ; Define default routing rules based on minimum manufacturing constraints.
+  val flex-velocity = phase-velocity(PI-Er)
+
+  val default-layer-rules = RoutingStructureLayerConstraints(
+    trace-width = min-trace-width,
+    clearance = min-clearance,
+    velocity = flex-velocity,
+    insertion-loss = PI-Dk,
+    neck-down = value-or-else(neckdown, {false})
+  )
+
+  pcb-routing-structure se-flex-rules:
+    name = "Flex-Default-Min-Rules"
+    layer-constraints(Top) = default-layer-rules
+    layer-constraints(Bottom) = default-layer-rules
+
+  se-flex-rules
+
+public pcb-routing-structure uncoupled-diff-flex-default:
+  val uncoupled-layer = RoutingStructureLayerConstraints(
+    trace-width = min-trace-width,
+    clearance = min-clearance,
+    velocity = phase-velocity(PI-Er),
+    insertion-loss = PI-Dk
+  )
+  layer-constraints(Top) = uncoupled-layer
+  layer-constraints(Bottom) = uncoupled-layer
+
+public pcb-differential-routing-structure diff-flex-default (
+  uncoupled:Maybe<RoutingStructure> = None(),
+  neckdown:Maybe<DifferentialNeckDown> = None()
+  ):
+  name = "Diff Flex Default"
+
+  make-uncoupled-region(uncoupled-diff-flex-default, uncoupled)
+
+  val flex-diff-rules = DiffRoutingStructureLayerConstraints(
+    trace-width = min-trace-width,
+    pair-spacing = 0.2, ; Adjust if you have real specs
+    clearance = min-clearance,
+    velocity = phase-velocity(PI-Er),
+    insertion-loss = PI-Dk,
+    neck-down = value-or-else(neckdown, {false})
+  )
+
+  layer-constraints(Top) = flex-diff-rules
+  layer-constraints(Bottom) = flex-diff-rules
+
+; --- Substrate Definition ---
+public defn JLC-Flex-2L () -> Substrate :
+  ; Create the Substrate object
+  Substrate(
+    stackup = flex-stackup,
+    vias = [ jlc_flex_th_via ],
+    single-ended = [ 0 => se-flex-default ],
+    differential = [ 0 => diff-flex-default ]
+  )

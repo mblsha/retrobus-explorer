@@ -1,0 +1,30 @@
+#use-added-syntax(jitx)
+defpackage stackups/materials-flex :
+  import core
+  import jitx
+  import jsl/layerstack
+
+; --- Polyimide (PI) ---
+; Typical values for Polyimide film used in FPCs
+; Er ~3.4, Loss Tangent ~0.004 @ 1GHz
+; Check JLCPCB datasheet for specific material if available.
+public val PI-Er = 3.4
+public val PI-Dk = 0.004
+
+public val PolyimideMaterial = DielectricMaterial(
+  description = "Polyimide (PI) Base/Coverlay Material"
+  dielectric-coefficient = PI-Er
+  loss-tangent = PI-Dk
+)
+
+; --- Flex Adhesive ---
+; Often modified epoxy or acrylic based. Properties can vary.
+; Assuming similar properties to PI for simplicity if specific data unavailable.
+public val Adhesive-Er = 3.4
+public val Adhesive-Dk = 0.005 ; Often slightly higher loss than pure PI
+
+public val FlexAdhesiveMaterial = DielectricMaterial(
+  description = "Flexible PCB Adhesive"
+  dielectric-coefficient = Adhesive-Er
+  loss-tangent = Adhesive-Dk
+)
