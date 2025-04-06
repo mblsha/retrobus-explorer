@@ -78,18 +78,19 @@ public pcb-component interposer :
     [pin:Ref  | pads:Int ... ]
     [ X1      |   1 ] ; Ceramic oscillation output
     [ X2      |   2 ] ; Ceramic oscillation input
-    [ X3      |   3 ] ; CR oscillation output
-    [ X4      |   4 ] ; CR oscillation input
-    [ VDD     |   5 ] ; Display power (converter) control output
-    [ VCC     |   6 ] ; (+) power input terminal
+    [ X3      |   3 ] ; Sub-clock oscillation output
+    [ X4      |   4 ] ; Sub-clock oscillation input
+    [ VDD     |   5 ] ; Display power
+    [ VCC     |   6 ] ; (+) power input terminal; should be GND??
     [ RESET   |   7 ] ; Reset input
-    [ GND     |   8 ] ; (-) power input terminal
+    [ GND     |   8 ] ; (-) power input terminal; VGG -5.0V power?
     [ TEST    |   9 ] ; Test input
-    [ CI      |  10 ] ; Cassette signal input terminal
-    [ CO      |  11 ] ; Cassette signal output terminal
+    [ CI      |  10 ] ; Cassette signal input terminal; CMT input
+    [ CO      |  11 ] ; Cassette signal output terminal; CMT output
     [ ON      |  12 ] ; ON key input terminal. Normally pulled down to low level.
-    [ WR      |  13 ] ; Write clock. Normally high level.
-    [ MRQ     |  14 ] ; Memory Request / Address Latch?
+    [ WR      |  13 ] ; Memory control write output
+    [ MRQ     |  14 ] ; Memory request output
+
     [ K[10]   |  15 ] ; Key input
     [ K[11]   |  16 ] ; Key input
     [ K[12]   |  17 ] ; Key input
@@ -98,14 +99,16 @@ public pcb-component interposer :
     [ K[15]   |  20 ] ; Key input
     [ K[16]   |  21 ] ; Key input
     [ K[17]   |  22 ] ; Key input
-    [ DIO[0]  |  23 ] ; Data bus
-    [ DIO[1]  |  24 ] ; Data bus
-    [ DIO[2]  |  25 ] ; Data bus
-    [ DIO[3]  |  26 ] ; Data bus
-    [ DIO[4]  |  27 ] ; Data bus
-    [ DIO[5]  |  28 ] ; Data bus
-    [ DIO[6]  |  29 ] ; Data bus
-    [ DIO[7]  |  30 ] ; Data bus
+
+    [ D[0]    |  23 ] ; Data bus
+    [ D[1]    |  24 ] ; Data bus
+    [ D[2]    |  25 ] ; Data bus
+    [ D[3]    |  26 ] ; Data bus
+    [ D[4]    |  27 ] ; Data bus
+    [ D[5]    |  28 ] ; Data bus
+    [ D[6]    |  29 ] ; Data bus
+    [ D[7]    |  30 ] ; Data bus
+
     [ A[0]    |  31 ] ; Address bus
     [ A[1]    |  32 ] ; Address bus
     [ A[2]    |  33 ] ; Address bus
@@ -125,8 +128,9 @@ public pcb-component interposer :
     [ A[16]   |  47 ] ; Address bus
     [ A[17]   |  48 ] ; Address bus
     [ A[18]   |  49 ] ; Address bus
-    [ VDISP   |  50 ]
-    [ VA      |  51 ]
+
+    [ VDISP   |  50 ] ; Display power
+    [ VA      |  51 ] ; Display power
     [ DCLK    |  52 ] ; Clock output for display chip
     [ KO[15]  |  53 ] ; SIO PRQ
     [ KO[14]  |  54 ] ; SIO ER, high level with OPEN command
@@ -135,7 +139,8 @@ public pcb-component interposer :
     [ KO[11]  |  57 ] ; Key strobe
     [ KO[10]  |  58 ] ; Key strobe
     [ IRQ     |  59 ] ; Low battery detection input
-    [ OUT     |  60 ] ; ???
+    [ OUT     |  60 ] ; Main clock waveform output
+
     [ CE[7]   |  61 ] ;
     [ CE[6]   |  62 ] ; ROM card chip select
     [ CE[5]   |  63 ] ; Chip select for display chip
@@ -144,10 +149,11 @@ public pcb-component interposer :
     [ CE[2]   |  66 ] ; Internal ROM chip enable
     [ CE[1]   |  67 ] ; RAM card chip enable
     [ CE[0]   |  68 ] ; Internal RAM chip enable
-    [ PHI_A   |  69 ] ;
-    [ DIS     |  70 ] ;
-    [ HA      |  71 ] ;
-    [ RD      |  72 ] ; ???
+
+    [ ACLK    |  69 ] ; Address latch clock output
+    [ DIS     |  70 ] ; LCD driver control signal output
+    [ HA      |  71 ] ; Display synchonizing signal output
+    [ RD      |  72 ] ; Memory control read output
     [ KO[9]   |  73 ] ; Key strobe
     [ KO[8]   |  74 ] ; Key strobe
     [ KO[7]   |  75 ] ; Key strobe
@@ -182,4 +188,4 @@ public pcb-component interposer :
   val box = BoxSymbol(self)
   assign-symbol $ create-symbol(box)
 
-view(interposer)
+; view(interposer)

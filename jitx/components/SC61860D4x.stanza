@@ -69,6 +69,7 @@ defmethod build-cut-out (pkg:QFN, vp:VirtualLP) -> False :
   false
 
 ; https://github.com/utz82/SC61860-Instruction-Set
+; Sharp PC-1360 Service Manual has some details.
 public pcb-component interposer :
   name = "SC61860D4x"
   description = "SC61860 CPU"
