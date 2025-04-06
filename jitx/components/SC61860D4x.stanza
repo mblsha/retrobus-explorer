@@ -47,8 +47,42 @@ val SC61860_QFN = QFN(
     thermal-lead? = false,
   )
 
+defmethod build-cut-out (pkg:QFN, vp:VirtualLP) -> False :
+  val body-to-lead-offset = 1.6
+  val x-width = 14.0
+  val y-width = 20.0
+  val x-span = 16.0 * mypitch
+  val y-span = 24.0 * mypitch
+
+  add-cutout(vp, Polygon([
+    Point(x-width / -2.0 - body-to-lead-offset, y-span / -2.0),
+    Point(x-width / -2.0 - body-to-lead-offset, y-span /  2.0),
+    Point(x-span / -2.0, y-width / 2.0 + body-to-lead-offset),
+    Point(x-span /  2.0, y-width / 2.0 + body-to-lead-offset),
+    Point(x-width / 2.0 + body-to-lead-offset, y-span /  2.0),
+    Point(x-width / 2.0 + body-to-lead-offset, y-span / -2.0),
+    Point(x-span /  2.0, y-width / -2.0 - body-to-lead-offset),
+    Point(x-span / -2.0, y-width / -2.0 - body-to-lead-offset),
+  ]))
+
+  ; Return false as per the build-* method convention
+  false
+
+public pcb-landpattern lp :
+  name = name(SC61860_QFN) ; Use the name generated from the package
+  description = "Landpattern for SC61860 QFN with custom cutouts"
+
+  ; Call the individual make-* generators for the standard parts
+  make-pads(SC61860_QFN)
+  make-silkscreen(SC61860_QFN)
+  make-courtyard(SC61860_QFN)
+  make-keep-out(SC61860_QFN) ; Call even if default is empty, for future-proofing
+  ; We are defining the cutout manually, so we DON'T call make-cut-out
+  make-conformal-mask(SC61860_QFN) ; Call if needed / for completeness
+
+
 ; https://github.com/utz82/SC61860-Instruction-Set
-public pcb-component device :
+public pcb-component interposer :
   name = "SC61860D4x"
   description = "SC61860 CPU"
   manufacturer = "Hitachi?"
@@ -138,31 +172,15 @@ public pcb-component device :
     [ A[1]    |  80 ] ; Address bus
 
   assign-landpattern $ create-landpattern(SC61860_QFN)
+  ; assign-landpattern(lp)
 
   val box = BoxSymbol(self)
   assign-symbol $ create-symbol(box)
 
-public pcb-module interposer :
-  inst d : device
+; view(device)
 
-  place(d) at loc(0.0, 0.0, 90.0) on Top
-  val body-to-lead-offset = 1.6
-  val x-span = 24.0 * mypitch
-  val y-span = 16.0 * mypitch
-  layer(Cutout()) = Polygon([
-    Point(-10.0 - body-to-lead-offset, y-span / -2.0),
-    Point(-10.0 - body-to-lead-offset, y-span /  2.0),
-    Point(x-span / -2.0, 7.0 + body-to-lead-offset),
-    Point(x-span /  2.0, 7.0 + body-to-lead-offset),
-    Point(10.0 + body-to-lead-offset, y-span /  2.0),
-    Point(10.0 + body-to-lead-offset, y-span / -2.0),
-    Point(x-span /  2.0, -7.0 - body-to-lead-offset),
-    Point(x-span / -2.0, -7.0 - body-to-lead-offset),
-  ])
-
-
-val board-shape = RoundedRectangle(50.0, 50.0, 0.25)
-setup-design("sc61860d4x-interposer", board-shape, signal-shrink = 0.5)
-set-main-module(interposer)
-view-schematic()
-view-board()
+; val board-shape = RoundedRectangle(50.0, 50.0, 0.25)
+; setup-design("sc61860d4x-interposer", board-shape, signal-shrink = 0.5)
+; set-main-module(interposer)
+; view-schematic()
+; view-board()

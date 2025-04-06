@@ -1,0 +1,113 @@
+#use-added-syntax(jitx)
+defpackage sharp-sc61860-interposer :
+  import core
+  import jitx
+  import jitx/commands
+  import jitx/parts
+
+  import helpers
+  import jsl
+  import collections
+
+  ; gen-testpad
+  import ocdb/utils/generic-components
+  ; get-time-string
+  import utils/time
+
+val board-shape = RoundedRectangle(
+  100.0,
+  100.0, 0.0)
+
+val narrow-width = 42.8
+val top-notch-height = 7.8
+
+pcb-module module :
+  ; NOTE: need to use inverted FFC cable to match the pins on the
+  ; level-shifter element
+  inst ffc : components/FFCConnector/module(flip_pins = false)
+
+  inst cpu : components/SC61860D4x/interposer
+
+  port gnd
+  port vcc
+  net GND (gnd ffc.GND)
+  net VCC (vcc ffc.VCC5V)
+
+  net (gnd cpu.GND)
+  net (vcc cpu.VGG)
+
+  val data = [
+    cpu.A[0],
+    cpu.A[1],
+    cpu.A[2],
+    cpu.A[3],
+    cpu.A[4],
+    cpu.A[5],
+    cpu.A[6],
+    cpu.A[7],
+    cpu.A[8],
+    cpu.A[9],
+    cpu.A[10],
+    cpu.A[11],
+    cpu.A[12],
+    cpu.A[13],
+    cpu.A[14],
+    cpu.A[15],
+
+    cpu.D[7],
+    cpu.D[6],
+    cpu.D[5],
+    cpu.D[4],
+    cpu.D[3],
+    cpu.D[2],
+    cpu.D[1],
+    cpu.D[0],
+
+    cpu.FO[4],
+    cpu.FO[3],
+    cpu.FO[2],
+    cpu.FO[1],
+    cpu.FO[0],
+
+    cpu.RW,
+    cpu.AL,
+
+    cpu.TEST,
+    cpu.RESET,
+    cpu.KON,
+    cpu.OSC_O,
+
+    cpu.IA[7],
+    cpu.IA[6],
+    cpu.IA[5],
+    cpu.IA[4],
+    cpu.IA[3],
+    cpu.IA[2],
+    cpu.IA[1],
+    cpu.IA[0],
+
+    cpu.XIN,
+    cpu.XOUT,
+    cpu.DIS,
+
+    cpu.GND,
+  ]
+  for i in 0 to length(data) do :
+    val bus-name = replace(to-string(ref(data[i])), "cpu.", "") as String
+    val name = to-string("%_-DATA%_" % [bus-name, i])
+    make-net(to-symbol(name), [data[i], ffc.data[i]])
+
+    if bus-name != "GND" :
+      var mapping = append("FPGA_MAP: ", to-string(i))
+      mapping = append(mapping, " → ")
+      mapping = append(mapping, to-string(ref(data[i])))
+      println(mapping)
+
+  place(cpu) at loc(0.0, 0.0, 90.0) on Top
+
+; FIXME: use FFC board type in order to have proper clearance specs for JLCPCB
+setup-design("sharp-sc61860-interposer", board-shape, signal-shrink = 0.5)
+set-main-module(module)
+view-schematic()
+view-board()
+export-to-cad()
