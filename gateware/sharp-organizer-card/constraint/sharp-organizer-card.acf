@@ -1,0 +1,50 @@
+STANDARD(LVCMOS33) {
+  pin addr[19] C49
+  pin addr[18] C6
+  pin addr[17] C5
+  pin addr[16] C3
+  pin addr[15] C28
+  pin addr[14] C30
+  pin addr[13] C31
+  pin addr[12] B6
+  pin addr[11] B5
+  pin addr[10] B3
+  pin addr[9]  B2
+  pin addr[8]  B48
+  pin addr[7]  B49
+  pin addr[6]  A33
+  pin addr[5]  A34
+  pin addr[4]  C33
+  pin addr[3]  C34
+  pin addr[2]  C36
+  pin addr[1]  C37
+  pin addr[0]  C39
+
+  pin data[0] C40
+  pin data[1] C42
+  pin data[2] C43
+  pin data[3] A24
+  pin data[4] A23
+  pin data[5] A15
+  pin data[6] A14
+  pin data[7] A12
+
+  pin conn_rw C46
+  pin conn_oe C48
+  pin conn_ci C2
+  pin conn_e2 A6
+
+  pin conn_mskrom A11
+  pin conn_sram1 A9
+  pin conn_sram2 A8
+  pin conn_eprom C45
+
+  pin conn_stnby D9
+  pin conn_vbatt D8
+  pin conn_vpp C27
+
+  pin conn_nc02 D43
+  pin conn_nc42 A5
+  pin conn_nc43 A3
+  pin conn_nc44 A2
+}

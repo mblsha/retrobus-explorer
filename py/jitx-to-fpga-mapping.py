@@ -21,6 +21,7 @@ def _(
     get_alchitry_element_mapping,
     get_alchitry_ffc_mapping,
     get_saleae_mapping,
+    get_sharp_organizer_card_mapping,
     get_sharp_pc_e500_bus_mapping,
     get_sharp_pc_g850_bus_mapping,
     mo,
@@ -65,6 +66,16 @@ def _(
         return r
 
     @acf_constraint
+    def sharp_organizer_card():
+        ffc = get_alchitry_ffc_mapping()
+        alchitry_mapping = get_alchitry_element_mapping()
+        pce500_mapping = get_sharp_organizer_card_mapping()
+        r = []
+        for pin, name in pce500_mapping.items():
+            r.append(f'pin {name} {alchitry_mapping[ffc[int(pin)]]}')
+        return r
+
+    @acf_constraint
     def saleae():
         ffc = get_alchitry_ffc_mapping()
         alchitry_mapping = get_alchitry_element_mapping()
@@ -85,6 +96,7 @@ def _(
         'Saleae': download_constraint('saleae', saleae()),
         'Sharp PC-G850 Bus': download_constraint('sharp_pc_g850_bus', sharp_pc_g850_bus()),
         'Sharp PC-E500 Bus': download_constraint('sharp_pc_e500_bus', sharp_pc_e500_bus()),
+        'Sharp Organizer Card': download_constraint('sharp_organizer_card', sharp_organizer_card()),
     })
     return (
         acf_constraint,
@@ -92,6 +104,7 @@ def _(
         functools,
         pin_tester,
         saleae,
+        sharp_organizer_card,
         sharp_pc_e500_bus,
         sharp_pc_g850_bus,
     )
@@ -440,6 +453,89 @@ def _(sharp_pc_e500_bus_mapping):
 
     get_sharp_pc_e500_bus_mapping()
     return (get_sharp_pc_e500_bus_mapping,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""# sharp-organizer-card.stanza""")
+    return
+
+
+@app.cell(hide_code=True)
+def _():
+    # sharp-sharp_organizer_card.stanza (print pin mapping)
+    sharp_organizer_card_mapping = """
+    FPGA_MAP: 46 → NC02
+    FPGA_MAP: 45 → STNBY
+    FPGA_MAP: 44 → VBATT
+    FPGA_MAP: 43 → VPP
+    FPGA_MAP: 42 → A15
+    FPGA_MAP: 41 → A14
+    FPGA_MAP: 40 → A13
+    FPGA_MAP: 39 → A12
+    FPGA_MAP: 38 → A11
+    FPGA_MAP: 37 → A10
+    FPGA_MAP: 36 → A9
+    FPGA_MAP: 35 → A8
+    FPGA_MAP: 34 → A7
+    FPGA_MAP: 33 → A6
+    FPGA_MAP: 32 → A5
+    FPGA_MAP: 31 → A4
+    FPGA_MAP: 30 → A3
+    FPGA_MAP: 29 → A2
+    FPGA_MAP: 28 → A1
+    FPGA_MAP: 27 → A0
+    FPGA_MAP: 26 → D0
+    FPGA_MAP: 25 → D1
+    FPGA_MAP: 24 → D2
+    FPGA_MAP: 23 → D3
+    FPGA_MAP: 22 → D4
+    FPGA_MAP: 21 → D5
+    FPGA_MAP: 20 → D6
+    FPGA_MAP: 19 → D7
+    FPGA_MAP: 18 → MSKROM
+    FPGA_MAP: 17 → SRAM1
+    FPGA_MAP: 16 → SRAM2
+    FPGA_MAP: 15 → EPROM
+    FPGA_MAP: 14 → RW
+    FPGA_MAP: 13 → OE
+    FPGA_MAP: 12 → A19
+    FPGA_MAP: 11 → A18
+    FPGA_MAP: 10 → A17
+    FPGA_MAP: 9 → A16
+    FPGA_MAP: 8 → CI
+    FPGA_MAP: 7 → E2
+    FPGA_MAP: 6 → NC42
+    FPGA_MAP: 5 → NC43
+    FPGA_MAP: 4 → NC44
+    """
+    return (sharp_organizer_card_mapping,)
+
+
+@app.cell
+def _(sharp_organizer_card_mapping):
+    def get_sharp_organizer_card_mapping():
+        """
+        maps from internal element mapping to the Sharp Organizer Card
+        """
+        import re
+        mapping = {}
+        for line in sharp_organizer_card_mapping.split('\n'):
+            if not line:
+                continue
+            m = re.match(r"FPGA_MAP: (\d+) → (\w+)", line)
+            # print(line.split(' '))
+            # print(m)
+            # print(m.groups())
+            pin, name = m.groups()
+            if name == 'GND':
+                continue
+            mapping[f'{pin}'] = name
+            # break
+        return mapping
+
+    get_sharp_organizer_card_mapping()
+    return (get_sharp_organizer_card_mapping,)
 
 
 @app.cell
