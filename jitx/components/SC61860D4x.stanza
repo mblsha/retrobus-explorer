@@ -27,13 +27,13 @@ val SC61860_QFN = QFN(
     num-leads = 80,
     lead-profile = Quad-Lead-Profile(
       x-leads = Lead-Profile(
-        span =  tol(17.2 + mylead-length + gullwing-offset),
+        span =  tol(16.2 + mylead-length + gullwing-offset),
         pitch = mypitch,
         lead = mylead
       ),
       x-count = 24,
       y-leads = Lead-Profile(
-        span = tol(23.2 + mylead-length + gullwing-offset),
+        span = tol(22.2 + mylead-length + gullwing-offset),
         pitch = mypitch,
         lead = mylead
       ),
@@ -48,7 +48,7 @@ val SC61860_QFN = QFN(
   )
 
 defmethod build-cut-out (pkg:QFN, vp:VirtualLP) -> False :
-  val body-to-lead-offset = 1.6
+  val body-to-lead-offset = 1.1
   val x-width = 14.0
   val y-width = 20.0
   val x-span = 16.0 * mypitch

@@ -31,7 +31,7 @@ pcb-module module :
   net VCC (vcc ffc.VCC5V)
 
   net (gnd cpu.GND)
-  net (vcc cpu.VCC)
+  ; net (vcc cpu.VCC)
 
   inst tp_gnd : gen-testpad(3.0)
   net (gnd tp_gnd.p)
@@ -107,9 +107,15 @@ pcb-module module :
       println(mapping)
 
   place(ffc) at loc(0.0, 19.0, 0.0) on Top
-  place(tp_gnd) at loc(-17.0, 16.0, 0.0) on Top
-  place(tp_vcc) at loc( 17.0, 16.0, 0.0) on Top
   place(cpu) at loc(-3.0, -11.0, 90.0) on Top
+
+  place(tp_gnd) at loc(-17.0, 16.0, 0.0) on Top
+  inst tp_gnd_text : ocdb/artwork/board-text/text("GND", 1.5, 0.0)
+  place(tp_gnd_text) at loc(-17.0, 13.5, 0.0) on Top
+
+  place(tp_vcc) at loc( 17.0, 16.0, 0.0) on Top
+  inst tp_vcc_text : ocdb/artwork/board-text/text("VCC", 1.5, 0.0)
+  place(tp_vcc_text) at loc(17.0, 13.5, 0.0) on Top
 
   val mydate:String = get-time-string("%Y-%m-%d")
   val label-text = append("SC62015 v1 (c) mblsha ", mydate)
