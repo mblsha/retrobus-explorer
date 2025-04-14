@@ -51,7 +51,9 @@ module alchitry_top (
     sig conn_stnby_sync
     sig conn_vbatt_sync
     sig conn_vpp_sync
-    sig misc_sync[11]
+
+    const NUM_MISC_SIGNALS = 11
+    sig misc_sync[NUM_MISC_SIGNALS]
 
     sig addr_sync[20]
     sig data_sync[8]
@@ -67,13 +69,13 @@ module alchitry_top (
     }
     #BAUD(100_000_000), #CLK_FREQ(400_000_000) {
         my_uart_tx tx_addr(#DATA_WIDTH(20), .rst(rst), .clk(clk_uart))
-        my_uart_tx tx_data(#DATA_WIDTH(8), .rst(rst), .clk(clk_uart))
-        my_uart_tx tx_misc(#DATA_WIDTH(11), .rst(rst), .clk(clk_uart))
+        my_uart_tx tx_data(#DATA_WIDTH(8),  .rst(rst), .clk(clk_uart))
+        my_uart_tx tx_misc(#DATA_WIDTH(NUM_MISC_SIGNALS), .rst(rst), .clk(clk_uart))
     }
     #ENTRIES(4) {
         async_fifo tx_addr_fifo(#WIDTH(20), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
-        async_fifo tx_data_fifo(#WIDTH(8), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
-        async_fifo tx_misc_fifo(#WIDTH(11), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
+        async_fifo tx_data_fifo(#WIDTH(8),  .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
+        async_fifo tx_misc_fifo(#WIDTH(NUM_MISC_SIGNALS), .wclk(clk), .wrst(rst), .rclk(clk_uart), .rrst(rst))
     }
     always {
         tx_addr_fifo.rget = 0
@@ -107,7 +109,7 @@ module alchitry_top (
         if (!tx_misc.busy && !tx_misc_fifo.empty) {
             tx_misc.new_data = 1
             tx_misc_fifo.rget = 1
-            tx_misc.data = tx_data_fifo.dout
+            tx_misc.data = tx_misc_fifo.dout
         }
     }
 
@@ -161,7 +163,7 @@ module alchitry_top (
             dff last_data_sent
             dff data_counter[32]
 
-            dff last_misc[11]
+            dff last_misc[NUM_MISC_SIGNALS]
             dff last_misc_sent
             dff misc_counter[32]
         }
@@ -216,7 +218,7 @@ module alchitry_top (
         conn_vpp_sync = sync_vpp.out
 
         misc_sync = c{
-            conn_rw_sync,   // bit 11
+            conn_rw_sync,   // bit 10 / 11
             conn_oe_sync,
             conn_ci_sync,
             conn_e2_sync,
