@@ -33,7 +33,7 @@ pcb-pad capsule-smd-pad :
 pcb-landpattern lp :
   val num_pads = 50
 
-  val drill_hole_span_per_side = 13.90 ; from table D: 50 pin
+  val drill_hole_span = 13.90 ; from table D: 50 pin
   val drill_hole_offset_from_center = 1.25
   val drill_hole_diameter = 0.55
 
@@ -89,8 +89,8 @@ pcb-landpattern lp :
     Circle(Point((pad_span_per_side + 1.0) / -2.0,
                  (distance_between_pad_rows + pad_height * 1.0 + 0.5) / first_pad_circle_factor), 0.3)
 
-  layer(Cutout()) = Circle(Point(drill_hole_span_per_side / 2.0,  drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
-  layer(Cutout()) = Circle(Point(drill_hole_span_per_side / -2.0, drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
+  layer(Cutout()) = Circle(Point(drill_hole_span / 2.0,  drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
+  layer(Cutout()) = Circle(Point(drill_hole_span / -2.0, drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
 
 
 public pcb-component component :
