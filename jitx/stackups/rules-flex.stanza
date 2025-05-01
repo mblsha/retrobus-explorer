@@ -53,5 +53,5 @@ public pcb-rules jlcpcb-rules-flex-1oz-finished :
 
   ; --- Board Rules ---
   ; Note: Max dimensions for Flex may be smaller than rigid. Verify.
-  max-board-width = 400.0 ; Representative max dimension for Flex. **Verify.**
-  max-board-height = 250.0 ; Representative max dimension for Flex. **Verify.**
+  max-board-width = 490.0 ; Representative max dimension for Flex. **Verify.**
+  max-board-height = 234.0 ; Representative max dimension for Flex. **Verify.**
