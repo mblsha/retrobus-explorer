@@ -1,0 +1,136 @@
+#use-added-syntax(jitx)
+defpackage sharp-organizer-host :
+  import core
+  import jitx
+  import jitx/commands
+  import jitx/parts
+
+  import helpers
+  import jsl
+  import collections
+
+  ; gen-testpad
+  import ocdb/utils/generic-components
+  ; get-time-string
+  import utils/time
+
+val board-shape = RoundedRectangle(
+  62.0,
+  30.0, 1.0)
+
+pcb-module module :
+  ; NOTE: need to use inverted FFC cable to match the pins on the
+  ; level-shifter element
+  inst ffc : components/FFCConnector/module(flip_pins = true)
+
+  inst bus : components/SharpOrganizerHostDBZ/sharp-organizer-component
+  val bus-height = components/JC20-C45S-F1-A1/pad_height
+
+  val data = [
+    bus.GND
+    bus.NC02
+    bus.STNBY
+    bus.VBATT
+    bus.VPP
+    bus.A15
+    bus.A14
+    bus.A13
+    bus.A12
+    bus.A11
+    bus.A10
+    bus.A9
+    bus.A8
+    bus.A7
+    bus.A6
+    bus.A5
+    bus.A4
+    bus.A3
+    bus.A2
+    bus.A1
+    bus.A0
+    bus.D0
+    bus.D1
+    bus.D2
+    bus.D3
+    bus.D4
+    bus.D5
+    bus.D6
+    bus.D7
+    bus.MSKROM ; EXROM?
+    bus.SRAM1  ; EXRAM1?
+    bus.SRAM2  ; EXRAM2?
+    bus.EPROM  ; EX_CE0
+    bus.RW
+    bus.OE
+    bus.A19
+    bus.A18
+    bus.A17
+    bus.A16
+    bus.CI ; S1
+    bus.E2 ; S2
+    bus.NC42
+    bus.NC43
+    bus.NC44
+    ; extra
+    bus.GND
+    bus.GND
+    bus.GND
+    bus.GND
+  ]
+
+  port gnd
+  port vcc
+
+  ; the card will be inserted upside down, so we need to reverse the order
+  var ffc-index = 47
+  for i in 0 to length(data) do :
+    val bus-name = replace(to-string(ref(data[i])), "bus.", "") as String
+    if bus-name == "GND" :
+      net (gnd ffc.data[ffc-index])
+    else :
+      val name = to-string("%_-DATA%_" % [bus-name, i])
+      make-net(to-symbol(name), [data[i] ffc.data[ffc-index]])
+
+      var mapping = append("FPGA_MAP: ", to-string(ffc-index))
+      mapping = append(mapping, " → ")
+      mapping = append(mapping, bus-name)
+      println(mapping)
+
+    ffc-index = ffc-index - 1
+
+  net GND (gnd ffc.GND)
+  net VCC (vcc ffc.VCC5V)
+
+  net (gnd bus.GND)
+  net (vcc bus.VCC)
+
+  val dx = -0.0
+  place(ffc) at loc(0.0, -15.0, 0.0) on Bottom
+  place(bus) at loc(0.0, height(board-shape) / 2.0 - bus-height / 2.0, 0.0) on Top
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val version-text = append("(c) mblsha ", mydate)
+  val name-text = "SHARP Organizer Host adapter v1"
+  inst name-label : ocdb/artwork/board-text/text(name-text, 1.5, 0.0)
+  inst version-label : ocdb/artwork/board-text/text(version-text, 1.5, 0.0)
+  val label_y = 0.0
+  val label_distance = 1.5
+  place(name-label) at loc(0.0, label_y + label_distance, 0.0) on Top
+  place(version-label) at loc(0.0, label_y - label_distance, 0.0) on Top
+
+  ; layer(ForbidCopper(LayerIndex(0, Top))) =
+  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
+  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
+
+  ; layer(ForbidVia()) =
+  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
+  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
+
+  ; geom(gnd) :
+  ;   copper-pour(LayerIndex(0, Top), isolate = 0.15, rank = 1) = board-shape
+
+setup-design("sharp-organizer-host", board-shape, signal-shrink = 0.5)
+set-main-module(module)
+view-schematic()
+view-board()
+export-to-cad()
