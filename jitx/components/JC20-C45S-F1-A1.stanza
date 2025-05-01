@@ -15,9 +15,6 @@ defpackage components/JC20-C45S-F1-A1:
 val pad_width = 0.50
 public val pad_height = 5.0
 
-val case_width = 46.0
-val case_height = 4.0
-
 pcb-pad capsule-smd-pad :
   name = "capsule-smd-pad"
   type = SMD
@@ -107,57 +104,57 @@ public pcb-component sharp-organizer-component :
   manufacturer = "JAE"
   reference-prefix = "J"
 
-  ; view from the front of the calculator with the display at front-left
-  ; VCC is on the left side, GND is on the right side
+  ; view from the back of the organizer with the display facing downwards
+  ; VCC is on the right side, GND is on the left side
   ;
   ; https://github.com/mamedev/mame/blob/master/hash/wizard_cart.xml
   pin-properties :
     [pin:Ref | pads:Int ... | side:Dir ]
-    [VCC    | 0  | Left ]
-    [NC02   | 1  | Left ]
-    [NC03   | 2  | Left ]
-    [VBATT  | 3  | Left ]
-    [NC05   | 4  | Left ]
-    [A15    | 5  | Left ]
-    [A14    | 6  | Left ]
-    [A13    | 7  | Left ]
-    [A12    | 8  | Left ]
-    [A11    | 9  | Left ]
-    [A10    | 10 | Left ]
-    [A9     | 11 | Left ]
-    [A8     | 12 | Left ]
-    [A7     | 13 | Left ]
-    [A6     | 14 | Left ]
-    [A5     | 15 | Left ]
-    [A4     | 16 | Left ]
-    [A3     | 17 | Left ]
-    [A2     | 18 | Left ]
-    [A1     | 19 | Left ]
-    [A0     | 20 | Left ]
-    [D0     | 21 | Left ]
+    [GND    | 0  | Left ]
+    [NC44   | 1  | Left ]
+    [NC43   | 2  | Left ]
+    [NC42   | 3  | Left ]
+    [E2     | 4  | Left ]
+    [CI     | 5  | Left ]
+    [A16    | 6  | Left ]
+    [A17    | 7  | Left ]
+    [A18    | 8  | Left ]
+    [A19    | 9  | Left ]
+    [OE     | 10 | Left ]
+    [RW     | 11 | Left ]
+    [EPROM  | 12 | Left ]
+    [SRAM2  | 13 | Left ]
+    [SRAM1  | 14 | Left ]
+    [MSKROM | 15 | Left ]
+    [D7     | 16 | Left ]
+    [D6     | 17 | Left ]
+    [D5     | 18 | Left ]
+    [D4     | 19 | Left ]
+    [D3     | 20 | Left ]
+    [D2     | 21 | Left ]
     [D1     | 22 | Left ]
-    [D2     | 23 | Left ]
-    [D3     | 24 | Left ]
-    [D4     | 25 | Left ]
-    [D5     | 26 | Left ]
-    [D6     | 27 | Left ]
-    [D7     | 28 | Left ]
-    [MSKROM | 29 | Left ]
-    [SRAM1  | 30 | Left ]
-    [SRAM2  | 31 | Left ]
-    [EPROM  | 32 | Left ]
-    [WR     | 33 | Left ]
-    [OE     | 34 | Left ]
-    [NC36   | 35 | Left ]
-    [A18    | 36 | Left ]
-    [A17    | 37 | Left ]
-    [A16    | 38 | Left ]
-    [NC40   | 39 | Left ]
-    [NC41   | 40 | Left ]
-    [NC42   | 41 | Left ]
-    [NC43   | 42 | Left ]
-    [NC44   | 43 | Left ]
-    [GND    | 44 | Left ]
+    [D0     | 23 | Left ]
+    [A0     | 24 | Left ]
+    [A1     | 25 | Left ]
+    [A2     | 26 | Left ]
+    [A3     | 27 | Left ]
+    [A4     | 28 | Left ]
+    [A5     | 29 | Left ]
+    [A6     | 30 | Left ]
+    [A7     | 31 | Left ]
+    [A8     | 32 | Left ]
+    [A9     | 33 | Left ]
+    [A10    | 34 | Left ]
+    [A11    | 35 | Left ]
+    [A12    | 36 | Left ]
+    [A13    | 37 | Left ]
+    [A14    | 38 | Left ]
+    [A15    | 39 | Left ]
+    [VPP    | 40 | Left ]
+    [VBATT  | 41 | Left ]
+    [STNBY  | 42 | Left ]
+    [NC02   | 43 | Left ]
+    [VCC    | 44 | Left ]
 
   val box = BoxSymbol(self)
   val symb = create-symbol(box)
@@ -166,7 +163,7 @@ public pcb-component sharp-organizer-component :
   assign-landpattern(lp)
 
 
-view(card-component)
+; view(sharp-organizer-component)
 
 ; val board-shape = RoundedRectangle(element_width, element_height, 3.0)
 ; setup-design("alchitry_element_bottom", board-shape, signal-shrink = 0.5)
