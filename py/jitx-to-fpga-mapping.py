@@ -1,6 +1,8 @@
+
+
 import marimo
 
-__generated_with = "0.11.17"
+__generated_with = "0.13.0"
 app = marimo.App(width="medium")
 
 
@@ -24,6 +26,7 @@ def _(
     get_sharp_organizer_card_mapping,
     get_sharp_pc_e500_bus_mapping,
     get_sharp_pc_g850_bus_mapping,
+    get_sharp_sc62015_mapping,
     mo,
 ):
     import functools
@@ -76,6 +79,16 @@ def _(
         return r
 
     @acf_constraint
+    def sharp_sc62015():
+        ffc = get_alchitry_ffc_mapping()
+        alchitry_mapping = get_alchitry_element_mapping()
+        sc62015_mapping = get_sharp_sc62015_mapping()
+        r = []
+        for pin, name in sc62015_mapping.items():
+            r.append(f'pin {name} {alchitry_mapping[ffc[int(pin)]]}')
+        return r
+
+    @acf_constraint
     def saleae():
         ffc = get_alchitry_ffc_mapping()
         alchitry_mapping = get_alchitry_element_mapping()
@@ -96,18 +109,10 @@ def _(
         'Saleae': download_constraint('saleae', saleae()),
         'Sharp PC-G850 Bus': download_constraint('sharp_pc_g850_bus', sharp_pc_g850_bus()),
         'Sharp PC-E500 Bus': download_constraint('sharp_pc_e500_bus', sharp_pc_e500_bus()),
+        'Sharp SC62015': download_constraint('sharp_sc62015', sharp_sc62015()),
         'Sharp Organizer Card': download_constraint('sharp_organizer_card', sharp_organizer_card()),
     })
-    return (
-        acf_constraint,
-        download_constraint,
-        functools,
-        pin_tester,
-        saleae,
-        sharp_organizer_card,
-        sharp_pc_e500_bus,
-        sharp_pc_g850_bus,
-    )
+    return
 
 
 @app.cell
@@ -536,6 +541,93 @@ def _(sharp_organizer_card_mapping):
 
     get_sharp_organizer_card_mapping()
     return (get_sharp_organizer_card_mapping,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""# sharp-sc62015-interposer.stanza""")
+    return
+
+
+@app.cell
+def _():
+    # sharp-sc62015-interposer.stanza (print pin mapping)
+    sharp_sc62015_mapping = """
+    FPGA_MAP: 0 → cpu.D[0]
+    FPGA_MAP: 1 → cpu.D[1]
+    FPGA_MAP: 2 → cpu.D[2]
+    FPGA_MAP: 3 → cpu.D[3]
+    FPGA_MAP: 4 → cpu.D[4]
+    FPGA_MAP: 5 → cpu.D[5]
+    FPGA_MAP: 6 → cpu.D[6]
+    FPGA_MAP: 7 → cpu.D[7]
+    FPGA_MAP: 8 → cpu.A[0]
+    FPGA_MAP: 9 → cpu.A[1]
+    FPGA_MAP: 10 → cpu.A[2]
+    FPGA_MAP: 11 → cpu.A[3]
+    FPGA_MAP: 12 → cpu.A[4]
+    FPGA_MAP: 13 → cpu.A[5]
+    FPGA_MAP: 14 → cpu.A[6]
+    FPGA_MAP: 15 → cpu.A[7]
+    FPGA_MAP: 16 → cpu.A[8]
+    FPGA_MAP: 17 → cpu.A[9]
+    FPGA_MAP: 18 → cpu.A[10]
+    FPGA_MAP: 19 → cpu.A[11]
+    FPGA_MAP: 20 → cpu.A[12]
+    FPGA_MAP: 21 → cpu.A[13]
+    FPGA_MAP: 22 → cpu.A[14]
+    FPGA_MAP: 23 → cpu.A[15]
+    FPGA_MAP: 24 → cpu.A[16]
+    FPGA_MAP: 25 → cpu.A[17]
+    FPGA_MAP: 26 → cpu.A[18]
+    FPGA_MAP: 27 → cpu.DCLK
+    FPGA_MAP: 28 → cpu.OUT
+    FPGA_MAP: 29 → cpu.CE[7]
+    FPGA_MAP: 30 → cpu.CE[6]
+    FPGA_MAP: 31 → cpu.CE[5]
+    FPGA_MAP: 32 → cpu.CE[4]
+    FPGA_MAP: 33 → cpu.CE[3]
+    FPGA_MAP: 34 → cpu.CE[2]
+    FPGA_MAP: 35 → cpu.CE[1]
+    FPGA_MAP: 36 → cpu.CE[0]
+    FPGA_MAP: 37 → cpu.ACLK
+    FPGA_MAP: 38 → cpu.DIS
+    FPGA_MAP: 39 → cpu.RD
+    FPGA_MAP: 40 → cpu.RXD
+    FPGA_MAP: 41 → cpu.TXD
+    FPGA_MAP: 42 → cpu.RESET
+    FPGA_MAP: 43 → cpu.TEST
+    FPGA_MAP: 44 → cpu.ON
+    FPGA_MAP: 45 → cpu.WR
+    FPGA_MAP: 46 → cpu.MRQ
+    """
+    return (sharp_sc62015_mapping,)
+
+
+@app.cell
+def _(sharp_sc62015_mapping):
+    def get_sharp_sc62015_mapping():
+        """
+        maps from internal element mapping to the Sharp sc62015
+        """
+        import re
+        mapping = {}
+        for line in sharp_sc62015_mapping.split('\n'):
+            if not line:
+                continue
+            m = re.match(r"FPGA_MAP: (\d+) → cpu.([\w\[\]]+)", line)
+            # print(line.split(' '))
+            # print(m)
+            # print(m.groups())
+            pin, name = m.groups()
+            if name == 'GND':
+                continue
+            mapping[f'{pin}'] = name
+            # break
+        return mapping
+
+    get_sharp_sc62015_mapping()
+    return (get_sharp_sc62015_mapping,)
 
 
 @app.cell
