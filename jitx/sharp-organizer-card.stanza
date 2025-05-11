@@ -134,14 +134,6 @@ pcb-module module :
   start-x = width(board-shape) / 2.0 - side-width
   layer(Cutout()) = Rectangle(start-x, start-y, start-x + side-width, end-y)
 
-  ; layer(ForbidCopper(LayerIndex(0, Top))) =
-  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
-  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
-
-  ; layer(ForbidVia()) =
-  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
-  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
-
   ; geom(gnd) :
   ;   copper-pour(LayerIndex(0, Top), isolate = 0.15, rank = 1) = board-shape
 

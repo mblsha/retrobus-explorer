@@ -81,6 +81,10 @@ pcb-module module :
   port gnd
   port vcc
 
+  inst tp-gnd : components/GndTestpads/module(diameter = 3.0, width = width(board-shape), height = height(board-shape))
+  net (tp-gnd.GND gnd)
+  place(tp-gnd) at loc(0.0, 0.0) on Top
+
   ; the card will be inserted upside down, so we need to reverse the order
   var ffc-index = 47
   for i in 0 to length(data) do :
@@ -105,7 +109,7 @@ pcb-module module :
   net (vcc bus.VCC)
 
   val dx = -0.0
-  place(ffc) at loc(0.0, -15.0, 0.0) on Bottom
+  place(ffc) at loc(0.0, -9.0, 180.0) on Top
   place(bus) at loc(0.0, height(board-shape) / 2.0 - bus-height / 2.0, 0.0) on Top
 
   val mydate:String = get-time-string("%Y-%m-%d")
@@ -117,14 +121,6 @@ pcb-module module :
   val label_distance = 1.5
   place(name-label) at loc(0.0, label_y + label_distance, 0.0) on Top
   place(version-label) at loc(0.0, label_y - label_distance, 0.0) on Top
-
-  ; layer(ForbidCopper(LayerIndex(0, Top))) =
-  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
-  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
-
-  ; layer(ForbidVia()) =
-  ;   Rectangle(width(board-shape) / -2.0, height(board-shape) / 2.0 - 5.0,
-  ;             width(board-shape) / 2.0, height(board-shape) / 2.0)
 
   ; geom(gnd) :
   ;   copper-pour(LayerIndex(0, Top), isolate = 0.15, rank = 1) = board-shape
