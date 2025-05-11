@@ -37,20 +37,26 @@ public pcb-module module :
 
   ; FIXME: use a single decoupling cap?
   ; reference: https://mastodon.social/@timonsku/113879320591652467
-  val capcase = "0603"
-  val cap1 = 1.0e-7 ; 0.1uF
-  val cap2 = 4.7e-6 ; 4.7uF
+  val capcase = "0402"
+  val cap1 = 10.0e-6 ; 10uF
   val caplo1 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, gnd, ["capacitance" => cap1, "case" => capcase])
-  val caplo2 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, gnd, ["capacitance" => cap2, "case" => capcase])
   val caphi1 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, gnd, ["capacitance" => cap1, "case" => capcase])
-  val caphi2 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, gnd, ["capacitance" => cap2, "case" => capcase])
+  place(caplo1) at loc(-2.0, 3.9, 90.0) on Top
+  place(caphi1) at loc( 2.0, 3.9, -90.0) on Top
+
+  ; ; based on the previous 0603 design
+  ; val cap1 = 1.0e-7 ; 0.1uF
+  ; val cap2 = 4.7e-6 ; 4.7uF
+  ; val caplo1 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, gnd, ["capacitance" => cap1, "case" => capcase])
+  ; val caplo2 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCA, gnd, ["capacitance" => cap2, "case" => capcase])
+  ; val caphi1 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, gnd, ["capacitance" => cap1, "case" => capcase])
+  ; val caphi2 = ocdb/utils/generic-components/bypass-cap-strap(shifter.VCCB, gnd, ["capacitance" => cap2, "case" => capcase])
+  ; place(caplo1) at loc(-2.0, 4.1, 90.0) on Top
+  ; place(caplo2) at loc(-2.0, 5.35, 90.0) on Top
+  ; place(caphi1) at loc(2.0, 4.1, -90.0) on Top
+  ; place(caphi2) at loc(2.0, 5.35, -90.0) on Top
 
   place(shifter) at loc(0.0, 0.0, 270.0) on Top
-
-  place(caplo1) at loc(-2.0, 4.1, 90.0) on Top
-  place(caplo2) at loc(-2.0, 5.35, 90.0) on Top
-  place(caphi1) at loc(2.0, 4.1, -90.0) on Top
-  place(caphi2) at loc(2.0, 5.35, -90.0) on Top
 
   ; val all-cats = BaseQuery(
   ;   mounting = "smd",
@@ -126,7 +132,7 @@ pcb-module test-module :
   ; insert-resistor(GND, m.shifter.B1, R-query, resistance = 10.0e3)
 
 ; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
-; setup-design("jitx-design", board-shape, signal-shrink = 0.5)
+; setup-design("level-shifter", board-shape, signal-shrink = 0.5)
 ; set-main-module(module)
 ; view-schematic()
 ; view-board()
