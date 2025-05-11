@@ -38,18 +38,23 @@ pcb-module alchitry-level-shifter :
 
   port gnd
   port vcc3v3
-  port vcc5v
+  port vbus
   net GND (gnd fpga.GND ffc1.GND ffc2.GND)
   net VCC3V3 (vcc3v3 fpga.VCC3V3)
-  net VCC5V (vcc5v ffc1.VCC5V ffc2.VCC5V)
+  net VBUS (vbus ffc1.VCC5V ffc2.VCC5V)
 
   inst saleae : components/Saleae/saleae8(text-angle = 90.0)
+
+  inst vcc_select : components/VccSelectHeader/module(text-angle = 180.0)
+  net (vbus vcc_select.bus)
+  net (vcc3v3 vcc_select.fpga_3v3)
+  net (vcc_select.fpga_5v fpga.VCC5V)
 
   val num_shifters = 6
   inst shift : components/LevelShifter/module[num_shifters]
   for i in 0 to num_shifters do:
     net (gnd shift[i].gnd)
-    net (vcc5v shift[i].vcchi)
+    net (vbus shift[i].vcchi)
     net (vcc3v3 shift[i].vcclo)
     net (vcc3v3 shift[i].oe)
 
@@ -58,7 +63,7 @@ pcb-module alchitry-level-shifter :
 
   symbol(GND) = GND-SYMB
   symbol(VCC3V3) = PWR-SYMB
-  symbol(VCC5V) = PWR-SYMB
+  symbol(VBUS) = PWR-SYMB
 
   defn do-shift (shiftno:Int, pinno:Int, high:JITXObject, low:JITXObject) :
     var low-name = replace(to-string(ref(high)), "ffc1.data", "loDATA") as String
@@ -149,7 +154,7 @@ pcb-module alchitry-level-shifter :
 
   inst tp_vcc : gen-testpad(1.0)[2]
   net (vcc3v3 tp_vcc[0].p)
-  net (vcc5v  tp_vcc[1].p)
+  net (vbus   tp_vcc[1].p)
   place(tp_vcc[0]) at loc(0.0, 12.0) on Bottom
   place(tp_vcc[1]) at loc(0.0, 7.0)  on Bottom
 
@@ -161,10 +166,13 @@ pcb-module alchitry-level-shifter :
   val mydate:String = get-time-string("%Y-%m-%d")
   inst name-label : ocdb/artwork/board-text/text("Level Shifter Element (Au1) v2", 1.5, 0.0)
   inst version-label  : ocdb/artwork/board-text/text(append("(c) mblsha ", mydate), 1.5, 0.0)
-  place(name-label)    at loc(w / 2.0 - 5.0, 0.0, 90.0) on Bottom
-  place(version-label) at loc(w / 2.0 - 3.0, 0.0, 90.0) on Bottom
+  ; place(name-label)    at loc(w / 2.0 - 5.0, 0.0, 0.0) on Bottom
+  ; place(version-label) at loc(w / 2.0 - 3.0, 0.0, 0.0) on Bottom
+  place(name-label)    at loc(0.0, 1.0, 0.0) on Bottom
+  place(version-label) at loc(0.0, -1.0, 0.0) on Bottom
 
   place(saleae) at loc(w / -2.0 + 10.0, 0.0, 0.0) on Bottom
+  place(vcc_select) at loc(w / 2.0 - 7.0, 0.0, 180.0) on Bottom
 
   ; NOTE: bgupta recommended commenting out the copper-pours during the initial
   ;       layout phase to help avoid major slowdowns.

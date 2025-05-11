@@ -54,6 +54,6 @@ public pcb-module saleae8 (-- text-angle:Double = 0.0) :
 
 ; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
 ; setup-design("saleae8", board-shape, signal-shrink = 0.5)
-; set-main-module(saleae8)
+; set-main-module(saleae8(text-angle = 0.0))
 ; view-schematic()
 ; view-board()

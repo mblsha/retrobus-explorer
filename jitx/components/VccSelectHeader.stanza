@@ -1,0 +1,47 @@
+#use-added-syntax(jitx)
+defpackage components/VccSelectHeader :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+  import jsl
+
+  ; setup-design
+  import helpers
+  import pose-helpers
+  ; pin-header
+  import ocdb/utils/generic-components
+
+public pcb-module module (-- text-angle:Double = 0.0) :
+  inst header : pin-header(6, 2)
+
+  port bus
+  port fpga_5v
+  port fpga_3v3
+
+  net VCC5V (fpga_5v header.p[4])
+  net VCC3V3 (fpga_3v3 header.p[2])
+  net BUS (bus header.p[1] header.p[3], header.p[5])
+
+  place(header) at loc(0.0, 0.0) on Top
+
+  val vcc_names = [
+    "NC",
+    "5V",
+    "3V3",
+  ]
+
+  for i in 0 to length(vcc_names) do :
+    val name = vcc_names[i]
+    inst label1 : ocdb/artwork/board-text/text(name, 1.5, 0.0)
+    val offset = 2.54 * to-double(i) - 2.54
+    place(label1) at loc(4.1, offset, text-angle) on Top
+
+    inst label2 : ocdb/artwork/board-text/text("VBus", 1.5, 0.0)
+    place(label2) at loc(-4.5, offset, text-angle) on Top
+
+; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+; setup-design("vcc-select", board-shape, signal-shrink = 0.5)
+; set-main-module(module(text-angle = 0.0))
+; view-schematic()
+; view-board()
