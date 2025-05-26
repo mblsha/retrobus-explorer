@@ -1,0 +1,53 @@
+#use-added-syntax(jitx)
+defpackage rpi-pico-40-pin-adapter :
+  import core
+  import jitx
+  import jitx/commands
+  import jitx/parts
+
+  import helpers
+  import jsl
+  import collections
+
+  import ocdb/utils/generic-components
+  import ocdb/utils/landpatterns
+  import ocdb/components/raspberry-pi/gpio-header
+  ; get-time-string
+  import utils/time
+
+val connectors-spacing = 7.0
+val forty-pin-width = 5.0
+val board-shape = RoundedRectangle(
+  52.0,
+  components/RPiPico/width + connectors-spacing + forty-pin-width, 1.0)
+
+pcb-module rpi-pico-40-pin-adapter :
+  inst pico : components/RPiPico/module
+  inst forty-pin : ocdb/components/raspberry-pi/gpio-header/module
+
+  val y-offset = -5.0
+  place(pico) at loc(0.0, components/RPiPico/width / 2.0 + y-offset, 270.0) on Top
+  place(forty-pin) at loc(0.0, connectors-spacing * -1.0 + y-offset, 270.0) on Top
+
+  port gnd
+  net GND (gnd, pico.gnd, forty-pin.gnd)
+
+  ; first two pins are unconnected on Jumperless V5 adapter
+  for i in 2 to 28 do:
+    val name = append("BCM-", to-string(i))
+    make-net(to-symbol(name), [pico.BCM[i], forty-pin.BCM[i]])
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val label-text = append("rpi-pico 40-pin ", mydate)
+  inst version-label : ocdb/artwork/board-text/text(label-text, 1.5, 0.0)
+  val label_y = 0.0 ; height(board-shape) / 2.0 - 2.0
+  place(version-label) at loc(0.0, label_y, 0.0) on Top
+
+
+setup-design("rpi-pico-40-pin-adapter", board-shape, signal-shrink = 0.5)
+set-main-module(rpi-pico-40-pin-adapter)
+view-schematic()
+view-board()
+export-to-cad()
+
+

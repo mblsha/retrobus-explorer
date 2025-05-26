@@ -1,0 +1,82 @@
+#use-added-syntax(jitx)
+defpackage components/RPiPico :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+  import jsl
+
+  ; setup-design
+  import helpers
+  import pose-helpers
+  ; pin-header
+  import ocdb/utils/generic-components
+
+public val width = 17.78
+
+public pcb-module module :
+  port BCM : pin[29]
+  port gnd
+  port p3v3 : power
+
+  inst header : pin-header(20, 1)[2]
+
+  val distance = components/RPiPico/width ; 17.78
+  place(header[0]) at loc(distance / -2.0, 0.0) on Top
+  place(header[1]) at loc(distance /  2.0, 0.0, 180.0) on Top
+
+  ; net (BCM[0], header.p[27])
+  net (BCM[0],  header[0].p[1])
+  net (BCM[1],  header[0].p[2])
+  net (gnd,     header[0].p[3])
+  net (BCM[2],  header[0].p[4])
+  net (BCM[3],  header[0].p[5])
+  net (BCM[4],  header[0].p[6])
+  net (BCM[5],  header[0].p[7])
+  net (gnd,     header[0].p[8])
+  net (BCM[6],  header[0].p[9])
+  net (BCM[7],  header[0].p[10])
+  net (BCM[8],  header[0].p[11])
+  net (BCM[9],  header[0].p[12])
+  net (gnd,     header[0].p[13])
+  net (BCM[10], header[0].p[14])
+  net (BCM[11], header[0].p[15])
+  net (BCM[12], header[0].p[16])
+  net (BCM[13], header[0].p[17])
+  net (gnd,     header[0].p[18])
+  net (BCM[14], header[0].p[19])
+  net (BCM[15], header[0].p[20])
+
+  net (BCM[16], header[1].p[1])
+  net (BCM[17], header[1].p[2])
+  net (gnd,     header[1].p[3])
+  net (BCM[18], header[1].p[4])
+  net (BCM[19], header[1].p[5])
+  net (BCM[20], header[1].p[6])
+  net (BCM[21], header[1].p[7])
+  net (gnd,     header[1].p[8])
+  net (BCM[22], header[1].p[9])
+  ; RUN
+  net (BCM[26], header[1].p[11])
+  net (BCM[27], header[1].p[12])
+  net (gnd,     header[1].p[13])
+  net (BCM[28], header[1].p[14])
+  ; ADC_VREF
+  ; net (p3v3.vdd, header[1].p[15])
+  ; 3V3_EN
+  net (gnd,     header[1].p[17])
+  ; VSYS
+  ; VBUS
+
+  ; net (gnd, p3v3.gnd)
+
+  for i in 0 to 28 do:
+    supports gpio :
+      gpio.gpio => BCM[i]
+
+
+; val board-shape = RoundedRectangle(30.0, 18.5, 0.25)
+; setup-design("rpi-pico", board-shape, signal-shrink = 0.5)
+; set-main-module(module)
+; view-schematic()
+; view-board()
