@@ -1,6 +1,8 @@
+
+
 import marimo
 
-__generated_with = "0.11.0"
+__generated_with = "0.13.0"
 app = marimo.App(width="medium")
 
 
@@ -38,7 +40,17 @@ def _():
 
 
 @app.cell(hide_code=True)
-def _(Enum, Lark, List, NamedTuple, Optional, Token, Transformer, v_args):
+def _(
+    Enum,
+    Lark,
+    List,
+    NamedTuple,
+    Optional,
+    Token,
+    Transformer,
+    bytes,
+    v_args,
+):
     class RecordType(Enum):
         DATA = 1
         EOF = 2
@@ -154,15 +166,7 @@ def _(Enum, Lark, List, NamedTuple, Optional, Token, Transformer, v_args):
 
 
     parser = Lark(grammar, parser="earley")
-    return (
-        IntelHexRecord,
-        IntelHexTransformer,
-        IntermediateRecord,
-        RecordType,
-        Segment,
-        grammar,
-        parser,
-    )
+    return IntelHexRecord, IntelHexTransformer, RecordType, Segment, parser
 
 
 @app.cell(hide_code=True)
@@ -212,7 +216,7 @@ def _(IntelHexRecord, List, NamedTuple, Optional, RecordType, Segment):
                 merged_segments.append(seg)
 
         return ProcessedRecords(segments=merged_segments, execution_start_address=execution_start_address)
-    return ProcessedRecords, process_records
+    return (process_records,)
 
 
 @app.cell
@@ -234,6 +238,74 @@ def _(IntelHexTransformer, parser, text):
 @app.cell
 def _(parsed, process_records):
     process_records(parsed)
+    return
+
+
+@app.function
+def decode_sequential_bytes(lines):
+    """
+    Parse lines of "START_ADDR: BYTE1 BYTE2 …", verify sequential addresses
+    across all bytes, and write the bytes to a binary file.
+
+    :param lines: iterable of strings, each "ADDRESS: HEXBYTE [HEXBYTE …]"
+    :param out_path: path to output binary file
+    :raises ValueError: if addresses are not strictly sequential
+    """
+    prev_addr = None
+    data_bytes = bytearray()
+
+    for lineno, raw in enumerate(lines, start=1):
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        try:
+            addr_str, byte_list_str = line.split(':', 1)
+        except ValueError:
+            raise ValueError(f"Line {lineno}: malformed, expected 'ADDR: BYTE…'")
+
+        addr = int(addr_str.strip(), 16)
+        byte_strs = byte_list_str.strip().split()
+
+        for offset, b in enumerate(byte_strs):
+            this_addr = addr + offset
+            byte_val = int(b, 16)
+            if not 0 <= byte_val <= 0xFF:
+                raise ValueError(f"Line {lineno}, byte #{offset+1}: {b!r} out of range")
+
+            if prev_addr is None:
+                # first_addr = this_addr
+                pass
+            else:
+                if this_addr != prev_addr + 1:
+                    raise ValueError(
+                        f"Non-sequential address at line {lineno}, byte #{offset+1}: "
+                        f"expected 0x{prev_addr+1:X}, got 0x{this_addr:X}"
+                    )
+
+            data_bytes.append(byte_val)
+            prev_addr = this_addr
+
+    if not data_bytes:
+        raise ValueError("No data parsed!")
+
+    return data_bytes
+
+
+@app.cell
+def _():
+    with open('iq-7000-full-memory2.txt', 'r') as f:
+        lines = f.readlines()
+        bytes = decode_sequential_bytes(lines)
+        print(bytes)
+        # with open('iq-7000-full-memory2.bin', 'wb') as f:
+        #     # pass
+        #     f.write(bytes)
+    return (bytes,)
+
+
+@app.cell
+def _():
     return
 
 
