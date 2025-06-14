@@ -72,11 +72,11 @@ module alchitry_top (
 
                 // using 8 doesn't allow to have a lot of granularity
                 // when sampling only pin0 of ffc connector
-                const out_bank_multiplier = 2
+                const OUT_BANK_MULTIPLIER = 2
 
-                led = counter.q[(bank.q * out_bank_multiplier)+:8]
-                saleae = counter.q[(bank.q * out_bank_multiplier)+:8]
-                ffc_data[0+:8] = counter.q[(bank.q * out_bank_multiplier)+:8]
+                led = counter.q[(bank.q * OUT_BANK_MULTIPLIER)+:8]
+                saleae = counter.q[(bank.q * OUT_BANK_MULTIPLIER)+:8]
+                ffc_data[0+:8] = counter.q[(bank.q * OUT_BANK_MULTIPLIER)+:8]
 
                 if (rx.new_data) {
                     if (rx.data >= "0" && rx.data <= "9") {
