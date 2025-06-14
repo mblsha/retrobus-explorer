@@ -127,7 +127,29 @@ jobs:
         
         # Run syntax check using the binary path from previous step
         echo "Running syntax check..."
-        "$ALCHITRY_BIN" check "$PROJECT_FILE"
+        
+        # Convert to absolute path as alchitry expects absolute paths
+        PROJECT_ABS_PATH="$(pwd)/$PROJECT_FILE"
+        echo "Using absolute path: $PROJECT_ABS_PATH"
+        
+        # Run the check and capture output to detect failures
+        if "$ALCHITRY_BIN" check "$PROJECT_ABS_PATH" 2>&1 | tee check_output.log; then
+          # Check if the output contains failure messages
+          if grep -q "Failed to open project" check_output.log; then
+            echo "❌ Project check failed - could not open project file"
+            cat check_output.log
+            exit 1
+          elif grep -q "error\|Error\|ERROR" check_output.log; then
+            echo "❌ Project check failed - errors found"
+            cat check_output.log
+            exit 1
+          else
+            echo "✅ Project syntax check completed successfully"
+          fi
+        else
+          echo "❌ alchitry command failed with exit code $?"
+          exit 1
+        fi
         
         echo "✅ Project ${{ matrix.project }} passed syntax check"
     
