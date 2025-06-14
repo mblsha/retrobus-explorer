@@ -1,7 +1,7 @@
 {
     "project": {
         "type": "V1.3",
-        "projectName": "pin-tester",
+        "projectName": "test-minimal",
         "board": "Alchitry Au",
         "sourceFiles": [
             {
@@ -16,18 +16,6 @@
                     "type": "Component",
                     "path": "Conditioning/reset_conditioner.luc"
                 }
-            },
-            {
-                "file": {
-                    "type": "Component",
-                    "path": "Interfaces/uart_rx.luc"
-                }
-            },
-            {
-                "file": {
-                    "type": "Component",
-                    "path": "Interfaces/uart_tx.luc"
-                }
             }
         ],
         "constraintFiles": [
@@ -36,20 +24,9 @@
                     "type": "Component",
                     "path": "Constraints/alchitry.acf"
                 }
-            },
-            {
-                "file": {
-                    "type": "DiskFile",
-                    "path": "constraint/level-shifter.acf"
-                }
-            },
-            {
-                "file": {
-                    "type": "DiskFile",
-                    "path": "constraint/saleae.acf"
-                }
             }
         ],
         "ipCores": []
     }
 }
+

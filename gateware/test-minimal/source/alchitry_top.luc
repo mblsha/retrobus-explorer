@@ -1,0 +1,25 @@
+module alchitry_top (
+    input clk,              // 100MHz clock
+    input rst_n,            // reset button (active low)
+    output led[8]           // 8 user controllable LEDs
+) {
+    sig rst                 // reset signal
+    
+    .clk(clk) {
+        reset_conditioner reset_cond
+        
+        .rst(rst) {
+            dff counter[26]     // 26-bit counter for LED blinking
+        }
+    }
+    
+    always {
+        reset_cond.in = ~rst_n  // input raw inverted reset signal
+        rst = reset_cond.out    // conditioned reset
+        
+        counter.d = counter.q + 1  // increment counter
+        
+        led = counter.q[25:18]  // use upper bits for visible blinking
+    }
+}
+

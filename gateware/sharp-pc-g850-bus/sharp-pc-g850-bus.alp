@@ -7,7 +7,7 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "source\\alchitry_top.luc"
+                    "path": "source/alchitry_top.luc"
                 },
                 "top": true
             },
@@ -68,7 +68,7 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "source\\my_uart_tx.luc"
+                    "path": "source/my_uart_tx.luc"
                 }
             }
         ],
@@ -82,7 +82,7 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "constraint\\pc-g850-bus.acf"
+                    "path": "constraint/pc-g850-bus.acf"
                 }
             },
             {
@@ -94,7 +94,7 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "constraint\\saleae.acf"
+                    "path": "constraint/saleae.acf"
                 }
             }
         ],
@@ -104,12 +104,12 @@
                 "stub": {
                     "file": {
                         "type": "DiskFile",
-                        "path": "cores\\clk_wiz_0\\clk_wiz_0_stub.v"
+                        "path": "cores/clk_wiz_0/clk_wiz_0_stub.v"
                     }
                 },
                 "files": [
                     {
-                        "path": "cores\\clk_wiz_0\\clk_wiz_0.xci"
+                        "path": "cores/clk_wiz_0/clk_wiz_0.xci"
                     }
                 ]
             }
