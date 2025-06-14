@@ -35,53 +35,75 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
     
+    - name: Get latest Alchitry Labs version
+      id: get-version
+      run: |
+        LATEST_VERSION=$(curl -s https://api.github.com/repos/alchitry/Alchitry-Labs-V2/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        echo "version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+        echo "Latest Alchitry Labs version: ${LATEST_VERSION}"
+    
     - name: Cache Alchitry Labs installation
       uses: actions/cache@v4
       with:
         path: |
           ~/alchitry-labs
           ~/.cache/alchitry
-        key: alchitry-labs-v2-${{ runner.os }}-${{ hashFiles('.github/workflows/alchitry-ci.yml') }}
+        key: alchitry-labs-v2-${{ runner.os }}-${{ steps.get-version.outputs.version }}
         restore-keys: |
           alchitry-labs-v2-${{ runner.os }}-
     
     - name: Download and install Alchitry Labs V2
       run: |
-        # Create installation directory
-        mkdir -p ~/alchitry-labs
-        cd ~/alchitry-labs
+        # Use version from previous step
+        LATEST_VERSION="${{ steps.get-version.outputs.version }}"
+        echo "Installing Alchitry Labs V2 version: $LATEST_VERSION"
         
-        # Download the latest Alchitry Labs V2 deb package
-        echo "Downloading Alchitry Labs V2..."
-        wget -q https://cdn.alchitry.com/labs-v2/alchitry-labs_2.0.0-ALPHA-0-1_amd64.deb
+        # Check if already cached
+        if [ -d "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}" ]; then
+          echo "Alchitry Labs already cached, skipping download"
+        else
+          # Create installation directory
+          mkdir -p ~/alchitry-labs
+          cd ~/alchitry-labs
+          
+          # Download the latest Alchitry Labs V2 tar.gz package
+          echo "Downloading Alchitry Labs V2..."
+          wget -q "https://github.com/alchitry/Alchitry-Labs-V2/releases/download/${LATEST_VERSION}/alchitry-labs-${LATEST_VERSION}-linux-amd64.tar.gz"
+          
+          # Extract the tar.gz package
+          echo "Extracting Alchitry Labs V2..."
+          tar -xzf "alchitry-labs-${LATEST_VERSION}-linux-amd64.tar.gz"
+          
+          # Clean up archive
+          rm "alchitry-labs-${LATEST_VERSION}-linux-amd64.tar.gz"
+        fi
         
-        # Extract the deb package without installing system-wide
-        echo "Extracting Alchitry Labs V2..."
-        ar x alchitry-labs_2.0.0-ALPHA-0-1_amd64.deb
-        tar -xf data.tar.xz
-        
-        # Make the binary executable and create symlink
-        chmod +x opt/alchitry-labs/bin/alchitry-labs
+        # Make the binaries executable
+        chmod +x "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin/alchitry"
+        chmod +x "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin/alchitry-labs"
         
         # Add to PATH for this session
-        echo "~/alchitry-labs/opt/alchitry-labs/bin" >> $GITHUB_PATH
+        echo "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin" >> $GITHUB_PATH
+        
+        # Store version for later steps
+        echo "ALCHITRY_VERSION=${LATEST_VERSION}" >> $GITHUB_ENV
         
         # Verify installation
-        ~/alchitry-labs/opt/alchitry-labs/bin/alchitry-labs --help || true
+        "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin/alchitry" --help || true
     
     - name: Verify Alchitry Labs installation
       run: |
         echo "Verifying Alchitry Labs installation..."
-        which alchitry-labs || echo "alchitry-labs not in PATH, using full path"
-        ~/alchitry-labs/opt/alchitry-labs/bin/alchitry-labs --help
+        which alchitry || echo "alchitry not in PATH, using full path"
+        "~/alchitry-labs/alchitry-labs-${ALCHITRY_VERSION}/bin/alchitry" --help
     
     - name: Check project syntax and build
       run: |
         cd gateware/${{ matrix.project }}
         echo "Checking project: ${{ matrix.project }}"
         
-        # Use the full path to alchitry-labs binary
-        ALCHITRY_BIN=~/alchitry-labs/opt/alchitry-labs/bin/alchitry-labs
+        # Use the full path to alchitry CLI binary
+        ALCHITRY_BIN="~/alchitry-labs/alchitry-labs-${ALCHITRY_VERSION}/bin/alchitry"
         
         # Check if project file exists
         PROJECT_FILE="${{ matrix.project }}.alp"
@@ -123,4 +145,3 @@ jobs:
           echo "❌ Some Alchitry Labs V2 projects failed syntax checks"
           exit 1
         fi
-
