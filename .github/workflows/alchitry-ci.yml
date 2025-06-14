@@ -59,12 +59,12 @@ jobs:
         echo "Installing Alchitry Labs V2 version: $LATEST_VERSION"
         
         # Check if already cached
-        if [ -d "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}" ]; then
+        if [ -d "$HOME/alchitry-labs/alchitry-labs-${LATEST_VERSION}" ]; then
           echo "Alchitry Labs already cached, skipping download"
         else
           # Create installation directory
-          mkdir -p ~/alchitry-labs
-          cd ~/alchitry-labs
+          mkdir -p $HOME/alchitry-labs
+          cd $HOME/alchitry-labs
           
           # Download the latest Alchitry Labs V2 tar.gz package
           echo "Downloading Alchitry Labs V2..."
@@ -78,32 +78,43 @@ jobs:
           rm "alchitry-labs-${LATEST_VERSION}-linux-amd64.tar.gz"
         fi
         
-        # Make the binaries executable
-        chmod +x "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin/alchitry"
-        chmod +x "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin/alchitry-labs"
+        # Debug: List the extracted contents to understand the structure
+        echo "Contents of extracted directory:"
+        ls -la "$HOME/alchitry-labs/alchitry-labs-${LATEST_VERSION}/" || echo "Directory not found, listing parent:"
+        ls -la "$HOME/alchitry-labs/"
         
-        # Add to PATH for this session
-        echo "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin" >> $GITHUB_PATH
+        # Find the actual binary location
+        echo "Looking for alchitry binary:"
+        find "$HOME/alchitry-labs/" -name "alchitry*" -type f 2>/dev/null || echo "No alchitry binary found"
         
         # Store version for later steps
         echo "ALCHITRY_VERSION=${LATEST_VERSION}" >> $GITHUB_ENV
-        
-        # Verify installation
-        "~/alchitry-labs/alchitry-labs-${LATEST_VERSION}/bin/alchitry" --help || true
     
     - name: Verify Alchitry Labs installation
       run: |
         echo "Verifying Alchitry Labs installation..."
-        which alchitry || echo "alchitry not in PATH, using full path"
-        "~/alchitry-labs/alchitry-labs-${ALCHITRY_VERSION}/bin/alchitry" --help
+        
+        # Find the alchitry binary
+        ALCHITRY_BIN=$(find "$HOME/alchitry-labs/" -name "alchitry" -type f 2>/dev/null | head -1)
+        
+        if [ -z "$ALCHITRY_BIN" ]; then
+          echo "❌ Could not find alchitry binary"
+          exit 1
+        fi
+        
+        echo "Found alchitry binary at: $ALCHITRY_BIN"
+        chmod +x "$ALCHITRY_BIN"
+        
+        # Store the binary path for later steps
+        echo "ALCHITRY_BIN=$ALCHITRY_BIN" >> $GITHUB_ENV
+        
+        # Test the binary
+        "$ALCHITRY_BIN" --help || echo "Binary found but help command failed"
     
     - name: Check project syntax and build
       run: |
         cd gateware/${{ matrix.project }}
         echo "Checking project: ${{ matrix.project }}"
-        
-        # Use the full path to alchitry CLI binary
-        ALCHITRY_BIN="~/alchitry-labs/alchitry-labs-${ALCHITRY_VERSION}/bin/alchitry"
         
         # Check if project file exists
         PROJECT_FILE="${{ matrix.project }}.alp"
@@ -114,9 +125,9 @@ jobs:
         
         echo "Found project file: $PROJECT_FILE"
         
-        # Run syntax check
+        # Run syntax check using the binary path from previous step
         echo "Running syntax check..."
-        $ALCHITRY_BIN check --project "$PROJECT_FILE"
+        "$ALCHITRY_BIN" check --project "$PROJECT_FILE"
         
         echo "✅ Project ${{ matrix.project }} passed syntax check"
     
