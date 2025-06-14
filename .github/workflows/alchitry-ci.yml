@@ -127,7 +127,7 @@ jobs:
         
         # Run syntax check using the binary path from previous step
         echo "Running syntax check..."
-        "$ALCHITRY_BIN" check --project "$PROJECT_FILE"
+        "$ALCHITRY_BIN" check "$PROJECT_FILE"
         
         echo "✅ Project ${{ matrix.project }} passed syntax check"
     
