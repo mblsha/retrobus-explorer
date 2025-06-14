@@ -1,0 +1,126 @@
+name: Alchitry Labs V2 CI
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'gateware/**'
+      - '.github/workflows/alchitry-ci.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'gateware/**'
+      - '.github/workflows/alchitry-ci.yml'
+
+jobs:
+  check-projects:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        project:
+          - pin-tester
+          - sharp-organizer-card
+          - sharp-pc-g850-bus
+          - sharp-pc-g850-streaming-rom
+      fail-fast: false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Cache Alchitry Labs installation
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/alchitry-labs
+          ~/.cache/alchitry
+        key: alchitry-labs-v2-${{ runner.os }}-${{ hashFiles('.github/workflows/alchitry-ci.yml') }}
+        restore-keys: |
+          alchitry-labs-v2-${{ runner.os }}-
+    
+    - name: Download and install Alchitry Labs V2
+      run: |
+        # Create installation directory
+        mkdir -p ~/alchitry-labs
+        cd ~/alchitry-labs
+        
+        # Download the latest Alchitry Labs V2 deb package
+        echo "Downloading Alchitry Labs V2..."
+        wget -q https://cdn.alchitry.com/labs-v2/alchitry-labs_2.0.0-ALPHA-0-1_amd64.deb
+        
+        # Extract the deb package without installing system-wide
+        echo "Extracting Alchitry Labs V2..."
+        ar x alchitry-labs_2.0.0-ALPHA-0-1_amd64.deb
+        tar -xf data.tar.xz
+        
+        # Make the binary executable and create symlink
+        chmod +x opt/alchitry-labs/bin/alchitry-labs
+        
+        # Add to PATH for this session
+        echo "~/alchitry-labs/opt/alchitry-labs/bin" >> $GITHUB_PATH
+        
+        # Verify installation
+        ~/alchitry-labs/opt/alchitry-labs/bin/alchitry-labs --help || true
+    
+    - name: Verify Alchitry Labs installation
+      run: |
+        echo "Verifying Alchitry Labs installation..."
+        which alchitry-labs || echo "alchitry-labs not in PATH, using full path"
+        ~/alchitry-labs/opt/alchitry-labs/bin/alchitry-labs --help
+    
+    - name: Check project syntax and build
+      run: |
+        cd gateware/${{ matrix.project }}
+        echo "Checking project: ${{ matrix.project }}"
+        
+        # Use the full path to alchitry-labs binary
+        ALCHITRY_BIN=~/alchitry-labs/opt/alchitry-labs/bin/alchitry-labs
+        
+        # Check if project file exists
+        PROJECT_FILE="${{ matrix.project }}.alp"
+        if [ ! -f "$PROJECT_FILE" ]; then
+          echo "Error: Project file $PROJECT_FILE not found"
+          exit 1
+        fi
+        
+        echo "Found project file: $PROJECT_FILE"
+        
+        # Run syntax check
+        echo "Running syntax check..."
+        $ALCHITRY_BIN check --project "$PROJECT_FILE"
+        
+        echo "✅ Project ${{ matrix.project }} passed syntax check"
+    
+    - name: Upload build artifacts (if any)
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-logs-${{ matrix.project }}
+        path: |
+          gateware/${{ matrix.project }}/*.log
+          gateware/${{ matrix.project }}/build/
+        retention-days: 7
+        if-no-files-found: ignore
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: check-projects
+    if: always()
+    
+    steps:
+    - name: Check overall status
+      run: |
+        if [ "${{ needs.check-projects.result }}" == "success" ]; then
+          echo "✅ All Alchitry Labs V2 projects passed syntax checks!"
+        else
+          echo "❌ Some Alchitry Labs V2 projects failed syntax checks"
+          exit 1
+        fi
+
