@@ -19,6 +19,7 @@ jobs:
     strategy:
       matrix:
         project:
+          - test-minimal
           - pin-tester
           - sharp-organizer-card
           - sharp-pc-g850-bus
