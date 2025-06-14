@@ -7,7 +7,7 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "source\\alchitry_top.luc"
+                    "path": "source/alchitry_top.luc"
                 },
                 "top": true
             },
@@ -40,13 +40,13 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "constraint\\level-shifter.acf"
+                    "path": "constraint/level-shifter.acf"
                 }
             },
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "constraint\\saleae.acf"
+                    "path": "constraint/saleae.acf"
                 }
             }
         ],
