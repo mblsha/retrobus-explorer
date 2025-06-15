@@ -28,7 +28,7 @@ analytics via a Marimo Notebook interface in the browser.
 * SHARP IQ-7000 (SC62015-based)
 
     **ROM Decoding**: In Progress ([Binary Ninja
-    Plugin](https://github.com/mblsha/binja-esr)
+    Plugin](https://github.com/mblsha/binja-esr))
 
 
 # Hardware
