@@ -53,64 +53,10 @@ jobs:
         restore-keys: |
           alchitry-labs-v2-${{ runner.os }}-
     
-    - name: Download and install Alchitry Labs V2
+    - name: Install Alchitry Labs V2
       run: |
-        # Use version from previous step
-        LATEST_VERSION="${{ steps.get-version.outputs.version }}"
-        echo "Installing Alchitry Labs V2 version: $LATEST_VERSION"
-        
-        # Check if already cached
-        if [ -d "$HOME/alchitry-labs/alchitry-labs-${LATEST_VERSION}" ]; then
-          echo "Alchitry Labs already cached, skipping download"
-        else
-          # Create installation directory
-          mkdir -p $HOME/alchitry-labs
-          cd $HOME/alchitry-labs
-          
-          # Download the latest Alchitry Labs V2 tar.gz package
-          echo "Downloading Alchitry Labs V2..."
-          wget -q "https://github.com/alchitry/Alchitry-Labs-V2/releases/download/${LATEST_VERSION}/alchitry-labs-${LATEST_VERSION}-linux-amd64.tar.gz"
-          
-          # Extract the tar.gz package
-          echo "Extracting Alchitry Labs V2..."
-          tar -xzf "alchitry-labs-${LATEST_VERSION}-linux-amd64.tar.gz"
-          
-          # Clean up archive
-          rm "alchitry-labs-${LATEST_VERSION}-linux-amd64.tar.gz"
-        fi
-        
-        # Debug: List the extracted contents to understand the structure
-        echo "Contents of extracted directory:"
-        ls -la "$HOME/alchitry-labs/alchitry-labs-${LATEST_VERSION}/" || echo "Directory not found, listing parent:"
-        ls -la "$HOME/alchitry-labs/"
-        
-        # Find the actual binary location
-        echo "Looking for alchitry binary:"
-        find "$HOME/alchitry-labs/" -name "alchitry*" -type f 2>/dev/null || echo "No alchitry binary found"
-        
-        # Store version for later steps
-        echo "ALCHITRY_VERSION=${LATEST_VERSION}" >> $GITHUB_ENV
-    
-    - name: Verify Alchitry Labs installation
-      run: |
-        echo "Verifying Alchitry Labs installation..."
-        
-        # Find the alchitry binary
-        ALCHITRY_BIN=$(find "$HOME/alchitry-labs/" -name "alchitry" -type f 2>/dev/null | head -1)
-        
-        if [ -z "$ALCHITRY_BIN" ]; then
-          echo "❌ Could not find alchitry binary"
-          exit 1
-        fi
-        
-        echo "Found alchitry binary at: $ALCHITRY_BIN"
-        chmod +x "$ALCHITRY_BIN"
-        
-        # Store the binary path for later steps
-        echo "ALCHITRY_BIN=$ALCHITRY_BIN" >> $GITHUB_ENV
-        
-        # Test the binary
-        "$ALCHITRY_BIN" --help || echo "Binary found but help command failed"
+        export ALCHITRY_VERSION="${{ steps.get-version.outputs.version }}"
+        ./.github/install-alchitry-labs.sh
     
     - name: Check project syntax and build
       run: |
