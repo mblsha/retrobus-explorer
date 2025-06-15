@@ -58,13 +58,19 @@ fi
 echo "🎯 Found alchitry binary at: $ALCHITRY_BIN"
 chmod +x "$ALCHITRY_BIN"
 
-# Export environment variables for subsequent steps
-echo "ALCHITRY_VERSION=${ALCHITRY_VERSION}" >> $GITHUB_ENV
-echo "ALCHITRY_BIN=$ALCHITRY_BIN" >> $GITHUB_ENV
+# Export environment variables for subsequent steps (only in GitHub Actions)
+if [ -n "$GITHUB_ENV" ]; then
+    echo "ALCHITRY_VERSION=${ALCHITRY_VERSION}" >> $GITHUB_ENV
+    echo "ALCHITRY_BIN=$ALCHITRY_BIN" >> $GITHUB_ENV
+    echo "📝 Environment variables exported to GitHub Actions"
+else
+    echo "📝 Environment variables (local execution):"
+    echo "   ALCHITRY_VERSION=${ALCHITRY_VERSION}"
+    echo "   ALCHITRY_BIN=$ALCHITRY_BIN"
+fi
 
 # Test the binary
 echo "🧪 Testing alchitry binary..."
 "$ALCHITRY_BIN" --help || echo "Binary found but help command failed"
 
 echo "🎉 Alchitry Labs V2 installation completed successfully!"
-
