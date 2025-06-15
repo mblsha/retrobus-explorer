@@ -15,6 +15,9 @@ module alchitry_top (
     // using 8 doesn't allow to have a lot of granularity
     // when sampling only pin0 of ffc connector
     const OUT_BANK_MULTIPLIER = 2
+    
+    // ffc_data is 48 bits wide, so with 8-bit banks we can have max 6 banks (0-5)
+    // Bank 0: bits 0-7, Bank 1: bits 8-15, ..., Bank 5: bits 40-47
 
     .clk(clk) {
         reset_conditioner reset_cond
@@ -79,7 +82,7 @@ module alchitry_top (
                 ffc_data[0+:8] = counter.q[(bank.q * OUT_BANK_MULTIPLIER)+:8]
 
                 if (rx.new_data) {
-                    if (rx.data >= "0" && rx.data <= "9") {
+                    if (rx.data >= "0" && rx.data <= "5") {
                         bank.d = rx.data - "0"
 
                         if (!tx.busy) {
