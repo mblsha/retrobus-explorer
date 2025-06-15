@@ -2,17 +2,13 @@ testbench alchitry_top_tb {
     sig clk
     sig rst_n
     sig usb_rx
-    sig led[8]
     sig ffc_data[48]
-    sig saleae[8]
     
     alchitry_top dut (
         .clk(clk), 
         .rst_n(rst_n),
         .usb_rx(usb_rx),
-        .led(led),
-        .ffc_data(ffc_data),
-        .saleae(saleae)
+        .ffc_data(ffc_data)
     )
     
     fun tickClock() {
@@ -79,9 +75,9 @@ testbench alchitry_top_tb {
         }
         
         // After reset, should be in RECEIVE state with bank 0
-        $assert(led == 8h00)
-        $assert(saleae == 8h00)
-        $print("After reset - LED: %h, Saleae: %h", led, saleae)
+        $assert(dut.led == 8h00)
+        $assert(dut.saleae == 8h00)
+        $print("After reset - LED: %h, Saleae: %h", dut.led, dut.saleae)
         
         $print("Reset behavior test completed!")
     }
@@ -113,18 +109,18 @@ testbench alchitry_top_tb {
         }
         
         // Should reflect bank 0 data on LED and Saleae
-        $assert(led == 8hAA)
-        $assert(saleae == 8hAA)
-        $print("Bank 0 - LED: %h, Saleae: %h (expected AA)", led, saleae)
+        $assert(dut.led == 8hAA)
+        $assert(dut.saleae == 8hAA)
+        $print("Bank 0 - LED: %h, Saleae: %h (expected AA)", dut.led, dut.saleae)
         
         // Send bank selection command "1" to switch to bank 1
         $sendUartByte("1")
         $waitForUartTx()
         
         // Should now reflect bank 1 data
-        $assert(led == 8h55)
-        $assert(saleae == 8h55)
-        $print("Bank 1 - LED: %h, Saleae: %h (expected 55)", led, saleae)
+        $assert(dut.led == 8h55)
+        $assert(dut.saleae == 8h55)
+        $print("Bank 1 - LED: %h, Saleae: %h (expected 55)", dut.led, dut.saleae)
         
         $print("Receive state test completed!")
     }
@@ -160,26 +156,26 @@ testbench alchitry_top_tb {
         }
         
         // Test bank 0 (default)
-        $assert(led == 8h01)
-        $print("Bank 0 selected - LED: %h (expected 01)", led)
+        $assert(dut.led == 8h01)
+        $print("Bank 0 selected - LED: %h (expected 01)", dut.led)
         
         // Test bank 2
         $sendUartByte("2")
         $waitForUartTx()
-        $assert(led == 8h04)
-        $print("Bank 2 selected - LED: %h (expected 04)", led)
+        $assert(dut.led == 8h04)
+        $print("Bank 2 selected - LED: %h (expected 04)", dut.led)
         
         // Test bank 5
         $sendUartByte("5")
         $waitForUartTx()
-        $assert(led == 8h20)
-        $print("Bank 5 selected - LED: %h (expected 20)", led)
+        $assert(dut.led == 8h20)
+        $print("Bank 5 selected - LED: %h (expected 20)", dut.led)
         
         // Test invalid bank (should be ignored)
         $sendUartByte("9")
         $waitForUartTx()
-        $assert(led == 8h20)  // Should still be bank 5
-        $print("Invalid bank 9 - LED: %h (should remain 20)", led)
+        $assert(dut.led == 8h20)  // Should still be bank 5
+        $print("Invalid bank 9 - LED: %h (should remain 20)", dut.led)
         
         $print("Bank selection test completed!")
     }
@@ -219,7 +215,7 @@ testbench alchitry_top_tb {
         // Counter should be non-zero by now
         // LED should reflect counter[(bank * OUT_BANK_MULTIPLIER)+:8]
         // With bank=0 and OUT_BANK_MULTIPLIER=2, this is counter[0+:8]
-        $print("Send state - LED: %h, Saleae: %h", led, saleae)
+        $print("Send state - LED: %h, Saleae: %h", dut.led, dut.saleae)
         
         // Test bank selection in send state
         $sendUartByte("1")
@@ -230,7 +226,7 @@ testbench alchitry_top_tb {
         }
         
         // Now should show counter[(1 * 2)+:8] = counter[2+:8]
-        $print("Send state bank 1 - LED: %h, Saleae: %h", led, saleae)
+        $print("Send state bank 1 - LED: %h, Saleae: %h", dut.led, dut.saleae)
         
         // Switch back to receive state
         $sendUartByte("r")
@@ -241,8 +237,8 @@ testbench alchitry_top_tb {
         repeat(10) {
             $tickClock()
         }
-        $assert(led == 8hFF)
-        $print("Back to receive state - LED: %h (expected FF)", led)
+        $assert(dut.led == 8hFF)
+        $print("Back to receive state - LED: %h (expected FF)", dut.led)
         
         $print("Send state test completed!")
     }
@@ -318,7 +314,7 @@ testbench alchitry_top_tb {
             $tickClock()
         }
         sig initial_led[8]
-        initial_led = led
+        initial_led = dut.led
         
         // Let counter run
         repeat(1000) {
@@ -326,7 +322,7 @@ testbench alchitry_top_tb {
         }
         
         // LED should have changed (counter incremented)
-        $print("Initial LED: %h, Current LED: %h", initial_led, led)
+        $print("Initial LED: %h, Current LED: %h", initial_led, dut.led)
         
         // The exact value depends on timing, but it should be different
         // unless we hit a very unlikely case where the counter wrapped
