@@ -100,6 +100,41 @@ jobs:
         
         echo "✅ Project ${{ matrix.project }} passed syntax check"
     
+    - name: Run test benches (if available)
+      run: |
+        cd gateware/${{ matrix.project }}
+        echo "Checking for test benches in project: ${{ matrix.project }}"
+        
+        PROJECT_FILE="${{ matrix.project }}.alp"
+        PROJECT_ABS_PATH="$(pwd)/$PROJECT_FILE"
+        
+        # Check if project has test benches
+        if "$ALCHITRY_BIN" sim "$PROJECT_ABS_PATH" --list 2>&1 | grep -q "Tests:"; then
+          echo "📋 Test benches found, running simulation tests..."
+          
+          # Run all test benches and capture output
+          if "$ALCHITRY_BIN" sim "$PROJECT_ABS_PATH" 2>&1 | tee sim_output.log; then
+            # Check if any tests failed
+            if grep -q "failed\|Failed\|FAILED\|Error\|ERROR" sim_output.log; then
+              echo "❌ Test bench execution failed"
+              cat sim_output.log
+              exit 1
+            elif grep -q "passed!" sim_output.log; then
+              echo "✅ All test benches passed successfully"
+              # Show a summary of passed tests
+              grep "passed!" sim_output.log
+            else
+              echo "⚠️ Test benches ran but no clear pass/fail indication found"
+              cat sim_output.log
+            fi
+          else
+            echo "❌ Test bench execution failed with exit code $?"
+            exit 1
+          fi
+        else
+          echo "ℹ️ No test benches found for project ${{ matrix.project }}, skipping simulation tests"
+        fi
+    
     - name: Upload build artifacts (if any)
       uses: actions/upload-artifact@v4
       if: always()

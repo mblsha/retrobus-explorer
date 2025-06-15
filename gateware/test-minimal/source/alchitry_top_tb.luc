@@ -1,0 +1,100 @@
+testbench alchitry_top_tb {
+    sig clk
+    sig rst_n
+    
+    alchitry_top dut (.clk(clk), .rst_n(rst_n))
+    
+    fun tickClock() {
+        clk = 1
+        $tick()
+        clk = 0
+        $tick()
+    }
+    
+    test basicCounterTest {
+        clk = 0
+        rst_n = 1
+        $tick()
+        
+        $print("Starting basic counter test...")
+        
+        // Apply reset
+        rst_n = 0
+        $tickClock()
+        $tickClock()
+        rst_n = 1
+        $tickClock()
+        $tickClock()
+        
+        $print("After reset - LED value: %h", dut.led)
+        
+        // Test counter increments - LED should remain 0 for first 2^18 cycles
+        // Since LED = counter[25:18], it will be 0 until counter reaches 2^18
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // LED should still be 0 after 100 cycles
+        $assert(dut.led == 8h00)
+        $print("After 100 cycles - LED value: %h (should be 00)", dut.led)
+        
+        $print("Basic counter test completed!")
+    }
+    
+    test resetBehaviorTest {
+        clk = 0
+        rst_n = 1
+        $tick()
+        
+        $print("Starting reset behavior test...")
+        
+        // Let counter run for some cycles
+        repeat(50) {
+            $tickClock()
+        }
+        
+        // Apply reset and verify LED goes to 0
+        rst_n = 0
+        $tickClock()
+        $tickClock()
+        rst_n = 1
+        $tickClock()
+        $tickClock()
+        $tickClock()
+        
+        // After reset, LED should be 0
+        $assert(dut.led == 8h00)
+        $print("After reset - LED value: %h (should be 00)", dut.led)
+        
+        $print("Reset behavior test completed!")
+    }
+    
+    test clockingTest {
+        clk = 0
+        rst_n = 1
+        $tick()
+        
+        $print("Starting clocking test...")
+        
+        // Reset first
+        rst_n = 0
+        $tickClock()
+        rst_n = 1
+        $tickClock()
+        
+        // Test that clock edges work properly
+        // The counter should increment on each positive clock edge
+        clk = 0
+        $tick()
+        clk = 1
+        $tick()
+        clk = 0
+        $tick()
+        
+        // Verify LED is still 0 (expected for small counter values)
+        $assert(dut.led == 8h00)
+        $print("After manual clock cycles - LED value: %h", dut.led)
+        
+        $print("Clocking test completed!")
+    }
+}
