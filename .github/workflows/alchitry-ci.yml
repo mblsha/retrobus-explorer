@@ -5,12 +5,12 @@ on:
     branches: [ master, main ]
     paths:
       - 'gateware/**'
-      - '.github/workflows/alchitry-ci.yml'
+      - '.github/**'
   pull_request:
     branches: [ master, main ]
     paths:
       - 'gateware/**'
-      - '.github/workflows/alchitry-ci.yml'
+      - '.github/**'
 
 jobs:
   check-projects:
