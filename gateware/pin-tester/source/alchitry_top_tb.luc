@@ -2,7 +2,6 @@ testbench alchitry_top_tb {
     sig clk
     sig rst_n
     sig usb_rx
-    sig usb_tx
     sig led[8]
     sig ffc_data[48]
     sig saleae[8]
@@ -11,7 +10,6 @@ testbench alchitry_top_tb {
         .clk(clk), 
         .rst_n(rst_n),
         .usb_rx(usb_rx),
-        .usb_tx(usb_tx),
         .led(led),
         .ffc_data(ffc_data),
         .saleae(saleae)
@@ -28,6 +26,9 @@ testbench alchitry_top_tb {
         // UART format: start bit (0), 8 data bits (LSB first), stop bit (1)
         // At 1MHz baud rate with 100MHz clock = 100 clock cycles per bit
         
+        sig byte_temp[8]
+        byte_temp = byte
+        
         // Start bit
         usb_rx = 0
         repeat(100) {
@@ -36,8 +37,8 @@ testbench alchitry_top_tb {
         
         // Data bits (LSB first)
         repeat(8) {
-            usb_rx = byte[0]
-            byte = byte >> 1
+            usb_rx = byte_temp[0]
+            byte_temp = byte_temp >> 1
             repeat(100) {
                 $tickClock()
             }
@@ -334,4 +335,3 @@ testbench alchitry_top_tb {
         $print("Counter increment test completed!")
     }
 }
-
