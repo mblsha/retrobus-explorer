@@ -25,6 +25,12 @@ analytics via a Marimo Notebook interface in the browser.
     **External ROM Emulation**: Can stream data in ext banks 0 and 1 from USB3
     continuously, this could be used for video playback
 
+* SHARP IQ-7000 (SC62015-based)
+
+    **ROM Decoding**: In Progress ([Binary Ninja
+    Plugin](https://github.com/mblsha/binja-esr)
+
+
 # Hardware
 
 Project is built on top of [Alchitry Au FPGA board](https://www.sparkfun.com/alchitry-au-fpga-development-board-xilinx-artix-7.html) and [Ft Element board](https://www.sparkfun.com/alchitry-ft-element-board.html).
@@ -36,11 +42,16 @@ Up to 48 signals can be captured simultaneously.
 Up to two adapters can be connected at the same time, allowing to capture
 communication on the system bus and the external bus card.
 
-# Hardware Adapters
+# Hardware Adapters (up to 48 signals)
 
-* Pin Tester to test correctness and signal integrity
-* SHARP PC-G850
-* SHARP PC-E500
+* [Pin Tester](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/pin-tester.stanza) to test correctness and signal integrity
+* [SHARP PC-G850 Bus Connector](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-pc-g850-bus.stanza)
+* [SHARP PC-E500 RAM Card](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-pc-e500-ram-card.stanza)
+* [SHARP Organizer Card](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-organizer-card.stanza) (plugs into organizers)
+* [SHARP Organizer Host](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-organizer-host.stanza) (accepts card connections)
+* [SC62015 CPU Interposer](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-sc62015-interposer.stanza)
+* [SC61860 CPU Interposer](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-sc61860-interposer.stanza)
+
 
 # License
 
