@@ -44,6 +44,7 @@ communication on the system bus and the external bus card.
 
 # Hardware Adapters (up to 48 signals)
 
+* [Level Shifter Element Au1](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/main.stanza)
 * [Pin Tester](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/pin-tester.stanza) to test correctness and signal integrity
 * [SHARP PC-G850 Bus Connector](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-pc-g850-bus.stanza)
 * [SHARP PC-E500 RAM Card](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-pc-e500-ram-card.stanza)
@@ -52,6 +53,10 @@ communication on the system bus and the external bus card.
 * [SC62015 CPU Interposer](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-sc62015-interposer.stanza)
 * [SC61860 CPU Interposer](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-sc61860-interposer.stanza)
 
+# Misc Adapters
+
+* [RPi 40-pin to RPi Pico](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/rpi-pico-40-pin-adapter.stanza)
+* [Saleae to DSLab probes](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/saleae-dslab-adapter.stanza)
 
 # License
 
