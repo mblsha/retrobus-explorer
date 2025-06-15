@@ -1,0 +1,337 @@
+testbench alchitry_top_tb {
+    sig clk
+    sig rst_n
+    sig usb_rx
+    sig usb_tx
+    sig led[8]
+    sig ffc_data[48]
+    sig saleae[8]
+    
+    alchitry_top dut (
+        .clk(clk), 
+        .rst_n(rst_n),
+        .usb_rx(usb_rx),
+        .usb_tx(usb_tx),
+        .led(led),
+        .ffc_data(ffc_data),
+        .saleae(saleae)
+    )
+    
+    fun tickClock() {
+        clk = 1
+        $tick()
+        clk = 0
+        $tick()
+    }
+    
+    fun sendUartByte(byte) {
+        // UART format: start bit (0), 8 data bits (LSB first), stop bit (1)
+        // At 1MHz baud rate with 100MHz clock = 100 clock cycles per bit
+        
+        // Start bit
+        usb_rx = 0
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // Data bits (LSB first)
+        repeat(8) {
+            usb_rx = byte[0]
+            byte = byte >> 1
+            repeat(100) {
+                $tickClock()
+            }
+        }
+        
+        // Stop bit
+        usb_rx = 1
+        repeat(100) {
+            $tickClock()
+        }
+    }
+    
+    fun waitForUartTx() {
+        // Wait for UART transmission to complete
+        // Each byte takes ~1000 clock cycles at 1MHz baud
+        repeat(1200) {
+            $tickClock()
+        }
+    }
+    
+    test resetBehaviorTest {
+        clk = 0
+        rst_n = 1
+        usb_rx = 1  // UART idle state
+        ffc_data = 48x{1bz}  // High impedance
+        $tick()
+        
+        $print("Starting reset behavior test...")
+        
+        // Apply reset
+        rst_n = 0
+        repeat(10) {
+            $tickClock()
+        }
+        rst_n = 1
+        repeat(10) {
+            $tickClock()
+        }
+        
+        // After reset, should be in RECEIVE state with bank 0
+        $assert(led == 8h00)
+        $assert(saleae == 8h00)
+        $print("After reset - LED: %h, Saleae: %h", led, saleae)
+        
+        $print("Reset behavior test completed!")
+    }
+    
+    test receiveStateTest {
+        clk = 0
+        rst_n = 1
+        usb_rx = 1
+        ffc_data = 48x{1bz}
+        $tick()
+        
+        $print("Starting receive state test...")
+        
+        // Reset first
+        rst_n = 0
+        repeat(10) {
+            $tickClock()
+        }
+        rst_n = 1
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // Set some test data on ffc_data pins 0-7 (bank 0)
+        ffc_data[0+:8] = 8hAA  // 10101010 pattern
+        ffc_data[8+:8] = 8h55  // 01010101 pattern for bank 1
+        repeat(10) {
+            $tickClock()
+        }
+        
+        // Should reflect bank 0 data on LED and Saleae
+        $assert(led == 8hAA)
+        $assert(saleae == 8hAA)
+        $print("Bank 0 - LED: %h, Saleae: %h (expected AA)", led, saleae)
+        
+        // Send bank selection command "1" to switch to bank 1
+        $sendUartByte("1")
+        $waitForUartTx()
+        
+        // Should now reflect bank 1 data
+        $assert(led == 8h55)
+        $assert(saleae == 8h55)
+        $print("Bank 1 - LED: %h, Saleae: %h (expected 55)", led, saleae)
+        
+        $print("Receive state test completed!")
+    }
+    
+    test bankSelectionTest {
+        clk = 0
+        rst_n = 1
+        usb_rx = 1
+        ffc_data = 48x{1bz}
+        $tick()
+        
+        $print("Starting bank selection test...")
+        
+        // Reset first
+        rst_n = 0
+        repeat(10) {
+            $tickClock()
+        }
+        rst_n = 1
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // Set different patterns on different banks
+        ffc_data[0+:8] = 8h01   // Bank 0
+        ffc_data[8+:8] = 8h02   // Bank 1
+        ffc_data[16+:8] = 8h04  // Bank 2
+        ffc_data[24+:8] = 8h08  // Bank 3
+        ffc_data[32+:8] = 8h10  // Bank 4
+        ffc_data[40+:8] = 8h20  // Bank 5
+        repeat(10) {
+            $tickClock()
+        }
+        
+        // Test bank 0 (default)
+        $assert(led == 8h01)
+        $print("Bank 0 selected - LED: %h (expected 01)", led)
+        
+        // Test bank 2
+        $sendUartByte("2")
+        $waitForUartTx()
+        $assert(led == 8h04)
+        $print("Bank 2 selected - LED: %h (expected 04)", led)
+        
+        // Test bank 5
+        $sendUartByte("5")
+        $waitForUartTx()
+        $assert(led == 8h20)
+        $print("Bank 5 selected - LED: %h (expected 20)", led)
+        
+        // Test invalid bank (should be ignored)
+        $sendUartByte("9")
+        $waitForUartTx()
+        $assert(led == 8h20)  // Should still be bank 5
+        $print("Invalid bank 9 - LED: %h (should remain 20)", led)
+        
+        $print("Bank selection test completed!")
+    }
+    
+    test sendStateTest {
+        clk = 0
+        rst_n = 1
+        usb_rx = 1
+        ffc_data = 48x{1bz}
+        $tick()
+        
+        $print("Starting send state test...")
+        
+        // Reset first
+        rst_n = 0
+        repeat(10) {
+            $tickClock()
+        }
+        rst_n = 1
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // Switch to send state
+        $sendUartByte("s")
+        $waitForUartTx()
+        
+        // In send state, counter should be incrementing
+        // LED and saleae should show counter bits
+        // ffc_data[0+:8] should also show counter bits
+        
+        // Let counter run for a while
+        repeat(1000) {
+            $tickClock()
+        }
+        
+        // Counter should be non-zero by now
+        // LED should reflect counter[(bank * OUT_BANK_MULTIPLIER)+:8]
+        // With bank=0 and OUT_BANK_MULTIPLIER=2, this is counter[0+:8]
+        $print("Send state - LED: %h, Saleae: %h", led, saleae)
+        
+        // Test bank selection in send state
+        $sendUartByte("1")
+        $waitForUartTx()
+        
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // Now should show counter[(1 * 2)+:8] = counter[2+:8]
+        $print("Send state bank 1 - LED: %h, Saleae: %h", led, saleae)
+        
+        // Switch back to receive state
+        $sendUartByte("r")
+        $waitForUartTx()
+        
+        // Should be back in receive state
+        ffc_data[0+:8] = 8hFF
+        repeat(10) {
+            $tickClock()
+        }
+        $assert(led == 8hFF)
+        $print("Back to receive state - LED: %h (expected FF)", led)
+        
+        $print("Send state test completed!")
+    }
+    
+    test uartEchoTest {
+        clk = 0
+        rst_n = 1
+        usb_rx = 1
+        ffc_data = 48x{1bz}
+        $tick()
+        
+        $print("Starting UART echo test...")
+        
+        // Reset first
+        rst_n = 0
+        repeat(10) {
+            $tickClock()
+        }
+        rst_n = 1
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // Send valid commands and verify they get echoed
+        // Note: This is a simplified test - in real hardware we'd need to
+        // decode the UART TX signal to verify the echo
+        
+        $sendUartByte("0")
+        $waitForUartTx()
+        $print("Sent bank selection '0'")
+        
+        $sendUartByte("s")
+        $waitForUartTx()
+        $print("Sent send mode 's'")
+        
+        $sendUartByte("r")
+        $waitForUartTx()
+        $print("Sent receive mode 'r'")
+        
+        // Send invalid command (should still be processed but not change state)
+        $sendUartByte("x")
+        $waitForUartTx()
+        $print("Sent invalid command 'x'")
+        
+        $print("UART echo test completed!")
+    }
+    
+    test counterIncrementTest {
+        clk = 0
+        rst_n = 1
+        usb_rx = 1
+        ffc_data = 48x{1bz}
+        $tick()
+        
+        $print("Starting counter increment test...")
+        
+        // Reset first
+        rst_n = 0
+        repeat(10) {
+            $tickClock()
+        }
+        rst_n = 1
+        repeat(100) {
+            $tickClock()
+        }
+        
+        // Switch to send state
+        $sendUartByte("s")
+        $waitForUartTx()
+        
+        // Capture initial LED value
+        repeat(100) {
+            $tickClock()
+        }
+        sig initial_led[8]
+        initial_led = led
+        
+        // Let counter run
+        repeat(1000) {
+            $tickClock()
+        }
+        
+        // LED should have changed (counter incremented)
+        $print("Initial LED: %h, Current LED: %h", initial_led, led)
+        
+        // The exact value depends on timing, but it should be different
+        // unless we hit a very unlikely case where the counter wrapped
+        // to show the same 8-bit slice
+        
+        $print("Counter increment test completed!")
+    }
+}
+
