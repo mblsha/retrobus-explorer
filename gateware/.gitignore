@@ -38,7 +38,6 @@ wt/
 *.xml
 *_sim_netlist.v
 *_sim_netlist.vhdl
-*_stub.v
 *_stub.vhdl
 *_bmstub.v
 *_clk_wiz.v
