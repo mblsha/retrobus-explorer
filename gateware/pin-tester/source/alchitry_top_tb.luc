@@ -204,7 +204,7 @@ testbench alchitry_top_tb {
         $waitForUartTx()
         
         // In send state, counter should be incrementing
-        // LED and saleae should show counter bits
+        // LED and dut.saleae should show counter bits
         // ffc_data[0+:8] should also show counter bits
         
         // Let counter run for a while
