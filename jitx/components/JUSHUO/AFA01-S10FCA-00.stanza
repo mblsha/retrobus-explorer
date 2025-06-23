@@ -1,0 +1,170 @@
+; This file is generated based on the parts database query below:")
+;   database-part(["manufacturer" => "JUSHUO", "mpn" => "AFA01-S10FCA-00"])
+#use-added-syntax(jitx)
+defpackage components/JUSHUO/AFA01-S10FCA-00 :
+  import core
+  import jitx
+  import jitx/commands
+  import ocdb/utils/box-symbol
+
+
+pcb-pad rectangle-smd-pad :
+  name = "rectangle-smd-pad"
+  type = SMD
+  shape = Rectangle(0.300, 1.250)
+  layer(SolderMask(Top)) = Rectangle(0.402, 1.352)
+  layer(Paste(Top)) = Rectangle(0.402, 1.352)
+
+pcb-pad rectangle-smd-pad-1 :
+  name = "rectangle-smd-pad-1"
+  type = SMD
+  shape = Rectangle(1.800, 2.200)
+  layer(SolderMask(Top)) = Rectangle(1.902, 2.302)
+  layer(Paste(Top)) = Rectangle(1.902, 2.302)
+
+pcb-landpattern lp :
+  pad p[1] : rectangle-smd-pad at loc(-4.498, -2.613) on Top
+  pad p[2] : rectangle-smd-pad at loc(-3.498, -2.613) on Top
+  pad p[3] : rectangle-smd-pad at loc(-2.498, -2.613) on Top
+  pad p[4] : rectangle-smd-pad at loc(-1.498, -2.613) on Top
+  pad p[5] : rectangle-smd-pad at loc(-0.498, -2.613) on Top
+  pad p[6] : rectangle-smd-pad at loc(0.502, -2.613) on Top
+  pad p[7] : rectangle-smd-pad at loc(1.502, -2.613) on Top
+  pad p[8] : rectangle-smd-pad at loc(2.502, -2.613) on Top
+  pad p[9] : rectangle-smd-pad at loc(3.502, -2.611) on Top
+  pad p[10] : rectangle-smd-pad at loc(4.502, -2.611) on Top
+  pad p[11] : rectangle-smd-pad-1 at loc(-6.901, -0.061, 180.000) on Top
+  pad p[12] : rectangle-smd-pad-1 at loc(6.899, -0.061, 180.000) on Top
+
+  layer(Silkscreen("F-SilkS", Top)) = Text(">REF", 0.5, W, loc(-0.750, 4.995))
+  layer(CustomLayer("Fab", Top)) = Text(">VALUE", 0.5, W, loc(-0.750, 3.995))
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-8.000, 3.163), Point(8.000, 3.163)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-8.000, 3.163), Point(-8.000, 1.156)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-8.000, -1.277), Point(-8.000, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-8.000, -2.111), Point(-4.880, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-4.117, -2.111), Point(-3.880, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-3.117, -2.111), Point(-2.881, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-2.116, -2.111), Point(-1.880, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-1.117, -2.111), Point(-0.880, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(-0.117, -2.111), Point(0.120, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(0.883, -2.111), Point(1.120, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(1.883, -2.111), Point(2.120, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(2.883, -2.111), Point(3.120, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(3.883, -2.111), Point(4.120, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(4.883, -2.111), Point(8.000, -2.111)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(8.000, -2.111), Point(8.000, -1.273)])
+  layer(Silkscreen("F-SilkS", Top)) = Line(0.254, [Point(8.000, 1.151), Point(8.000, 3.163)])
+  layer(CustomLayer("Fab", Top)) = Polyline(0.200, [
+    Arc(-7.952, -2.659, 0.100, 0.0, -360.000)])
+  layer(Courtyard(Top)) = Rectangle(16.253, 6.579)
+
+  model3d = Model3D("{USER_PROJECT_ROOT}/3d-models/jitx-64d12eefb789d8dc4b77e394.stp",
+    Vec3D(0.0, 0.0, 0.0),
+    Vec3D(1.000, 1.000, 1.000),
+    Vec3D(0.0, 0.0, 0.0),
+    [],
+    )
+
+pcb-symbol sym-AFA01-S10FCA-00 :
+  pin p[1] at Point(-1.270, 11.430) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[2] at Point(-1.270, 8.890) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[3] at Point(-1.270, 6.350) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[4] at Point(-1.270, 3.810) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[5] at Point(-1.270, 1.270) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[6] at Point(-1.270, -1.270) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[7] at Point(-1.270, -3.810) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[8] at Point(-1.270, -6.350) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[9] at Point(-1.270, -8.890) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[10] at Point(-1.270, -11.430) with :
+    direction = Left
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[11] at Point(5.080, -13.970) with :
+    direction = Down
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+  pin p[12] at Point(5.080, 13.970) with :
+    direction = Up
+    length = 5.080
+    number-size = 1.000
+    name-size = 1.000
+
+  draw("value") = Text(">VALUE", 0.7056, C, loc(0.0, 14.970))
+  draw("reference") = Text(">REF", 0.7056, C, loc(0.0, 15.970))
+  draw("foreground") = Rectangle(7.620, 27.940, loc(2.540, 0.0))
+
+public pcb-component component :
+  name = "C262756"
+  description = "Clamshell 10P Bottom Contact Surface Mount 1mm SMD,P=1mm  FFC/FPC Connectors ROHS"
+  manufacturer = "JUSHUO"
+  mpn = "AFA01-S10FCA-00"
+  datasheet = "https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_JUSHUO-AFA01-S10FCA-00_C262756.pdf"
+  reference-prefix = "J"
+  pin-properties :
+    [pin:Ref | pads:Ref ... | side:Dir | electrical-type:String | bank:Int]
+    [p[1] | p[1] | Left | "unspecified" | 0]
+    [p[2] | p[2] | Left | "unspecified" | 0]
+    [p[3] | p[3] | Left | "unspecified" | 0]
+    [p[4] | p[4] | Left | "unspecified" | 0]
+    [p[5] | p[5] | Left | "unspecified" | 0]
+    [p[6] | p[6] | Left | "unspecified" | 0]
+    [p[7] | p[7] | Left | "unspecified" | 0]
+    [p[8] | p[8] | Left | "unspecified" | 0]
+    [p[9] | p[9] | Left | "unspecified" | 0]
+    [p[10] | p[10] | Left | "unspecified" | 0]
+    [p[11] | p[11] | Down | "unspecified" | 0]
+    [p[12] | p[12] | Up | "unspecified" | 0]
+
+  assign-landpattern(lp)
+  assign-symbol(sym-AFA01-S10FCA-00)
+
+  property(self.category) = "connector"
+  property(self.manufacturer_aliases) = ["JUSHUO"]
+  property(self.mpn_aliases) = ["AFA01-S10FCA-00"]
+  property(self.cofactr_id) = "COURMZQ5ANM4"
+  property(self.reference_prefix) = "J"
+  property(self.trust) = "low"
+  property(self.x) = 16.253
+  property(self.y) = 6.579
+  property(self.area) = 106.928
+  property(self.case) = "SMD,P=1mm"
+  property(self.mounting) = "smd"
+

@@ -1,0 +1,73 @@
+#use-added-syntax(jitx)
+defpackage espi-debug-breakout :
+  import core
+  import jitx
+  import jitx/commands
+  import jitx/parts
+
+  import helpers
+  import jsl
+  import collections
+
+  import ocdb/utils/generic-components
+  import ocdb/utils/landpatterns
+  import utils/time
+
+; Define the physical shape and size of the breakout board.
+val board-shape = RoundedRectangle(35.0, 28.0, 1.0)
+
+; This is the main module for our eSPI debug breakout board.
+public pcb-module espi-debug-breakout-module :
+  port gnd
+  port vcc
+
+  inst ffc : components/JUSHUO/AFA01-S10FCA-00/component
+  inst saleae : components/Saleae/saleae8(text-angle = 90.0)
+  inst gpio-header : pin-header(20, 2)
+
+  ; FFC Pin 1: GND
+  ; FFC Pin 2: VCC
+  ; FFC Pins 3-10: 8 data lines
+
+  net GND (gnd, ffc.p[1], saleae.gnd, ffc.p[11], ffc.p[12])
+  net VCC (vcc, ffc.p[2])
+
+  for i in 0 to 8 do :
+    val ffc_pin_index = i + 3
+    val saleae_data_index = 7 - i
+    val net_name = to-symbol(append("ESPI_D", to-string(saleae_data_index)))
+    make-net(net_name, [ffc.p[ffc_pin_index], saleae.data[saleae_data_index]])
+
+  for i in 0 to 10 do :
+    val ffc_pin_index = 10 - i
+    val gpio_signal_pin = i * 2 + 1
+    net (ffc.p[ffc_pin_index], gpio-header.p[gpio_signal_pin])
+
+  for i in 0 to 10 do :
+    val gpio_gnd_pin = i * 2 + 2
+    net (gnd, gpio-header.p[gpio_gnd_pin])
+
+  val board_w = width(board-shape)
+  val board_h = height(board-shape)
+
+  place(ffc) at loc(0.0, -10.0, 180.0) on Top
+  place(saleae) at loc(0.0, 0.0, 270.0) on Top
+  place(gpio-header) at loc(0.0, 10.0, 90.0) on Top
+
+  val mydate:String = get-time-string("%Y-%m-%d")
+  val label-text = append("eSPI-Debug-Breakout ", mydate)
+  inst version-label : ocdb/artwork/board-text/text(label-text, 1.5, 0.0)
+  place(version-label) at loc(0.0, 5.0, 0.0) on Top
+
+  inst ffc-pin1-marker : ocdb/artwork/board-text/text("1", 1.0, 0.0)
+  place(ffc-pin1-marker) at loc(-8.5, 0.0, 180.0) on Top (relative-to ffc)
+
+  geom(gnd) :
+    copper-pour(LayerIndex(0, Top), isolate = 0.2, rank = 1) = board-shape
+    copper-pour(LayerIndex(1, Bottom), isolate = 0.2, rank = 1) = board-shape
+
+setup-design("espi-debug-breakout", board-shape, signal-shrink = 0.5)
+set-main-module(espi-debug-breakout-module)
+view-schematic()
+view-board()
+export-to-cad()
