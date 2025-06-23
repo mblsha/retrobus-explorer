@@ -89,8 +89,13 @@ pcb-landpattern lp :
     Circle(Point((pad_span_per_side + 1.0) / -2.0,
                  (distance_between_pad_rows + pad_height * 1.0 + 0.5) / first_pad_circle_factor), 0.3)
 
-  layer(Cutout()) = Circle(Point(drill_hole_span / 2.0,  drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
-  layer(Cutout()) = Circle(Point(drill_hole_span / -2.0, drill_hole_offset_from_center * -1.0), drill_hole_diameter / 2.0)
+  val drill_y_offset =
+    if mirror_sides :
+      drill_hole_offset_from_center * 1.0
+    else :
+      drill_hole_offset_from_center * -1.0
+  layer(Cutout()) = Circle(Point(drill_hole_span / 2.0,  drill_y_offset), drill_hole_diameter / 2.0)
+  layer(Cutout()) = Circle(Point(drill_hole_span / -2.0, drill_y_offset), drill_hole_diameter / 2.0)
 
 
 public pcb-component component :
