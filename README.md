@@ -44,7 +44,7 @@ communication on the system bus and the external bus card.
 
 # Hardware Adapters (up to 48 signals)
 
-* [Level Shifter Element Au1](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/main.stanza)
+* [Level Shifter Element Au1](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/alchitry-au1-level-shifter.stanza)
 * [Pin Tester](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/pin-tester.stanza) to test correctness and signal integrity
 * [SHARP PC-G850 Bus Connector](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-pc-g850-bus.stanza)
 * [SHARP PC-E500 RAM Card](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/sharp-pc-e500-ram-card.stanza)

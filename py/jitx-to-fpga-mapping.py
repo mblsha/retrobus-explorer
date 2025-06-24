@@ -638,6 +638,7 @@ def _(mo):
 
 @app.cell
 def _():
+    # From alchitry-au1-level-shifter.stanza lines 106-113
     saleae_to_alchitry_mapping = """
     saleae0 → fpga.data_b[15]
     saleae1 → fpga.data_b[13]
