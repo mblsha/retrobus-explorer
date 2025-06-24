@@ -142,14 +142,14 @@ loDATA39 → fpga.data_b[6]
 
 # From alchitry-au1-level-shifter.stanza lines 106-113
 SALEAE_TO_ALCHITRY_MAPPING = """
-saleae3 → fpga.data_b[15]
-saleae2 → fpga.data_b[13]
-saleae1 → fpga.data_b[12]
-saleae0 → fpga.data_b[14]
-saleae7 → fpga.data_b[10]
-saleae6 → fpga.data_b[8]
-saleae5 → fpga.data_d[4]
-saleae4 → fpga.data_d[5]
+saleae0 → fpga.data_d[5]
+saleae1 → fpga.data_d[4]
+saleae2 → fpga.data_b[8]
+saleae3 → fpga.data_b[10]
+saleae4 → fpga.data_b[14]
+saleae5 → fpga.data_b[12]
+saleae6 → fpga.data_b[13]
+saleae7 → fpga.data_b[15]
 """.strip()
 
 # sharp-pc-g850-bus.stanza (print pin mapping)
