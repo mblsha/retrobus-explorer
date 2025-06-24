@@ -1,5 +1,31 @@
-# https://docs.marimo.io/guides/editor_features/language_server/#installation
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
 
+[project]
+name = "retrobus-explorer"
+version = "0.1.0"
+description = "RetroComputing bus exploration tools and FPGA gateware"
+requires-python = ">=3.8"
+dependencies = [
+    "pytest>=6.0",
+    "pillow>=8.0",
+    "pandas>=1.3",
+    "fastapi>=0.68",
+    "uvicorn>=0.15",
+]
+
+[tool.setuptools.packages.find]
+include = ["z80bus*", "d3xx*", "shared*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+
+# https://docs.marimo.io/guides/editor_features/language_server/#installation
 [tool.marimo.experimental]
 lsp = true
 
@@ -17,3 +43,14 @@ enable_pyflakes = false      # Syntax checking with pyflakes
 [tool.marimo.diagnostics]
 enabled = true               # Show diagnostics in the editor
 
+# Pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
