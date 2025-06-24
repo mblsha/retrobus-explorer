@@ -1,5 +1,3 @@
-
-
 import marimo
 
 __generated_with = "0.13.0"
@@ -26,6 +24,7 @@ def _():
     from enum import Enum
     from typing import NamedTuple, Optional, List
     from lark import Lark, Transformer, v_args, Token
+
     return (
         Enum,
         Lark,
@@ -114,56 +113,67 @@ def _(
             return a.value + b.value
 
         def hexpair_seq(self, *pairs: str) -> bytes:
-            return bytes.fromhex(''.join(pairs))
+            return bytes.fromhex("".join(pairs))
 
         def checksum(self, pair: str) -> str:
             return pair
 
         def data_record(self, hex_seq: bytes, checksum: str) -> IntermediateRecord:
             return IntermediateRecord(
-                record_type=RecordType.DATA,
-                raw_data=hex_seq,
-                checksum=checksum
+                record_type=RecordType.DATA, raw_data=hex_seq, checksum=checksum
             )
 
         def eof_record(self, type_token: Token) -> IntermediateRecord:
             return IntermediateRecord(record_type=RecordType.EOF)
 
-        def extended_linear_address_record(self, type_token: Token, hex_seq: bytes, checksum: str) -> IntermediateRecord:
+        def extended_linear_address_record(
+            self, type_token: Token, hex_seq: bytes, checksum: str
+        ) -> IntermediateRecord:
             return IntermediateRecord(
                 record_type=RecordType.EXTENDED_LINEAR_ADDRESS,
                 raw_data=hex_seq,
-                checksum=checksum
+                checksum=checksum,
             )
 
-        def start_linear_address_record(self, type_token: Token, hex_seq: bytes, checksum: str) -> IntermediateRecord:
+        def start_linear_address_record(
+            self, type_token: Token, hex_seq: bytes, checksum: str
+        ) -> IntermediateRecord:
             return IntermediateRecord(
                 record_type=RecordType.START_LINEAR_ADDRESS,
                 raw_data=hex_seq,
-                checksum=checksum
+                checksum=checksum,
             )
 
         def record_data(self, data: IntermediateRecord) -> IntermediateRecord:
             return data
 
-        def record(self, byte_count: int, address: int, rec_data: IntermediateRecord) -> IntelHexRecord:
+        def record(
+            self, byte_count: int, address: int, rec_data: IntermediateRecord
+        ) -> IntelHexRecord:
             size: int = byte_count
             addr: int = address
             rtype: RecordType = rec_data.record_type
-            if rtype in {RecordType.DATA, RecordType.EXTENDED_LINEAR_ADDRESS, RecordType.START_LINEAR_ADDRESS}:
+            if rtype in {
+                RecordType.DATA,
+                RecordType.EXTENDED_LINEAR_ADDRESS,
+                RecordType.START_LINEAR_ADDRESS,
+            }:
                 raw = rec_data.raw_data
                 if raw is None or len(raw) != size:
-                    raise ValueError(f"Byte count mismatch: expected {size}, got {len(raw) if raw is not None else 0}")
+                    raise ValueError(
+                        f"Byte count mismatch: expected {size}, got {len(raw) if raw is not None else 0}"
+                    )
                 data_field: bytes = raw
                 cs: Optional[str] = rec_data.checksum
             else:  # EOF record
                 data_field = None
                 cs = None
-            return IntelHexRecord(record_type=rtype, addr=addr, size=size, data=data_field, checksum=cs)
+            return IntelHexRecord(
+                record_type=rtype, addr=addr, size=size, data=data_field, checksum=cs
+            )
 
         def start(self, *records: IntelHexRecord) -> List[IntelHexRecord]:
             return list(records)
-
 
     parser = Lark(grammar, parser="earley")
     return IntelHexRecord, IntelHexTransformer, RecordType, Segment, parser
@@ -189,9 +199,9 @@ def _(IntelHexRecord, List, NamedTuple, Optional, RecordType, Segment):
         for record in records:
             if record.record_type == RecordType.EXTENDED_LINEAR_ADDRESS:
                 # Convert the two-byte data field to an integer.
-                extended_linear_address = int.from_bytes(record.data, byteorder='big')
+                extended_linear_address = int.from_bytes(record.data, byteorder="big")
             elif record.record_type == RecordType.START_LINEAR_ADDRESS:
-                execution_start_address = int.from_bytes(record.data, byteorder='big')
+                execution_start_address = int.from_bytes(record.data, byteorder="big")
             elif record.record_type == RecordType.DATA:
                 full_address = (extended_linear_address << 16) + record.addr
                 segments.append(Segment(start_address=full_address, data=record.data))
@@ -206,16 +216,24 @@ def _(IntelHexRecord, List, NamedTuple, Optional, RecordType, Segment):
         merged_segments: List[Segment] = []
 
         for seg in segments:
-            if merged_segments and (merged_segments[-1].start_address + len(merged_segments[-1].data) == seg.start_address):
+            if merged_segments and (
+                merged_segments[-1].start_address + len(merged_segments[-1].data)
+                == seg.start_address
+            ):
                 # Merge contiguous segments.
                 last_seg = merged_segments.pop()
                 merged_data = last_seg.data + seg.data
-                merged_seg = Segment(start_address=last_seg.start_address, data=merged_data)
+                merged_seg = Segment(
+                    start_address=last_seg.start_address, data=merged_data
+                )
                 merged_segments.append(merged_seg)
             else:
                 merged_segments.append(seg)
 
-        return ProcessedRecords(segments=merged_segments, execution_start_address=execution_start_address)
+        return ProcessedRecords(
+            segments=merged_segments, execution_start_address=execution_start_address
+        )
+
     return (process_records,)
 
 
@@ -256,11 +274,11 @@ def decode_sequential_bytes(lines):
 
     for lineno, raw in enumerate(lines, start=1):
         line = raw.strip()
-        if not line or line.startswith('#'):
+        if not line or line.startswith("#"):
             continue
 
         try:
-            addr_str, byte_list_str = line.split(':', 1)
+            addr_str, byte_list_str = line.split(":", 1)
         except ValueError:
             raise ValueError(f"Line {lineno}: malformed, expected 'ADDR: BYTE…'")
 
@@ -271,7 +289,9 @@ def decode_sequential_bytes(lines):
             this_addr = addr + offset
             byte_val = int(b, 16)
             if not 0 <= byte_val <= 0xFF:
-                raise ValueError(f"Line {lineno}, byte #{offset+1}: {b!r} out of range")
+                raise ValueError(
+                    f"Line {lineno}, byte #{offset + 1}: {b!r} out of range"
+                )
 
             if prev_addr is None:
                 # first_addr = this_addr
@@ -279,8 +299,8 @@ def decode_sequential_bytes(lines):
             else:
                 if this_addr != prev_addr + 1:
                     raise ValueError(
-                        f"Non-sequential address at line {lineno}, byte #{offset+1}: "
-                        f"expected 0x{prev_addr+1:X}, got 0x{this_addr:X}"
+                        f"Non-sequential address at line {lineno}, byte #{offset + 1}: "
+                        f"expected 0x{prev_addr + 1:X}, got 0x{this_addr:X}"
                     )
 
             data_bytes.append(byte_val)
@@ -294,7 +314,7 @@ def decode_sequential_bytes(lines):
 
 @app.cell
 def _():
-    with open('iq-7000-full-memory2.txt', 'r') as f:
+    with open("iq-7000-full-memory2.txt", "r") as f:
         lines = f.readlines()
         bytes = decode_sequential_bytes(lines)
         print(bytes)

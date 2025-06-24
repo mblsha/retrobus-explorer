@@ -333,11 +333,13 @@ def get_alchitry_element_mapping() -> Dict[str, str]:
     Maps from internal shield mapping to the Alchitry Labs constraint pin name
     """
     mapping = {}
-    for line in ALCHITRY_ELEMENT_MAPPING.split('\n'):
+    for line in ALCHITRY_ELEMENT_MAPPING.split("\n"):
         m = re.match(r"([A-D])\[(\d+)\] → [a-d]\.(\w+) \(([\w\d]+)\)", line)
         if m:
             bank, pin, bga_pin, internal_pin = m.groups()
-            mapping[f'{bank}{pin}'] = internal_pin  # Use internal pin name for Alchitry Labs
+            mapping[f"{bank}{pin}"] = (
+                internal_pin  # Use internal pin name for Alchitry Labs
+            )
     return mapping
 
 
@@ -346,11 +348,11 @@ def get_alchitry_ffc_mapping() -> Dict[int, str]:
     Maps from FFC data pin to the internal bank name
     """
     mapping = {}
-    for line in FFC_TO_ALCHITRY_MAPPING.split('\n'):
+    for line in FFC_TO_ALCHITRY_MAPPING.split("\n"):
         m = re.match(r"loDATA(\d+) → fpga.data_([a-d])\[(\d+)\]", line)
         if m:
             ffc_pin, bank, bank_num = m.groups()
-            mapping[int(ffc_pin)] = f'{bank.upper()}{bank_num}'
+            mapping[int(ffc_pin)] = f"{bank.upper()}{bank_num}"
     return mapping
 
 
@@ -359,11 +361,11 @@ def get_saleae_mapping() -> Dict[int, str]:
     Maps from Saleae pin to the internal bank name
     """
     mapping = {}
-    for line in SALEAE_TO_ALCHITRY_MAPPING.split('\n'):
+    for line in SALEAE_TO_ALCHITRY_MAPPING.split("\n"):
         m = re.match(r"saleae(\d+) → fpga.data_([a-d])\[(\d+)\]", line)
         if m:
             saleae_pin, bank, bank_num = m.groups()
-            mapping[int(saleae_pin)] = f'{bank.upper()}{bank_num}'
+            mapping[int(saleae_pin)] = f"{bank.upper()}{bank_num}"
     return mapping
 
 
@@ -372,11 +374,11 @@ def get_sharp_pc_g850_bus_mapping() -> Dict[str, str]:
     Maps from internal shield mapping to the Sharp PC-G850 bus pin name
     """
     mapping = {}
-    for line in SHARP_PC_G850_BUS_MAPPING.split('\n'):
+    for line in SHARP_PC_G850_BUS_MAPPING.split("\n"):
         m = re.match(r"(\d+) → bus.(\w+)", line)
         if m:
             pin, name = m.groups()
-            if name != 'GND':
+            if name != "GND":
                 mapping[pin] = name
     return mapping
 
@@ -386,13 +388,13 @@ def get_sharp_pc_e500_bus_mapping() -> Dict[str, str]:
     Maps from internal element mapping to the Sharp PC-E500 bus pin name
     """
     mapping = {}
-    for line in SHARP_PC_E500_BUS_MAPPING.split('\n'):
+    for line in SHARP_PC_E500_BUS_MAPPING.split("\n"):
         if not line:
             continue
         m = re.match(r"FPGA_MAP: (\d+) → bus\.(\w+)", line)
         if m:
             pin, name = m.groups()
-            if name != 'GND':
+            if name != "GND":
                 mapping[pin] = name
     return mapping
 
@@ -402,13 +404,13 @@ def get_sharp_organizer_card_mapping() -> Dict[str, str]:
     Maps from internal element mapping to the Sharp Organizer Card
     """
     mapping = {}
-    for line in SHARP_ORGANIZER_CARD_MAPPING.split('\n'):
+    for line in SHARP_ORGANIZER_CARD_MAPPING.split("\n"):
         if not line:
             continue
         m = re.match(r"FPGA_MAP: (\d+) → (\w+)", line)
         if m:
             pin, name = m.groups()
-            if name != 'GND':
+            if name != "GND":
                 mapping[pin] = name
     return mapping
 
@@ -418,13 +420,13 @@ def get_sharp_sc62015_mapping() -> Dict[str, str]:
     Maps from internal element mapping to the Sharp sc62015
     """
     mapping = {}
-    for line in SHARP_SC62015_MAPPING.split('\n'):
+    for line in SHARP_SC62015_MAPPING.split("\n"):
         if not line:
             continue
         m = re.match(r"FPGA_MAP: (\d+) → cpu.([\w\[\]]+)", line)
         if m:
             pin, name = m.groups()
-            if name != 'GND':
+            if name != "GND":
                 mapping[pin] = name
     return mapping
 
@@ -447,7 +449,7 @@ def generate_pin_tester_acf() -> str:
     for ffc_pin in sorted(ffc.keys()):
         if ffc_pin < 48:  # Only first 48 pins
             alchitry_pin = ffc[ffc_pin]
-            pins.append((f'ffc_data[{ffc_pin}]', alchitry_mapping[alchitry_pin]))
+            pins.append((f"ffc_data[{ffc_pin}]", alchitry_mapping[alchitry_pin]))
 
     return format_acf_content(pins)
 
@@ -460,7 +462,7 @@ def generate_saleae_acf() -> str:
     pins = []
     for saleae_pin in saleae.keys():
         alchitry_pin = saleae[saleae_pin]
-        pins.append((f'saleae[{saleae_pin}]', alchitry_mapping[alchitry_pin]))
+        pins.append((f"saleae[{saleae_pin}]", alchitry_mapping[alchitry_pin]))
 
     return format_acf_content(pins)
 
@@ -535,4 +537,3 @@ if __name__ == "__main__":
     print(generate_sharp_organizer_card_acf())
     print("\n=== Sharp SC62015 ===")
     print(generate_sharp_sc62015_acf())
-

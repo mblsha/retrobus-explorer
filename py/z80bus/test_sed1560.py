@@ -66,4 +66,3 @@ def test_set_column_part():
 def test_interpret_columns():
     assert interpret(out_cmd(0x02)).col == 0x02
     assert interpret(out_cmd(0x13)).col == 0x30
-

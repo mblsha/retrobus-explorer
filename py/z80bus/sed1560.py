@@ -364,7 +364,7 @@ class DrawLCDContext:
 
     def __enter__(self):
         self.process.start()
-        print(f'DrawLCDContext: pid {self.process.pid}')
+        print(f"DrawLCDContext: pid {self.process.pid}")
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):

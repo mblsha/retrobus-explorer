@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "retrobus-explorer"
 version = "0.1.0"
 description = "RetroComputing bus exploration tools and FPGA gateware"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
     "pytest>=6.0",
     "pillow>=8.0",
@@ -42,6 +42,41 @@ enable_pyflakes = false      # Syntax checking with pyflakes
 # Diagnostics configuration
 [tool.marimo.diagnostics]
 enabled = true               # Show diagnostics in the editor
+
+# Ruff configuration
+[tool.ruff]
+# Set target Python version to match project requirements
+target-version = "py310"
+
+# Configure per-file ignores for different modules
+[tool.ruff.lint.per-file-ignores]
+# d3xx is a ctypes binding library - allow common ctypes patterns
+"d3xx/*.py" = [
+    "F403",  # Star imports (from ctypes import *)
+    "F405",  # Undefined names from star imports
+    "F401",  # Unused imports
+    "E402",  # Module level import not at top of file
+    "E712",  # Avoid equality comparisons to True/False
+    "E741",  # Ambiguous variable names
+]
+# Test files - allow some test-specific patterns
+"**/test_*.py" = [
+    "F401",  # Unused imports in tests
+    "F821",  # Undefined names (test fixtures)
+    "E721",  # Type comparisons (tests often use type() == type())
+    "F541",  # f-string without placeholders
+    "E711",  # Comparison to None
+]
+# Legacy scripts and modules - allow common legacy patterns
+"*.py" = [
+    "F811",  # Redefinition of unused variables
+    "E402",  # Module level import not at top of file
+    "F401",  # Unused imports
+    "E711",  # Comparison to None
+    "F841",  # Local variable assigned but never used
+    "E722",  # Do not use bare except
+    "F541",  # f-string without placeholders
+]
 
 # Pytest configuration
 [tool.pytest.ini_options]

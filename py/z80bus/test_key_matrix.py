@@ -24,35 +24,41 @@ def test_key_matrix():
 
     # can only scan when both strobe colum and row bits have non-zero bits
     assert eval(in_port(0xFF, IOPort.KEY_INPUT)).cur == []
-    assert eval(
-        out_port(0x01, IOPort.SET_KEY_STROBE_LO)
-        + in_port(0x00, IOPort.KEY_INPUT)
-    ).cur == []
+    assert (
+        eval(
+            out_port(0x01, IOPort.SET_KEY_STROBE_LO) + in_port(0x00, IOPort.KEY_INPUT)
+        ).cur
+        == []
+    )
 
     assert eval(
-        out_port(0x01, IOPort.SET_KEY_STROBE_LO)
-        + in_port(0x01, IOPort.KEY_INPUT)
+        out_port(0x01, IOPort.SET_KEY_STROBE_LO) + in_port(0x01, IOPort.KEY_INPUT)
     ).cur == [PressedKey(row=0, col=0)]
     assert eval(
-        out_port(0x01, IOPort.SET_KEY_STROBE_LO)
-        + in_port(0x02, IOPort.KEY_INPUT)
+        out_port(0x01, IOPort.SET_KEY_STROBE_LO) + in_port(0x02, IOPort.KEY_INPUT)
     ).cur == [PressedKey(row=0, col=1)]
     assert eval(
-        out_port(0x01, IOPort.SET_KEY_STROBE_LO)
-        + in_port(0x03, IOPort.KEY_INPUT)
+        out_port(0x01, IOPort.SET_KEY_STROBE_LO) + in_port(0x03, IOPort.KEY_INPUT)
     ).cur == [PressedKey(row=0, col=0), PressedKey(row=0, col=1)]
     assert eval(
-        out_port(0x02, IOPort.SET_KEY_STROBE_LO)
-        + in_port(0x02, IOPort.KEY_INPUT)
+        out_port(0x02, IOPort.SET_KEY_STROBE_LO) + in_port(0x02, IOPort.KEY_INPUT)
     ).cur == [PressedKey(row=1, col=1)]
 
-    assert eval(
-        out_port(0x02, IOPort.SET_KEY_STROBE_LO)
-        + in_port(0x02, IOPort.KEY_INPUT)
-        + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
-    ).cur == []
-    assert str(eval(
-        out_port(0x02, IOPort.SET_KEY_STROBE_LO)
-        + in_port(0x02, IOPort.KEY_INPUT)
-        + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
-    )) == 'S'
+    assert (
+        eval(
+            out_port(0x02, IOPort.SET_KEY_STROBE_LO)
+            + in_port(0x02, IOPort.KEY_INPUT)
+            + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
+        ).cur
+        == []
+    )
+    assert (
+        str(
+            eval(
+                out_port(0x02, IOPort.SET_KEY_STROBE_LO)
+                + in_port(0x02, IOPort.KEY_INPUT)
+                + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
+            )
+        )
+        == "S"
+    )

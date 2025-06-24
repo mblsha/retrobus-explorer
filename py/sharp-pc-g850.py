@@ -17,6 +17,7 @@ def _():
     import websockets
     import queue
     from contextlib import asynccontextmanager
+
     return (
         alt,
         asynccontextmanager,
@@ -38,12 +39,14 @@ def _():
     import struct
 
     from typing import NamedTuple, Optional, List
+
     return Enum, List, NamedTuple, Optional, dataclass, struct
 
 
 @app.cell
 def _():
     import sys
+
     sys.path.append("d3xx")
 
     # NOTE: expect d3xx/libftd3xx.dylib to be present
@@ -51,18 +54,21 @@ def _():
     import _ftd3xx_linux as mft
 
     import ctypes
+
     return ctypes, ftd3xx, mft, sys
 
 
 @app.cell(hide_code=True)
 def _(ctypes, ftd3xx, mft):
-    class Ft600Device():
+    class Ft600Device:
         def __init__(self):
             self.channel = 0
 
             self.D3XX = ftd3xx.create(0, mft.FT_OPEN_BY_INDEX)
             if self.D3XX is None:
-                raise ValueError("ERROR: Please check if another D3XX application is open! Disconnecting both the FPGA + Ft element and then reconnecting them should help.")
+                raise ValueError(
+                    "ERROR: Please check if another D3XX application is open! Disconnecting both the FPGA + Ft element and then reconnecting them should help."
+                )
 
         def __enter__(self):
             return self
@@ -81,17 +87,26 @@ def _(ctypes, ftd3xx, mft):
         def read(self, datalen):
             bytesTransferred = mft.ULONG()
             data = ctypes.create_string_buffer(datalen)
-            status = ftd3xx.call_ft(mft.FT_ReadPipeEx, self.D3XX.handle, mft.UCHAR(self.channel), data, mft.ULONG(datalen),
-                                    ctypes.byref(bytesTransferred), 100)
+            status = ftd3xx.call_ft(
+                mft.FT_ReadPipeEx,
+                self.D3XX.handle,
+                mft.UCHAR(self.channel),
+                data,
+                mft.ULONG(datalen),
+                ctypes.byref(bytesTransferred),
+                100,
+            )
             if bytesTransferred.value == 0:
                 return None
-            return data.raw[:bytesTransferred.value]
+            return data.raw[: bytesTransferred.value]
+
     return (Ft600Device,)
 
 
 @app.cell
 def _():
     from contextlib import ExitStack
+
     return (ExitStack,)
 
 
@@ -99,6 +114,7 @@ def _():
 def _():
     import multiprocessing as mp
     import threading
+
     return mp, threading
 
 
@@ -151,9 +167,11 @@ def _(Enum, mo):
             "Local Pipeline (results in data loss)": CollectDataType.LOCAL_PIPELINE,
             "Local Buffer": CollectDataType.LOCAL_BUFFER,
         },
-        value='Local Buffer',
+        value="Local Buffer",
     )
-    collect_date_timeout = mo.ui.number(start=1, stop=10, value=3, step=1, label='Timeout (seconds)')
+    collect_date_timeout = mo.ui.number(
+        start=1, stop=10, value=3, step=1, label="Timeout (seconds)"
+    )
     return CollectDataType, collect_data_type, collect_date_timeout
 
 
@@ -184,15 +202,26 @@ def _(datetime, humanize):
             if data is not None:
                 self.status_update_packets += 1
                 self.status_update_bytes += len(data)
+
     return (TransferRateCalculator,)
 
 
 @app.cell(hide_code=True)
 def _(collect_data_type, collect_date_timeout, mo):
-    collect_data_button = mo.ui.run_button(label="Collect Bus Data", disabled=collect_data_type.value is None)
+    collect_data_button = mo.ui.run_button(
+        label="Collect Bus Data", disabled=collect_data_type.value is None
+    )
     mo.vstack(
         [
-            mo.hstack([collect_date_timeout, mo.plain_text('Stop capture after there\'s no activity for selected amount of seconds')], justify='start'),
+            mo.hstack(
+                [
+                    collect_date_timeout,
+                    mo.plain_text(
+                        "Stop capture after there's no activity for selected amount of seconds"
+                    ),
+                ],
+                justify="start",
+            ),
             collect_data_type,
             collect_data_button,
         ]
@@ -218,7 +247,6 @@ async def _(
 ):
     mo.stop(not collect_data_button.value)
 
-
     class WebsocketAdapter:
         def __init__(self):
             self.websocket = None
@@ -230,7 +258,6 @@ async def _(
         async def all_events(self):
             await self.websocket.close()
             return []
-
 
     class LocalPipelineAdapter:
         def __init__(self):
@@ -253,7 +280,6 @@ async def _(
             self.parser.flush()
             return self.parser.all_events
 
-
     class LocalBufferAdapter:
         def __init__(self):
             self.errors_queue = queue.Queue()
@@ -271,13 +297,14 @@ async def _(
                 out_ports_queue=None,
                 save_all_events=True,
             )
-            combined_buffer = b''.join(self.buffer)
+            combined_buffer = b"".join(self.buffer)
             expect_num_events = len(combined_buffer) / 4
-            print(f'Buffer size: {humanize.naturalsize(len(combined_buffer), binary=True)}; expected number of events: {expect_num_events}')
+            print(
+                f"Buffer size: {humanize.naturalsize(len(combined_buffer), binary=True)}; expected number of events: {expect_num_events}"
+            )
             self.parser.parse(combined_buffer)
             self.parser.flush()
             return self.parser.all_events
-
 
     async def GetBusData(streamer, num_seconds_before_timeout=3):
         # 32KB at a time; Sub-1KB buffers result in FPGA buffer overflow,
@@ -287,9 +314,7 @@ async def _(
         inst = streamer()
         await inst.start()
 
-        with mo.status.spinner(
-            subtitle="Waiting for buffer to clear ..."
-        ) as _spinner:
+        with mo.status.spinner(subtitle="Waiting for buffer to clear ...") as _spinner:
             with Ft600Device() as d:
                 # clear input buffer
                 empty_count = 0
@@ -307,12 +332,10 @@ async def _(
 
                 start = datetime.datetime.now()
                 rate_calculator = TransferRateCalculator(
-                    lambda rate: _spinner.update(
-                        subtitle=f"Collecting data ... {rate}"
-                    )
+                    lambda rate: _spinner.update(subtitle=f"Collecting data ... {rate}")
                 )
 
-                d.write(b'S+')
+                d.write(b"S+")
 
                 image_index = 1
                 transmission_buf = b""
@@ -324,9 +347,7 @@ async def _(
 
                     now = datetime.datetime.now()
                     if bytes is None:
-                        if (
-                            now - start
-                        ).total_seconds() > num_seconds_before_timeout:
+                        if (now - start).total_seconds() > num_seconds_before_timeout:
                             break
                         continue
                     start = now
@@ -340,10 +361,7 @@ async def _(
                         status_num_bytes_sent += len(bytes)
                         transmission_buf = b""
 
-                        if (
-                            collect_data_type.value
-                            == CollectDataType.STREAM_TO_FASTAPI
-                        ):
+                        if collect_data_type.value == CollectDataType.STREAM_TO_FASTAPI:
                             mo.output.replace(
                                 mo.image(
                                     f"http://localhost:8000/lcd?force_redraw={image_index}"
@@ -351,7 +369,7 @@ async def _(
                             )
                             image_index += 1
 
-                d.write(b'S-')
+                d.write(b"S-")
 
             _spinner.update(subtitle="Collecting data ...")
             return await inst.all_events()
@@ -387,7 +405,7 @@ def _(pandas, parsed):
 
 @app.cell
 def _(bus_parser, df):
-    df[df['type'].isin([bus_parser.Type.ERROR])]
+    df[df["type"].isin([bus_parser.Type.ERROR])]
     return
 
 
@@ -405,14 +423,17 @@ def _():
                 # print only changed keys/values, use __dict__ to get all keys/values
                 diff = []
                 for key in p4[i].__dict__.keys():
-                    if key == 'pc':
+                    if key == "pc":
                         continue
                     if p4[i].__dict__[key] != p6[i].__dict__[key]:
-                        diff.append(f'  {key}: {p4[i].__dict__[key]} != {p6[i].__dict__[key]}')
+                        diff.append(
+                            f"  {key}: {p4[i].__dict__[key]} != {p6[i].__dict__[key]}"
+                        )
 
                 if len(diff) > 0:
-                    print(f'{i}')
-                    print('\n'.join(diff))
+                    print(f"{i}")
+                    print("\n".join(diff))
+
     return (find_differences,)
 
 
@@ -421,7 +442,7 @@ def _(Type, z80):
     class ProcessBusEvents:
         def __init__(self):
             self.pc = None
-            self.buf = b''
+            self.buf = b""
             self.decoded = False
 
         def decode(self):
@@ -443,7 +464,7 @@ def _(Type, z80):
                 self.buf += bytes([val])
                 self.decode()
 
-        def process_bus_events(self, df):            
+        def process_bus_events(self, df):
             for r in df.itertuples():
                 if r.type == Type.FETCH:
                     self.fetch(r.addr, r.val)
@@ -456,10 +477,12 @@ def _(Type, z80):
             for index, e in enumerate(parsed[start:end]):
                 # print(f"{index + start}: {e}")
                 if e.type == Type.FETCH:
-                    print(f'M:{hex(e.addr)} → {hex(e.val)}{" " + str(e.instr) if e.instr else ""}')
+                    print(
+                        f"M:{hex(e.addr)} → {hex(e.val)}{' ' + str(e.instr) if e.instr else ''}"
+                    )
                     self.fetch(e.addr, e.val)
                 elif e.type == Type.READ:
-                    print(f'R:{hex(e.addr)} → {hex(e.val)}')
+                    print(f"R:{hex(e.addr)} → {hex(e.val)}")
                     self.read(e.addr, e.val)
                 elif e.type == Type.WRITE:
                     print(f"W:{hex(e.addr)} ← {hex(e.val)}")
@@ -533,12 +556,14 @@ def _():
         if addr in FUNCTIONS:
             return FUNCTIONS[addr]
         return f"sub_{hex(addr)[2:]}"
+
     return BNIDA_NAMES, BNIDA_NAMES_RAW, FUNCTIONS, get_function_name
 
 
 @app.cell
 def _():
     import dataclasses
+
     return (dataclasses,)
 
 
@@ -546,7 +571,8 @@ def _():
 def _():
     def print_be5f():
         for i in range(26):
-            print(f'{hex(i+0x61)}: \'{chr(ord("a")+i)}\',')
+            print(f"{hex(i + 0x61)}: '{chr(ord('a') + i)}',")
+
     print_be5f()
     return (print_be5f,)
 
@@ -658,12 +684,13 @@ def _():
             if char in DrawCharInterpreter.CHAR_NAMES:
                 return DrawCharInterpreter.CHAR_NAMES[char]
             return hex(char)
+
     return (DrawCharInterpreter,)
 
 
 @app.cell
 def _(bus_parser):
-    hex(0xd34f + bus_parser.BANK_SIZE * 2), hex(0xd00c + bus_parser.BANK_SIZE * 2)
+    hex(0xD34F + bus_parser.BANK_SIZE * 2), hex(0xD00C + bus_parser.BANK_SIZE * 2)
     return
 
 
@@ -694,7 +721,6 @@ def _(
         pc: int
         expected_return_addr: int
 
-
     class PerfettoTraceCreator:
         def __init__(self):
             self.pc = None
@@ -708,7 +734,7 @@ def _(
             self.main_thread = None
             self.keys_thread = None
             self.draw_char_thread = None
-            self.draw_char_addr = {0x8440, 0xbe62, 0xbe5f}
+            self.draw_char_addr = {0x8440, 0xBE62, 0xBE5F}
 
             self.runner = Pyz80Runner()
             self.key_matrix = key_matrix.KeyMatrixInterpreter()
@@ -716,27 +742,37 @@ def _(
 
             self.enrichment = {
                 # draw_char
-                0x8440: {'A': 'char', 'D': 'y', 'E': 'x'},
-                0xbe5f: {'A': 'char', 'D': 'y', 'E': 'x'},
-                0xbe62: {'A': 'char', 'D': 'y', 'E': 'x'},
+                0x8440: {"A": "char", "D": "y", "E": "x"},
+                0xBE5F: {"A": "char", "D": "y", "E": "x"},
+                0xBE62: {"A": "char", "D": "y", "E": "x"},
                 # draw_char_continuous
-                0x8738: {'A': 'char', 'B': 'num_char', 'D': 'y', 'E': 'x'},
-                0xbfee: {'A': 'char', 'B': 'num_char', 'D': 'y', 'E': 'x'},
+                0x8738: {"A": "char", "B": "num_char", "D": "y", "E": "x"},
+                0xBFEE: {"A": "char", "B": "num_char", "D": "y", "E": "x"},
                 # draw_string
-                0x84bf: {'B': 'num_char', 'D': 'y', 'E': 'x', 'HL': 'str_ptr'},
-                0xbff1: {'B': 'num_char', 'D': 'y', 'E': 'x', 'HL': 'str_ptr'},
+                0x84BF: {"B": "num_char", "D": "y", "E": "x", "HL": "str_ptr"},
+                0xBFF1: {"B": "num_char", "D": "y", "E": "x", "HL": "str_ptr"},
             }
 
             self.interesting_functions = set(self.enrichment.keys())
-            self.interesting_functions.add(0x14000) # alternative string draw?
+            self.interesting_functions.add(0x14000)  # alternative string draw?
 
         def create_perfetto_trace(self, data):
-            current_date_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.builder = PerfettoTraceBuilder(f'SHARP PC-G850 {current_date_time_str}')
+            current_date_time_str = datetime.datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            self.builder = PerfettoTraceBuilder(
+                f"SHARP PC-G850 {current_date_time_str}"
+            )
 
-            self.main_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "main")
-            self.keys_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "keys")
-            self.draw_char_thread = self.builder.add_thread_descriptor(self.builder.process_uuid, "draw_char")
+            self.main_thread = self.builder.add_thread_descriptor(
+                self.builder.process_uuid, "main"
+            )
+            self.keys_thread = self.builder.add_thread_descriptor(
+                self.builder.process_uuid, "keys"
+            )
+            self.draw_char_thread = self.builder.add_thread_descriptor(
+                self.builder.process_uuid, "draw_char"
+            )
 
             for index, e in enumerate(data):
                 self.index = index
@@ -767,7 +803,9 @@ def _(
 
                     self.key_matrix.eval(e)
                     if self.last_pressed_keys != self.key_matrix.pressed_keys():
-                        self._handle_pressed_keys(self.last_pressed_keys, self.key_matrix.pressed_keys())
+                        self._handle_pressed_keys(
+                            self.last_pressed_keys, self.key_matrix.pressed_keys()
+                        )
                         self.last_pressed_keys = self.key_matrix.pressed_keys()
                 elif e.type in [Type.READ_STACK, Type.WRITE_STACK]:
                     self._handle_stack_event(e)
@@ -784,12 +822,14 @@ def _(
             # first need to close the slices for the keys that are no longer pressed
             stop_pressed = set(last) - set(curr)
             for k in stop_pressed:
-                self.builder.add_slice_event(self.keys_thread, self.ts, 'end')
+                self.builder.add_slice_event(self.keys_thread, self.ts, "end")
 
             # then open slices for keys that weren't pressed before and are pressed now
             start_pressed = set(curr) - set(last)
             for k in start_pressed:
-                self.builder.add_slice_event(self.keys_thread, self.ts, 'begin', f'key {k}')
+                self.builder.add_slice_event(
+                    self.keys_thread, self.ts, "begin", f"key {k}"
+                )
 
         def _annotate_common(self, be, e, name):
             with be.annotation(name) as ann:
@@ -801,17 +841,21 @@ def _(
 
         def _handle_call_event(self, e):
             function_name = get_function_name(self.pc)
-            with self.builder.add_slice_event(self.main_thread, self.ts, 'begin', function_name) as begin_event:
+            with self.builder.add_slice_event(
+                self.main_thread, self.ts, "begin", function_name
+            ) as begin_event:
                 expected_return_addr = self.last_stack_event.addr + 3
-                self.stack.append(PerfettoStack(
-                    begin_event=begin_event,
-                    begin_ts=self.ts,
-                    reg=None,
-                    caller=self.last_stack_event.addr,
-                    pc=self.pc,
-                    expected_return_addr=expected_return_addr
-                ))
-                self._annotate_common(begin_event, e, 'call')
+                self.stack.append(
+                    PerfettoStack(
+                        begin_event=begin_event,
+                        begin_ts=self.ts,
+                        reg=None,
+                        caller=self.last_stack_event.addr,
+                        pc=self.pc,
+                        expected_return_addr=expected_return_addr,
+                    )
+                )
+                self._annotate_common(begin_event, e, "call")
 
         def enrich_interesting_function(self, addr):
             assert len(self.stack) > 0
@@ -825,7 +869,7 @@ def _(
                             ann.pointer(field, (high << 8) | low)
                         else:
                             ann.int(field, getattr(self.runner.reg(), reg))
-            else:   
+            else:
                 with s.begin_event.annotation("reg") as ann:
                     reg = self.runner.reg()
                     # iterate over all fields in RegisterPair and add them to the annotation as pointers
@@ -834,21 +878,25 @@ def _(
 
         def create_draw_char_slice(self, s, e):
             char = DrawCharInterpreter.char_name(s.reg.A, s.pc)
-            begin = self.builder.add_slice_event(self.draw_char_thread, s.begin_ts, 'begin', char)
-            with begin.annotation('draw_char') as ann:
+            begin = self.builder.add_slice_event(
+                self.draw_char_thread, s.begin_ts, "begin", char
+            )
+            with begin.annotation("draw_char") as ann:
                 ann.pointer("char", s.reg.A)
                 ann.pointer("x", s.reg.E)
                 ann.pointer("y", s.reg.D)
-            self.builder.add_slice_event(self.draw_char_thread, self.ts, 'end')
+            self.builder.add_slice_event(self.draw_char_thread, self.ts, "end")
 
         def _handle_mismatched_ret_event(self, e, s):
             # sub_93cd hacks the return address after switching rom bank
-            if self.last_stack_event.addr == 0x93f2:
+            if self.last_stack_event.addr == 0x93F2:
                 self._handle_call_event(e)
-                self.stack[-1].expected_return_addr = 0x93f3
+                self.stack[-1].expected_return_addr = 0x93F3
                 return
 
-            with self.builder.add_instant_event(self.main_thread, self.ts, 'BAD_RET').annotation('ret') as ann:
+            with self.builder.add_instant_event(
+                self.main_thread, self.ts, "BAD_RET"
+            ).annotation("ret") as ann:
                 ann.int("index", self.index)
                 ann.pointer("pc", self.pc)
                 ann.pointer("expected_return_addr", s.expected_return_addr)
@@ -860,40 +908,45 @@ def _(
                 if s.pc in self.draw_char_addr:
                     self.create_draw_char_slice(s, e)
 
-                self.builder.add_slice_event(self.main_thread, self.ts, 'end')
-                self._annotate_common(s.begin_event, e, 'ret')
+                self.builder.add_slice_event(self.main_thread, self.ts, "end")
+                self._annotate_common(s.begin_event, e, "ret")
 
                 if self.pc != s.expected_return_addr:
                     self._handle_mismatched_ret_event(e, s)
             else:
-                underflow = self.builder.add_instant_event(self.main_thread, self.ts, 'UNDERFLOW')
-                self._annotate_common(underflow, e, 'ret')
+                underflow = self.builder.add_instant_event(
+                    self.main_thread, self.ts, "UNDERFLOW"
+                )
+                self._annotate_common(underflow, e, "ret")
 
         def _handle_port_event(self, e):
-            direction = 'in' if e.type == Type.IN_PORT else 'out'
-            name = f'{e.port.name} {direction} {hex(e.val)}'
-            with self.builder.add_instant_event(self.main_thread, self.ts, name).annotation('call') as ann:
+            direction = "in" if e.type == Type.IN_PORT else "out"
+            name = f"{e.port.name} {direction} {hex(e.val)}"
+            with self.builder.add_instant_event(
+                self.main_thread, self.ts, name
+            ).annotation("call") as ann:
                 ann.int("index", self.index)
                 ann.pointer("pc", self.pc)
                 ann.pointer("port", e.port.value)
                 ann.pointer("val", e.val)
 
         def _handle_stack_event(self, e):
-            direction = 'POP' if e.type == Type.READ_STACK else 'PUSH'
-            name = f'{direction} {hex(e.val)}'
-            with self.builder.add_instant_event(self.main_thread, self.ts, name).annotation('stack') as ann:
+            direction = "POP" if e.type == Type.READ_STACK else "PUSH"
+            name = f"{direction} {hex(e.val)}"
+            with self.builder.add_instant_event(
+                self.main_thread, self.ts, name
+            ).annotation("stack") as ann:
                 ann.int("index", self.index)
                 ann.pointer("pc", self.pc)
                 ann.pointer("addr", e.addr)
                 ann.pointer("val", e.val)
-
 
     def get_perfetto_trace_data():
         ppp = PerfettoTraceCreator().create_perfetto_trace(parsed)
         return ppp.serialize()
 
     download_perfetto = mo.download(
-        label='Download Perfetto Trace',
+        label="Download Perfetto Trace",
         data=get_perfetto_trace_data,
         filename="sharp-pc-g850-perfetto.pb",
     )
@@ -975,7 +1028,7 @@ def _():
             track_uuid = self.last_track_uuid
 
             packet = self.trace.packet.add()
-            packet.track_descriptor.uuid = track_uuid # self.process_uuid
+            packet.track_descriptor.uuid = track_uuid  # self.process_uuid
             packet.track_descriptor.process.pid = self.pid
             packet.track_descriptor.process.process_name = process_name
             return track_uuid
@@ -993,14 +1046,16 @@ def _():
             packet.track_descriptor.thread.thread_name = thread_name
             return track_uuid
 
-        def add_slice_event(self, track_uuid, timestamp: int, event_type: str, name: str = None):
+        def add_slice_event(
+            self, track_uuid, timestamp: int, event_type: str, name: str = None
+        ):
             packet = self.trace.packet.add()
             packet.timestamp = timestamp
 
-            if event_type == 'begin':
+            if event_type == "begin":
                 packet.track_event.type = perfetto.TrackEvent.TYPE_SLICE_BEGIN
                 packet.track_event.name = name
-            elif event_type == 'end':
+            elif event_type == "end":
                 packet.track_event.type = perfetto.TrackEvent.TYPE_SLICE_END
             else:
                 raise ValueError("event_type must be either 'begin' or 'end'.")
@@ -1020,6 +1075,7 @@ def _():
 
         def serialize(self) -> bytes:
             return self.trace.SerializeToString()
+
     return DebugAnnotation, PerfettoTraceBuilder, TrackEvent, perfetto
 
 
@@ -1031,14 +1087,14 @@ def _():
         import re
 
         def parse_rom(filename):
-            m = re.match(r'.*rom([0-9a-fA-F]+).bin', filename)
+            m = re.match(r".*rom([0-9a-fA-F]+).bin", filename)
             bank = int(m.group(1), 16)
 
-            with open(filename, 'rb') as f:
+            with open(filename, "rb") as f:
                 return bank, f.read()
 
         banks = {}
-        for f in glob.glob('g850-roms/rom*.bin'):
+        for f in glob.glob("g850-roms/rom*.bin"):
             bank, data = parse_rom(f)
             banks[bank] = data
 
@@ -1051,18 +1107,18 @@ def _():
 @app.cell
 def _(RomVerifier, rom_banks):
     def make_continuous_rom_image():
-        result = b'\x00' * RomVerifier.ROM0_ADDR_START
+        result = b"\x00" * RomVerifier.ROM0_ADDR_START
         for bank in sorted(rom_banks.keys()):
             result += rom_banks[bank]
 
-        with open('g850-roms/base.bin', 'rb') as f:
+        with open("g850-roms/base.bin", "rb") as f:
             base = f.read()
-        result = base + result[len(base):]
+        result = base + result[len(base) :]
 
         # add 0x1000 empty bytes to the end for fake port function creation
-        result += b'\x00' * 0x1000
+        result += b"\x00" * 0x1000
 
-        with open('sharp-pc-g850-full.bin', 'wb') as f:
+        with open("sharp-pc-g850-full.bin", "wb") as f:
             f.write(result)
 
     # make_continuous_rom_image()
@@ -1089,24 +1145,28 @@ def _(IOPort, Type, df, rom_banks):
             # 1: CERAM2 (external RAM on system bus)
             self.ram_bank = None
 
-            self.ram = ['-'] * 0x8000
+            self.ram = ["-"] * 0x8000
 
             self.i = 0
 
         def get_rom_bank(self, bank):
-            assert(self.rom_bank is not None)
+            assert self.rom_bank is not None
             if self.rom_bank != bank:
-                raise ValueError(f"Expected rom_bank {hex(self.rom_bank)}, got {hex(bank)}")
+                raise ValueError(
+                    f"Expected rom_bank {hex(self.rom_bank)}, got {hex(bank)}"
+                )
 
         def get_ex_bank(self, bank):
-            assert(self.ex_bank is not None)
+            assert self.ex_bank is not None
             if self.ex_bank != bank:
                 raise ValueError(f"Expected ex_bank {self.ex_bank}, got {bank}")
 
         def get_ram_bank(self, bank):
-            assert(self.ram_bank is not None)
+            assert self.ram_bank is not None
             if self.ram_bank != bank:
-                raise ValueError(f"Expected ram_bank {hex(self.ram_bank)}, got {hex(bank)}")
+                raise ValueError(
+                    f"Expected ram_bank {hex(self.ram_bank)}, got {hex(bank)}"
+                )
 
         def set_rom_bank(self, bank):
             if self.rom_bank != bank:
@@ -1130,18 +1190,24 @@ def _(IOPort, Type, df, rom_banks):
             if addr > self.RAM_ADDR_START and addr < self.ROM0_ADDR_START:
                 self.ram[addr] = val
             if addr > self.ROM0_ADDR_START:
-                raise ValueError(f"Unexpected write to ROM region: {hex(addr)}: {hex(val)}")
+                raise ValueError(
+                    f"Unexpected write to ROM region: {hex(addr)}: {hex(val)}"
+                )
 
         def read(self, addr, val):
             if addr > self.ROM0_ADDR_START and addr < self.BANK_ADDR_START:
                 expect = rom_banks[0][addr - self.ROM0_ADDR_START]
                 if val != expect:
-                    print(f"ex_bank({self.ex_bank}): mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}")
+                    print(
+                        f"ex_bank({self.ex_bank}): mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}"
+                    )
 
             if addr > self.BANK_ADDR_START:
                 expect = rom_banks[self.rom_bank][addr - self.BANK_ADDR_START]
                 if val != expect:
-                    print(f"rom_bank({self.rom_bank}): mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}")
+                    print(
+                        f"rom_bank({self.rom_bank}): mismatch at {hex(addr)}: {hex(val)} != {hex(expect)}"
+                    )
 
     def verify_rom_memory():
         verifier = RomVerifier()
@@ -1153,7 +1219,9 @@ def _(IOPort, Type, df, rom_banks):
             # print(r.type, r.val, r.addr)
 
             try:
-                port = IOPort(r.addr) if r.type in [Type.IN_PORT, Type.OUT_PORT] else None
+                port = (
+                    IOPort(r.addr) if r.type in [Type.IN_PORT, Type.OUT_PORT] else None
+                )
             except ValueError:
                 continue
 
@@ -1194,13 +1262,15 @@ def _(IOPort, Type, df, rom_banks):
 
 @app.cell(hide_code=True)
 def _(df, mo):
-    df_range = mo.md('''
+    df_range = mo.md("""
     {start}
 
     {length}
-    ''').batch(
-    length=mo.ui.number(start=1, stop=1000000, value=100000, step=1, label='Length'),
-    start=mo.ui.number(start=0, stop=df.shape[0], step=1, label='Start'),
+    """).batch(
+        length=mo.ui.number(
+            start=1, stop=1000000, value=100000, step=1, label="Length"
+        ),
+        start=mo.ui.number(start=0, stop=df.shape[0], step=1, label="Start"),
     )
     df_range
     return (df_range,)
@@ -1210,30 +1280,44 @@ def _(df, mo):
 def _(alt, df, df_range, mo, pandas):
     def plot_df_addr(df):
         full_scale = alt.Scale(domain=[0x0, 0x10000])
-        bars = alt.Chart(df).transform_aggregate(
-            count='count()', groupby=['addr', 'type']
-        ).transform_calculate(
-            truncated_count="min(datum.count, 20)"
-        ).mark_bar().encode(
-            x=alt.X('addr:Q', title='Address (Hex)',
-                axis=alt.Axis(labelExpr="format(datum.value, 'X')"),  # Format as hex
-                scale=full_scale),
-            y=alt.Y('truncated_count:Q', title='Number of Events'),
-            color='type:N',
-            tooltip=[alt.Tooltip('addr:Q', title='Address', format='X'), 'type:N', alt.Tooltip('count()', title='Count')]
+        bars = (
+            alt.Chart(df)
+            .transform_aggregate(count="count()", groupby=["addr", "type"])
+            .transform_calculate(truncated_count="min(datum.count, 20)")
+            .mark_bar()
+            .encode(
+                x=alt.X(
+                    "addr:Q",
+                    title="Address (Hex)",
+                    axis=alt.Axis(
+                        labelExpr="format(datum.value, 'X')"
+                    ),  # Format as hex
+                    scale=full_scale,
+                ),
+                y=alt.Y("truncated_count:Q", title="Number of Events"),
+                color="type:N",
+                tooltip=[
+                    alt.Tooltip("addr:Q", title="Address", format="X"),
+                    "type:N",
+                    alt.Tooltip("count()", title="Count"),
+                ],
+            )
         )
 
-        rules = alt.Chart(pandas.DataFrame({'addr': [0x8000, 0xC000]})).mark_rule(
-            color='blue',
-            strokeWidth=1
-        ).encode(
-            x=alt.X('addr:Q', scale=full_scale),
+        rules = (
+            alt.Chart(pandas.DataFrame({"addr": [0x8000, 0xC000]}))
+            .mark_rule(color="blue", strokeWidth=1)
+            .encode(
+                x=alt.X("addr:Q", scale=full_scale),
+            )
         )
 
         # Combine bars and rules
-        return (bars + rules).properties(title='Memory Bus Events by Address and Type')
+        return (bars + rules).properties(title="Memory Bus Events by Address and Type")
 
-    df_for_plot = df.iloc[df_range.value['start']:df_range.value['start'] + df_range.value['length']]
+    df_for_plot = df.iloc[
+        df_range.value["start"] : df_range.value["start"] + df_range.value["length"]
+    ]
     mo.ui.altair_chart(plot_df_addr(df_for_plot))
     return df_for_plot, plot_df_addr
 
@@ -1242,14 +1326,15 @@ def _(alt, df, df_range, mo, pandas):
 def _(Type):
     def df_valh(df):
         df2 = df.copy()
-        for col in ['pc', 'addr', 'val']:
+        for col in ["pc", "addr", "val"]:
             if col in df2.columns:
-                df2[col + 'h'] = df2[col].apply(lambda x: hex(x))
+                df2[col + "h"] = df2[col].apply(lambda x: hex(x))
         return df2
 
     def io_df(df):
-        df2 = df[df['type'].isin([Type.IN_PORT, Type.OUT_PORT])].copy()
+        df2 = df[df["type"].isin([Type.IN_PORT, Type.OUT_PORT])].copy()
         return df_valh(df2)
+
     return df_valh, io_df
 
 
@@ -1268,13 +1353,14 @@ def _(IOPort, df, sed1560):
                         IOPort.SET_KEY_STROBE_HI,
                     ]
                 )
-            ]
-            .copy()
+            ].copy()
             # .reset_index(drop=True)
         )
 
     parsed_lcd_commands = do_parse_lcd_commsnds(df)
-    parsed_lcd_commands_df = sed1560.SED1560Parser.parsed_commands_to_df(parsed_lcd_commands)
+    parsed_lcd_commands_df = sed1560.SED1560Parser.parsed_commands_to_df(
+        parsed_lcd_commands
+    )
     return do_parse_lcd_commsnds, parsed_lcd_commands, parsed_lcd_commands_df
 
 
@@ -1295,8 +1381,10 @@ def _(IOPort, df, lcd_commands_range):
 
     # df_valh(dfports[lcd_commands_range.value['start']:lcd_commands_range.value['start']+lcd_commands_range.value['length']])
     # print the original index that corresponds to lcd_commands_range.value['start']
-    orig_start = dfports.index[lcd_commands_range.value['start']]
-    orig_end = dfports.index[lcd_commands_range.value['start']+lcd_commands_range.value['length']]
+    orig_start = dfports.index[lcd_commands_range.value["start"]]
+    orig_end = dfports.index[
+        lcd_commands_range.value["start"] + lcd_commands_range.value["length"]
+    ]
     orig_start, orig_end
     return dfports, orig_end, orig_start
 
@@ -1354,7 +1442,9 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
             )
             if self.debug_index_start is not None:
                 assert self.debug_index_end is not None
-                print(f"Debugging from {self.debug_index_start} to {self.debug_index_end}")
+                print(
+                    f"Debugging from {self.debug_index_start} to {self.debug_index_end}"
+                )
                 self.z80.set_debug_message(self.debug_message)
             self.z80.PC = self.pc
 
@@ -1364,12 +1454,18 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
             except KeyError as e:
                 if addr >= 0x87B7 and addr <= 0x87C0:
                     return rom_banks[0][addr - 0x8000]
-            
+
                 # FIXME: why stack could become misaligned?
-                if addr < bus_parser.ROM_ADDR_START and addr >= bus_parser.ROM_ADDR_START - bus_parser.STACK_SIZE:
+                if (
+                    addr < bus_parser.ROM_ADDR_START
+                    and addr >= bus_parser.ROM_ADDR_START - bus_parser.STACK_SIZE
+                ):
                     return 0
 
-                if addr >= bus_parser.ROM_ADDR_START and addr < bus_parser.BANK_ADDR_START:
+                if (
+                    addr >= bus_parser.ROM_ADDR_START
+                    and addr < bus_parser.BANK_ADDR_START
+                ):
                     return rom_banks[0][addr - bus_parser.ROM_ADDR_START]
                 if addr > bus_parser.BANK_ADDR_START:
                     return rom_banks[self.rom_bank][addr - bus_parser.BANK_ADDR_START]
@@ -1396,7 +1492,10 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
             self.io_writes[port] = value
 
         def debug_message(self, msg):
-            if self.index >= self.debug_index_start and self.index < self.debug_index_end:
+            if (
+                self.index >= self.debug_index_start
+                and self.index < self.debug_index_end
+            ):
                 print(f"{self.index} DEBUG:", msg)
 
         def print_dict_hex(self, d):
@@ -1423,7 +1522,7 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
             self.z80.PC = self.last_pc
 
             # don't try to execute HALT, as it'll prevent further analysis
-            if self.expected_reads[self.last_pc] != 0x76: # HALT
+            if self.expected_reads[self.last_pc] != 0x76:  # HALT
                 # print(f"z80.PC: {hex(self.z80.PC)}, pc: {hex(self.last_pc)}")
                 try:
                     self.z80.execute(1)
@@ -1514,13 +1613,13 @@ def _():
 
 @app.cell
 def _(df, df_valh, orig_end, orig_start):
-    df_valh(df[orig_start+1:orig_end])
+    df_valh(df[orig_start + 1 : orig_end])
     return
 
 
 @app.cell
 def _(df, df_valh):
-    df_valh(df[412722-20:])
+    df_valh(df[412722 - 20 :])
     return
 
 
@@ -1538,13 +1637,15 @@ app._unparsable_cell(
     r"""
     df[]
     """,
-    name="_"
+    name="_",
 )
 
 
 @app.cell
 def _(dfports, lcd_commands_range):
-    dfports.iloc[lcd_commands_range.value['start']:lcd_commands_range.value['start']+1]
+    dfports.iloc[
+        lcd_commands_range.value["start"] : lcd_commands_range.value["start"] + 1
+    ]
     return
 
 
@@ -1556,9 +1657,14 @@ def _(lcd_commands_range):
             opts.value["start"] : opts.value["start"] + opts.value["length"]
         ].copy()
         # use opts['show_initial_display_line'] to filter out InitialDisplayLine
-        df = df[~(df["type"] == "InitialDisplayLine")] if not opts.value["show_initial_display_line"] else df
+        df = (
+            df[~(df["type"] == "InitialDisplayLine")]
+            if not opts.value["show_initial_display_line"]
+            else df
+        )
 
         return df
+
     return (filtered_lcd_commands,)
 
 
@@ -1579,10 +1685,10 @@ def _(mo, parsed_lcd_commands_df):
                 step=1,
                 label="Length",
             ),
-            start=mo.ui.number(
-                start=0, stop=df.shape[0], step=1, label="Start"
+            start=mo.ui.number(start=0, stop=df.shape[0], step=1, label="Start"),
+            show_initial_display_line=mo.ui.checkbox(
+                value=True, label="Show Initial Display Line"
             ),
-            show_initial_display_line=mo.ui.checkbox(value=True, label="Show Initial Display Line"),
         )
 
     lcd_commands_range = get_lcd_commands_range(parsed_lcd_commands_df)
@@ -1592,7 +1698,10 @@ def _(mo, parsed_lcd_commands_df):
 
 @app.cell(hide_code=True)
 def _(lcd_commands_range, parsed_lcd_commands):
-    parsed_lcd_commands_filtered = parsed_lcd_commands[lcd_commands_range.value['start']: lcd_commands_range.value['start'] + lcd_commands_range.value['length']]
+    parsed_lcd_commands_filtered = parsed_lcd_commands[
+        lcd_commands_range.value["start"] : lcd_commands_range.value["start"]
+        + lcd_commands_range.value["length"]
+    ]
     return (parsed_lcd_commands_filtered,)
 
 
@@ -1609,11 +1718,11 @@ def _(parsed_lcd_commands_filtered, sed1560):
 @app.cell(hide_code=True)
 def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
     def plot_parsed_lcd_commands(df):
-        min_index = df['index'].min()
-        max_index = df['index'].max()
+        min_index = df["index"].min()
+        max_index = df["index"].max()
         x_scale = alt.Scale(domain=(min_index, max_index))
 
-        key_columns = [] # 'KEY_INPUT'] #, 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
+        key_columns = []  # 'KEY_INPUT'] #, 'SHIFT_KEY_INPUT', 'SET_KEY_STROBE_LO', 'SET_KEY_STROBE_HI']
         # key_columns = []
 
         events_points = (
@@ -1633,7 +1742,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
             )
             .mark_point()
             .encode(
-                x=alt.X('index:Q', scale=x_scale),
+                x=alt.X("index:Q", scale=x_scale),
                 y="type:N",
                 color="type:N",
                 tooltip=["index", "type", "value"],
@@ -1646,7 +1755,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
                 alt.Chart(df[df["type"].isin([key])])
                 .mark_point()
                 .encode(
-                    x=alt.X('index:Q', scale=x_scale),
+                    x=alt.X("index:Q", scale=x_scale),
                     y=alt.Y("value:Q", title="Value"),
                     color="type:N",
                     tooltip=["index", "type", "value"],
@@ -1655,12 +1764,11 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
             )
             key_charts.append(chart)
 
-
         vram_write = (
             alt.Chart(df[df["type"].isin(["VRAMWrite"])])
             .mark_point()
             .encode(
-                x=alt.X('index:Q', scale=x_scale),
+                x=alt.X("index:Q", scale=x_scale),
                 y=alt.Y("value:Q", title="Value"),
                 color="type:N",
                 tooltip=["index", "type", "value"],
@@ -1673,7 +1781,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
             alt.Chart(df[df["type"] == "SetColumn"])
             .mark_point()
             .encode(
-                x=alt.X('index:Q', scale=x_scale),
+                x=alt.X("index:Q", scale=x_scale),
                 y=alt.Y("value:Q", title="Value"),
                 # color="is_high:N",
                 tooltip=["index", "type", "value"],
@@ -1685,7 +1793,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
             alt.Chart(df[df["type"] == "SetPageAddress"])
             .mark_point()
             .encode(
-                x=alt.X('index:Q', scale=x_scale),
+                x=alt.X("index:Q", scale=x_scale),
                 y="value:Q",
                 color="type:N",
                 tooltip=["index", "type", "value"],
@@ -1697,7 +1805,7 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
             alt.Chart(df[df["type"] == "InitialDisplayLine"])
             .mark_point()
             .encode(
-                x=alt.X('index:Q', scale=x_scale),
+                x=alt.X("index:Q", scale=x_scale),
                 y="value:Q",
                 color="type:N",
                 tooltip=["index", "type", "value"],
@@ -1714,8 +1822,9 @@ def _(alt, filtered_lcd_commands, mo, parsed_lcd_commands_df):
             initial_display_line,
         )
 
-
-    mo.ui.altair_chart(plot_parsed_lcd_commands(filtered_lcd_commands(parsed_lcd_commands_df)))
+    mo.ui.altair_chart(
+        plot_parsed_lcd_commands(filtered_lcd_commands(parsed_lcd_commands_df))
+    )
     return (plot_parsed_lcd_commands,)
 
 
