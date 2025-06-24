@@ -232,7 +232,6 @@ def _():
 @app.cell
 def _(IntelHexTransformer, parser, text):
     parsed = IntelHexTransformer().transform(parser.parse(text))
-    parsed
     return (parsed,)
 
 
@@ -262,8 +261,8 @@ def decode_sequential_bytes(lines):
 
         try:
             addr_str, byte_list_str = line.split(':', 1)
-        except ValueError:
-            raise ValueError(f"Line {lineno}: malformed, expected 'ADDR: BYTE…'")
+        except ValueError as err:
+            raise ValueError(f"Line {lineno}: malformed, expected 'ADDR: BYTE…'") from err
 
         addr = int(addr_str.strip(), 16)
         byte_strs = byte_list_str.strip().split()
