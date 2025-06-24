@@ -22,10 +22,11 @@ def _(mo):
 
 @app.cell
 def _():
-    import marimo as mo
     from enum import Enum
-    from typing import NamedTuple, Optional, List
-    from lark import Lark, Transformer, v_args, Token
+    from typing import List, NamedTuple, Optional
+
+    import marimo as mo
+    from lark import Lark, Token, Transformer, v_args
     return (
         Enum,
         Lark,
@@ -294,7 +295,7 @@ def decode_sequential_bytes(lines):
 
 @app.cell
 def _():
-    with open('iq-7000-full-memory2.txt', 'r') as f:
+    with open('iq-7000-full-memory2.txt') as f:
         lines = f.readlines()
         bytes = decode_sequential_bytes(lines)
         print(bytes)

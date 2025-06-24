@@ -1,17 +1,16 @@
-from z80bus.bus_parser import (
-    SimpleBusParser,
-    BusParser,
-    PipelineBusParser,
-    Event,
-    ErrorType,
-    Type,
-    IOPort,
-)
-import z80bus.bus_parser as bus_parser
-
-from typing import List, Tuple
-import struct
 import queue
+import struct
+from typing import List, Tuple
+
+import z80bus.bus_parser as bus_parser
+from z80bus.bus_parser import (
+    BusParser,
+    ErrorType,
+    Event,
+    IOPort,
+    PipelineBusParser,
+    Type,
+)
 
 
 def pipeline_parse(input: bytes):
@@ -31,7 +30,7 @@ def pipeline_parse(input: bytes):
     while not errors_queue.empty():
         errors.append(errors_queue.get())
     if len(buf) > 0:
-        errors.append(f"Trailing data")
+        errors.append("Trailing data")
 
     return p.all_events, errors
 

@@ -1,22 +1,10 @@
-import sys
-from ctypes import *
 import ctypes as c
+from ctypes import *
+from ctypes.wintypes import BOOL, BOOLEAN, DWORD, HANDLE, ULONG, WORD, WPARAM
+
 from defines import *
 
 STRING = c_char_p
-from ctypes.wintypes import DWORD
-from ctypes.wintypes import ULONG
-from ctypes.wintypes import WORD
-from ctypes.wintypes import BYTE
-from ctypes.wintypes import BOOL
-from ctypes.wintypes import BOOLEAN
-from ctypes.wintypes import LPCSTR
-from ctypes.wintypes import HANDLE
-from ctypes.wintypes import LONG
-from ctypes.wintypes import UINT
-from ctypes.wintypes import LPSTR
-from ctypes.wintypes import FILETIME
-from ctypes.wintypes import WPARAM
 
 _libname = './ftd3xx.dll'
 _libraries = {}

@@ -1,8 +1,8 @@
-from z80bus.sed1560 import SED1560, SED1560Parser, SED1560Interpreter
-import z80bus.sed1560
-from z80bus.bus_parser import IOPort
-from z80bus.test_bus_parser import in_port, out_port, normal_parse
 from typing import List
+
+from z80bus.bus_parser import IOPort
+from z80bus.sed1560 import SED1560, SED1560Interpreter, SED1560Parser
+from z80bus.test_bus_parser import normal_parse, out_port
 
 
 def parse40(val: int) -> SED1560:

@@ -5,8 +5,7 @@ if sys.platform == 'win32':
 else:
     import _ftd3xx_linux as _ft
 import ctypes as c
-import threading
-import time
+
 from defines import *
 
 msgs = [
@@ -171,7 +170,7 @@ def setTransferParams(conf, fifo):
     return None
 
 
-class FTD3XX(object):
+class FTD3XX:
     """Class for communicating with an FTDI device"""
 
     def __init__(self, handle):
@@ -304,7 +303,7 @@ class FTD3XX(object):
         """Set GPIO pull"""
         self.status = call_ft(_ft.FT_SetGPIOPull, self.handle, _ft.ULONG(mask), _ft.ULONG(pull))
         return None
-        
+
     def setStreamPipe(self, pipe, size):
         """Set stream pipe for continous transfer of fixed size"""
         self.status = call_ft(_ft.FT_SetStreamPipe, self.handle, _ft.BOOLEAN(0), _ft.BOOLEAN(0), _ft.UCHAR(pipe),
@@ -318,7 +317,7 @@ class FTD3XX(object):
 
 
     # OS-dependent functions
-    # If Windows	
+    # If Windows
     if sys.platform == 'win32':
 
         def initializeOverlapped(self, overlapped):

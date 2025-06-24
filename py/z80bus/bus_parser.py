@@ -1,12 +1,9 @@
-from typing import NamedTuple, Optional, List
-from enum import Enum
-from dataclasses import dataclass
-import struct
-import multiprocessing as mp
-import threading
-import queue
-import time
 import datetime
+import multiprocessing as mp
+import struct
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
 
 
 # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
@@ -305,7 +302,7 @@ class BusParser:
                 last_ret_conditional = last_index
 
         if offset != len(data):
-            errors.append(f"Trailing data")
+            errors.append("Trailing data")
         return r, errors
 
 

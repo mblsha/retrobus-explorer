@@ -6,17 +6,17 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    import marimo as mo
-    import altair as alt
-    import pandas
-    import datetime
-    import time
-    import humanize
-    import time
     import asyncio
-    import websockets
+    import datetime
     import queue
+    import time
     from contextlib import asynccontextmanager
+
+    import altair as alt
+    import humanize
+    import marimo as mo
+    import pandas
+    import websockets
     return (
         alt,
         asynccontextmanager,
@@ -33,11 +33,10 @@ def _():
 
 @app.cell
 def _():
-    from enum import Enum
-    from dataclasses import dataclass
     import struct
-
-    from typing import NamedTuple, Optional, List
+    from dataclasses import dataclass
+    from enum import Enum
+    from typing import List, NamedTuple, Optional
     return Enum, List, NamedTuple, Optional, dataclass, struct
 
 
@@ -47,16 +46,16 @@ def _():
     sys.path.append("d3xx")
 
     # NOTE: expect d3xx/libftd3xx.dylib to be present
-    import ftd3xx
-    import _ftd3xx_linux as mft
-
     import ctypes
+
+    import _ftd3xx_linux as mft
+    import ftd3xx
     return ctypes, ftd3xx, mft, sys
 
 
 @app.cell(hide_code=True)
 def _(ctypes, ftd3xx, mft):
-    class Ft600Device():
+    class Ft600Device:
         def __init__(self):
             self.channel = 0
 
@@ -104,9 +103,7 @@ def _():
 
 @app.cell
 def _():
-    from z80bus import bus_parser
-    from z80bus import sed1560
-    from z80bus import key_matrix
+    from z80bus import bus_parser, key_matrix, sed1560
 
     IOPort = bus_parser.IOPort
     Type = bus_parser.Type
@@ -443,7 +440,7 @@ def _(Type, z80):
                 self.buf += bytes([val])
                 self.decode()
 
-        def process_bus_events(self, df):            
+        def process_bus_events(self, df):
             for r in df.itertuples():
                 if r.type == Type.FETCH:
                     self.fetch(r.addr, r.val)
@@ -825,7 +822,7 @@ def _(
                             ann.pointer(field, (high << 8) | low)
                         else:
                             ann.int(field, getattr(self.runner.reg(), reg))
-            else:   
+            else:
                 with s.begin_event.annotation("reg") as ann:
                     reg = self.runner.reg()
                     # iterate over all fields in RegisterPair and add them to the annotation as pointers
@@ -1026,7 +1023,6 @@ def _():
 @app.cell(hide_code=True)
 def _():
     def read_rom_banks():
-        import os
         import glob
         import re
 
@@ -1361,10 +1357,10 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
         def read_byte(self, addr):
             try:
                 ret = self.expected_reads[addr]
-            except KeyError as e:
+            except KeyError:
                 if addr >= 0x87B7 and addr <= 0x87C0:
                     return rom_banks[0][addr - 0x8000]
-            
+
                 # FIXME: why stack could become misaligned?
                 if addr < bus_parser.ROM_ADDR_START and addr >= bus_parser.ROM_ADDR_START - bus_parser.STACK_SIZE:
                     return 0
@@ -1388,7 +1384,7 @@ def _(IOPort, Type, bus_parser, dataclass, rom_banks):
         def in_port(self, port):
             try:
                 return self.io_reads[port]
-            except KeyError as e:
+            except KeyError:
                 # FIXME
                 return 0
 

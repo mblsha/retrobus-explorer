@@ -1,21 +1,15 @@
 # SED1560 is an LCD controller from SHARP PC-G850.
 
-from enum import Enum
-from dataclasses import dataclass
-from PIL import Image, ImageDraw
-import multiprocessing as mp
-import threading
-import queue
-import datetime
 import copy
+import datetime
+import multiprocessing as mp
+from dataclasses import dataclass
+from enum import Enum
 
-from typing import List
 import pandas
+from PIL import Image, ImageDraw
 
 from z80bus.bus_parser import (
-    Event,
-    ErrorType,
-    Type,
     IOPort,
 )
 

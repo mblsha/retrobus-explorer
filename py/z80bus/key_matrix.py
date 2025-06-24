@@ -1,8 +1,8 @@
-from z80bus.bus_parser import IOPort, Event, Type
-import copy
 import math
 from dataclasses import dataclass
 from typing import List
+
+from z80bus.bus_parser import Event, IOPort
 
 # https://ver0.sakura.ne.jp/doc/pcg800iocs.html shows how the keycodes are mapped
 # to the key matrix.

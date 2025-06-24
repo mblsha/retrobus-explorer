@@ -1,12 +1,13 @@
 import multiprocessing as mp
 import queue
-import time
+
 import PIL
 
 import z80bus.bus_parser
-import z80bus.sed1560
-from z80bus.bus_parser import IOPort, Event, Type
-from z80bus.test_bus_parser import fetch, in_port, out_port, normal_parse
+import z80bus.bus_parser as bus_parser
+import z80bus.sed1560 as sed1560
+from z80bus.bus_parser import Event, IOPort, Type
+from z80bus.test_bus_parser import fetch, out_port
 
 
 def test_parse_context():
@@ -58,11 +59,11 @@ def test_draw_lcd_context():
 
             raw_queue.put(out_port(0x02, bus_parser.IOPort.LCD_COMMAND))
             raw_queue.put(fetch(0x00, 0x1234))
-            assert type(display_queue.get()) == PIL.Image.Image
+            assert isinstance(display_queue.get(), PIL.Image.Image)
 
             raw_queue.put(out_port(0x01, bus_parser.IOPort.LCD_OUT))
             raw_queue.put(fetch(0x00, 0x1234))
-            assert type(display_queue.get()) == PIL.Image.Image
+            assert isinstance(display_queue.get(), PIL.Image.Image)
 
             # should not put image if it's same as old one
             raw_queue.put(out_port(0x02, bus_parser.IOPort.LCD_COMMAND))
@@ -83,6 +84,6 @@ def test_draw_lcd_context():
             raw_queue.put(fetch(0x00, 0x1234))
             raw_queue.put(out_port(0x01, bus_parser.IOPort.LCD_OUT))
             raw_queue.put(fetch(0x00, 0x1234))
-            assert type(display_queue.get()) == PIL.Image.Image
+            assert isinstance(display_queue.get(), PIL.Image.Image)
             assert_display_queue_empty()
     # assert False

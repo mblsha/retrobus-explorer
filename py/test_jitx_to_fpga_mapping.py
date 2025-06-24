@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Test pin mappings against expected ACF files"""
 
-import pytest
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
+
+import pytest
 
 import jitx_to_fpga_mapping as jfm
 
