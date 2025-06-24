@@ -1,5 +1,5 @@
 [project]
-name = "universal-level-shifter"
+name = "retrobus-explorer"
 version = "0.1.0"
 description = "RetroBus Explorer - Hardware/software tools for interfacing with legacy 5V computer systems"
 readme = "../README.md"
@@ -22,8 +22,11 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_backend"
+
+[tool.setuptools]
+packages = ["z80bus", "d3xx", "shared"]
 
 [tool.pytest.ini_options]
 testpaths = [".", "z80bus"]

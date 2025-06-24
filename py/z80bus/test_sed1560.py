@@ -1,4 +1,6 @@
 
+from __future__ import annotations
+
 from z80bus.bus_parser import IOPort
 from z80bus.sed1560 import SED1560, SED1560Interpreter, SED1560Parser
 from z80bus.test_bus_parser import normal_parse, out_port
