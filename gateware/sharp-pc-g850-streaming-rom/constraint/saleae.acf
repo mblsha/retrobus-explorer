@@ -1,10 +1,10 @@
 STANDARD(LVCMOS33) {
-    pin saleae[3] B39
-    pin saleae[2] B40
-    pin saleae[1] B11
-    pin saleae[0] B12
-    pin saleae[7] B9
-    pin saleae[6] B8
-    pin saleae[5] D11
-    pin saleae[4] D12
+    pin saleae[3] F2
+    pin saleae[2] E1
+    pin saleae[1] P14
+    pin saleae[0] M15
+    pin saleae[7] D4
+    pin saleae[6] C4
+    pin saleae[5] F3
+    pin saleae[4] F4
 }
