@@ -1,24 +1,22 @@
 
-from typing import Union
-
 from z80bus.bus_parser import IOPort
 from z80bus.sed1560 import SED1560, SED1560Interpreter, SED1560Parser
 from z80bus.test_bus_parser import normal_parse, out_port
 
 # Type alias for all possible SED1560 command types
-SED1560Command = Union[
-    SED1560.InitialDisplayLine,
-    SED1560.Contrast,
-    SED1560.PowerOn,
-    SED1560.PowerOnComplete,
-    SED1560.SetPageAddress,
-    SED1560.CmdA,
-    SED1560.SetCommonSegmentOutput,
-    SED1560.SetColumnPart,
-    SED1560.SetColumn,
-    SED1560.VRAMWrite,
-    SED1560.Unknown,
-]
+SED1560Command = (
+    SED1560.InitialDisplayLine
+    | SED1560.Contrast
+    | SED1560.PowerOn
+    | SED1560.PowerOnComplete
+    | SED1560.SetPageAddress
+    | SED1560.CmdA
+    | SED1560.SetCommonSegmentOutput
+    | SED1560.SetColumnPart
+    | SED1560.SetColumn
+    | SED1560.VRAMWrite
+    | SED1560.Unknown
+)
 
 
 def parse40(val: int) -> SED1560Command:

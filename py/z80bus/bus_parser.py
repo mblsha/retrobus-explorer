@@ -3,7 +3,6 @@ import multiprocessing as mp
 import struct
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
@@ -88,11 +87,11 @@ class InstructionType(Enum):
 class Event:
     type: Type
     val: int  # uint8
-    addr: Optional[int] = None  # uint16
-    pc: Optional[int] = None  # uint32
-    bank: Optional[int] = None
-    port: Optional[IOPort] = None
-    instr: Optional[InstructionType] = None
+    addr: int | None = None  # uint16
+    pc: int | None = None  # uint32
+    bank: int | None = None
+    port: IOPort | None = None
+    instr: InstructionType | None = None
 
     # convert to string, printing values in hex
     def stubname(self):

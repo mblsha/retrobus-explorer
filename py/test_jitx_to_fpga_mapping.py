@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Test pin mappings against expected ACF files"""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
