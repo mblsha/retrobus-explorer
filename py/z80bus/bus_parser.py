@@ -118,13 +118,13 @@ class Event:
 
 
 # for some opcodes the processor will set M1 low twice, if unhandled we can misclassify the second M1 as CALL/RET
-OPCODE_MULTI_PREFIX = set([0xCB, 0xDD, 0xED, 0xFD])
+OPCODE_MULTI_PREFIX = {0xCB, 0xDD, 0xED, 0xFD}
 # https://clrhome.org/table/#call
-OPCODE_CALL_PREFIX = set([0xCD])
-OPCODE_CONDITIONAL_CALL_PREFIX = set([0xC4, 0xCC, 0xD4, 0xDC, 0xE4, 0xEC, 0xF4, 0xFC])
+OPCODE_CALL_PREFIX = {0xCD}
+OPCODE_CONDITIONAL_CALL_PREFIX = {0xC4, 0xCC, 0xD4, 0xDC, 0xE4, 0xEC, 0xF4, 0xFC}
 # https://clrhome.org/table/#ret
-OPCODE_RET_PREFIX = set([0xC9])
-OPCODE_CONDITIONAL_RET_PREFIX = set([0xC0, 0xC8, 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8])
+OPCODE_RET_PREFIX = {0xC9}
+OPCODE_CONDITIONAL_RET_PREFIX = {0xC0, 0xC8, 0xD0, 0xD8, 0xE0, 0xE8, 0xF0, 0xF8}
 
 ROM_ADDR_START = 0x8000
 BANK_ADDR_START = 0xC000
@@ -279,7 +279,7 @@ class BusParser:
                         self.rom_bank = val
                     elif port == IOPort.ROM_EX_BANK:
                         self.rom_bank = val & 0x0F
-                except:
+                except ValueError:
                     errors.append(f"Invalid port at offset {offset}: {hex(addr)}")
 
             r.append(
@@ -416,7 +416,7 @@ class PipelineBusParser:
                     self.rom_bank = val
                 elif port == IOPort.ROM_EX_BANK:
                     self.rom_bank = val & 0x0F
-            except:
+            except ValueError:
                 self.errors.append(f"Invalid port at {hex(addr)}")
 
         return Event(

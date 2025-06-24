@@ -27,7 +27,7 @@ class ParseRenderManager:
         if cls._instance is None:
             with cls._instance_lock:
                 if cls._instance is None:
-                    cls._instance = super(ParseRenderManager, cls).__new__(cls)
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def reset(self):

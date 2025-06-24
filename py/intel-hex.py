@@ -23,14 +23,14 @@ def _(mo):
 @app.cell
 def _():
     from enum import Enum
-    from typing import List, NamedTuple, Optional
+    from typing import NamedTuple, Optional
 
     import marimo as mo
     from lark import Lark, Token, Transformer, v_args
     return (
         Enum,
         Lark,
-        List,
+        list,
         NamedTuple,
         Optional,
         Token,

@@ -3,7 +3,6 @@ import queue
 
 import PIL
 
-import z80bus.bus_parser
 import z80bus.bus_parser as bus_parser
 import z80bus.sed1560 as sed1560
 from z80bus.bus_parser import Event, IOPort, Type
@@ -23,7 +22,7 @@ def test_parse_context():
         raw_queue.put(out_port(0xAB, bus_parser.IOPort.LCD_COMMAND))
         try:
             ports_queue.get_nowait()
-            assert False
+            raise AssertionError()
         except queue.Empty:
             pass
         raw_queue.put(fetch(0x00, 0x1234))
@@ -33,7 +32,7 @@ def test_parse_context():
             val=0xAB,
             addr=IOPort.LCD_COMMAND.value,
         )
-    assert ports_queue.get() == None
+    assert ports_queue.get() is None
 
 
 def test_draw_lcd_context():
@@ -47,7 +46,7 @@ def test_draw_lcd_context():
     def assert_display_queue_empty():
         try:
             display_queue.get_nowait()
-            assert False
+            raise AssertionError()
         except queue.Empty:
             pass
 

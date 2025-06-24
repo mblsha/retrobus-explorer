@@ -242,7 +242,7 @@ class SED1560Interpreter:
                 # The counter automatically stops at the highest address, A6H.
                 self.col = min(self.col + 1, self.LCD_WIDTH - 1)
             case SED1560.SetCommonSegmentOutput(
-                scanning_direction=direction, case=case
+                scanning_direction=direction
             ):
                 self.scanning_direction = direction
             case SED1560.Contrast(contrast=contrast):
@@ -260,7 +260,7 @@ class SED1560Interpreter:
                     self.col = (self.col & 0x0F) | value
                 else:
                     self.col = (self.col & 0xF0) | value
-            case SED1560.Unknown(addr=addr, value=value):
+            case SED1560.Unknown():
                 pass
             case _:
                 raise ValueError(f"Unhandled command: {cmd}")

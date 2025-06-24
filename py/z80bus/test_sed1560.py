@@ -1,4 +1,3 @@
-from typing import List
 
 from z80bus.bus_parser import IOPort
 from z80bus.sed1560 import SED1560, SED1560Interpreter, SED1560Parser
@@ -13,7 +12,7 @@ def parse41(val: int) -> SED1560:
     return SED1560Parser.parse_out41(val)
 
 
-def parse(data: bytes) -> List[SED1560]:
+def parse(data: bytes) -> list[SED1560]:
     events, errors = normal_parse(data)
     assert len(errors) == 0
     return SED1560Parser.parse_bus_commands(events)

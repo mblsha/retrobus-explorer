@@ -36,8 +36,8 @@ def _():
     import struct
     from dataclasses import dataclass
     from enum import Enum
-    from typing import List, NamedTuple, Optional
-    return Enum, List, NamedTuple, Optional, dataclass, struct
+    from typing import NamedTuple, Optional
+    return Enum, list, NamedTuple, Optional, dataclass, struct
 
 
 @app.cell
@@ -80,7 +80,7 @@ def _(ctypes, ftd3xx, mft):
         def read(self, datalen):
             bytesTransferred = mft.ULONG()
             data = ctypes.create_string_buffer(datalen)
-            status = ftd3xx.call_ft(mft.FT_ReadPipeEx, self.D3XX.handle, mft.UCHAR(self.channel), data, mft.ULONG(datalen),
+            ftd3xx.call_ft(mft.FT_ReadPipeEx, self.D3XX.handle, mft.UCHAR(self.channel), data, mft.ULONG(datalen),
                                     ctypes.byref(bytesTransferred), 100)
             if bytesTransferred.value == 0:
                 return None
@@ -292,7 +292,7 @@ async def _(
                 empty_count = 0
                 while True:
                     bytes = d.read(read_size)
-                    if bytes == None or len(bytes) == 0:
+                    if bytes is None or len(bytes) == 0:
                         empty_count += 1
                     else:
                         empty_count = 0
@@ -450,7 +450,7 @@ def _(Type, z80):
         def analyze_portion_of_trace(self, parsed, analyze_min_max):
             start = min(analyze_min_max)
             end = max(analyze_min_max)
-            for index, e in enumerate(parsed[start:end]):
+            for _index, e in enumerate(parsed[start:end]):
                 # print(f"{index + start}: {e}")
                 if e.type == Type.FETCH:
                     print(f'M:{hex(e.addr)} → {hex(e.val)}{" " + str(e.instr) if e.instr else ""}')
@@ -1145,7 +1145,6 @@ def _(IOPort, Type, df, rom_banks):
         # IO Port documentation:
         # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
         for r in df.iloc[0:1000000].itertuples():
-            index = r.Index
             # print(r.type, r.val, r.addr)
 
             try:

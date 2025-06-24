@@ -5,7 +5,6 @@ Converts JITX pin definitions to Alchitry Labs constraint files.
 """
 
 import re
-from typing import Dict, List, Tuple
 
 # AlchitryAu.stanza (print pin mapping)
 ALCHITRY_ELEMENT_MAPPING = """
@@ -328,7 +327,7 @@ FPGA_MAP: 46 → cpu.MRQ
 """.strip()
 
 
-def get_alchitry_element_mapping() -> Dict[str, str]:
+def get_alchitry_element_mapping() -> dict[str, str]:
     """
     Maps from internal shield mapping to the Alchitry Labs constraint pin name
     """
@@ -341,7 +340,7 @@ def get_alchitry_element_mapping() -> Dict[str, str]:
     return mapping
 
 
-def get_alchitry_ffc_mapping() -> Dict[int, str]:
+def get_alchitry_ffc_mapping() -> dict[int, str]:
     """
     Maps from FFC data pin to the internal bank name
     """
@@ -354,7 +353,7 @@ def get_alchitry_ffc_mapping() -> Dict[int, str]:
     return mapping
 
 
-def get_saleae_mapping() -> Dict[int, str]:
+def get_saleae_mapping() -> dict[int, str]:
     """
     Maps from Saleae pin to the internal bank name
     """
@@ -367,7 +366,7 @@ def get_saleae_mapping() -> Dict[int, str]:
     return mapping
 
 
-def get_sharp_pc_g850_bus_mapping() -> Dict[str, str]:
+def get_sharp_pc_g850_bus_mapping() -> dict[str, str]:
     """
     Maps from internal shield mapping to the Sharp PC-G850 bus pin name
     """
@@ -381,7 +380,7 @@ def get_sharp_pc_g850_bus_mapping() -> Dict[str, str]:
     return mapping
 
 
-def get_sharp_pc_e500_bus_mapping() -> Dict[str, str]:
+def get_sharp_pc_e500_bus_mapping() -> dict[str, str]:
     """
     Maps from internal element mapping to the Sharp PC-E500 bus pin name
     """
@@ -397,7 +396,7 @@ def get_sharp_pc_e500_bus_mapping() -> Dict[str, str]:
     return mapping
 
 
-def get_sharp_organizer_card_mapping() -> Dict[str, str]:
+def get_sharp_organizer_card_mapping() -> dict[str, str]:
     """
     Maps from internal element mapping to the Sharp Organizer Card
     """
@@ -413,7 +412,7 @@ def get_sharp_organizer_card_mapping() -> Dict[str, str]:
     return mapping
 
 
-def get_sharp_sc62015_mapping() -> Dict[str, str]:
+def get_sharp_sc62015_mapping() -> dict[str, str]:
     """
     Maps from internal element mapping to the Sharp sc62015
     """
@@ -429,7 +428,7 @@ def get_sharp_sc62015_mapping() -> Dict[str, str]:
     return mapping
 
 
-def format_acf_content(pin_list: List[Tuple[str, str]]) -> str:
+def format_acf_content(pin_list: list[tuple[str, str]]) -> str:
     """Format pin list as ACF content"""
     lines = ["STANDARD(LVCMOS33) {"]
     for signal, pin in pin_list:

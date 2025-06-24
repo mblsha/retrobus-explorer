@@ -68,7 +68,7 @@ def call_ft(function, *args):
 def raiseExceptionOnError(bEnable):
     """Enable or disable exception handling"""
     origValue = len(bRaiseExceptionOnError) > 0
-    if bEnable == True:
+    if bEnable is True:
         if len(bRaiseExceptionOnError) == 0:
             bRaiseExceptionOnError.append(True)
     else:
@@ -98,7 +98,7 @@ def listDevices(flags=_ft.FT_OPEN_BY_DESCRIPTION):
         for i in range(devcount):
             ba[i] = c.cast(bd[i], c.c_char_p)
         call_ft(_ft.FT_ListDevices, ba, c.byref(n), _ft.DWORD(FT_LIST_ALL | flags))
-        return [res for res in ba[:devcount]]
+        return list(ba[:devcount])
     else:
         return None
 
@@ -136,19 +136,19 @@ def getDeviceInfoDetail(devnum=0):
     f = _ft.DWORD()
     t = _ft.DWORD()
     i = _ft.DWORD()
-    l = _ft.DWORD()
+    loc = _ft.DWORD()
     h = _ft.FT_HANDLE()
     n = c.c_buffer(FT_MAX_DESCRIPTION_SIZE)
     d = c.c_buffer(FT_MAX_DESCRIPTION_SIZE)
     call_ft(_ft.FT_GetDeviceInfoDetail, _ft.DWORD(devnum),
-            c.byref(f), c.byref(t), c.byref(i), c.byref(l), n, d, c.byref(h))
+            c.byref(f), c.byref(t), c.byref(i), c.byref(loc), n, d, c.byref(h))
     if sys.platform != 'Win32':
         """Linux creates a handle to the device so close it. D3XX Linux driver issue."""
         call_ft(_ft.FT_Close, h)
     return {'Flags': f.value,
             'Type': t.value,
             'ID': i.value,
-            'LocId': l.value,
+            'LocId': loc.value,
             'SerialNumber': n.value,
             'Description': d.value}
 
@@ -363,7 +363,7 @@ class FTD3XX:
             self.status = call_ft(_ft.FT_ReadPipeEx, self.handle, _ft.UCHAR(pipe), data, _ft.ULONG(datalen),
                                   c.byref(bytesTransferred), None)
             return {'bytesTransferred': bytesTransferred.value,
-                    'bytes': data.raw[:bytesTransferred.value] if raw == True else data.value[:bytesTransferred.value]}
+                    'bytes': data.raw[:bytesTransferred.value] if raw is True else data.value[:bytesTransferred.value]}
 
         def readPipeAsync(self, pipe, data, datalen, transferred, overlapped):
             """Recv the data to the device."""
@@ -429,7 +429,7 @@ class FTD3XX:
             self.status = call_ft(_ft.FT_ReadPipeEx, self.handle, _ft.UCHAR(channel), data, _ft.ULONG(datalen),
                                   c.byref(bytesTransferred), timeout)
             return {'bytesTransferred': bytesTransferred.value,
-                    'bytes': data.value[:bytesTransferred.value] if raw == False else data.raw[:bytesTransferred.value]}
+                    'bytes': data.value[:bytesTransferred.value] if raw is False else data.raw[:bytesTransferred.value]}
 
 
 __all__ = ['call_ft',

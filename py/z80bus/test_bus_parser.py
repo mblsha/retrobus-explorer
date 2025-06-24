@@ -1,6 +1,5 @@
 import queue
 import struct
-from typing import List, Tuple
 
 import z80bus.bus_parser as bus_parser
 from z80bus.bus_parser import (
@@ -35,7 +34,7 @@ def pipeline_parse(input: bytes):
     return p.all_events, errors
 
 
-def normal_parse(b: bytes) -> Tuple[List[Event], List[str]]:
+def normal_parse(b: bytes) -> tuple[list[Event], list[str]]:
     normal_events, normal_errors = BusParser().parse(b)
     pipe_events, pipe_errors = pipeline_parse(b)
     assert len(normal_events) == len(pipe_events)
@@ -58,7 +57,7 @@ def not_parse(b: bytes) -> None:
     assert len(errors) > 0
 
 
-def parsel(b: bytes) -> List[Event]:
+def parsel(b: bytes) -> list[Event]:
     events, errors = normal_parse(b)
     assert not errors
     assert len(events) > 1
@@ -497,7 +496,7 @@ def test_call_unconditional():
 
 
 def test_bank_number_for_address():
-    assert bus_parser.bank_number_for_address(0x4000) == None
+    assert bus_parser.bank_number_for_address(0x4000) is None
     assert bus_parser.bank_number_for_address(0x8000) == 0
     assert bus_parser.bank_number_for_address(0xC000) == 1
     assert bus_parser.bank_number_for_address(0xC000 + 0x100) == 1

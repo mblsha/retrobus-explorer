@@ -1,6 +1,5 @@
 import math
 from dataclasses import dataclass
-from typing import List
 
 from z80bus.bus_parser import Event, IOPort
 
@@ -39,7 +38,7 @@ class PressedKey:
 
 @dataclass
 class KeyMatrixState:
-    pressed_keys: List[PressedKey]
+    pressed_keys: list[PressedKey]
     shift_pressed: bool
 
 
