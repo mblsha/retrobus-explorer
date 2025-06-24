@@ -59,7 +59,7 @@ class ParseRenderManager:
             self.status_num_lcd_commands += 1
             self.lcd.eval(c)
 
-    def process_raw_data(self, data: bytes) -> list:
+    def process_raw_data(self, data: bytes) -> None:
         self.buf += data
         self.buf = self.parser.parse(self.buf)
         self.process_queues()

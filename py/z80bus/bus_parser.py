@@ -90,7 +90,7 @@ class InstructionType(Enum):
 class Event:
     type: Type
     val: int  # uint8
-    addr: int = None  # uint16
+    addr: Optional[int] = None  # uint16
     pc: Optional[int] = None  # uint32
     bank: Optional[int] = None
     port: Optional[IOPort] = None

@@ -14,8 +14,8 @@ from z80bus.bus_parser import (
 
 
 def pipeline_parse(input: bytes):
-    errors_queue = queue.Queue()
-    out_ports_queue = queue.Queue()
+    errors_queue: queue.Queue = queue.Queue()
+    out_ports_queue: queue.Queue = queue.Queue()
     p = PipelineBusParser(errors_queue, out_ports_queue, save_all_events=True)
 
     buf = b""
@@ -52,7 +52,7 @@ def parse(b: bytes) -> Event:
     return events[0]
 
 
-def not_parse(b: bytes) -> Event:
+def not_parse(b: bytes) -> None:
     events, errors = normal_parse(b)
     assert len(events) == 0
     assert len(errors) > 0

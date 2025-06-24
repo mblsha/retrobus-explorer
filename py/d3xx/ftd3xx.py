@@ -43,7 +43,7 @@ msgs = [
     'FT_INCORRECT_DEVICE_PATH',
     'FT_OTHER_ERROR']
 
-bRaiseExceptionOnError = []
+bRaiseExceptionOnError: list[bool] = []
 
 
 class DeviceError(Exception):

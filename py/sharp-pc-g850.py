@@ -990,7 +990,7 @@ def _():
             packet.track_descriptor.thread.thread_name = thread_name
             return track_uuid
 
-        def add_slice_event(self, track_uuid, timestamp: int, event_type: str, name: str = None):
+        def add_slice_event(self, track_uuid, timestamp: int, event_type: str, name: Optional[str] = None):
             packet = self.trace.packet.add()
             packet.timestamp = timestamp
 
