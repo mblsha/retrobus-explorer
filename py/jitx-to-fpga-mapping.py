@@ -640,14 +640,14 @@ def _(mo):
 def _():
     # From alchitry-au1-level-shifter.stanza lines 106-113
     saleae_to_alchitry_mapping = """
-    saleae7 → fpga.data_b[15]
-    saleae6 → fpga.data_b[13]
-    saleae5 → fpga.data_b[12]
-    saleae4 → fpga.data_b[14]
-    saleae3 → fpga.data_b[10]
-    saleae2 → fpga.data_b[8]
-    saleae1 → fpga.data_d[4]
-    saleae0 → fpga.data_d[5]
+    saleae0 → fpga.data_b[15]
+    saleae1 → fpga.data_b[13]
+    saleae2 → fpga.data_b[12]
+    saleae3 → fpga.data_b[14]
+    saleae4 → fpga.data_b[10]
+    saleae5 → fpga.data_b[8]
+    saleae6 → fpga.data_d[4]
+    saleae7 → fpga.data_d[5]
     """.strip()
     return (saleae_to_alchitry_mapping,)
 
@@ -670,15 +670,12 @@ def _(saleae_to_alchitry_mapping):
             # break
         return mapping
 
-    saleae_mapping = get_saleae_mapping()
-    return (get_saleae_mapping, saleae_mapping)
+    get_saleae_mapping()
+    return (get_saleae_mapping,)
 
 
 @app.cell
-def _(saleae_mapping):
-    print("Saleae to FPGA pin mapping:")
-    for saleae_pin in sorted(saleae_mapping.keys()):
-        print(f"  saleae{saleae_pin} → {saleae_mapping[saleae_pin]}")
+def _():
     return
 
 
