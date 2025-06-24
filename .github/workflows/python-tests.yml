@@ -18,14 +18,12 @@ jobs:
         python-version: '3.12'
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install ruff
+      run: python -m pip install -e ./py[dev]
     
     - name: Run Ruff
       run: |
         cd py
-        ruff check .
+        ruff check . || (echo "Ruff check failed" && exit 1)
 
   mypy:
     runs-on: ubuntu-latest
@@ -38,11 +36,7 @@ jobs:
         python-version: '3.12'
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        cd py
-        pip install -e .
-        pip install mypy types-protobuf
+      run: python -m pip install -e ./py[dev]
     
     - name: Run Mypy
       run: ./.github/scripts/run-mypy.sh
@@ -58,24 +52,12 @@ jobs:
         python-version: '3.12'
     
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        cd py
-        pip install -e .
-        pip install pytest pytest-cov
+      run: python -m pip install -e ./py[dev]
     
     - name: Run tests
       run: |
         cd py
-        pytest --cov=. --cov-report=xml --cov-report=term
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./py/coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
+        pytest
 
   summary:
     if: always()
