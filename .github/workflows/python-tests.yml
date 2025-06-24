@@ -45,9 +45,7 @@ jobs:
         pip install mypy types-protobuf
     
     - name: Run Mypy
-      run: |
-        cd py
-        mypy --ignore-missing-imports --exclude='(single-bit-png|intel-hex|sharp-pc-g850|organizer-misc-signals|perfetto_pb2|shared/pyz80)\.py$' .
+      run: ./.github/scripts/run-mypy.sh
 
   test:
     runs-on: ubuntu-latest

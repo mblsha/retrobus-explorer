@@ -5,6 +5,7 @@ import os
 import queue
 import sys
 import threading
+from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -83,8 +84,8 @@ class ParseRenderManager:
             "2out_ports_queue_size_after": out_ports_queue_size_after,
         }
 
-    def get_accumulated_events(self) -> list:
-        return self.parser.all_events
+    def get_accumulated_events(self) -> list[Any]:
+        return self.parser.all_events  # type: ignore[no-any-return]
 
     def get_lcd_image_bytes(self) -> bytes:
         img, draw = self.lcd.vram_image()
