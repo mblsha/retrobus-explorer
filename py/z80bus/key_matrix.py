@@ -67,7 +67,7 @@ class KeyMatrixInterpreter:
     def __str__(self):
         r = []
         if self.last_shift_state:
-            r.append('SHIFT')
+            r.append("SHIFT")
         for k in self.last_full_state:
             r.append(str(k))
         return ", ".join(r)

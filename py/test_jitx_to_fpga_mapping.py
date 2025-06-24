@@ -93,8 +93,8 @@ class TestPinMappings:
         for config in BOARD_CONFIGS:
             content = config.generator()
             pins = []
-            for line in content.split('\n'):
-                if line.strip().startswith('pin'):
+            for line in content.split("\n"):
+                if line.strip().startswith("pin"):
                     pin = line.split()[-1]
                     assert pin not in pins, f"Duplicate pin {pin} in {config.name} mapping"
                     pins.append(pin)
@@ -109,7 +109,7 @@ def generate_all_acf_files():
         content = config.generator()
         output_path = project_root / config.expected_file
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content + '\n')
+        output_path.write_text(content + "\n")
         print(f"Generated: {config.expected_file}")
 
 

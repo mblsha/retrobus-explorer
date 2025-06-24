@@ -50,9 +50,7 @@ class IOPort(Enum):
     UART_DATA = 0x6F
 
     SET_BOOTROM_OFF = 0x1A
-    RAM_CE_MODE = (
-        0x1B  # 0: CERAM1 (internal RAM), 1: CERAM2 (external RAM on system bus)
-    )
+    RAM_CE_MODE = 0x1B  # 0: CERAM1 (internal RAM), 1: CERAM2 (external RAM on system bus)
     SET_IORESET = 0x1C
 
     UNKNOWN_1D = 0x1D
@@ -101,20 +99,19 @@ class Event:
         # print the creation function for unittest
         if self.type == Type.FETCH:
             return f"fetch(0x{self.val:02X}, 0x{self.addr:04X})"
-        elif self.type == Type.READ:
+        if self.type == Type.READ:
             return f"read(0x{self.val:02X}, 0x{self.addr:04X})"
-        elif self.type == Type.WRITE:
+        if self.type == Type.WRITE:
             return f"write(0x{self.val:02X}, 0x{self.addr:04X})"
-        elif self.type == Type.IN_PORT:
+        if self.type == Type.IN_PORT:
             return f"in_port(0x{self.val:02X}, IOPort.{self.port.name})"
-        elif self.type == Type.OUT_PORT:
+        if self.type == Type.OUT_PORT:
             return f"out_port(0x{self.val:02X}, IOPort.{self.port.name})"
-        elif self.type == Type.READ_STACK:
+        if self.type == Type.READ_STACK:
             return f"read_stack(0x{self.val:02X}, 0x{self.addr:04X})"
-        elif self.type == Type.WRITE_STACK:
+        if self.type == Type.WRITE_STACK:
             return f"write_stack(0x{self.val:02X}, 0x{self.addr:04X})"
-        else:
-            return f"{self.type.value} v:{self.val:02X} a:{self.addr:04X}"
+        return f"{self.type.value} v:{self.val:02X} a:{self.addr:04X}"
 
 
 # for some opcodes the processor will set M1 low twice, if unhandled we can misclassify the second M1 as CALL/RET
@@ -497,7 +494,7 @@ def parse_data_thread(
             "num_out_ports": parser.status_num_out_ports,
             "num_empty_queue": status_num_empty_queue,
             "num_errors_full_buffer": parser.status_num_errors_full_buffer,
-            "num_out_ports_full_buffer": parser.status_num_out_ports_full_buffer,
+            # "num_out_ports_full_buffer": parser.status_num_out_ports_full_buffer,
         }
     )
 

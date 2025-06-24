@@ -1,7 +1,7 @@
 import queue
 import struct
 
-import z80bus.bus_parser as bus_parser
+from z80bus import bus_parser
 from z80bus.bus_parser import (
     BusParser,
     ErrorType,

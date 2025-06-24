@@ -9,9 +9,7 @@ from enum import Enum
 import pandas
 from PIL import Image, ImageDraw
 
-from z80bus.bus_parser import (
-    IOPort,
-)
+from z80bus.bus_parser import IOPort
 
 
 class SED1560:
@@ -88,26 +86,26 @@ class SED1560Parser:
             # Initial Display Line command
             com0 = x & 0x3F
             return SED1560.InitialDisplayLine(value=com0)
-        elif (x >> 5) == 0b100:
+        if (x >> 5) == 0b100:
             # Contrast command: lower 5 bits hold the contrast value
             contrast = x & 0b11111
             return SED1560.Contrast(contrast=contrast)
-        elif (x >> 1) == 0b10010:
+        if (x >> 1) == 0b10010:
             # PSU On command: LSB determines state (0 or 1)
             on = bool(x & 0b1)
             return SED1560.PowerOn(on=on)
-        elif x == 0b11101101:
+        if x == 0b11101101:
             # Power on complete command
             return SED1560.PowerOnComplete()
-        elif high == 0xB:
+        if high == 0xB:
             # Set Page Address command
             return SED1560.SetPageAddress(value=low)
-        elif high == 0xA:
+        if high == 0xA:
             #  A: low nibble split into command and value
             command_a = SED1560.CmdAType(low & 0b1110)
             value = low & 0b1
             return SED1560.CmdA(cmd=command_a, value=value)
-        elif high == 0xC:
+        if high == 0xC:
             # Set Common and Segment Output Status Register command
             scanning_direction = low >> 3
             case = low & 0b111
@@ -118,7 +116,7 @@ class SED1560Parser:
             return SED1560.SetCommonSegmentOutput(
                 scanning_direction=scanning_direction, case=case
             )
-        elif high in [0x0, 0x1]:
+        if high in [0x0, 0x1]:
             # Column address command: update column based on high/low nibble.
             if high:  # high nibble update
                 col = low << 4
@@ -127,8 +125,7 @@ class SED1560Parser:
                 col = low
                 is_high = False
             return SED1560.SetColumnPart(is_high=is_high, value=col)
-        else:
-            raise ValueError(SED1560.Unknown(addr=0x40, value=x))
+        raise ValueError(SED1560.Unknown(addr=0x40, value=x))
 
     @staticmethod
     def parse_out41(x: int):
@@ -242,7 +239,7 @@ class SED1560Interpreter:
                 # The counter automatically stops at the highest address, A6H.
                 self.col = min(self.col + 1, self.LCD_WIDTH - 1)
             case SED1560.SetCommonSegmentOutput(
-                scanning_direction=direction
+                scanning_direction=direction, case=_
             ):
                 self.scanning_direction = direction
             case SED1560.Contrast(contrast=contrast):
@@ -251,15 +248,15 @@ class SED1560Interpreter:
                 self.power_on = on
             case SED1560.PowerOnComplete():
                 pass
-            case SED1560.CmdA(cmd=SED1560.CmdAType.DISPLAY_ON, value=value):
+            case SED1560.CmdA(cmd=cmd, value=value) if cmd == SED1560.CmdAType.DISPLAY_ON:
                 self.display_on = value
-            case SED1560.CmdA(cmd=SED1560.CmdAType.SEGMENTS_DISPLAY_MODE, value=value):
+            case SED1560.CmdA(cmd=cmd, value=value) if cmd == SED1560.CmdAType.SEGMENTS_DISPLAY_MODE:
                 self.segments_display_mode = value
-            case SED1560.SetColumnPart(is_high=is_high, value=value):
-                if is_high:
-                    self.col = (self.col & 0x0F) | value
+            case SED1560.SetColumnPart() as col_part:
+                if col_part.is_high:
+                    self.col = (self.col & 0x0F) | col_part.value
                 else:
-                    self.col = (self.col & 0xF0) | value
+                    self.col = (self.col & 0xF0) | col_part.value
             case SED1560.Unknown():
                 pass
             case _:
@@ -358,7 +355,7 @@ class DrawLCDContext:
 
     def __enter__(self):
         self.process.start()
-        print(f'DrawLCDContext: pid {self.process.pid}')
+        print(f"DrawLCDContext: pid {self.process.pid}")
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):

@@ -1,47 +1,53 @@
+import ctypes as c
 import sys
 
-if sys.platform == 'win32':
+if sys.platform == "win32":
     import _ftd3xx_win32 as _ft
 else:
     import _ftd3xx_linux as _ft
-import ctypes as c
 
-from defines import *
+from defines import (
+    FT_LIST_ALL,
+    FT_LIST_NUMBER_ONLY,
+    FT_MAX_DESCRIPTION_SIZE,
+    FT_OPEN_BY_INDEX,
+    FT_STRING_DESCRIPTOR_TYPE,
+)
 
 msgs = [
-    'FT_OK',
-    'FT_INVALID_HANDLE',
-    'FT_DEVICE_NOT_FOUND',
-    'FT_DEVICE_NOT_OPENED',
-    'FT_IO_ERROR',
-    'FT_INSUFFICIENT_RESOURCES',
-    'FT_INVALID_PARAMETER',
-    'FT_INVALID_BAUD_RATE',
-    'FT_DEVICE_NOT_OPENED_FOR_ERASE',
-    'FT_DEVICE_NOT_OPENED_FOR_WRITE',
-    'FT_FAILED_TO_WRITE_DEVICE',
-    'FT_EEPROM_READ_FAILED',
-    'FT_EEPROM_WRITE_FAILED',
-    'FT_EEPROM_ERASE_FAILED',
-    'FT_EEPROM_NOT_PRESENT',
-    'FT_EEPROM_NOT_PROGRAMMED',
-    'FT_INVALID_ARGS',
-    'FT_NOT_SUPPORTED',
-    'FT_NO_MORE_ITEMS',
-    'FT_TIMEOUT',
-    'FT_OPERATION_ABORTED',
-    'FT_RESERVED_PIPE',
-    'FT_INVALID_CONTROL_REQUEST_DIRECTION',
-    'FT_INVALID_CONTROL_REQUEST_TYPE',
-    'FT_IO_PENDING',
-    'FT_IO_INCOMPLETE',
-    'FT_HANDLE_EOF',
-    'FT_BUSY',
-    'FT_NO_SYSTEM_RESOURCES',
-    'FT_DEVICE_LIST_NOT_READY',
-    'FT_DEVICE_NOT_CONNECTED',
-    'FT_INCORRECT_DEVICE_PATH',
-    'FT_OTHER_ERROR']
+    "FT_OK",
+    "FT_INVALID_HANDLE",
+    "FT_DEVICE_NOT_FOUND",
+    "FT_DEVICE_NOT_OPENED",
+    "FT_IO_ERROR",
+    "FT_INSUFFICIENT_RESOURCES",
+    "FT_INVALID_PARAMETER",
+    "FT_INVALID_BAUD_RATE",
+    "FT_DEVICE_NOT_OPENED_FOR_ERASE",
+    "FT_DEVICE_NOT_OPENED_FOR_WRITE",
+    "FT_FAILED_TO_WRITE_DEVICE",
+    "FT_EEPROM_READ_FAILED",
+    "FT_EEPROM_WRITE_FAILED",
+    "FT_EEPROM_ERASE_FAILED",
+    "FT_EEPROM_NOT_PRESENT",
+    "FT_EEPROM_NOT_PROGRAMMED",
+    "FT_INVALID_ARGS",
+    "FT_NOT_SUPPORTED",
+    "FT_NO_MORE_ITEMS",
+    "FT_TIMEOUT",
+    "FT_OPERATION_ABORTED",
+    "FT_RESERVED_PIPE",
+    "FT_INVALID_CONTROL_REQUEST_DIRECTION",
+    "FT_INVALID_CONTROL_REQUEST_TYPE",
+    "FT_IO_PENDING",
+    "FT_IO_INCOMPLETE",
+    "FT_HANDLE_EOF",
+    "FT_BUSY",
+    "FT_NO_SYSTEM_RESOURCES",
+    "FT_DEVICE_LIST_NOT_READY",
+    "FT_DEVICE_NOT_CONNECTED",
+    "FT_INCORRECT_DEVICE_PATH",
+    "FT_OTHER_ERROR"]
 
 bRaiseExceptionOnError: list[bool] = []
 
@@ -71,9 +77,8 @@ def raiseExceptionOnError(bEnable):
     if bEnable is True:
         if len(bRaiseExceptionOnError) == 0:
             bRaiseExceptionOnError.append(True)
-    else:
-        if len(bRaiseExceptionOnError) > 0:
-            bRaiseExceptionOnError.get()
+    elif len(bRaiseExceptionOnError) > 0:
+        bRaiseExceptionOnError.pop()
     return origValue
 
 
@@ -99,8 +104,7 @@ def listDevices(flags=_ft.FT_OPEN_BY_DESCRIPTION):
             ba[i] = c.cast(bd[i], c.c_char_p)
         call_ft(_ft.FT_ListDevices, ba, c.byref(n), _ft.DWORD(FT_LIST_ALL | flags))
         return list(ba[:devcount])
-    else:
-        return None
+    return None
 
 
 def createDeviceInfoList():
@@ -122,11 +126,11 @@ def getDeviceInfoList():
     for i in range(numDevices):
         device = _ft.FT_DEVICE_LIST_INFO_NODE()
         deviceInfo = getDeviceInfoDetail(i)
-        device.Flags = deviceInfo['Flags']
-        device.ID = deviceInfo['ID']
-        device.LocId = deviceInfo['LocId']
-        device.SerialNumber = deviceInfo['SerialNumber']
-        device.Description = deviceInfo['Description']
+        device.Flags = deviceInfo["Flags"]
+        device.ID = deviceInfo["ID"]
+        device.LocId = deviceInfo["LocId"]
+        device.SerialNumber = deviceInfo["SerialNumber"]
+        device.Description = deviceInfo["Description"]
         deviceList.append(device)
     return deviceList
 
@@ -142,15 +146,15 @@ def getDeviceInfoDetail(devnum=0):
     d = c.c_buffer(FT_MAX_DESCRIPTION_SIZE)
     call_ft(_ft.FT_GetDeviceInfoDetail, _ft.DWORD(devnum),
             c.byref(f), c.byref(t), c.byref(i), c.byref(loc), n, d, c.byref(h))
-    if sys.platform != 'Win32':
+    if sys.platform != "Win32":
         """Linux creates a handle to the device so close it. D3XX Linux driver issue."""
         call_ft(_ft.FT_Close, h)
-    return {'Flags': f.value,
-            'Type': t.value,
-            'ID': i.value,
-            'LocId': loc.value,
-            'SerialNumber': n.value,
-            'Description': d.value}
+    return {"Flags": f.value,
+            "Type": t.value,
+            "ID": i.value,
+            "LocId": loc.value,
+            "SerialNumber": n.value,
+            "Description": d.value}
 
 
 def create(id_str, flags=FT_OPEN_BY_INDEX):
@@ -165,9 +169,8 @@ def create(id_str, flags=FT_OPEN_BY_INDEX):
 
 def setTransferParams(conf, fifo):
     """Set transfer parameters for Linux only"""
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         call_ft(_ft.FT_SetTransferParams, c.byref(conf), fifo)
-    return None
 
 
 class FTD3XX:
@@ -179,12 +182,10 @@ class FTD3XX:
         update to False to avoid a slow call to createDeviceInfoList."""
         self.handle = handle
         self.status = 0
-        return None
 
     def close(self, noreset=False):
         """Close the device handle"""
         self.status = call_ft(_ft.FT_Close, self.handle)
-        return None
 
     def getLastError(self):
         """Return status"""
@@ -193,7 +194,6 @@ class FTD3XX:
     def flushPipe(self, pipe):
         """Flush pipe"""
         self.status = call_ft(_ft.FT_FlushPipe, self.handle, _ft.UCHAR(pipe))
-        return None
 
     def getDeviceInfo(self):
         """Returns a dictionary describing the device. """
@@ -203,10 +203,10 @@ class FTD3XX:
         serial = c.c_buffer(FT_MAX_DESCRIPTION_SIZE)
         self.status = call_ft(_ft.FT_GetDeviceInfo, self.handle, c.byref(deviceType), c.byref(deviceId), serial, desc,
                               None)
-        return {'Type': deviceType.value,
-                'ID': deviceId.value,
-                'Description': desc.value,
-                'Serial': serial.value}
+        return {"Type": deviceType.value,
+                "ID": deviceId.value,
+                "Description": desc.value,
+                "Serial": serial.value}
 
     def getDeviceDescriptor(self):
         """Returns a dictionary describing the device descriptor. """
@@ -251,7 +251,6 @@ class FTD3XX:
         """Sets a chip configuration. """
         self.status = call_ft(_ft.FT_SetChipConfiguration, self.handle,
                               c.byref(chipCfg) if chipCfg is not None else None)
-        return None
 
     def getVIDPID(self):
         """Get the VID and PID of the device"""
@@ -281,17 +280,14 @@ class FTD3XX:
     def resetDevicePort(self):
         """Reset port where device is connected"""
         self.status = call_ft(_ft.FT_ResetDevicePort, self.handle)
-        return None
 
     def enableGPIO(self, mask, direction):
         """Enable GPIO"""
         self.status = call_ft(_ft.FT_EnableGPIO, self.handle, _ft.ULONG(mask), _ft.ULONG(direction))
-        return None
 
     def writeGPIO(self, mask, data):
         """Write GPIO"""
         self.status = call_ft(_ft.FT_WriteGPIO, self.handle, _ft.ULONG(mask), _ft.ULONG(data))
-        return None
 
     def readGPIO(self):
         """Read GPIO"""
@@ -302,23 +298,20 @@ class FTD3XX:
     def setGPIOPull(self, mask, pull):
         """Set GPIO pull"""
         self.status = call_ft(_ft.FT_SetGPIOPull, self.handle, _ft.ULONG(mask), _ft.ULONG(pull))
-        return None
 
     def setStreamPipe(self, pipe, size):
         """Set stream pipe for continous transfer of fixed size"""
         self.status = call_ft(_ft.FT_SetStreamPipe, self.handle, _ft.BOOLEAN(0), _ft.BOOLEAN(0), _ft.UCHAR(pipe),
                               _ft.ULONG(size))
-        return None
 
     def clearStreamPipe(self, pipe):
         """Clear stream pipe for continous transfer of fixed size"""
         self.status = call_ft(_ft.FT_ClearStreamPipe, self.handle, _ft.BOOLEAN(0), _ft.BOOLEAN(0), _ft.UCHAR(pipe))
-        return None
 
 
     # OS-dependent functions
     # If Windows
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
 
         def initializeOverlapped(self, overlapped):
             """ initialize overlapped """
@@ -362,8 +355,8 @@ class FTD3XX:
             data = c.c_buffer(datalen)
             self.status = call_ft(_ft.FT_ReadPipeEx, self.handle, _ft.UCHAR(pipe), data, _ft.ULONG(datalen),
                                   c.byref(bytesTransferred), None)
-            return {'bytesTransferred': bytesTransferred.value,
-                    'bytes': data.raw[:bytesTransferred.value] if raw is True else data.value[:bytesTransferred.value]}
+            return {"bytesTransferred": bytesTransferred.value,
+                    "bytes": data.raw[:bytesTransferred.value] if raw is True else data.value[:bytesTransferred.value]}
 
         def readPipeAsync(self, pipe, data, datalen, transferred, overlapped):
             """Recv the data to the device."""
@@ -374,7 +367,6 @@ class FTD3XX:
         def setPipeTimeout(self, pipeid, timeoutMS):
             """Set pipe timeout"""
             self.status = call_ft(_ft.FT_SetPipeTimeout, self.handle, _ft.UCHAR(pipeid), _ft.ULONG(timeoutMS))
-            return None
 
         def getPipeTimeout(self, pipeid):
             """Get pipe timeout"""
@@ -386,17 +378,14 @@ class FTD3XX:
         def abortPipe(self, pipe):
             """Abort ongoing transfers for the specifed pipe"""
             self.status = call_ft(_ft.FT_AbortPipe, self.handle, _ft.UCHAR(pipe))
-            return None
 
         def cycleDevicePort(self):
             """Cycle port where device is connected"""
             self.status = call_ft(_ft.FT_CycleDevicePort, self.handle)
-            return None
 
         def setSuspendTimeout(self, timeout):
             """Set suspend timeout"""
             self.status = call_ft(_ft.FT_SetSuspendTimeout, self.handle, _ft.ULONG(timeout))
-            return None
 
         def getSuspendTimeout(self):
             """Get suspend timeout"""
@@ -428,18 +417,18 @@ class FTD3XX:
             data = c.c_buffer(datalen)
             self.status = call_ft(_ft.FT_ReadPipeEx, self.handle, _ft.UCHAR(channel), data, _ft.ULONG(datalen),
                                   c.byref(bytesTransferred), timeout)
-            return {'bytesTransferred': bytesTransferred.value,
-                    'bytes': data.value[:bytesTransferred.value] if raw is False else data.raw[:bytesTransferred.value]}
+            return {"bytesTransferred": bytesTransferred.value,
+                    "bytes": data.value[:bytesTransferred.value] if raw is False else data.raw[:bytesTransferred.value]}
 
 
-__all__ = ['call_ft',
-           'listDevices',
-           'createDeviceInfoList',
-           'getDeviceInfoDetail',
-           'getDeviceInfoList',
-           'getStrError',
-           'setTransferParams',
-           'create',
-           'FTD3XX',
-           'raiseExceptionOnError',
-           'DeviceError']
+__all__ = ["call_ft",
+           "listDevices",
+           "createDeviceInfoList",
+           "getDeviceInfoDetail",
+           "getDeviceInfoList",
+           "getStrError",
+           "setTransferParams",
+           "create",
+           "FTD3XX",
+           "raiseExceptionOnError",
+           "DeviceError"]

@@ -55,4 +55,4 @@ def test_key_matrix():
         out_port(0x02, IOPort.SET_KEY_STROBE_LO)
         + in_port(0x02, IOPort.KEY_INPUT)
         + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
-    )) == 'S'
+    )) == "S"
