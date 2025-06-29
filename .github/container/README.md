@@ -60,12 +60,19 @@ The container runs natively on ARM64 (Apple Silicon) using Java 22, which is req
 - `Dockerfile` - Container definition with Java 22 and Alchitry Labs
 - `build.sh` - Script to build the container image (Apple Container runtime)
 - `docker-build.sh` - Script to build the container image (Docker)
+- `test-core.sh` - Core testing logic shared between local and CI
 - `test.sh` - Script to run CI checks locally (works with both runtimes)
 - `README.md` - This documentation
 
 ## GitHub Actions Integration
 
-The `.github/workflows/alchitry-ci-docker.yml` workflow uses the same test script as local development, ensuring consistency between local and CI environments.
+The GitHub Actions workflow uses the same core testing logic as local development through the shared `test-core.sh` script. This ensures consistency between local and CI environments without requiring Docker in CI.
+
+### Shared Scripts
+
+- `test-core.sh` - Core testing functions used by both local and CI
+- `test.sh` - Local testing wrapper that runs tests in a container
+- `../scripts/run-alchitry-tests.sh` - CI wrapper that runs tests directly
 
 ## Troubleshooting
 

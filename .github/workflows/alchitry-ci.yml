@@ -58,82 +58,9 @@ jobs:
         export ALCHITRY_VERSION="${{ steps.get-version.outputs.version }}"
         ./.github/install-alchitry-labs.sh
     
-    - name: Check project syntax and build
+    - name: Run project tests using shared script
       run: |
-        cd gateware/${{ matrix.project }}
-        echo "Checking project: ${{ matrix.project }}"
-        
-        # Check if project file exists
-        PROJECT_FILE="${{ matrix.project }}.alp"
-        if [ ! -f "$PROJECT_FILE" ]; then
-          echo "Error: Project file $PROJECT_FILE not found"
-          exit 1
-        fi
-        
-        echo "Found project file: $PROJECT_FILE"
-        
-        # Run syntax check using the binary path from previous step
-        echo "Running syntax check..."
-        
-        # Convert to absolute path as alchitry expects absolute paths
-        PROJECT_ABS_PATH="$(pwd)/$PROJECT_FILE"
-        echo "Using absolute path: $PROJECT_ABS_PATH"
-        
-        # Run the check and capture output to detect failures
-        if "$ALCHITRY_BIN" check "$PROJECT_ABS_PATH" 2>&1 | tee check_output.log; then
-          # Check if the output contains failure messages
-          if grep -q "Failed to open project" check_output.log; then
-            echo "❌ Project check failed - could not open project file"
-            cat check_output.log
-            exit 1
-          elif grep -q "error\|Error\|ERROR" check_output.log; then
-            echo "❌ Project check failed - errors found"
-            cat check_output.log
-            exit 1
-          else
-            echo "✅ Project syntax check completed successfully"
-          fi
-        else
-          echo "❌ alchitry command failed with exit code $?"
-          exit 1
-        fi
-        
-        echo "✅ Project ${{ matrix.project }} passed syntax check"
-    
-    - name: Run test benches (if available)
-      run: |
-        cd gateware/${{ matrix.project }}
-        echo "Checking for test benches in project: ${{ matrix.project }}"
-        
-        PROJECT_FILE="${{ matrix.project }}.alp"
-        PROJECT_ABS_PATH="$(pwd)/$PROJECT_FILE"
-        
-        # Check if project has test benches
-        if "$ALCHITRY_BIN" sim "$PROJECT_ABS_PATH" --list 2>&1 | grep -q "Tests:"; then
-          echo "📋 Test benches found, running simulation tests..."
-          
-          # Run all test benches and capture output
-          if "$ALCHITRY_BIN" sim "$PROJECT_ABS_PATH" 2>&1 | tee sim_output.log; then
-            # Check if any tests failed
-            if grep -q "failed\|Failed\|FAILED\|Error\|ERROR" sim_output.log; then
-              echo "❌ Test bench execution failed"
-              cat sim_output.log
-              exit 1
-            elif grep -q "passed!" sim_output.log; then
-              echo "✅ All test benches passed successfully"
-              # Show a summary of passed tests
-              grep "passed!" sim_output.log
-            else
-              echo "⚠️ Test benches ran but no clear pass/fail indication found"
-              cat sim_output.log
-            fi
-          else
-            echo "❌ Test bench execution failed with exit code $?"
-            exit 1
-          fi
-        else
-          echo "ℹ️ No test benches found for project ${{ matrix.project }}, skipping simulation tests"
-        fi
+        ./.github/scripts/run-alchitry-tests.sh ${{ matrix.project }}
     
     - name: Upload build artifacts (if any)
       uses: actions/upload-artifact@v4
