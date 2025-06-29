@@ -9,15 +9,28 @@ RetroBus Explorer is an FPGA-based platform for capturing and analyzing signals 
 ## Development Environment
 
 ### FPGA Development
-- **Primary Tool**: Alchitry Labs V2 (requires Java 17)
+- **Primary Tool**: Alchitry Labs V2 (requires Java 22)
 - **HDL Language**: Lucid (.luc files) - compiles to Verilog
 - **Target FPGA**: Xilinx Artix-7 (Alchitry Au board)
+- **Local Testing**: Container-based environment matching GitHub CI
 
 ### Key Commands
 
 **Check FPGA project syntax (CI command):**
 ```bash
 alchitry check /absolute/path/to/project.alp
+```
+
+**Run tests locally on macOS using container:**
+```bash
+# Build the container (one-time setup)
+./.github/container/build.sh
+
+# Test all projects
+./.github/container/test.sh
+
+# Test specific project(s)
+./.github/container/test.sh sharp-pc-g850-bus pin-tester
 ```
 
 **Build Python Z80 emulator extension:**
@@ -96,6 +109,26 @@ The Python tools require (install manually as no requirements.txt exists):
 ## CI/CD
 
 GitHub Actions runs syntax checks on all FPGA projects when gateware files change. The workflow downloads the latest Alchitry Labs V2 and validates each project.
+
+### Local Testing Environment
+
+The project includes a containerized testing environment that exactly matches the GitHub Actions CI:
+
+1. **Container Setup**: Uses Ubuntu 22.04 with Java 22 and Alchitry Labs V2
+2. **Shared Test Logic**: The same `test-core.sh` script is used by both local containers and GitHub Actions
+3. **Container Runtime**: Supports both Apple Container (`container`) and Docker
+4. **Architecture**: Runs natively on ARM64 (Apple Silicon)
+
+To run tests locally:
+```bash
+# One-time setup
+./.github/container/build.sh  # For Apple Container
+# OR
+./.github/container/docker-build.sh  # For Docker
+
+# Run tests (automatically detects container runtime)
+./.github/container/test.sh
+```
 
 ## Lucid HDL Language Reference
 
