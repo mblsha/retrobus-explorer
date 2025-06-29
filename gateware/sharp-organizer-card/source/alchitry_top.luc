@@ -38,6 +38,7 @@ module alchitry_top (
 
     enum FtStates {GET_FIFO, STREAM}
     enum SaleaeStates {SYNC_SIGNALS, COUNTER}
+    enum SyncSubModes {STANDARD_SIGNALS, MEMORY_BANKS}
 
     sig conn_rw_sync
     sig conn_oe_sync
@@ -154,6 +155,7 @@ module alchitry_top (
 
             dff saleae_state[$width(SaleaeStates)]
             dff saleae_counter[8]
+            dff sync_sub_mode[$width(SyncSubModes)]
 
             dff last_addr[20]
             dff last_addr_sent
@@ -338,9 +340,17 @@ module alchitry_top (
                 }
             } else if (rx.data == "s") {
                 saleae_state.d = SaleaeStates.SYNC_SIGNALS
+                sync_sub_mode.d = SyncSubModes.STANDARD_SIGNALS
                 if (!tx.busy) {
                     tx.new_data = 1
                     tx.data = "s"
+                }
+            } else if (rx.data == "S") {
+                saleae_state.d = SaleaeStates.SYNC_SIGNALS
+                sync_sub_mode.d = SyncSubModes.MEMORY_BANKS
+                if (!tx.busy) {
+                    tx.new_data = 1
+                    tx.data = "S"
                 }
             }
         }
@@ -353,15 +363,33 @@ module alchitry_top (
                 saleae_counter.d = saleae_counter.q + 1
 
             SaleaeStates.SYNC_SIGNALS:
-                saleae = c{
-                    tx_addr.tx,
-                    tx_data.tx,
-                    tx_misc.tx,
-                    conn_mskrom_sync,
-                    conn_e2_sync,
-                    conn_ci_sync,
-                    conn_oe_sync,
-                    conn_rw_sync
+                case (sync_sub_mode.q) {
+                    SyncSubModes.STANDARD_SIGNALS:
+                        saleae = c{
+                            tx_addr.tx,
+                            tx_data.tx,
+                            tx_misc.tx,
+                            conn_mskrom_sync,
+                            conn_e2_sync,
+                            conn_ci_sync,
+                            conn_oe_sync,
+                            conn_rw_sync
+                        }
+                    
+                    SyncSubModes.MEMORY_BANKS:
+                        saleae = c{
+                            tx_addr.tx,
+                            tx_data.tx,
+                            tx_misc.tx,
+                            conn_eprom_sync,
+                            conn_sram2_sync,
+                            conn_sram1_sync,
+                            conn_mskrom_sync,
+                            conn_rw_sync
+                        }
+                    
+                    default:
+                        saleae = 0
                 }
 
             default:
