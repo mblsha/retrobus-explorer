@@ -1,4 +1,4 @@
-name: Alchitry Labs V2 CI
+name: Alchitry Labs V2 CI (Legacy)
 
 on:
   push:

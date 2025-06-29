@@ -32,7 +32,17 @@ check_project() {
     echo "🔍 Checking project: $project"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    container run --rm \
+    # Detect container runtime (Docker or Apple container)
+    if command -v docker &> /dev/null; then
+        CONTAINER_CMD="docker"
+    elif command -v container &> /dev/null; then
+        CONTAINER_CMD="container"
+    else
+        echo "❌ No container runtime found (docker or container)"
+        exit 1
+    fi
+    
+    $CONTAINER_CMD run --rm \
         --volume "$PROJECT_ROOT:/workspace" \
         retrobus-alchitry-ci \
         bash -c "

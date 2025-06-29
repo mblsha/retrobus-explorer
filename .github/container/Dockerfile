@@ -31,7 +31,9 @@ RUN chmod +x /tmp/install-alchitry-labs.sh
 RUN /tmp/install-alchitry-labs.sh
 
 # Create a wrapper script to run Alchitry Labs CLI with system Java
-RUN echo '#!/bin/bash\njava -Dapp.dir="/root/alchitry-labs/alchitry-labs-2.0.36" -cp "/root/alchitry-labs/alchitry-labs-2.0.36/lib/app/*" com.alchitry.labs2.CLIKt "$@"' > /usr/local/bin/alchitry && \
+RUN ALCHITRY_DIR=$(find /root/alchitry-labs -maxdepth 1 -type d -name "alchitry-labs-*" | head -1) && \
+    echo "#!/bin/bash" > /usr/local/bin/alchitry && \
+    echo "java -Dapp.dir=\"$ALCHITRY_DIR\" -cp \"$ALCHITRY_DIR/lib/app/*\" com.alchitry.labs2.CLIKt \"\$@\"" >> /usr/local/bin/alchitry && \
     chmod +x /usr/local/bin/alchitry
 
 # Set up environment variables for Alchitry Labs

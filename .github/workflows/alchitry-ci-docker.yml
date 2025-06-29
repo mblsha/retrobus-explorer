@@ -1,0 +1,69 @@
+name: Alchitry Labs V2 CI (Docker)
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'gateware/**'
+      - '.github/**'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'gateware/**'
+      - '.github/**'
+
+jobs:
+  check-projects:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        project:
+          - test-minimal
+          - pin-tester
+          - sharp-organizer-card
+          - sharp-pc-g850-bus
+          - sharp-pc-g850-streaming-rom
+      fail-fast: false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: |
+        docker build -t retrobus-alchitry-ci -f .github/container/Dockerfile .github
+    
+    - name: Run tests using container test script
+      run: |
+        # Run the test script inside Docker, mounting the workspace
+        docker run --rm \
+          --volume "$(pwd):/workspace" \
+          retrobus-alchitry-ci \
+          bash /workspace/.github/container/test.sh ${{ matrix.project }}
+    
+    - name: Upload build artifacts (if any)
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-logs-${{ matrix.project }}
+        path: |
+          gateware/${{ matrix.project }}/*.log
+          gateware/${{ matrix.project }}/build/
+        retention-days: 7
+        if-no-files-found: ignore
+
+  summary:
+    runs-on: ubuntu-latest
+    needs: check-projects
+    if: always()
+    
+    steps:
+    - name: Check overall status
+      run: |
+        if [ "${{ needs.check-projects.result }}" == "success" ]; then
+          echo "✅ All Alchitry Labs V2 projects passed syntax checks!"
+        else
+          echo "❌ Some Alchitry Labs V2 projects failed syntax checks"
+          exit 1
+        fi
