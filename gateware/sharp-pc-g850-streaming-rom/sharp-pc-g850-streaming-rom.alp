@@ -20,7 +20,7 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "source/my_uart_tx.luc"
+                    "path": "../shared-lib/uart/my_uart_tx.luc"
                 }
             },
             {
@@ -82,7 +82,7 @@
             {
                 "file": {
                     "type": "DiskFile",
-                    "path": "constraint/saleae.acf"
+                    "path": "../shared-constraints/saleae.acf"
                 }
             },
             {
