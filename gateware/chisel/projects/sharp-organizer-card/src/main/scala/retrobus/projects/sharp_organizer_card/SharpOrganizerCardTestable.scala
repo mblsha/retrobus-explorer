@@ -58,6 +58,10 @@ class SharpOrganizerCardTestable extends Module {
   resetCond.io.in := !io.rst_n
   val rst = resetCond.io.out
   
+  // Ensure USB TX is always idle high during reset (rst is active high)
+  val uartTxRaw = Wire(Bool())
+  io.usb_tx := Mux(rst, true.B, uartTxRaw)
+  
   withReset(rst.asAsyncReset) {
     // Synchronize all input signals
     val connRwSync = ShiftRegister(io.conn_rw, 2)
@@ -133,7 +137,8 @@ class SharpOrganizerCardTestable extends Module {
     uartRx.io.rx := io.usb_rx
     
     val uartTx = Module(new UartTx(clkFreq = 100_000_000, baud = 1_000_000))
-    io.usb_tx := uartTx.io.tx
+    uartTxRaw := uartTx.io.tx
+    uartTx.io.block := false.B
     
     // High-speed UART transmitters (100Mbps on 400MHz clock)
     // For now, use 100MHz clock with 10Mbps
@@ -230,6 +235,11 @@ class SharpOrganizerCardTestable extends Module {
     val syncSubMode = RegInit(SyncSubMode.STANDARD_SIGNALS)
     val counter = RegInit(0.U(8.W))
     counter := counter + 1.U
+    
+    // Default outputs
+    io.saleae := 0.U
+    uartTx.io.data := 0.U
+    uartTx.io.newData := false.B
     
     // UART command processing
     when(uartRx.io.newData) {
