@@ -126,8 +126,8 @@ jobs:
       run: |
         cd gateware/fusesoc
         # Check if core files are valid
-        echo "Validating pin-tester core"
-        fusesoc core show retrobus:projects:pin_tester
+        echo "Validating test-minimal core"
+        fusesoc core show retrobus:test:test_minimal
 
   integration-test:
     runs-on: ubuntu-latest
