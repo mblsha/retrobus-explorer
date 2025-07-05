@@ -32,24 +32,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Set up Java ${{ matrix.java-version }}
-      uses: actions/setup-java@v4
+    - name: Setup Chisel Environment
+      uses: ./.github/actions/setup-chisel-env
       with:
-        distribution: 'temurin'
         java-version: ${{ matrix.java-version }}
-    
-    - name: Cache SBT dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.ivy2/cache
-          ~/.sbt
-          ~/.cache/coursier
-          gateware/chisel/target
-          gateware/chisel/project/target
-        key: sbt-${{ runner.os }}-${{ hashFiles('gateware/chisel/build.sbt', 'gateware/chisel/project/build.properties') }}
-        restore-keys: |
-          sbt-${{ runner.os }}-
     
     - name: Compile Chisel projects
       run: |
@@ -93,24 +79,8 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Set up Java 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
-    
-    - name: Cache SBT dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.ivy2/cache
-          ~/.sbt
-          ~/.cache/coursier
-          gateware/chisel/target
-          gateware/chisel/project/target
-        key: sbt-${{ runner.os }}-${{ hashFiles('gateware/chisel/build.sbt', 'gateware/chisel/project/build.properties') }}
-        restore-keys: |
-          sbt-${{ runner.os }}-
+    - name: Setup Chisel Environment
+      uses: ./.github/actions/setup-chisel-env
     
     - name: Run Chisel tests
       run: |
@@ -136,23 +106,10 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
+    - name: Setup Chisel Environment
+      uses: ./.github/actions/setup-chisel-env
       with:
-        python-version: '3.12'
-    
-    - name: Cache pip dependencies
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: pip-${{ runner.os }}-${{ hashFiles('**/requirements*.txt') }}
-        restore-keys: |
-          pip-${{ runner.os }}-
-    
-    - name: Install FuseSOC
-      run: |
-        pip install fusesoc==2.4.3
-        fusesoc --version
+        install-fusesoc: 'true'
     
     - name: Initialize FuseSOC workspace
       run: |
@@ -185,33 +142,19 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    - name: Set up Java 17
-      uses: actions/setup-java@v4
+    - name: Setup Chisel Environment
+      uses: ./.github/actions/setup-chisel-env
       with:
-        distribution: 'temurin'
-        java-version: '17'
+        install-fusesoc: 'true'
     
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    
-    - name: Cache dependencies
+    - name: Cache integration dependencies
       uses: actions/cache@v4
       with:
         path: |
-          ~/.ivy2/cache
-          ~/.sbt
-          ~/.cache/coursier
-          ~/.cache/pip
           gateware/chisel/target
         key: integration-${{ runner.os }}-${{ hashFiles('gateware/chisel/build.sbt') }}
         restore-keys: |
           integration-${{ runner.os }}-
-    
-    - name: Install FuseSOC
-      run: |
-        pip install fusesoc==2.4.3
     
     - name: Generate fresh Verilog from Chisel
       run: |
