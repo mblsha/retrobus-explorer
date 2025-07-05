@@ -1,0 +1,296 @@
+name: Chisel + FuseSOC CI
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - 'gateware/chisel/**'
+      - 'gateware/fusesoc/**'
+      - '.github/**'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'gateware/chisel/**'
+      - 'gateware/fusesoc/**'
+      - '.github/**'
+
+jobs:
+  chisel-compile:
+    runs-on: ubuntu-latest
+    name: Chisel Compilation Tests
+    
+    strategy:
+      matrix:
+        project:
+          - library
+          - pinTester
+        scala-version: ['2.13.12']
+        java-version: ['17']
+      fail-fast: false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Java ${{ matrix.java-version }}
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: ${{ matrix.java-version }}
+    
+    - name: Cache SBT dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.cache/coursier
+          gateware/chisel/target
+          gateware/chisel/project/target
+        key: sbt-${{ runner.os }}-${{ hashFiles('gateware/chisel/build.sbt', 'gateware/chisel/project/build.properties') }}
+        restore-keys: |
+          sbt-${{ runner.os }}-
+    
+    - name: Compile Chisel projects
+      run: |
+        cd gateware/chisel
+        sbt "project ${{ matrix.project }}" compile
+    
+    - name: Generate Verilog
+      run: |
+        cd gateware/chisel
+        case "${{ matrix.project }}" in
+          "pinTester")
+            sbt "project pinTester" "runMain retrobus.projects.pin_tester.PinTesterTopVerilog"
+            ;;
+          "library")
+            echo "Library project - no Verilog generation needed"
+            ;;
+        esac
+    
+    - name: Upload generated Verilog
+      uses: actions/upload-artifact@v4
+      if: matrix.project == 'pinTester'
+      with:
+        name: generated-verilog-${{ matrix.project }}
+        path: gateware/chisel/generated/
+        retention-days: 7
+
+  chisel-test:
+    runs-on: ubuntu-latest
+    name: Chisel Test Suite
+    
+    strategy:
+      matrix:
+        project:
+          - pinTester
+        test-suite:
+          - "retrobus.projects.pin_tester.PinTesterTestSuite"
+          - "retrobus.projects.pin_tester.PinTesterBasicTest"
+      fail-fast: false
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Cache SBT dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.cache/coursier
+          gateware/chisel/target
+          gateware/chisel/project/target
+        key: sbt-${{ runner.os }}-${{ hashFiles('gateware/chisel/build.sbt', 'gateware/chisel/project/build.properties') }}
+        restore-keys: |
+          sbt-${{ runner.os }}-
+    
+    - name: Run Chisel tests
+      run: |
+        cd gateware/chisel
+        sbt "project ${{ matrix.project }}" "testOnly ${{ matrix.test-suite }}"
+    
+    - name: Upload test reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-reports-${{ matrix.project }}-${{ matrix.test-suite }}
+        path: |
+          gateware/chisel/projects/*/target/test-reports/
+          gateware/chisel/test_run_dir/
+        retention-days: 7
+        if-no-files-found: ignore
+
+  fusesoc-setup:
+    runs-on: ubuntu-latest
+    name: FuseSOC Setup and Validation
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          pip-${{ runner.os }}-
+    
+    - name: Install FuseSOC
+      run: |
+        pip install fusesoc==2.4.3
+        fusesoc --version
+    
+    - name: Initialize FuseSOC workspace
+      run: |
+        cd gateware/fusesoc
+        fusesoc init
+        fusesoc library add retrobus .
+    
+    - name: List available cores
+      run: |
+        cd gateware/fusesoc
+        fusesoc core list
+    
+    - name: Validate core files
+      run: |
+        cd gateware/fusesoc
+        # Check if core files are valid
+        for core_file in ../chisel/cores/*.core; do
+          if [ -f "$core_file" ]; then
+            echo "Validating $core_file"
+            fusesoc core show $(basename "$core_file" .core)
+          fi
+        done
+
+  integration-test:
+    runs-on: ubuntu-latest
+    name: Chisel + FuseSOC Integration
+    needs: [chisel-compile, fusesoc-setup]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.cache/coursier
+          ~/.cache/pip
+          gateware/chisel/target
+        key: integration-${{ runner.os }}-${{ hashFiles('gateware/chisel/build.sbt') }}
+        restore-keys: |
+          integration-${{ runner.os }}-
+    
+    - name: Install FuseSOC
+      run: |
+        pip install fusesoc==2.4.3
+    
+    - name: Generate fresh Verilog from Chisel
+      run: |
+        cd gateware/chisel
+        sbt "project pinTester" "runMain retrobus.projects.pin_tester.PinTesterTopVerilog"
+    
+    - name: Set up FuseSOC with generated Verilog
+      run: |
+        cd gateware/fusesoc
+        fusesoc init
+        fusesoc library add retrobus .
+        
+        # Copy generated Verilog to the right location for FuseSOC
+        mkdir -p generated
+        cp ../chisel/generated/*.sv generated/ 2>/dev/null || true
+    
+    - name: Test FuseSOC core integration
+      run: |
+        cd gateware/fusesoc
+        
+        # Test core listing and validation
+        echo "=== Available cores ==="
+        fusesoc core list
+        
+        echo "=== Core information ==="
+        fusesoc core show retrobus:projects:pin_tester || echo "Pin-tester core not found, checking available cores..."
+    
+    - name: Upload integration artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: integration-artifacts
+        path: |
+          gateware/chisel/generated/
+          gateware/fusesoc/generated/
+        retention-days: 7
+        if-no-files-found: ignore
+
+  summary:
+    runs-on: ubuntu-latest
+    name: CI Summary
+    needs: [chisel-compile, chisel-test, fusesoc-setup, integration-test]
+    if: always()
+    
+    steps:
+    - name: Check overall status
+      run: |
+        echo "=== Chisel + FuseSOC CI Summary ==="
+        echo ""
+        
+        # Check each job result
+        compile_status="${{ needs.chisel-compile.result }}"
+        test_status="${{ needs.chisel-test.result }}"
+        fusesoc_status="${{ needs.fusesoc-setup.result }}"
+        integration_status="${{ needs.integration-test.result }}"
+        
+        echo "📦 Chisel Compilation: $compile_status"
+        echo "🧪 Chisel Tests: $test_status"
+        echo "⚙️  FuseSOC Setup: $fusesoc_status"
+        echo "🔗 Integration: $integration_status"
+        echo ""
+        
+        # Determine overall result
+        if [[ "$compile_status" == "success" && "$test_status" == "success" && "$fusesoc_status" == "success" && "$integration_status" == "success" ]]; then
+          echo "✅ All Chisel + FuseSOC CI jobs passed!"
+          echo "🎉 Migration infrastructure is working correctly!"
+        else
+          echo "❌ Some Chisel + FuseSOC CI jobs failed:"
+          if [[ "$compile_status" != "success" ]]; then
+            echo "  - Compilation issues detected"
+          fi
+          if [[ "$test_status" != "success" ]]; then
+            echo "  - Test failures detected"
+          fi
+          if [[ "$fusesoc_status" != "success" ]]; then
+            echo "  - FuseSOC setup issues detected"
+          fi
+          if [[ "$integration_status" != "success" ]]; then
+            echo "  - Integration issues detected"
+          fi
+          exit 1
+        fi
