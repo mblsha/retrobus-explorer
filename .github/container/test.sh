@@ -50,7 +50,12 @@ check_project_container() {
         retrobus-alchitry-ci \
         bash -c "
             source /scripts/test-core.sh
-            check_project '$project' '/workspace/gateware/$project' '\$ALCHITRY_BIN'
+            # Ensure ALCHITRY_BIN is set before calling check_project
+            if [ -z \"\$ALCHITRY_BIN\" ]; then
+                echo '❌ Error: ALCHITRY_BIN environment variable is not set in container'
+                exit 1
+            fi
+            check_project '$project' '/workspace/gateware/$project' \"\$ALCHITRY_BIN\"
         "
     
     return $?

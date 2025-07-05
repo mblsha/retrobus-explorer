@@ -20,6 +20,18 @@ check_project() {
     echo "🔍 Checking project: $project"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
+    # Check if alchitry binary exists and is executable
+    if [ -z "$alchitry_bin" ]; then
+        echo "❌ Error: Alchitry binary path is not set"
+        return 1
+    fi
+    
+    if ! command -v "$alchitry_bin" &> /dev/null; then
+        echo "❌ Error: Alchitry binary not found at: $alchitry_bin"
+        echo "   Command not found: $alchitry_bin"
+        return 1
+    fi
+    
     cd "$project_dir" || return 1
     echo "Checking project: $project"
     
