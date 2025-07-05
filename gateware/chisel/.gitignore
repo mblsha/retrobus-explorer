@@ -1,0 +1,18 @@
+# SBT build artifacts
+target/
+project/target/
+project/project/target/
+
+# IDE files
+.bsp/
+.metals/
+.vscode/
+
+# Generated Verilog
+generated/
+*.v
+*.sv
+*.fir
+
+# Logs
+*.log
