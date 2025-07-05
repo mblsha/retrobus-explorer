@@ -114,8 +114,8 @@ jobs:
     - name: Initialize FuseSOC workspace
       run: |
         cd gateware/fusesoc
-        fusesoc init
         fusesoc library add retrobus .
+        fusesoc library add chisel_cores ../chisel
     
     - name: List available cores
       run: |
@@ -164,8 +164,8 @@ jobs:
     - name: Set up FuseSOC with generated Verilog
       run: |
         cd gateware/fusesoc
-        fusesoc init
         fusesoc library add retrobus .
+        fusesoc library add chisel_cores ../chisel
         
         # Copy generated Verilog to the right location for FuseSOC
         mkdir -p generated

@@ -16,10 +16,7 @@ filesets:
     file_type: xdc
 
 targets:
-  default: &default
-    <<: *alchitry_au
-
-  alchitry_au:
+  alchitry_au: &alchitry_au
     description: Alchitry Au FPGA board (Xilinx Artix-7)
     default_tool: vivado
     filesets:
@@ -31,6 +28,9 @@ targets:
       vivado:
         part: xc7a35tftg256-1
     toplevel: PinTesterTop
+
+  default: &default
+    <<: *alchitry_au
 
 parameters:
   UART_BAUD:
