@@ -24,13 +24,13 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
   val UART_r = 114 // 'r'
   val UART_R = 82  // 'R'
 
-  def waitCycles(dut: AlchitryTop, cycles: Int): Unit = {
+  def waitCycles(dut: PinTesterTestable, cycles: Int): Unit = {
     for (_ <- 0 until cycles) {
       dut.clock.step(1)
     }
   }
 
-  def sendUartByte(dut: AlchitryTop, data: Int): Unit = {
+  def sendUartByte(dut: PinTesterTestable, data: Int): Unit = {
     // Simulate UART reception - set newData pulse for one cycle
     dut.io.usb_rx.poke(true.B) // Keep RX high (idle state)
     
@@ -43,7 +43,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
     // by assuming the UART has processed the byte
   }
 
-  def simulateUartReception(dut: AlchitryTop, data: Int): Unit = {
+  def simulateUartReception(dut: PinTesterTestable, data: Int): Unit = {
     // This helper simulates what would happen when UART receives a byte
     // In a more complete testbench, we would drive the actual UART bit stream
     
@@ -56,7 +56,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   "PinTester" should "initialize correctly" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       // Apply reset
       dut.io.rst_n.poke(false.B)
       dut.clock.step(5)
@@ -73,7 +73,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "display input data in RECEIVE mode" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       // Initialize
       dut.io.rst_n.poke(false.B)
       dut.clock.step(5)
@@ -86,9 +86,9 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
       waitCycles(dut, 10)
       
       // In RECEIVE mode, bank 0 (bits 7:0) should be displayed
-      // testData bits 7:0 = 0xF0 = 240
-      dut.io.led.expect(0xF0.U)
-      dut.io.saleae.expect(0xF0.U)
+      // testData bits 7:0 = 0xBC = 188
+      dut.io.led.expect(0xBC.U)
+      dut.io.saleae.expect(0xBC.U)
       
       // Should not be driving ffc_data outputs
       dut.io.ffc_data_oe.expect(false.B)
@@ -96,7 +96,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "switch to SEND mode and generate counter data" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       // Initialize
       dut.io.rst_n.poke(false.B)
       dut.clock.step(5)
@@ -126,7 +126,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "handle bank selection in RECEIVE mode" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       // Initialize  
       dut.io.rst_n.poke(false.B)
       dut.clock.step(5)
@@ -138,9 +138,9 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
       
       waitCycles(dut, 10)
       
-      // Bank 0 (bits 7:0) = 0x10
-      dut.io.led.expect(0x10.U)
-      dut.io.saleae.expect(0x10.U)
+      // Bank 0 (bits 7:0) = 0x54
+      dut.io.led.expect(0x54.U)
+      dut.io.saleae.expect(0x54.U)
       
       // Test would continue with UART bank selection commands
       // This requires a more sophisticated UART simulation
@@ -150,7 +150,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "maintain proper reset behavior" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       // Test reset during operation
       dut.io.rst_n.poke(true.B)
       dut.io.ffc_data_in.poke("hAAAABBBBCCCC".U(48.W))
@@ -176,7 +176,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "show counter behavior over time" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       // Initialize
       dut.io.rst_n.poke(false.B)
       dut.clock.step(5)

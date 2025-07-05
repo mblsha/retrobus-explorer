@@ -35,7 +35,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   /**
    * Send a UART byte with proper bit timing
    */
-  def sendUartByte(dut: AlchitryTop, data: Int): Unit = {
+  def sendUartByte(dut: PinTesterTestable, data: Int): Unit = {
     println(f"Sending UART byte: 0x$data%02X (${data.toChar})")
     
     // UART idle state (high)
@@ -64,7 +64,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   /**
    * Wait for UART transmission to complete and check for echo
    */
-  def waitForUartResponse(dut: AlchitryTop, expectedEcho: Option[Int] = None): Unit = {
+  def waitForUartResponse(dut: PinTesterTestable, expectedEcho: Option[Int] = None): Unit = {
     // Wait for processing
     dut.clock.step(CYCLES_PER_BIT * 2)
     
@@ -75,7 +75,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   /**
    * Initialize DUT with proper reset sequence
    */
-  def initializeDut(dut: AlchitryTop): Unit = {
+  def initializeDut(dut: PinTesterTestable): Unit = {
     dut.io.usb_rx.poke(true.B) // UART idle
     dut.io.ffc_data_in.poke(0.U)
     
@@ -87,7 +87,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   "PinTester UART Interface" should "respond to bank selection commands" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       initializeDut(dut)
       
       // Set test data with distinct patterns for each bank
@@ -122,7 +122,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "switch to SEND mode and generate counter output" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       initializeDut(dut)
       
       // Start in RECEIVE mode
@@ -152,7 +152,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "switch back to RECEIVE mode" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       initializeDut(dut)
       
       // Switch to SEND mode first
@@ -180,7 +180,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "handle bank selection in SEND mode" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       initializeDut(dut)
       
       // Switch to SEND mode
@@ -215,7 +215,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "ignore invalid commands" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       initializeDut(dut)
       
       // Record initial state
@@ -241,7 +241,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
   }
 
   it should "maintain state across multiple operations" in {
-    test(new AlchitryTop) { dut =>
+    test(new PinTesterTestable) { dut =>
       initializeDut(dut)
       
       val testPattern = "h0123456789AB".U(48.W)
