@@ -13,12 +13,6 @@
             },
             {
                 "file": {
-                    "type": "DiskFile",
-                    "path": "source/alchitry_top_tb.luc"
-                }
-            },
-            {
-                "file": {
                     "type": "Component",
                     "path": "Conditioning/reset_conditioner.luc"
                 }
