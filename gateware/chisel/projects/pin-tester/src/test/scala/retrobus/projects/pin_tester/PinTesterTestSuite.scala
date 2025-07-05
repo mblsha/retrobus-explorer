@@ -42,13 +42,13 @@ class PinTesterTestSuite extends AnyFlatSpec with ChiselScalatestTester {
       
       // Test 2: RECEIVE mode data display
       println("\n2. Testing RECEIVE mode data display...")
-      val testData = "h123456789ABCDEF".U(48.W)
+      val testData = "h123456789ABC".U(48.W)
       dut.io.ffc_data_in.poke(testData)
       dut.clock.step(10)
       
-      // Bank 0 should show bits 7:0 = 0xEF
-      dut.io.led.expect(0xEF.U)
-      dut.io.saleae.expect(0xEF.U)
+      // Bank 0 should show bits 7:0 = 0xBC
+      dut.io.led.expect(0xBC.U)
+      dut.io.saleae.expect(0xBC.U)
       dut.io.ffc_data_oe.expect(false.B)
       println("✓ RECEIVE mode data display test passed")
       
@@ -107,9 +107,9 @@ class PinTesterTestSuite extends AnyFlatSpec with ChiselScalatestTester {
       // Test 6: Signal integrity
       println("\n6. Testing signal integrity...")
       
-      // Test all LED bits
+      // Test all LED bits (bank 0 shows bits 7:0)
       for (bitPattern <- 0 until 256) {
-        val testValue = f"h${bitPattern}%02X${"00" * 5}".U(48.W)
+        val testValue = bitPattern.U(48.W) // Put pattern in bits 7:0
         dut.io.ffc_data_in.poke(testValue)
         dut.clock.step(2)
         dut.io.led.expect(bitPattern.U)

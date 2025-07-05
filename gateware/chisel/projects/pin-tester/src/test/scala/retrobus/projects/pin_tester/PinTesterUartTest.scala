@@ -91,7 +91,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
       initializeDut(dut)
       
       // Set test data with distinct patterns for each bank
-      val testData = "h123456789ABCDEF0".U(48.W)
+      val testData = "h123456789ABC".U(48.W)
       dut.io.ffc_data_in.poke(testData)
       dut.clock.step(10)
       
@@ -244,7 +244,7 @@ class PinTesterUartTest extends AnyFlatSpec with ChiselScalatestTester {
     test(new AlchitryTop) { dut =>
       initializeDut(dut)
       
-      val testPattern = "h0123456789ABCDEF".U(48.W)
+      val testPattern = "h0123456789AB".U(48.W)
       dut.io.ffc_data_in.poke(testPattern)
       
       // Complex sequence: bank changes, mode switches, more bank changes

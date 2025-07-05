@@ -80,7 +80,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.rst_n.poke(true.B)
       
       // Set some test data on ffc_data_in
-      val testData = "h123456789ABCDEF0".U(48.W) // Test pattern
+      val testData = "h123456789ABC".U(48.W) // Test pattern
       dut.io.ffc_data_in.poke(testData)
       
       waitCycles(dut, 10)
@@ -133,7 +133,7 @@ class PinTesterBasicTest extends AnyFlatSpec with ChiselScalatestTester {
       dut.io.rst_n.poke(true.B)
       
       // Set test pattern with different values in each bank
-      val testPattern = "hFEDCBA9876543210".U(48.W)
+      val testPattern = "hFEDCBA987654".U(48.W)
       dut.io.ffc_data_in.poke(testPattern)
       
       waitCycles(dut, 10)
