@@ -1,0 +1,145 @@
+package retrobus.projects.pin_tester
+
+import chisel3._
+import chisel3.util._
+import retrobus.library.reset.ResetConditioner
+import retrobus.library.uart.{UartRx, UartTx}
+
+/**
+ * Testable version of the pin-tester that uses the default clock
+ * This version removes the explicit io.clk to make it compatible with ChiselTest
+ * The functionality is identical to AlchitryTop but uses implicit clock/reset
+ */
+class PinTesterTestable extends Module {
+  val io = IO(new Bundle {
+    val rst_n = Input(Bool())         // reset button (active low)
+    val led = Output(UInt(8.W))       // 8 user controllable LEDs
+    val usb_rx = Input(Bool())        // USB->Serial input
+    val usb_tx = Output(Bool())       // USB->Serial output
+    val ffc_data_in = Input(UInt(48.W))    // FFC data input (from tristate buffers)
+    val ffc_data_out = Output(UInt(48.W))  // FFC data output (to tristate buffers)
+    val ffc_data_oe = Output(Bool())       // FFC data output enable
+    val saleae = Output(UInt(8.W))    // 8-bit Saleae logic analyzer output
+  })
+
+  // Reset conditioner using implicit clock
+  val resetCond = Module(new ResetConditioner)
+  resetCond.io.in := !io.rst_n  // invert reset signal
+  
+  // Use conditioned reset for all logic
+  withReset(resetCond.io.out.asAsyncReset) {
+    
+    // Constants
+    val OUT_BANK_MULTIPLIER = 2
+    
+    // State machine
+    object States extends ChiselEnum {
+      val RECEIVE, SEND = Value
+    }
+
+    // UART modules with 1Mbaud rate
+    val uart_tx = Module(new UartTx(clkFreq = 100_000_000, baud = 1_000_000))
+    val uart_rx = Module(new UartRx(clkFreq = 100_000_000, baud = 1_000_000))
+
+    // Connect UART to external pins
+    io.usb_tx := uart_tx.io.tx
+    uart_rx.io.rx := io.usb_rx
+
+    // State registers
+    val state = RegInit(States.RECEIVE)
+    val bank = RegInit(0.U(8.W))
+    val counter = RegInit(0.U(128.W))
+
+    // Default UART connections
+    uart_tx.io.block := false.B
+    uart_tx.io.data := 0.U
+    uart_tx.io.newData := false.B
+
+    // Default outputs
+    io.led := 0.U
+    io.saleae := 0.U
+
+    // Default ffc_data outputs
+    io.ffc_data_out := 0.U
+    io.ffc_data_oe := false.B
+
+    // State machine logic
+    switch(state) {
+      is(States.RECEIVE) {
+        // Display input data on outputs
+        val bankOffset = bank * 8.U
+        val selectedData = (io.ffc_data_in >> bankOffset)(7, 0)
+        io.led := selectedData
+        io.saleae := selectedData
+
+        // Handle UART commands
+        when(uart_rx.io.newData) {
+          val rxData = uart_rx.io.data
+
+          // Bank selection commands ('0' to '5')
+          when(rxData >= 48.U && rxData <= 53.U) { // ASCII '0' = 48, '5' = 53
+            bank := rxData - 48.U
+            
+            // Echo command back
+            when(!uart_tx.io.busy) {
+              uart_tx.io.newData := true.B
+              uart_tx.io.data := rxData
+            }
+          }
+          // Switch to SEND mode ('s' or 'S')
+          .elsewhen(rxData === 115.U || rxData === 83.U) { // ASCII 's' = 115, 'S' = 83
+            when(!uart_tx.io.busy) {
+              uart_tx.io.newData := true.B
+              uart_tx.io.data := rxData
+            }
+            bank := 0.U
+            state := States.SEND
+          }
+        }
+      }
+
+      is(States.SEND) {
+        // Increment counter
+        counter := counter + 1.U
+
+        // Output counter data
+        val bankOffset = bank * OUT_BANK_MULTIPLIER.U
+        val selectedCounter = (counter >> bankOffset)(7, 0)
+        io.led := selectedCounter
+        io.saleae := selectedCounter
+
+        // Drive ffc_data with counter data
+        io.ffc_data_out := selectedCounter
+        io.ffc_data_oe := true.B
+
+        // Handle UART commands
+        when(uart_rx.io.newData) {
+          val rxData = uart_rx.io.data
+
+          // Bank selection commands ('0' to '5')
+          when(rxData >= 48.U && rxData <= 53.U) { // ASCII '0' = 48, '5' = 53
+            bank := rxData - 48.U
+            
+            // Echo command back
+            when(!uart_tx.io.busy) {
+              uart_tx.io.newData := true.B
+              uart_tx.io.data := rxData
+            }
+          }
+          // Switch to RECEIVE mode ('r' or 'R')
+          .elsewhen(rxData === 114.U || rxData === 82.U) { // ASCII 'r' = 114, 'R' = 82
+            when(!uart_tx.io.busy) {
+              uart_tx.io.newData := true.B
+              uart_tx.io.data := rxData
+            }
+            bank := 0.U
+            state := States.RECEIVE
+          }
+        }
+      }
+    }
+
+    // Note: Actual ffc_data bidirectional handling needs platform-specific implementation
+    // This would typically be handled at the top-level with tristate buffers
+  }
+}

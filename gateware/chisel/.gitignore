@@ -16,3 +16,8 @@ generated/
 
 # Logs
 *.log
+
+# ChiselTest outputs
+test_run_dir/
+*.vcd
+*.vpd
