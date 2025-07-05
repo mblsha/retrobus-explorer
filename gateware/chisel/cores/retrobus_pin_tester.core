@@ -1,0 +1,46 @@
+CAPI=2:
+
+name: retrobus:projects:pin_tester:1.0.0
+
+description: Pin Tester project for retrobus-explorer - migrated from Lucid to Chisel
+
+filesets:
+  rtl:
+    files:
+      - generated/PinTesterTop.sv
+    file_type: systemVerilogSource
+
+  constraints_alchitry_au:
+    files:
+      - constraints/pin_tester.xdc
+    file_type: xdc
+
+targets:
+  default: &default
+    <<: *alchitry_au
+
+  alchitry_au:
+    description: Alchitry Au FPGA board (Xilinx Artix-7)
+    default_tool: vivado
+    filesets:
+      - rtl
+      - constraints_alchitry_au
+    parameters:
+      - UART_BAUD=1000000
+    tools:
+      vivado:
+        part: xc7a35tftg256-1
+    toplevel: PinTesterTop
+
+parameters:
+  UART_BAUD:
+    datatype: int
+    default: 1000000
+    description: UART baud rate (default 1Mbaud)
+    paramtype: vlogparam
+
+provider:
+  name: github
+  user: retrobus-explorer
+  repo: retrobus-explorer
+  version: v1.0.0

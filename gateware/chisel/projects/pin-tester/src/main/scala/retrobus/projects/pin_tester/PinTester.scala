@@ -25,8 +25,9 @@ class AlchitryTop extends Module {
     val led = Output(UInt(8.W))       // 8 user controllable LEDs
     val usb_rx = Input(Bool())        // USB->Serial input
     val usb_tx = Output(Bool())       // USB->Serial output
-    // Note: ffc_data bidirectional handling is platform-specific
-    // In actual implementation, this would need tristate buffers at top level
+    val ffc_data_in = Input(UInt(48.W))    // FFC data input (from tristate buffers)
+    val ffc_data_out = Output(UInt(48.W))  // FFC data output (to tristate buffers)
+    val ffc_data_oe = Output(Bool())       // FFC data output enable
     val saleae = Output(UInt(8.W))    // 8-bit Saleae logic analyzer output
   })
 
@@ -69,17 +70,16 @@ class AlchitryTop extends Module {
       io.led := 0.U
       io.saleae := 0.U
 
-      // Bidirectional ffc_data handling would be done at platform level
-      // For now we'll simulate with internal signals for testing
-      val ffc_data_in = Wire(UInt(48.W))
-      ffc_data_in := 0.U // Would be connected to actual pins in platform
+      // Default ffc_data outputs
+      io.ffc_data_out := 0.U
+      io.ffc_data_oe := false.B
 
       // State machine logic
       switch(state) {
         is(States.RECEIVE) {
           // Display input data on outputs
           val bankOffset = bank * 8.U
-          val selectedData = (ffc_data_in >> bankOffset)(7, 0)
+          val selectedData = (io.ffc_data_in >> bankOffset)(7, 0)
           io.led := selectedData
           io.saleae := selectedData
 
@@ -119,9 +119,9 @@ class AlchitryTop extends Module {
           io.led := selectedCounter
           io.saleae := selectedCounter
 
-          // In real implementation, would drive ffc_data with counter
-          // ffc_data_out := selectedCounter
-          // ffc_data_oe := true.B
+          // Drive ffc_data with counter data
+          io.ffc_data_out := selectedCounter
+          io.ffc_data_oe := true.B
 
           // Handle UART commands
           when(uart_rx.io.newData) {
