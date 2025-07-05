@@ -7,12 +7,12 @@ description: Pin Tester project for retrobus-explorer - migrated from Lucid to C
 filesets:
   rtl:
     files:
-      - generated/PinTesterTop.sv
+      - ../generated/PinTesterTop.sv
     file_type: systemVerilogSource
 
   constraints_alchitry_au:
     files:
-      - constraints/pin_tester.xdc
+      - ../constraints/pin_tester.xdc
     file_type: xdc
 
 targets:

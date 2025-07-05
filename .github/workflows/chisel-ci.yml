@@ -114,8 +114,8 @@ jobs:
     - name: Initialize FuseSOC workspace
       run: |
         cd gateware/fusesoc
-        fusesoc library add retrobus .
-        fusesoc library add chisel_cores ../chisel
+        fusesoc library add retrobus . --sync-type local
+        fusesoc library add chisel_cores $(realpath ../chisel) --sync-type local
     
     - name: List available cores
       run: |
@@ -126,12 +126,8 @@ jobs:
       run: |
         cd gateware/fusesoc
         # Check if core files are valid
-        for core_file in ../chisel/cores/*.core; do
-          if [ -f "$core_file" ]; then
-            echo "Validating $core_file"
-            fusesoc core show $(basename "$core_file" .core)
-          fi
-        done
+        echo "Validating pin-tester core"
+        fusesoc core show retrobus:projects:pin_tester
 
   integration-test:
     runs-on: ubuntu-latest
@@ -164,8 +160,8 @@ jobs:
     - name: Set up FuseSOC with generated Verilog
       run: |
         cd gateware/fusesoc
-        fusesoc library add retrobus .
-        fusesoc library add chisel_cores ../chisel
+        fusesoc library add retrobus . --sync-type local
+        fusesoc library add chisel_cores $(realpath ../chisel) --sync-type local
         
         # Copy generated Verilog to the right location for FuseSOC
         mkdir -p generated
