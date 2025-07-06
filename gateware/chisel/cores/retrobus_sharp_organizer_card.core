@@ -43,12 +43,12 @@ targets:
       - ip_cores
       - constraints
     toplevel: SharpOrganizerCard
-    
-  synth:
-    <<: *default
     flow: vivado
     flow_options:
       part: xc7a35tftg256-1
+    
+  synth:
+    <<: *default
 
   sim:
     <<: *default
