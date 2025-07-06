@@ -161,7 +161,18 @@ FUSESOC_EOF
 export FUSESOC_CONFIG=\"fusesoc_gateware.conf\"
 echo \"Using FuseSoC config: \$FUSESOC_CONFIG\"
 
-./build-scripts/build_local.sh $PROJECT_NAME $*
+./build-scripts/build_local.sh $PROJECT_NAME $* 2>&1 | tee /tmp/retrobus_build_output_$$.log
+BUILD_EXIT=\${PIPESTATUS[0]}
+
+# Save information about where logs might be
+echo "Build exit code: \$BUILD_EXIT" > /tmp/retrobus_build_info_$$.txt
+echo "Working directory: \$(pwd)" >> /tmp/retrobus_build_info_$$.txt
+echo "Build output saved to: /tmp/retrobus_build_output_$$.log" >> /tmp/retrobus_build_info_$$.txt
+
+# Try to find vivado_calls.log and other important logs
+find . -name "vivado_calls.log" -o -name "*.rpt" -o -name "vivado.log" 2>/dev/null | head -20 >> /tmp/retrobus_build_info_$$.txt
+
+exit \$BUILD_EXIT
 EOF
 
 chmod +x \"$REMOTE_WORK_DIR/remote_build.sh\""
@@ -248,7 +259,16 @@ else
     # Copy Vivado logs if they exist
     echo "  Copying Vivado logs..."
     scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/vivado_calls.log logs/ 2>/dev/null || {
-        echo "  No vivado_calls.log found"
+        echo "  No vivado_calls.log found in gateware directory"
+    }
+    
+    # Copy the build output and info files
+    echo "  Copying build output log..."
+    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:/tmp/retrobus_build_output_$$.log logs/ 2>/dev/null || {
+        echo "  No build output log found"
+    }
+    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:/tmp/retrobus_build_info_$$.txt logs/ 2>/dev/null || {
+        echo "  No build info file found"
     }
     
     # Copy build directories that might contain useful logs
@@ -272,10 +292,15 @@ else
     
     # Try to get the vivado project directory logs
     echo "  Looking for Vivado project logs..."
-    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -name 'vivado.log' -o -name 'runme.log' 2>/dev/null | head -10" 2>/dev/null | while read -r viv_log; do
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -name 'vivado.log' -o -name 'runme.log' -o -name 'vivado_calls.log' 2>/dev/null | head -20" 2>/dev/null | while read -r viv_log; do
         if [ -n "$viv_log" ]; then
             echo "    Found Vivado log: $viv_log"
-            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"$viv_log" logs/vivado_logs/ 2>/dev/null || true
+            LOG_NAME=$(basename "$viv_log")
+            # For vivado_calls.log, preserve the path structure in the filename
+            if [ "$LOG_NAME" = "vivado_calls.log" ]; then
+                LOG_NAME="vivado_calls_$(echo "$viv_log" | sed 's|/|_|g' | sed 's|.*build_fusesoc_||').log"
+            fi
+            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"$viv_log" "logs/vivado_logs/$LOG_NAME" 2>/dev/null || true
         fi
     done
     
@@ -301,8 +326,14 @@ else
     echo ""
     echo "Build failed. Diagnostic information collected in logs/ directory:"
     echo "  - FuseSoC logs: logs/fusesoc_*.log"
-    echo "  - Vivado logs: logs/vivado_calls.log, logs/vivado_logs/"
+    echo "  - Build output: logs/retrobus_build_output_*.log"
+    echo "  - Build info: logs/retrobus_build_info_*.txt"
+    echo "  - Vivado logs: logs/vivado_logs/"
     echo "  - Build artifacts: logs/build_artifacts/"
     echo "  - Directory listings: logs/remote_*.txt"
+    echo ""
+    echo "To find specific Vivado logs, check:"
+    echo "  - logs/vivado_logs/vivado_calls_*.log"
+    echo "  - logs/build_artifacts/**/vivado_calls.log"
     exit 1
 fi
