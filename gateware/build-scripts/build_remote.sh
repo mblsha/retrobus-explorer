@@ -177,24 +177,100 @@ EOF
 
 chmod +x \"$REMOTE_WORK_DIR/remote_build.sh\""
 
+collect_diagnostic_logs() {
+    local step_desc="$1"
+    echo "  $step_desc: Collecting diagnostic logs..."
+    
+    # Create local directories for logs
+    mkdir -p logs/vivado_logs logs/build_artifacts
+    
+    # Copy FuseSoC logs
+    echo "    Copying FuseSoC logs..."
+    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/logs/fusesoc_${PROJECT_NAME}_*.log logs/ 2>/dev/null || {
+        echo "    No FuseSoC logs found"
+    }
+    
+    # Copy the build output and info files
+    echo "    Copying build output and info files..."
+    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:/tmp/retrobus_build_output_$$.log logs/ 2>/dev/null || {
+        echo "    No build output log found"
+    }
+    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:/tmp/retrobus_build_info_$$.txt logs/ 2>/dev/null || {
+        echo "    No build info file found"
+    }
+    
+    # Copy Vivado logs from multiple possible locations
+    echo "    Copying Vivado logs..."
+    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/vivado_calls.log logs/ 2>/dev/null || {
+        echo "    No vivado_calls.log found in gateware directory"
+    }
+    
+    # Copy build directories that might contain useful logs
+    echo "    Searching for build artifacts..."
+    BUILD_DIR="${REMOTE_WORK_DIR}/gateware/build_fusesoc"
+    
+    # Copy specific log files from build directories
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -name '*.log' -o -name '*.rpt' -o -name 'Makefile' 2>/dev/null | head -30" 2>/dev/null | while read -r logfile; do
+        if [ -n "$logfile" ]; then
+            echo "      Found: $logfile"
+            # Create directory structure locally
+            LOCAL_DIR="logs/build_artifacts/$(dirname "$logfile" | sed "s|${BUILD_DIR}/||")"
+            mkdir -p "$LOCAL_DIR"
+            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"$logfile" "$LOCAL_DIR/" 2>/dev/null || true
+        fi
+    done
+    
+    # Copy Vivado project logs with path preservation
+    echo "    Copying Vivado project logs..."
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -name 'vivado.log' -o -name 'runme.log' -o -name 'vivado_calls.log' 2>/dev/null | head -20" 2>/dev/null | while read -r viv_log; do
+        if [ -n "$viv_log" ]; then
+            echo "      Found Vivado log: $viv_log"
+            LOG_NAME=$(basename "$viv_log")
+            # For vivado_calls.log, preserve the path structure in the filename
+            if [ "$LOG_NAME" = "vivado_calls.log" ]; then
+                LOG_NAME="vivado_calls_$(echo "$viv_log" | sed 's|/|_|g' | sed 's|.*build_fusesoc_||').log"
+            fi
+            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"$viv_log" "logs/vivado_logs/$LOG_NAME" 2>/dev/null || true
+        fi
+    done
+    
+    # Get directory listings for debugging
+    echo "    Getting remote directory structure..."
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "ls -la ${REMOTE_WORK_DIR}/gateware/" > logs/remote_gateware_listing.txt 2>/dev/null || true
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -type f -name '*.log' -o -name '*.rpt' -o -name 'Makefile' 2>/dev/null | sort" > logs/remote_build_files.txt 2>/dev/null || true
+    
+    # Get the actual error from the build
+    echo "    Capturing build analysis..."
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR} && find . -name 'Makefile' -exec grep -l 'retrobus' {} \; 2>/dev/null | head -1" 2>/dev/null | read -r MAKEFILE_PATH
+    if [ -n "$MAKEFILE_PATH" ]; then
+        echo "      Found Makefile at: $MAKEFILE_PATH"
+        ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR}/$(dirname $MAKEFILE_PATH) && make -n" > logs/make_dry_run.txt 2>&1 || true
+    fi
+}
+
 echo "Step 4/5: Running build on Windows WSL..."
 ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "$REMOTE_WORK_DIR/remote_build.sh"
+BUILD_RESULT=$?
 
-# Check if build succeeded
-if [ $? -eq 0 ]; then
-    echo ""
-    echo "Step 5/5: Copying results back to local machine..."
+echo ""
+echo "Step 5/5: Collecting results and diagnostic information..."
+
+# Always collect logs regardless of build outcome
+collect_diagnostic_logs "Always"
+
+# Check if build succeeded and copy artifacts
+if [ $BUILD_RESULT -eq 0 ]; then
+    echo "  BUILD SUCCESSFUL: Copying bitstreams..."
     
-    # Create local directories
-    mkdir -p bitstreams logs
+    # Create bitstreams directory
+    mkdir -p bitstreams
     
     # Convert project name to safe filename (matching Python script convention)
     SAFE_NAME=$(echo $PROJECT_NAME | tr '-' '_')
     
-    echo "  Copying bitstreams..."
     # Copy the latest bitstream from gateware/bitstreams directory
     scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/bitstreams/${SAFE_NAME}_latest.bit bitstreams/ 2>/dev/null || {
-        echo "  Warning: Latest bitstream not found, looking for timestamped versions..."
+        echo "    Warning: Latest bitstream not found, looking for timestamped versions..."
         # Try to copy any timestamped bitstream
         LATEST_TIMESTAMPED=$(ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "ls -t ${REMOTE_WORK_DIR}/gateware/bitstreams/${SAFE_NAME}_*.bit 2>/dev/null | head -1" || echo "")
         if [ -n "$LATEST_TIMESTAMPED" ]; then
@@ -202,23 +278,16 @@ if [ $? -eq 0 ]; then
             scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"$LATEST_TIMESTAMPED" bitstreams/
             # Also create a "latest" symlink
             ln -sf "$BASENAME" "bitstreams/${SAFE_NAME}_latest.bit"
-            echo "  Copied: bitstreams/$BASENAME"
+            echo "    Copied: bitstreams/$BASENAME"
         else
-            echo "  Error: No bitstream found!"
-            exit 1
+            echo "    Warning: No bitstream found! Check logs for synthesis/implementation errors."
         fi
-    }
-    
-    # Copy build logs
-    echo "  Copying build logs..."
-    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/logs/fusesoc_${PROJECT_NAME}_*.log logs/ 2>/dev/null || {
-        echo "  Warning: Build logs not found"
     }
     
     # Copy any timestamped bitstreams that exist
     TIMESTAMPED_BITS=$(ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "ls ${REMOTE_WORK_DIR}/gateware/bitstreams/${SAFE_NAME}_2*.bit 2>/dev/null" || echo "")
     if [ -n "$TIMESTAMPED_BITS" ]; then
-        echo "  Copying timestamped bitstreams..."
+        echo "    Copying additional timestamped bitstreams..."
         scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/bitstreams/${SAFE_NAME}_2*.bit bitstreams/ 2>/dev/null || true
     fi
     
@@ -243,97 +312,32 @@ if [ $? -eq 0 ]; then
     }
     
 else
+    echo "  BUILD FAILED: Error code $BUILD_RESULT"
     echo ""
-    echo "Build failed on Windows. Collecting diagnostic information..."
-    
-    # Create local directories for logs
-    mkdir -p logs
-    mkdir -p logs/vivado_logs
-    
-    # Try to copy all relevant logs even if build failed
-    echo "  Copying FuseSoC logs..."
-    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/logs/fusesoc_${PROJECT_NAME}_*.log logs/ 2>/dev/null || {
-        echo "  No FuseSoC logs found"
-    }
-    
-    # Copy Vivado logs if they exist
-    echo "  Copying Vivado logs..."
-    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/vivado_calls.log logs/ 2>/dev/null || {
-        echo "  No vivado_calls.log found in gateware directory"
-    }
-    
-    # Copy the build output and info files
-    echo "  Copying build output log..."
-    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:/tmp/retrobus_build_output_$$.log logs/ 2>/dev/null || {
-        echo "  No build output log found"
-    }
-    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:/tmp/retrobus_build_info_$$.txt logs/ 2>/dev/null || {
-        echo "  No build info file found"
-    }
-    
-    # Copy build directories that might contain useful logs
-    echo "  Copying build artifacts..."
-    BUILD_DIR="${REMOTE_WORK_DIR}/gateware/build_fusesoc"
-    
-    # Find the specific build directory for this core
-    CORE_NAME=$(echo $PROJECT_NAME | tr '-' ':')
-    FUSESOC_CORE="retrobus:projects:${CORE_NAME}"
-    
-    # Try to copy the entire build directory for analysis
-    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR} && find . -name '*.log' -o -name '*.rpt' -o -name 'Makefile' | head -50" 2>/dev/null | while read -r logfile; do
-        if [ -n "$logfile" ]; then
-            echo "    Found: $logfile"
-            # Create directory structure locally
-            LOCAL_DIR="logs/build_artifacts/$(dirname "$logfile")"
-            mkdir -p "$LOCAL_DIR"
-            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"${BUILD_DIR}/${logfile}" "$LOCAL_DIR/" 2>/dev/null || true
-        fi
-    done
-    
-    # Try to get the vivado project directory logs
-    echo "  Looking for Vivado project logs..."
-    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -name 'vivado.log' -o -name 'runme.log' -o -name 'vivado_calls.log' 2>/dev/null | head -20" 2>/dev/null | while read -r viv_log; do
-        if [ -n "$viv_log" ]; then
-            echo "    Found Vivado log: $viv_log"
-            LOG_NAME=$(basename "$viv_log")
-            # For vivado_calls.log, preserve the path structure in the filename
-            if [ "$LOG_NAME" = "vivado_calls.log" ]; then
-                LOG_NAME="vivado_calls_$(echo "$viv_log" | sed 's|/|_|g' | sed 's|.*build_fusesoc_||').log"
-            fi
-            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"$viv_log" "logs/vivado_logs/$LOG_NAME" 2>/dev/null || true
-        fi
-    done
-    
-    # Get directory listing for debugging
-    echo "  Getting remote directory structure..."
-    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "ls -la ${REMOTE_WORK_DIR}/gateware/" > logs/remote_gateware_listing.txt 2>/dev/null || true
-    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -type f -name '*.log' -o -name '*.rpt' -o -name 'Makefile' | sort" > logs/remote_build_files.txt 2>/dev/null || true
-    
-    # Get the actual error from the build
-    echo ""
-    echo "Attempting to get specific error information..."
-    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR} && find . -name 'Makefile' -exec grep -l 'retrobus' {} \; | head -1" 2>/dev/null | read -r MAKEFILE_PATH
-    if [ -n "$MAKEFILE_PATH" ]; then
-        echo "  Found Makefile at: $MAKEFILE_PATH"
-        ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR}/$(dirname $MAKEFILE_PATH) && make -n" > logs/make_dry_run.txt 2>&1 || true
-    fi
-    
-    # Cleanup remote directory even on failure
-    echo ""
-    echo "Cleaning up remote work directory..."
-    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "rm -rf $REMOTE_WORK_DIR" || true
-    
-    echo ""
-    echo "Build failed. Diagnostic information collected in logs/ directory:"
+    echo "Build failed. All diagnostic information has been collected in logs/ directory:"
     echo "  - FuseSoC logs: logs/fusesoc_*.log"
-    echo "  - Build output: logs/retrobus_build_output_*.log"
-    echo "  - Build info: logs/retrobus_build_info_*.txt"
-    echo "  - Vivado logs: logs/vivado_logs/"
-    echo "  - Build artifacts: logs/build_artifacts/"
+    echo "  - Complete build output: logs/retrobus_build_output_*.log"
+    echo "  - Build info and file locations: logs/retrobus_build_info_*.txt"
+    echo "  - Vivado logs with path preservation: logs/vivado_logs/"
+    echo "  - Build artifacts and reports: logs/build_artifacts/"
     echo "  - Directory listings: logs/remote_*.txt"
     echo ""
-    echo "To find specific Vivado logs, check:"
-    echo "  - logs/vivado_logs/vivado_calls_*.log"
-    echo "  - logs/build_artifacts/**/vivado_calls.log"
-    exit 1
+    echo "Key files to check for errors:"
+    echo "  - logs/vivado_logs/vivado_calls_*.log (actual Vivado errors)"
+    echo "  - logs/retrobus_build_output_*.log (complete build output)"
+    echo "  - logs/build_artifacts/**/vivado_calls.log (alternative location)"
+fi
+
+# Cleanup remote directory 
+echo ""
+echo "Cleaning up remote work directory..."
+ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "rm -rf $REMOTE_WORK_DIR" || {
+    echo "Warning: Failed to cleanup remote directory $REMOTE_WORK_DIR"
+}
+
+# Exit with the build result
+if [ $BUILD_RESULT -ne 0 ]; then
+    echo ""
+    echo "Build process failed. Check the logs above for detailed error information."
+    exit $BUILD_RESULT
 fi
