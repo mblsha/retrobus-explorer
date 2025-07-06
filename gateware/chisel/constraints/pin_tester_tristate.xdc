@@ -32,6 +32,8 @@ set_false_path -from [get_ports {io_ffc_data[*]}] -to [all_clocks]
 set_false_path -from [all_clocks] -to [get_ports {io_ffc_data[*]}]
 
 # Group ffc_data pins for easier analysis
-create_debug_port u_ila_0 probe0
-set_property PROBE_TYPE DATA_AND_TRIGGER [get_debug_ports u_ila_0/probe0]
-set_property port_width 48 [get_debug_ports u_ila_0/probe0]
+# Debug ports commented out to reduce resource usage and avoid ILA configuration issues
+# Uncomment the following lines only when actively debugging the ffc_data signals:
+# create_debug_port u_ila_0 probe0
+# set_property PROBE_TYPE DATA_AND_TRIGGER [get_debug_ports u_ila_0/probe0]
+# set_property port_width 48 [get_debug_ports u_ila_0/probe0]
