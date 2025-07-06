@@ -217,6 +217,30 @@ def create_windows_workspace():
             shutil.copy2(sv_file, dest_sv)
             copied_files.append("chisel/" + sv_file.name)
     
+    # Also check for and copy sharp-organizer-card IP cores if they exist
+    # This is needed because the core file references IP from another project
+    sharp_org_dir = None
+    search_path_sharp = cwd
+    for _ in range(4):  # Search up to 4 levels up
+        potential_sharp_org = search_path_sharp / "sharp-organizer-card"
+        if potential_sharp_org.exists():
+            sharp_org_dir = potential_sharp_org
+            break
+        potential_gateware_sharp = search_path_sharp / "gateware" / "sharp-organizer-card"
+        if potential_gateware_sharp.exists():
+            sharp_org_dir = potential_gateware_sharp
+            break
+        search_path_sharp = search_path_sharp.parent
+    
+    if sharp_org_dir:
+        # Copy the cores directory which contains the IP
+        sharp_cores = sharp_org_dir / "cores"
+        if sharp_cores.exists():
+            dest_sharp = workspace_path / "sharp-organizer-card" / "cores"
+            dest_sharp.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(sharp_cores, dest_sharp, dirs_exist_ok=True)
+            copied_files.append("sharp-organizer-card/cores/")
+    
     return workspace_path, copied_files
 
 def windows_path(wsl_path):
