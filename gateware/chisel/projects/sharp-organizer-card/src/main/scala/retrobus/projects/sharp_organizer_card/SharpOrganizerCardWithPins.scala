@@ -49,21 +49,21 @@ class SharpOrganizerCardWithPins extends SharpOrganizerCard with AlchitryConstra
   )
   
   // Control signals
-  mapPin(io.conn_rw, "C46", "LVCMOS33", pullup = true)
-  mapPin(io.conn_oe, "C48", "LVCMOS33", pullup = true)
-  mapPin(io.conn_ci, "C2", "LVCMOS33", pullup = true)
-  mapPin(io.conn_e2, "A6", "LVCMOS33", pullup = true)
+  mapPin(io.conn_rw, "C46")
+  mapPin(io.conn_oe, "C48")
+  mapPin(io.conn_ci, "C2")
+  mapPin(io.conn_e2, "A6")
   
   // Memory bank signals
-  mapPin(io.conn_mskrom, "A11", "LVCMOS33", pullup = true)
-  mapPin(io.conn_sram1, "A9", "LVCMOS33", pullup = true)
-  mapPin(io.conn_sram2, "A8", "LVCMOS33", pullup = true)
-  mapPin(io.conn_eprom, "C45", "LVCMOS33", pullup = true)
+  mapPin(io.conn_mskrom, "A11")
+  mapPin(io.conn_sram1, "A9")
+  mapPin(io.conn_sram2, "A8")
+  mapPin(io.conn_eprom, "C45")
   
   // Power control signals
-  mapPin(io.conn_stnby, "D9", "LVCMOS33", pullup = true)
-  mapPin(io.conn_vbatt, "D8", "LVCMOS33", pullup = true)
-  mapPin(io.conn_vpp, "C27", "LVCMOS33", pullup = true)
+  mapPin(io.conn_stnby, "D9")
+  mapPin(io.conn_vbatt, "D8")
+  mapPin(io.conn_vpp, "C27")
   
   // FT2232H interface pins (these would need proper mapping)
   // Note: These are placeholder mappings - need actual board pins
@@ -87,11 +87,11 @@ class SharpOrganizerCardWithPins extends SharpOrganizerCard with AlchitryConstra
   
   // Document bus mappings
   addrPins.zipWithIndex.foreach { case (pin, i) =>
-    mapBusPin("io_addr", i, pin, pullup = true)
+    mapBusPin("io_addr", i, pin)
   }
   
   dataPins.zipWithIndex.foreach { case (pin, i) =>
-    mapBusPin("io_data", i, pin, pullup = true)
+    mapBusPin("io_data", i, pin)
   }
 }
 
@@ -123,53 +123,53 @@ object SharpOrganizerCardWithPins extends App {
     PinMapping("io_usb_tx", "USB_TX"),
     
     // Address bus - individual bits
-    PinMapping("io_addr[0]", "C39", pullup = true),
-    PinMapping("io_addr[1]", "C37", pullup = true),
-    PinMapping("io_addr[2]", "C36", pullup = true),
-    PinMapping("io_addr[3]", "C34", pullup = true),
-    PinMapping("io_addr[4]", "C33", pullup = true),
-    PinMapping("io_addr[5]", "A34", pullup = true),
-    PinMapping("io_addr[6]", "A33", pullup = true),
-    PinMapping("io_addr[7]", "B49", pullup = true),
-    PinMapping("io_addr[8]", "B48", pullup = true),
-    PinMapping("io_addr[9]", "B2", pullup = true),
-    PinMapping("io_addr[10]", "B3", pullup = true),
-    PinMapping("io_addr[11]", "B5", pullup = true),
-    PinMapping("io_addr[12]", "B6", pullup = true),
-    PinMapping("io_addr[13]", "C31", pullup = true),
-    PinMapping("io_addr[14]", "C30", pullup = true),
-    PinMapping("io_addr[15]", "C28", pullup = true),
-    PinMapping("io_addr[16]", "C3", pullup = true),
-    PinMapping("io_addr[17]", "C5", pullup = true),
-    PinMapping("io_addr[18]", "C6", pullup = true),
-    PinMapping("io_addr[19]", "C49", pullup = true),
+    PinMapping("io_addr[0]", "C39"),
+    PinMapping("io_addr[1]", "C37"),
+    PinMapping("io_addr[2]", "C36"),
+    PinMapping("io_addr[3]", "C34"),
+    PinMapping("io_addr[4]", "C33"),
+    PinMapping("io_addr[5]", "A34"),
+    PinMapping("io_addr[6]", "A33"),
+    PinMapping("io_addr[7]", "B49"),
+    PinMapping("io_addr[8]", "B48"),
+    PinMapping("io_addr[9]", "B2"),
+    PinMapping("io_addr[10]", "B3"),
+    PinMapping("io_addr[11]", "B5"),
+    PinMapping("io_addr[12]", "B6"),
+    PinMapping("io_addr[13]", "C31"),
+    PinMapping("io_addr[14]", "C30"),
+    PinMapping("io_addr[15]", "C28"),
+    PinMapping("io_addr[16]", "C3"),
+    PinMapping("io_addr[17]", "C5"),
+    PinMapping("io_addr[18]", "C6"),
+    PinMapping("io_addr[19]", "C49"),
     
     // Data bus
-    PinMapping("io_data[0]", "C40", pullup = true),
-    PinMapping("io_data[1]", "C42", pullup = true),
-    PinMapping("io_data[2]", "C43", pullup = true),
-    PinMapping("io_data[3]", "A24", pullup = true),
-    PinMapping("io_data[4]", "A23", pullup = true),
-    PinMapping("io_data[5]", "A15", pullup = true),
-    PinMapping("io_data[6]", "A14", pullup = true),
-    PinMapping("io_data[7]", "A12", pullup = true),
+    PinMapping("io_data[0]", "C40"),
+    PinMapping("io_data[1]", "C42"),
+    PinMapping("io_data[2]", "C43"),
+    PinMapping("io_data[3]", "A24"),
+    PinMapping("io_data[4]", "A23"),
+    PinMapping("io_data[5]", "A15"),
+    PinMapping("io_data[6]", "A14"),
+    PinMapping("io_data[7]", "A12"),
     
     // Control signals
-    PinMapping("io_conn_rw", "C46", pullup = true),
-    PinMapping("io_conn_oe", "C48", pullup = true),
-    PinMapping("io_conn_ci", "C2", pullup = true),
-    PinMapping("io_conn_e2", "A6", pullup = true),
+    PinMapping("io_conn_rw", "C46"),
+    PinMapping("io_conn_oe", "C48"),
+    PinMapping("io_conn_ci", "C2"),
+    PinMapping("io_conn_e2", "A6"),
     
     // Memory bank signals
-    PinMapping("io_conn_mskrom", "A11", pullup = true),
-    PinMapping("io_conn_sram1", "A9", pullup = true),
-    PinMapping("io_conn_sram2", "A8", pullup = true),
-    PinMapping("io_conn_eprom", "C45", pullup = true),
+    PinMapping("io_conn_mskrom", "A11"),
+    PinMapping("io_conn_sram1", "A9"),
+    PinMapping("io_conn_sram2", "A8"),
+    PinMapping("io_conn_eprom", "C45"),
     
     // Power signals
-    PinMapping("io_conn_stnby", "D9", pullup = true),
-    PinMapping("io_conn_vbatt", "D8", pullup = true),
-    PinMapping("io_conn_vpp", "C27", pullup = true)
+    PinMapping("io_conn_stnby", "D9"),
+    PinMapping("io_conn_vbatt", "D8"),
+    PinMapping("io_conn_vpp", "C27")
   )
   
   // Generate Verilog and constraints
