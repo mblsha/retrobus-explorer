@@ -27,14 +27,20 @@ filesets:
       - mem_8192x16.sv
     file_type: systemVerilogSource
 
+  ip_cores:
+    files:
+      # Reference the existing clock wizard IP from the Lucid project
+      - ../../sharp-organizer-card/cores/clk_wiz_0/clk_wiz_0.xci: {file_type: xci}
+
   constraints:
     files:
-      - constraints/sharp_organizer_card.xdc: {file_type: xdc}
+      - ../constraints/sharp_organizer_card.xdc: {file_type: xdc}
 
 targets:
   default: &default
     filesets:
       - rtl
+      - ip_cores
       - constraints
     toplevel: SharpOrganizerCard
     
