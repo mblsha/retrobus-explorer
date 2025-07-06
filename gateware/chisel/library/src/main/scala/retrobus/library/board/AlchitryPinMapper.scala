@@ -9,10 +9,6 @@
 package retrobus.library.board
 
 import chisel3._
-import chisel3.experimental.{IO, ChiselAnnotation}
-import firrtl.annotations.{SingleTargetAnnotation, Target, ModuleTarget, ReferenceTarget}
-import scala.io.Source
-import scala.util.{Try, Using}
 import java.io.{File, PrintWriter}
 import scala.collection.mutable
 
@@ -81,54 +77,27 @@ object AlchitryPinMapper {
   }
 }
 
-/**
- * Pin constraint annotation for Chisel modules
- * Allows specifying virtual pins that get mapped to real pins
- */
-case class AlchitryPin(virtualPin: String, board: String = "au") extends ChiselAnnotation {
-  def toFirrtl: PinAnnotation = {
-    val realPin = AlchitryPinMapper.getRealPin(virtualPin, board)
-    PinAnnotation(realPin)
-  }
-}
-
-case class PinAnnotation(pin: String) extends SingleTargetAnnotation[ReferenceTarget] {
-  def duplicate(n: ReferenceTarget): PinAnnotation = this.copy()
-}
-
-/**
- * IO Standard annotation
- */
-case class IOStandard(standard: String) extends ChiselAnnotation {
-  def toFirrtl: IOStandardAnnotation = IOStandardAnnotation(standard)
-}
-
-case class IOStandardAnnotation(standard: String) extends SingleTargetAnnotation[ReferenceTarget] {
-  def duplicate(n: ReferenceTarget): IOStandardAnnotation = this.copy()
-}
 
 /**
  * Alchitry board base class with automatic pin mapping
  */
 abstract class AlchitryModule(board: String = "au") extends Module {
   
+  // Store pin mappings for later constraint generation
+  private val pinMappings = mutable.ListBuffer[(Data, String, Option[String])]()
+  
   // Helper method to assign virtual pins
   def assignPin(port: Data, virtualPin: String): Unit = {
-    port match {
-      case b: Bool => b.addAttribute("alchitry_pin", virtualPin)
-      case v: Vec[_] => 
-        // Handle vector pins
-        println(s"Warning: Cannot assign single pin $virtualPin to vector port")
-      case _ =>
-        println(s"Warning: Unsupported port type for pin assignment")
-    }
+    pinMappings += ((port, virtualPin, None))
   }
   
   // Helper to assign pin with IO standard
   def assignPin(port: Data, virtualPin: String, ioStandard: String): Unit = {
-    assignPin(port, virtualPin)
-    port.addAttribute("io_standard", ioStandard)
+    pinMappings += ((port, virtualPin, Some(ioStandard)))
   }
+  
+  // Get all pin mappings for constraint generation
+  def getPinMappings: Seq[(Data, String, Option[String])] = pinMappings.toSeq
 }
 
 /**
@@ -209,15 +178,17 @@ trait AlchitryConstraints { self: Module =>
   
   private val pinConstraints = mutable.ListBuffer[AlchitryConstraintGenerator.PinConstraint]()
   
-  def mapPin(port: Data, virtualPin: String, ioStandard: String = "LVCMOS33"): Unit = {
-    val portName = port.pathName
+  def mapPin(port: Data, virtualPin: String, ioStandard: String = "LVCMOS33", pullup: Boolean = false, pulldown: Boolean = false): Unit = {
+    // For now, we'll store the port reference and generate names later
     val realPin = AlchitryPinMapper.getRealPin(virtualPin)
     
     pinConstraints += AlchitryConstraintGenerator.PinConstraint(
-      portName = portName,
+      portName = s"io_${virtualPin.toLowerCase}", // Placeholder - will be fixed in elaboration
       virtualPin = virtualPin,
       realPin = realPin,
-      ioStandard = ioStandard
+      ioStandard = ioStandard,
+      pullup = pullup,
+      pulldown = pulldown
     )
   }
   
@@ -225,9 +196,9 @@ trait AlchitryConstraints { self: Module =>
     ports.foreach { case (port, pin) => mapPin(port, pin) }
   }
   
-  def generateConstraints(outputFile: String): Unit = {
+  def generateConstraints(outputFile: String, moduleName: String = "Module"): Unit = {
     AlchitryConstraintGenerator.generateXDC(
-      moduleName = this.name,
+      moduleName = moduleName,
       constraints = pinConstraints.toSeq,
       outputFile = outputFile
     )

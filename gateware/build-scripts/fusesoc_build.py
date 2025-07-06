@@ -26,7 +26,7 @@ PROJECT_CONFIGS = {
         "long_description": "Comprehensive hardware verification tool that tests all 48 FPGA pins through the level shifter interface. Includes bidirectional pin support using Xilinx IOBUF primitives."
     },
     "sharp-organizer-card": {
-        "sbt_target": "sharpOrganizerCard/run", 
+        "sbt_target": "sharpOrganizerCard/runMain retrobus.projects.sharp_organizer_card.SharpOrganizerCardTop", 
         "fusesoc_core": "retrobus:projects:sharp_organizer_card",
         "description": "Interface for Sharp electronic organizers",
         "long_description": "FPGA interface for capturing and analyzing signals from Sharp pocket computers and electronic organizers. Supports Z80 bus analysis and LCD/keyboard decoding."

@@ -65,6 +65,7 @@ class PinTesterWithPins extends AlchitryTop with AlchitryConstraints {
  * Companion object for elaboration with constraint generation
  */
 object PinTesterWithPins extends App {
+  import retrobus.library.board.AlchitryElaborator
   import retrobus.library.board.AlchitryElaborator._
   
   // Define complete pin mappings

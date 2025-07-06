@@ -49,21 +49,21 @@ class SharpOrganizerCardWithPins extends SharpOrganizerCard with AlchitryConstra
   )
   
   // Control signals
-  mapPin(io.conn_rw, "C46", pullup = true)
-  mapPin(io.conn_oe, "C48", pullup = true)
-  mapPin(io.conn_ci, "C2", pullup = true)
-  mapPin(io.conn_e2, "A6", pullup = true)
+  mapPin(io.conn_rw, "C46", "LVCMOS33", pullup = true)
+  mapPin(io.conn_oe, "C48", "LVCMOS33", pullup = true)
+  mapPin(io.conn_ci, "C2", "LVCMOS33", pullup = true)
+  mapPin(io.conn_e2, "A6", "LVCMOS33", pullup = true)
   
   // Memory bank signals
-  mapPin(io.conn_mskrom, "A11", pullup = true)
-  mapPin(io.conn_sram1, "A9", pullup = true)
-  mapPin(io.conn_sram2, "A8", pullup = true)
-  mapPin(io.conn_eprom, "C45", pullup = true)
+  mapPin(io.conn_mskrom, "A11", "LVCMOS33", pullup = true)
+  mapPin(io.conn_sram1, "A9", "LVCMOS33", pullup = true)
+  mapPin(io.conn_sram2, "A8", "LVCMOS33", pullup = true)
+  mapPin(io.conn_eprom, "C45", "LVCMOS33", pullup = true)
   
   // Power control signals
-  mapPin(io.conn_stnby, "D9", pullup = true)
-  mapPin(io.conn_vbatt, "D8", pullup = true)
-  mapPin(io.conn_vpp, "C27", pullup = true)
+  mapPin(io.conn_stnby, "D9", "LVCMOS33", pullup = true)
+  mapPin(io.conn_vbatt, "D8", "LVCMOS33", pullup = true)
+  mapPin(io.conn_vpp, "C27", "LVCMOS33", pullup = true)
   
   // FT2232H interface pins (these would need proper mapping)
   // Note: These are placeholder mappings - need actual board pins
@@ -99,6 +99,7 @@ class SharpOrganizerCardWithPins extends SharpOrganizerCard with AlchitryConstra
  * Companion object for elaboration with constraint generation
  */
 object SharpOrganizerCardWithPins extends App {
+  import retrobus.library.board.AlchitryElaborator
   import retrobus.library.board.AlchitryElaborator._
   
   // Define complete pin mappings including bus signals

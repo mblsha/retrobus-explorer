@@ -1,9 +1,7 @@
 package retrobus.library.board
 
 import chisel3._
-import chisel3.stage.{ChiselStage, ChiselGeneratorAnnotation}
-import firrtl.AnnotationSeq
-import firrtl.options.{TargetDirAnnotation, CustomFileEmission}
+import circt.stage.ChiselStage
 import java.io.{File, PrintWriter}
 
 /**
@@ -43,7 +41,7 @@ object AlchitryElaborator {
     val stage = new ChiselStage
     val annotations = stage.execute(
       Array("--target-dir", targetDir),
-      Seq(ChiselGeneratorAnnotation(() => gen))
+      Seq(chisel3.stage.ChiselGeneratorAnnotation(() => gen))
     )
     
     // Extract module name
@@ -232,11 +230,11 @@ object ExampleElaboration extends App {
     PinMapping("io_conn_oe", "C48", pullup = true)
   )
   
-  // Elaborate with constraints
-  AlchitryElaborator.elaborate(
-    gen = new ExampleAlchitryModule,
-    pinMappings = pinMappings,
-    board = "au",
-    targetDir = "build/alchitry"
-  )
+  // Example usage - replace ExampleModule with your actual module
+  // AlchitryElaborator.elaborate(
+  //   gen = new YourModule,
+  //   pinMappings = pinMappings,
+  //   board = "au",
+  //   targetDir = "build/alchitry"
+  // )
 }
