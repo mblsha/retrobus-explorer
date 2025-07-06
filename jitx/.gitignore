@@ -11,3 +11,13 @@ designs/**/design-info/physical-layout.design~
 parts-db
 #
 .slm
+
+# View and cache files
+.view/
+.vscode/
+
+# 3D models with generated hashes
+3d-models/jitx-*.stp
+
+# Generated designs directory
+designs/
