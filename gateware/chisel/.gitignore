@@ -13,6 +13,7 @@ generated/
 *.v
 *.sv
 *.fir
+filelist.f
 
 # Logs
 *.log
