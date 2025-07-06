@@ -233,17 +233,76 @@ if [ $? -eq 0 ]; then
     
 else
     echo ""
-    echo "Build failed on Windows. Checking for logs..."
+    echo "Build failed on Windows. Collecting diagnostic information..."
     
-    # Try to copy any logs even if build failed
+    # Create local directories for logs
     mkdir -p logs
+    mkdir -p logs/vivado_logs
+    
+    # Try to copy all relevant logs even if build failed
+    echo "  Copying FuseSoC logs..."
     scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/logs/fusesoc_${PROJECT_NAME}_*.log logs/ 2>/dev/null || {
-        echo "No build logs found to copy"
+        echo "  No FuseSoC logs found"
     }
     
+    # Copy Vivado logs if they exist
+    echo "  Copying Vivado logs..."
+    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${REMOTE_WORK_DIR}/gateware/vivado_calls.log logs/ 2>/dev/null || {
+        echo "  No vivado_calls.log found"
+    }
+    
+    # Copy build directories that might contain useful logs
+    echo "  Copying build artifacts..."
+    BUILD_DIR="${REMOTE_WORK_DIR}/gateware/build_fusesoc"
+    
+    # Find the specific build directory for this core
+    CORE_NAME=$(echo $PROJECT_NAME | tr '-' ':')
+    FUSESOC_CORE="retrobus:projects:${CORE_NAME}"
+    
+    # Try to copy the entire build directory for analysis
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR} && find . -name '*.log' -o -name '*.rpt' -o -name 'Makefile' | head -50" 2>/dev/null | while read -r logfile; do
+        if [ -n "$logfile" ]; then
+            echo "    Found: $logfile"
+            # Create directory structure locally
+            LOCAL_DIR="logs/build_artifacts/$(dirname "$logfile")"
+            mkdir -p "$LOCAL_DIR"
+            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"${BUILD_DIR}/${logfile}" "$LOCAL_DIR/" 2>/dev/null || true
+        fi
+    done
+    
+    # Try to get the vivado project directory logs
+    echo "  Looking for Vivado project logs..."
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -name 'vivado.log' -o -name 'runme.log' 2>/dev/null | head -10" 2>/dev/null | while read -r viv_log; do
+        if [ -n "$viv_log" ]; then
+            echo "    Found Vivado log: $viv_log"
+            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:"$viv_log" logs/vivado_logs/ 2>/dev/null || true
+        fi
+    done
+    
+    # Get directory listing for debugging
+    echo "  Getting remote directory structure..."
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "ls -la ${REMOTE_WORK_DIR}/gateware/" > logs/remote_gateware_listing.txt 2>/dev/null || true
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "find ${BUILD_DIR} -type f -name '*.log' -o -name '*.rpt' -o -name 'Makefile' | sort" > logs/remote_build_files.txt 2>/dev/null || true
+    
+    # Get the actual error from the build
+    echo ""
+    echo "Attempting to get specific error information..."
+    ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR} && find . -name 'Makefile' -exec grep -l 'retrobus' {} \; | head -1" 2>/dev/null | read -r MAKEFILE_PATH
+    if [ -n "$MAKEFILE_PATH" ]; then
+        echo "  Found Makefile at: $MAKEFILE_PATH"
+        ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${BUILD_DIR}/$(dirname $MAKEFILE_PATH) && make -n" > logs/make_dry_run.txt 2>&1 || true
+    fi
+    
     # Cleanup remote directory even on failure
+    echo ""
+    echo "Cleaning up remote work directory..."
     ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "rm -rf $REMOTE_WORK_DIR" || true
     
-    echo "Check logs/ directory for detailed error information"
+    echo ""
+    echo "Build failed. Diagnostic information collected in logs/ directory:"
+    echo "  - FuseSoC logs: logs/fusesoc_*.log"
+    echo "  - Vivado logs: logs/vivado_calls.log, logs/vivado_logs/"
+    echo "  - Build artifacts: logs/build_artifacts/"
+    echo "  - Directory listings: logs/remote_*.txt"
     exit 1
 fi
