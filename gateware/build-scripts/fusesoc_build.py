@@ -390,7 +390,64 @@ def main():
             with open(log_file_path, "a") as log:
                 log.write(f"  Changed working directory to: " + str(workspace_path) + "\\n")
             
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            # Execute Vivado with real-time output streaming
+            print("\\n🔨 Starting Vivado execution - real-time output:")
+            print("=" * 60)
+            
+            stdout_capture = []
+            stderr_capture = []
+            
+            import threading
+            
+            with subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                text=True, bufsize=1, universal_newlines=True) as process:
+                
+                def read_stdout():
+                    for line in iter(process.stdout.readline, ''):
+                        if line:
+                            line = line.rstrip()
+                            print(f"🔧 {{line}}")  # Real-time Vivado output with prefix
+                            stdout_capture.append(line)
+                            # Also write to log immediately
+                            with open(log_file_path, "a") as log:
+                                log.write(line + "\\n")
+                
+                def read_stderr():
+                    for line in iter(process.stderr.readline, ''):
+                        if line:
+                            line = line.rstrip()
+                            print(f"⚠️  {{line}}")  # Real-time stderr with different prefix  
+                            stderr_capture.append(line)
+                            # Also write to log immediately
+                            with open(log_file_path, "a") as log:
+                                log.write("STDERR: " + line + "\\n")
+                
+                # Start threads for parallel reading
+                stdout_thread = threading.Thread(target=read_stdout)
+                stderr_thread = threading.Thread(target=read_stderr)
+                
+                stdout_thread.start()
+                stderr_thread.start()
+                
+                # Wait for process completion
+                return_code = process.wait()
+                
+                # Wait for all output to be processed
+                stdout_thread.join()
+                stderr_thread.join()
+            
+            print("=" * 60)
+            print(f"🏁 Vivado execution completed with exit code: {{return_code}}")
+            
+            # Create result object compatible with existing code
+            class StreamedResult:
+                def __init__(self, returncode, stdout_lines, stderr_lines):
+                    self.returncode = returncode
+                    self.stdout = "\\n".join(stdout_lines)
+                    self.stderr = "\\n".join(stderr_lines)
+            
+            result = StreamedResult(return_code, stdout_capture, stderr_capture)
+            
         finally:
             # Always restore original working directory
             os.chdir(original_cwd)
@@ -702,7 +759,10 @@ def run_fusesoc_build(project_name: str, fusesoc_core: str, config: Dict[str, st
                 logger.info(f"    {key}={env[key]}")
         logger.debug(f"  Full environment: {dict(env)}")
         
-        # Run FuseSoC with real-time output
+        # Run FuseSoC with enhanced real-time output streaming
+        print("\n🔨 Starting FuseSoC execution - real-time output:")
+        print("=" * 60)
+        
         process = subprocess.Popen(
             cmd,
             env=env,
@@ -712,19 +772,32 @@ def run_fusesoc_build(project_name: str, fusesoc_core: str, config: Dict[str, st
             bufsize=1
         )
         
-        # Stream output
+        # Stream output with emoji prefixes
         output_lines = []
         for line in process.stdout:
             line = line.rstrip()
             if line:
                 output_lines.append(line)
-                # Log different types of messages with appropriate levels
+                
+                # Print with emoji prefixes for different message types
                 if "ERROR" in line or "CRITICAL" in line:
+                    print(f"❌ {line}")
                     logger.error(f"FuseSoC: {line}")
                 elif "WARNING" in line:
+                    print(f"⚠️  {line}")
                     logger.warning(f"FuseSoC: {line}")
-                else:
+                elif "vivado" in line.lower() or "synthesis" in line.lower() or "implementation" in line.lower():
+                    print(f"🔧 {line}")
                     logger.info(f"FuseSoC: {line}")
+                elif "INFO" in line:
+                    print(f"ℹ️  {line}")
+                    logger.info(f"FuseSoC: {line}")
+                else:
+                    print(f"📦 {line}")
+                    logger.info(f"FuseSoC: {line}")
+        
+        print("=" * 60)
+        print(f"🏁 FuseSoC execution completed")
         
         process.wait()
         
