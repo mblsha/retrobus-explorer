@@ -1,3 +1,11 @@
+/**
+ * Alchitry Pin Mapping Library
+ * 
+ * Pin mappings are synchronized with the official Alchitry Labs V2 source:
+ * https://github.com/alchitry/Alchitry-Labs-V2/blob/master/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt
+ * 
+ * When updating this file, please verify mappings against the official source.
+ */
 package retrobus.library.board
 
 import chisel3._
@@ -13,10 +21,14 @@ import scala.collection.mutable
  * 
  * This provides compile-time pin mapping for Alchitry boards,
  * converting virtual pins (like A2, C49) to real FPGA pins.
+ * 
+ * Pin mappings are derived from the official Alchitry Labs V2 source:
+ * https://github.com/alchitry/Alchitry-Labs-V2/blob/master/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt
  */
 object AlchitryPinMapper {
   
   // Pin mapping for Alchitry Au board
+  // Source: https://github.com/alchitry/Alchitry-Labs-V2/blob/master/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt
   val auPinMap: Map[String, String] = Map(
     // A-bank pins
     "A2" -> "T8", "A3" -> "T7", "A5" -> "T5", "A6" -> "R5",
@@ -45,10 +57,23 @@ object AlchitryPinMapper {
     "USB_RX" -> "P16", "USB_TX" -> "P15"
   )
   
+  /**
+   * Get the real FPGA pin for a virtual pin name.
+   * 
+   * @param virtualPin Virtual pin name (e.g., "A2", "C49")
+   * @param board Board type (currently only "au" supported)
+   * @return Real FPGA pin name (e.g., "T8", "P11")
+   * 
+   * Note: If the virtual pin is not found, returns the original pin name
+   * and prints a warning. This allows for forward compatibility if new
+   * pins are added to the official Alchitry Labs source.
+   */
   def getRealPin(virtualPin: String, board: String = "au"): String = {
     board.toLowerCase match {
       case "au" => auPinMap.getOrElse(virtualPin, {
         println(s"Warning: Virtual pin $virtualPin not found in mapping")
+        println(s"Please check the official source and update this mapping if needed:")
+        println(s"https://github.com/alchitry/Alchitry-Labs-V2/blob/master/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt")
         virtualPin
       })
       case _ => throw new Exception(s"Unsupported board: $board")
