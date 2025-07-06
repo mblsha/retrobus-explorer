@@ -166,7 +166,7 @@ BUILD_EXIT=\${PIPESTATUS[0]}
 
 # Save information about where logs might be
 echo "Build exit code: \$BUILD_EXIT" > /tmp/retrobus_build_info_$$.txt
-echo "Working directory: \$(pwd)" >> /tmp/retrobus_build_info_$$.txt
+pwd >> /tmp/retrobus_build_info_$$.txt
 echo "Build output saved to: /tmp/retrobus_build_output_$$.log" >> /tmp/retrobus_build_info_$$.txt
 
 # Try to find vivado_calls.log and other important logs
