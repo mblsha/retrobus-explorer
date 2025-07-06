@@ -7,15 +7,13 @@ description: Pin Tester project for retrobus-explorer - migrated from Lucid to C
 filesets:
   rtl:
     files:
-      - ../generated/PinTesterBidirectional.sv
-      - ../generated/PinTesterTop.sv
-      - ../generated/IOBUFGenerator.v
-    file_type: systemVerilogSource
+      - ../generated/PinTesterBidirectional.sv : {file_type: systemVerilogSource}
+      - ../generated/PinTesterTop.sv : {file_type: systemVerilogSource}
+      - ../generated/IOBUFGenerator.v : {file_type: verilogSource}
 
   constraints_alchitry_au:
     files:
-      - ../constraints/pin_tester_corrected.xdc
-    file_type: xdc
+      - ../constraints/pin_tester_corrected.xdc : {file_type: xdc}
 
 targets:
   alchitry_au: &alchitry_au
