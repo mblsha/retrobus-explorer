@@ -8,6 +8,7 @@ filesets:
   rtl:
     files:
       - ../generated/PinTesterBidirectional.sv
+      - ../generated/PinTesterTop.sv
       - ../generated/IOBUFGenerator.v
     file_type: systemVerilogSource
 

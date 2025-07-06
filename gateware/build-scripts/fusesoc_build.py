@@ -20,6 +20,7 @@ import argparse
 PROJECT_CONFIGS = {
     "pin-tester": {
         "sbt_target": "pinTester/runMain retrobus.projects.pin_tester.PinTesterBidirectionalVerilog",
+        "additional_targets": ["pinTester/runMain retrobus.projects.pin_tester.PinTesterTopVerilog"],
         "fusesoc_core": "retrobus:projects:pin_tester",
         "description": "Hardware verification tool for testing all FPGA pins",
         "long_description": "Comprehensive hardware verification tool that tests all 48 FPGA pins through the level shifter interface. Includes bidirectional pin support using Xilinx IOBUF primitives."
@@ -95,10 +96,20 @@ def load_env_config(env_file: str = ".env") -> Dict[str, str]:
     config = {}
     env_path = Path(env_file)
     
+    # If .env not found locally, try parent directory (for remote builds)
     if not env_path.exists():
-        raise FileNotFoundError(
-            f"{env_file} not found. Please copy .env.example to .env and configure it."
-        )
+        parent_env = Path("..") / env_file
+        if parent_env.exists():
+            env_path = parent_env
+        else:
+            # Try going up more levels to find the .env file at repository root
+            repo_root_env = Path("../..") / env_file
+            if repo_root_env.exists():
+                env_path = repo_root_env
+            else:
+                raise FileNotFoundError(
+                    f"{env_file} not found. Please copy .env.example to .env and configure it."
+                )
     
     with open(env_path) as f:
         for line in f:
@@ -124,17 +135,100 @@ def create_vivado_wrapper(config: Dict[str, str], logger: logging.Logger) -> Pat
 import sys
 import subprocess
 import os
+import shutil
+import tempfile
 import re
 from datetime import datetime
 from pathlib import Path
 
-def wsl_to_windows_path(path):
+def create_windows_workspace():
+    """Create a Windows-accessible workspace and copy necessary files"""
+    # Create a temporary directory in C:\\temp that Windows can access
+    windows_temp = Path("/mnt/c/temp")
+    windows_temp.mkdir(exist_ok=True)
+    
+    # Create unique workspace directory
+    workspace_name = "vivado_" + str(os.getpid()) + "_" + str(int(datetime.now().timestamp()))
+    workspace_path = windows_temp / workspace_name
+    workspace_path.mkdir(exist_ok=True)
+    
+    # Copy current directory contents to Windows workspace
+    cwd = Path(os.getcwd())
+    
+    # Copy essential files for Vivado
+    patterns_to_copy = ["*.tcl", "*.xpr", "*.sv", "*.v", "*.xdc", "*.txt", "*.prj", "*.xci", "Makefile", "*.yml", "*.eda"]
+    copied_files = []
+    
+    for pattern in patterns_to_copy:
+        for file_path in cwd.glob(pattern):
+            if file_path.is_file():
+                dest_path = workspace_path / file_path.name
+                shutil.copy2(file_path, dest_path)
+                copied_files.append(file_path.name)
+    
+    # Also copy any subdirectories that might contain source files
+    for subdir in cwd.iterdir():
+        if subdir.is_dir() and subdir.name in ["src", "sources", "hdl", "rtl", "constraints"]:
+            dest_subdir = workspace_path / subdir.name
+            shutil.copytree(subdir, dest_subdir, dirs_exist_ok=True)
+            copied_files.append(subdir.name + "/")
+    
+    # Copy Chisel generated files if they exist
+    # Look for chisel directory in current dir or parent directories
+    chisel_dir = None
+    search_path = cwd
+    for _ in range(4):  # Search up to 4 levels up
+        potential_chisel = search_path / "chisel"
+        if potential_chisel.exists():
+            chisel_dir = potential_chisel
+            break
+        # Also check for gateware/chisel if we're at repository root
+        potential_gateware_chisel = search_path / "gateware" / "chisel"
+        if potential_gateware_chisel.exists():
+            chisel_dir = potential_gateware_chisel
+            break
+        search_path = search_path.parent
+    
+    if chisel_dir:
+        # Copy specific Chisel subdirectories that Vivado needs
+        for chisel_subdir in ["cores", "generated", "constraints"]:
+            chisel_src = chisel_dir / chisel_subdir
+            if chisel_src.exists():
+                # Copy to both chisel/ location and also to the path structure expected by TCL
+                dest_chisel_subdir = workspace_path / "chisel" / chisel_subdir
+                dest_chisel_subdir.parent.mkdir(exist_ok=True)
+                shutil.copytree(chisel_src, dest_chisel_subdir, dirs_exist_ok=True)
+                copied_files.append("chisel/" + chisel_subdir + "/")
+                
+                # Also copy to the structure expected by the TCL files
+                # TCL expects paths like src/retrobus_projects_pin_tester_1.0.0/../generated/
+                # So we create a symlink or copy at the expected location
+                src_project_dir = workspace_path / "src" / "retrobus_projects_pin_tester_1.0.0"
+                src_project_dir.mkdir(parents=True, exist_ok=True)
+                dest_expected = src_project_dir.parent / chisel_subdir
+                if not dest_expected.exists():
+                    shutil.copytree(chisel_src, dest_expected, dirs_exist_ok=True)
+                    copied_files.append("src/" + chisel_subdir + "/")
+        
+        # Copy any loose SystemVerilog files in chisel directory
+        for sv_file in chisel_dir.glob("*.sv"):
+            dest_sv = workspace_path / "chisel" / sv_file.name
+            dest_sv.parent.mkdir(exist_ok=True)
+            shutil.copy2(sv_file, dest_sv)
+            copied_files.append("chisel/" + sv_file.name)
+    
+    return workspace_path, copied_files
+
+def windows_path(wsl_path):
     """Convert WSL path to Windows path"""
-    if path.startswith("/mnt/c/"):
-        return path.replace("/mnt/c/", "C:/").replace("/", "/")
-    elif path.startswith("/mnt/d/"):
-        return path.replace("/mnt/d/", "D:/").replace("/", "/")
-    return path
+    if isinstance(wsl_path, Path):
+        wsl_path = str(wsl_path)
+    
+    if wsl_path.startswith("/mnt/c/"):
+        return wsl_path.replace("/mnt/c/", "C:\\\\").replace("/", "\\\\")
+    elif wsl_path.startswith("/mnt/d/"):
+        return wsl_path.replace("/mnt/d/", "D:\\\\").replace("/", "\\\\")
+    return wsl_path
 
 def main():
     vivado_path = r"{config['VIVADO_WIN_PATH']}\\bin\\vivado.bat"
@@ -145,39 +239,203 @@ def main():
     
     with open(log_dir / "vivado_calls.log", "a") as log:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log.write(f"\\n[{{timestamp}}] Vivado wrapper called with args: {{sys.argv}}\\n")
+        log.write(f"\\n[" + timestamp + "] Vivado wrapper called with args: " + str(sys.argv) + "\\n")
+        log.write(f"  Original working directory: " + os.getcwd() + "\\n")
     
-    # Skip the first argument if it's 'vivado' (compatibility with EDALIZE_LAUNCHER)
-    args_to_process = sys.argv[1:]
-    if args_to_process and args_to_process[0] == 'vivado':
-        args_to_process = args_to_process[1:]
+    # Create Windows workspace and copy files
+    try:
+        workspace_path, copied_files = create_windows_workspace()
+        windows_workspace = windows_path(workspace_path)
+        
         with open(log_dir / "vivado_calls.log", "a") as log:
-            log.write(f"  Skipping redundant 'vivado' argument\\n")
-    
-    # Convert paths in arguments
-    args = []
-    for arg in args_to_process:
-        if arg.startswith("/") and "/mnt/" in arg:
-            converted = wsl_to_windows_path(arg)
-            args.append(converted)
+            log.write(f"  Created Windows workspace: " + windows_workspace + "\\n")
+            log.write(f"  Copied " + str(len(copied_files)) + " files/directories: " + ', '.join(copied_files[:10]) + ('...' if len(copied_files) > 10 else '') + "\\n")
+        
+        # Skip the first argument if it's 'vivado' (compatibility with EDALIZE_LAUNCHER)
+        args_to_process = sys.argv[1:]
+        if args_to_process and args_to_process[0] == 'vivado':
+            args_to_process = args_to_process[1:]
             with open(log_dir / "vivado_calls.log", "a") as log:
-                log.write(f"  Path converted: {{arg}} -> {{converted}}\\n")
+                log.write(f"  Skipping redundant 'vivado' argument\\n")
+        
+        # Process arguments - handle multiple TCL scripts and project files properly
+        processed_args = []
+        tcl_scripts = []
+        project_file = None
+        
+        i = 0
+        while i < len(args_to_process):
+            arg = args_to_process[i]
+            
+            if arg == "-source" and i + 1 < len(args_to_process):
+                # Handle -source script pairs
+                script = args_to_process[i + 1]
+                if script.startswith("./") or script.startswith("../"):
+                    script = os.path.basename(script)
+                tcl_scripts.append(script)
+                i += 2  # Skip both -source and script name
+            elif arg.endswith(".xpr"):
+                # Project file - should be opened, not passed as argument
+                if arg.startswith("./") or arg.startswith("../"):
+                    project_file = os.path.basename(arg)
+                else:
+                    project_file = arg
+                i += 1
+            elif arg.endswith(".tcl"):
+                # TCL script without -source flag
+                tcl_scripts.append(os.path.basename(arg) if (arg.startswith("./") or arg.startswith("../")) else arg)
+                if arg.startswith("./") or arg.startswith("../"):
+                    with open(log_dir / "vivado_calls.log", "a") as log:
+                        log.write(f"  Converted relative path: " + arg + " -> " + os.path.basename(arg) + "\\n")
+                i += 1
+            elif arg.startswith("./") or arg.startswith("../") or (not arg.startswith("-") and "." in arg and "/" in arg):
+                # Other relative file paths
+                filename = os.path.basename(arg)
+                processed_args.append(filename)
+                with open(log_dir / "vivado_calls.log", "a") as log:
+                    log.write(f"  Converted relative path: " + arg + " -> " + os.path.basename(arg) + "\\n")
+                i += 1
+            else:
+                processed_args.append(arg)
+                i += 1
+        
+        # Build the command to run in Windows workspace
+        with open(log_dir / "vivado_calls.log", "a") as log:
+            log.write(f"  Working directory: " + windows_workspace + "\\n")
+            log.write(f"  Parsed TCL scripts: " + str(tcl_scripts) + "\\n")
+            log.write(f"  Project file: " + str(project_file) + "\\n")
+            log.write(f"  Other args: " + str(processed_args) + "\\n")
+        
+        # Handle different Vivado command scenarios
+        if project_file and tcl_scripts:
+            # Opening project and running scripts - create a combined TCL script
+            combined_script = "combined_script.tcl"
+            combined_script_path = workspace_path / combined_script
+            
+            with open(combined_script_path, "w") as f:
+                f.write(f"# Combined TCL script generated by Vivado wrapper\\n")
+                f.write(f"open_project " + project_file + "\\n")
+                for script in tcl_scripts:
+                    f.write(f"source " + script + "\\n")
+            
+            cmd_args = ' '.join(processed_args + ['-source', combined_script])
+            
+            with open(log_dir / "vivado_calls.log", "a") as log:
+                log.write(f"  Created combined script: " + combined_script + "\\n")
+        elif project_file:
+            # Just opening project
+            cmd_args = ' '.join(processed_args + [project_file])
+        elif tcl_scripts:
+            # Just running scripts
+            if len(tcl_scripts) == 1:
+                cmd_args = ' '.join(processed_args + ['-source', tcl_scripts[0]])
+            else:
+                # Multiple scripts - create combined script
+                combined_script = "combined_script.tcl"
+                combined_script_path = workspace_path / combined_script
+                
+                with open(combined_script_path, "w") as f:
+                    f.write(f"# Combined TCL script generated by Vivado wrapper\\n")
+                    for script in tcl_scripts:
+                        f.write(f"source " + script + "\\n")
+                
+                cmd_args = ' '.join(processed_args + ['-source', combined_script])
+                
+                with open(log_dir / "vivado_calls.log", "a") as log:
+                    log.write(f"  Created combined script: " + combined_script + "\\n")
         else:
-            args.append(arg)
-    
-    # Build the command
-    cmd = f'cmd.exe /c "{{vivado_path}}" {{" ".join(args)}}'
-    
-    with open(log_dir / "vivado_calls.log", "a") as log:
-        log.write(f"  Full command: {{cmd}}\\n")
-    
-    # Execute
-    result = subprocess.run(cmd, shell=True, capture_output=False)
-    
-    with open(log_dir / "vivado_calls.log", "a") as log:
-        log.write(f"  Exit code: {{result.returncode}}\\n")
-    
-    sys.exit(result.returncode)
+            # No special handling needed
+            cmd_args = ' '.join(processed_args)
+        
+        cmd = f'cmd.exe /c "' + vivado_path + ' ' + cmd_args + '"'
+        
+        with open(log_dir / "vivado_calls.log", "a") as log:
+            log.write(f"  Final args: " + cmd_args + "\\n")
+            log.write(f"  Full command: " + cmd + "\\n")
+        
+        # Execute Vivado in Windows workspace with detailed output capture
+        with open(log_dir / "vivado_calls.log", "a") as log:
+            log.write(f"  Executing command...\\n")
+        
+        # Change to a Windows-accessible directory before running cmd.exe to avoid UNC path issues
+        original_cwd = os.getcwd()
+        log_file_path = Path(original_cwd) / log_dir / "vivado_calls.log"
+        try:
+            # Change to the Windows workspace directory in WSL
+            os.chdir(workspace_path)
+            with open(log_file_path, "a") as log:
+                log.write(f"  Changed working directory to: " + str(workspace_path) + "\\n")
+            
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        finally:
+            # Always restore original working directory
+            os.chdir(original_cwd)
+            with open(log_file_path, "a") as log:
+                log.write(f"  Restored working directory to: " + original_cwd + "\\n")
+        
+        # Log stdout and stderr
+        with open(log_file_path, "a") as log:
+            log.write(f"  Vivado exit code: " + str(result.returncode) + "\\n")
+            if result.stdout:
+                log.write(f"  STDOUT:\\n" + result.stdout + "\\n")
+            if result.stderr:
+                log.write(f"  STDERR:\\n" + result.stderr + "\\n")
+        
+        # Copy results back to original location
+        original_cwd = Path(os.getcwd())
+        
+        # Copy back any new files created by Vivado
+        result_patterns = ["*.bit", "*.bin", "*.mcs", "*.rpt", "*.log", "*.jou", "*.xpr"]
+        copied_back = []
+        
+        for pattern in result_patterns:
+            for result_file in workspace_path.glob(pattern):
+                if result_file.is_file():
+                    dest_path = original_cwd / result_file.name
+                    shutil.copy2(result_file, dest_path)
+                    copied_back.append(result_file.name)
+        
+        # Also copy back any run directories that were created
+        for item in workspace_path.iterdir():
+            if item.is_dir() and (item.name.endswith(".runs") or item.name.endswith(".sim") or item.name.endswith(".cache")):
+                dest_dir = original_cwd / item.name
+                if dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                shutil.copytree(item, dest_dir)
+                copied_back.append(item.name + "/")
+        
+        with open(log_dir / "vivado_calls.log", "a") as log:
+            if copied_back:
+                log.write(f"  Copied back " + str(len(copied_back)) + " result files/directories: " + ', '.join(copied_back[:10]) + ('...' if len(copied_back) > 10 else '') + "\\n")
+            else:
+                log.write(f"  No result files to copy back\\n")
+        
+        # Leave workspace for debugging if Vivado failed
+        if result.returncode != 0:
+            with open(log_dir / "vivado_calls.log", "a") as log:
+                log.write(f"  KEPT workspace for debugging: " + str(workspace_path) + "\\n")
+        else:
+            # Cleanup workspace only on success
+            try:
+                shutil.rmtree(workspace_path)
+                with open(log_dir / "vivado_calls.log", "a") as log:
+                    log.write(f"  Cleaned up workspace: " + str(workspace_path) + "\\n")
+            except Exception as cleanup_error:
+                with open(log_dir / "vivado_calls.log", "a") as log:
+                    log.write(f"  Warning: Could not cleanup workspace: " + str(cleanup_error) + "\\n")
+        
+        sys.exit(result.returncode)
+        
+    except Exception as e:
+        # Use absolute path for error logging
+        try:
+            error_log_path = Path(os.getcwd()) / log_dir / "vivado_calls.log"
+            with open(error_log_path, "a") as log:
+                log.write(f"  ERROR in Vivado wrapper: " + str(e) + "\\n")
+        except:
+            # If logging fails, at least print the error
+            print(f"ERROR in Vivado wrapper: " + str(e))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
@@ -191,15 +449,32 @@ if __name__ == "__main__":
     return wrapper_path
 
 def create_fusesoc_config(config: Dict[str, str], wrapper_path: Path, logger: logging.Logger) -> Path:
-    """Create FuseSoC configuration file"""
+    """Create FuseSoC configuration file or use existing one"""
+    
+    # Check if FUSESOC_CONFIG environment variable is set (used by remote builds)
+    existing_config = os.environ.get('FUSESOC_CONFIG')
+    if existing_config and Path(existing_config).exists():
+        logger.info(f"Using existing FuseSoC config: {existing_config}")
+        return Path(existing_config)
+    
+    # Determine correct chisel cores path
+    # Check if we're in gateware directory or repository root
+    current_dir = Path.cwd()
+    if current_dir.name == "gateware":
+        # We're in gateware directory, use relative path
+        cores_location = "chisel/cores"
+    else:
+        # We're in repository root, use full path
+        cores_location = "gateware/chisel/cores"
+    
     fusesoc_config = f"""[main]
 build_root = {config['BUILD_ROOT']}
 cache_root = {config['FUSESOC_CACHE']}
 library_root = libraries
 
 [library.retrobus]
-location = gateware/chisel/cores
-sync-uri = gateware/chisel/cores
+location = {cores_location}
+sync-uri = {cores_location}
 sync-type = local
 auto-sync = true
 
@@ -213,6 +488,7 @@ jobs = {config['VIVADO_JOBS']}
         f.write(fusesoc_config)
     
     logger.info(f"Created FuseSoC config at: {config_path}")
+    logger.info(f"Using cores location: {cores_location}")
     logger.debug(f"Config contents:\n{fusesoc_config}")
     return config_path
 
@@ -245,7 +521,7 @@ def run_command_with_logging(cmd: List[str], cwd: Path, logger: logging.Logger, 
         logger.error(f"{description} failed with exception: {e}")
         raise
 
-def run_chisel_build(project_name: str, sbt_target: str, logger: logging.Logger) -> bool:
+def run_chisel_build(project_name: str, project_config: Dict, logger: logging.Logger) -> bool:
     """Run Chisel build to generate SystemVerilog"""
     logger.info("="*60)
     logger.info(f"Starting Chisel build for {project_name}")
@@ -257,10 +533,19 @@ def run_chisel_build(project_name: str, sbt_target: str, logger: logging.Logger)
             logger.error("This script must be run from WSL")
             return False
         
-        # Change to Chisel directory
-        chisel_dir = Path("gateware/chisel")
+        # Determine correct chisel directory path
+        current_dir = Path.cwd()
+        if current_dir.name == "gateware":
+            # We're in gateware directory, use relative path
+            chisel_dir = Path("chisel")
+        else:
+            # We're in repository root, use full path
+            chisel_dir = Path("gateware/chisel")
+        
         if not chisel_dir.exists():
             logger.error(f"Chisel directory not found: {chisel_dir}")
+            logger.error(f"Current working directory: {current_dir}")
+            logger.error(f"Looked for chisel at: {chisel_dir.absolute()}")
             return False
         
         # Check for build.sbt
@@ -271,18 +556,23 @@ def run_chisel_build(project_name: str, sbt_target: str, logger: logging.Logger)
         
         logger.info(f"Found build.sbt at: {build_sbt}")
         
-        # Run SBT build
-        logger.info(f"Generating SystemVerilog with SBT target: {sbt_target}")
-        result = run_command_with_logging(
-            ["sbt", sbt_target],
-            chisel_dir,
-            logger,
-            "SBT build"
-        )
+        # Run SBT builds for all targets
+        sbt_target = project_config["sbt_target"]
+        additional_targets = project_config.get("additional_targets", [])
+        all_targets = [sbt_target] + additional_targets
         
-        if result.returncode != 0:
-            logger.error(f"SBT build failed with exit code: {result.returncode}")
-            return False
+        for i, target in enumerate(all_targets):
+            logger.info(f"Generating SystemVerilog with SBT target {i+1}/{len(all_targets)}: {target}")
+            result = run_command_with_logging(
+                ["sbt", target],
+                chisel_dir,
+                logger,
+                f"SBT build {i+1}/{len(all_targets)}"
+            )
+            
+            if result.returncode != 0:
+                logger.error(f"SBT build failed with exit code: {result.returncode}")
+                return False
         
         # Look for generated files
         logger.info("Looking for generated SystemVerilog files...")
@@ -292,6 +582,7 @@ def run_chisel_build(project_name: str, sbt_target: str, logger: logging.Logger)
         if project_name == "pin-tester":
             expected_files = [
                 generated_dir / "PinTesterBidirectional.sv",
+                generated_dir / "PinTesterTop.sv",
                 generated_dir / "IOBUFGenerator.v"
             ]
             for expected_file in expected_files:
@@ -350,7 +641,14 @@ def run_fusesoc_build(project_name: str, fusesoc_core: str, config: Dict[str, st
         
         # List available cores
         logger.info("Listing available cores...")
-        list_cmd = ["fusesoc", "core", "list"]
+        list_cmd = [
+            "fusesoc",
+            f"--config={os.environ['FUSESOC_CONFIG']}" if 'FUSESOC_CONFIG' in os.environ else "",
+            "core", 
+            "list"
+        ]
+        # Remove empty strings from command
+        list_cmd = [c for c in list_cmd if c]
         list_result = subprocess.run(list_cmd, env=env, capture_output=True, text=True)
         
         if list_result.returncode == 0:
@@ -360,6 +658,7 @@ def run_fusesoc_build(project_name: str, fusesoc_core: str, config: Dict[str, st
         # Build command
         cmd = [
             "fusesoc",
+            f"--config={os.environ['FUSESOC_CONFIG']}" if 'FUSESOC_CONFIG' in os.environ else "",
             "--verbose" if config.get('LOG_LEVEL') == 'DEBUG' else "",
             "run",
             "--tool=vivado",
@@ -370,7 +669,15 @@ def run_fusesoc_build(project_name: str, fusesoc_core: str, config: Dict[str, st
         # Remove empty strings from command
         cmd = [c for c in cmd if c]
         
-        logger.info(f"Running FuseSoC: {' '.join(cmd)}")
+        logger.info(f"Running FuseSoC command:")
+        logger.info(f"  Command list: {cmd}")
+        logger.info(f"  Joined command: {' '.join(cmd)}")
+        logger.info(f"  Working directory: {os.getcwd()}")
+        logger.info(f"  Environment variables:")
+        for key in ['FUSESOC_CONFIG', 'EDALIZE_LAUNCHER']:
+            if key in env:
+                logger.info(f"    {key}={env[key]}")
+        logger.debug(f"  Full environment: {dict(env)}")
         
         # Run FuseSoC with real-time output
         process = subprocess.Popen(
@@ -400,6 +707,23 @@ def run_fusesoc_build(project_name: str, fusesoc_core: str, config: Dict[str, st
         
         if process.returncode != 0:
             logger.error(f"FuseSoC build failed with code: {process.returncode}")
+            
+            # Log specific error analysis
+            error_lines = [line for line in output_lines if "ERROR" in line]
+            if error_lines:
+                logger.error("=== Specific Errors Found ===")
+                for error_line in error_lines[:5]:  # Show first 5 errors
+                    logger.error(f"  {error_line}")
+                logger.error("=== End Specific Errors ===")
+            
+            # Check for dependency-related errors
+            dependency_errors = [line for line in output_lines if "requires" in line and "not found" in line]
+            if dependency_errors:
+                logger.error("=== Dependency Resolution Errors ===")
+                for dep_error in dependency_errors:
+                    logger.error(f"  {dep_error}")
+                logger.error("=== End Dependency Errors ===")
+            
             # Save full output to a file for debugging
             error_log = Path("logs") / f"fusesoc_error_{project_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
             with open(error_log, 'w') as f:
@@ -506,12 +830,16 @@ def main():
     # Parse command line arguments for build
     if len(sys.argv) < 2:
         print("Error: No project name provided")
-        print(f"Usage: {sys.argv[0]} <project_name>")
+        print(f"Usage: {sys.argv[0]} <project_name> [--skip-chisel]")
+        print("Options:")
+        print("  --skip-chisel    Skip Chisel build step (use existing generated files)")
         print()
         print_available_projects()
         sys.exit(1)
     
+    # Parse arguments
     project_name = sys.argv[1]
+    skip_chisel = "--skip-chisel" in sys.argv[2:]
     
     # Validate project name
     if not validate_project_name(project_name):
@@ -544,6 +872,41 @@ def main():
     logger.info(f"SBT target: {project_config['sbt_target']}")
     logger.info(f"FuseSoC core: {project_config['fusesoc_core']}")
     
+    # Log tool versions for debugging
+    logger.info("=== Tool Versions ===")
+    try:
+        import subprocess
+        # Get FuseSoC version
+        fusesoc_version = subprocess.run(['fusesoc', '--version'], capture_output=True, text=True)
+        if fusesoc_version.returncode == 0:
+            logger.info(f"FuseSoC version: {fusesoc_version.stdout.strip()}")
+        else:
+            logger.info("FuseSoC version: Not available")
+        
+        # Get SBT version (will be logged during Chisel build)
+        sbt_version = subprocess.run(['sbt', 'sbtVersion'], capture_output=True, text=True, cwd=Path("gateware/chisel"))
+        if sbt_version.returncode == 0:
+            # Extract version from SBT output
+            for line in sbt_version.stdout.split('\n'):
+                if 'sbt version' in line.lower() or line.strip().startswith('1.'):
+                    logger.info(f"SBT version: {line.strip()}")
+                    break
+        else:
+            logger.info("SBT version: Not available")
+            
+        # Get Java version
+        java_version = subprocess.run(['java', '-version'], capture_output=True, text=True)
+        if java_version.returncode == 0:
+            # Java version goes to stderr
+            first_line = java_version.stderr.split('\n')[0] if java_version.stderr else "Unknown"
+            logger.info(f"Java version: {first_line}")
+        else:
+            logger.info("Java version: Not available")
+            
+    except Exception as e:
+        logger.warning(f"Could not get tool versions: {e}")
+    logger.info("=== End Tool Versions ===")
+    
     # Log all config at DEBUG level
     for key, value in config.items():
         logger.debug(f"Config: {key} = {value}")
@@ -564,12 +927,16 @@ def main():
     logger.info("\nStep 2/4: Creating FuseSoC configuration...")
     fusesoc_config_path = create_fusesoc_config(config, wrapper_path, logger)
     
-    # Step 3: Run Chisel build
-    logger.info("\nStep 3/4: Running Chisel build...")
-    if not run_chisel_build(project_name, project_config['sbt_target'], logger):
-        logger.error(f"\nBUILD FAILED at Chisel generation step for {project_name}")
-        logger.error("Check logs directory for detailed error information")
-        sys.exit(1)
+    # Step 3: Run Chisel build (optional)
+    if skip_chisel:
+        logger.info("\nStep 3/4: Skipping Chisel build (--skip-chisel specified)")
+        logger.info("Using existing generated SystemVerilog files")
+    else:
+        logger.info("\nStep 3/4: Running Chisel build...")
+        if not run_chisel_build(project_name, project_config, logger):
+            logger.error(f"\nBUILD FAILED at Chisel generation step for {project_name}")
+            logger.error("Check logs directory for detailed error information")
+            sys.exit(1)
     
     # Step 4: Run FuseSoC build
     logger.info("\nStep 4/4: Running FuseSoC synthesis...")

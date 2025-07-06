@@ -22,18 +22,18 @@ class PinTesterTop extends Module {
   })
 
   // Instantiate the main pin-tester logic
-  val pinTester = Module(new AlchitryTop)
+  val core = Module(new AlchitryTop)
   
   // Connect all signals directly - bidirectional handling done externally
-  pinTester.io.clk := io.clk
-  pinTester.io.rst_n := io.rst_n
-  io.led := pinTester.io.led
-  pinTester.io.usb_rx := io.usb_rx
-  io.usb_tx := pinTester.io.usb_tx
-  pinTester.io.ffc_data_in := io.ffc_data_in
-  io.ffc_data_out := pinTester.io.ffc_data_out
-  io.ffc_data_oe := pinTester.io.ffc_data_oe
-  io.saleae := pinTester.io.saleae
+  core.io.clk := io.clk
+  core.io.rst_n := io.rst_n
+  io.led := core.io.led
+  core.io.usb_rx := io.usb_rx
+  io.usb_tx := core.io.usb_tx
+  core.io.ffc_data_in := io.ffc_data_in
+  io.ffc_data_out := core.io.ffc_data_out
+  io.ffc_data_oe := core.io.ffc_data_oe
+  io.saleae := core.io.saleae
 }
 
 /**

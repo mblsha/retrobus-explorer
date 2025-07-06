@@ -26,18 +26,18 @@ class PinTesterBidirectional extends RawModule {
 
   // Instantiate the main pin-tester logic (which has PinTesterTop internally)
   withClockAndReset(io.clk, ~io.rst_n) {
-    val pinTester = Module(new PinTesterTop)
-    pinTester.io.clk := io.clk
-    pinTester.io.rst_n := io.rst_n
+    val core = Module(new PinTesterTop)
+    core.io.clk := io.clk
+    core.io.rst_n := io.rst_n
     
     // Connect all signals
-    io.led := pinTester.io.led
-    pinTester.io.usb_rx := io.usb_rx
-    io.usb_tx := pinTester.io.usb_tx
-    pinTester.io.ffc_data_in := ffc_data_in
-    ffc_data_out := pinTester.io.ffc_data_out
-    ffc_data_oe := pinTester.io.ffc_data_oe
-    io.saleae := pinTester.io.saleae
+    io.led := core.io.led
+    core.io.usb_rx := io.usb_rx
+    io.usb_tx := core.io.usb_tx
+    core.io.ffc_data_in := ffc_data_in
+    ffc_data_out := core.io.ffc_data_out
+    ffc_data_oe := core.io.ffc_data_oe
+    io.saleae := core.io.saleae
   }
 
   // BlackBox to handle bidirectional IOBUFs (doesn't need clock context)

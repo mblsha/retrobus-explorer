@@ -1,5 +1,5 @@
 #!/bin/bash
-# Local build wrapper that runs the build on Windows and copies results back
+# Local FuseSoC build wrapper for WSL environment
 
 set -e
 
@@ -8,88 +8,98 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Check if project name was provided
 if [ $# -eq 0 ]; then
+    echo "Usage: $0 <project_name> [--skip-chisel]"
+    echo "Options:"
+    echo "  --skip-chisel    Skip Chisel build step (use existing generated files)"
+    echo ""
     usage_error "No project name provided" "$0"
 fi
 
 PROJECT_NAME=$1
-shift
+shift  # Remove project name from arguments
 
 # Validate project name
 if ! validate_project "$PROJECT_NAME"; then
     usage_error "Unknown project '$PROJECT_NAME'" "$0"
 fi
 
-# Get script directory
+echo "=== RetroBus Explorer FuseSoC Build ==="
+echo "Project: $PROJECT_NAME"
+
+# Check if we're in WSL
+if [ ! -d "/mnt/c" ]; then
+    echo "Error: This script must be run from WSL"
+    exit 1
+fi
+
+# Get to repository root (two levels up from build-scripts)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$SCRIPT_DIR/../.."
+REPO_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
+cd "$REPO_ROOT"
 
 # Check for .env file
 if [ ! -f ".env" ]; then
-    echo "Error: .env file not found"
-    echo "Please create .env with your SSH/SCP settings"
+    echo "Error: .env file not found in repository root"
+    echo "Please copy .env.example to .env and configure it:"
+    echo "  cp .env.example .env"
+    echo "  nano .env"
     exit 1
 fi
 
-# Load environment variables
+# Source the .env file to set up pyenv
 source .env
 
-# Check required variables
-if [ -z "$SSH_USER" ] || [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ]; then
-    echo "Error: SSH settings not found in .env"
+# Check if running in fish shell
+if [ -n "$FISH_VERSION" ]; then
+    echo "Detected fish shell"
+    # Set up pyenv for fish
+    pyenv local $FUSESOC_PYENV
+    set -x PATH $HOME/.pyenv/versions/$FUSESOC_PYENV/bin $PATH
+else
+    # Bash/sh setup
+    export PYENV_VERSION=$FUSESOC_PYENV
+    export PATH="$HOME/.pyenv/versions/$FUSESOC_PYENV/bin:$PATH"
+fi
+
+# Check for required tools
+echo "Checking prerequisites..."
+
+if ! command -v python3 &> /dev/null; then
+    echo "Error: Python 3 not found in pyenv environment"
     exit 1
 fi
 
-if [ -z "$SCP_USER" ] || [ -z "$SCP_HOST" ] || [ -z "$SCP_PORT" ]; then
-    echo "Error: SCP settings not found in .env"
+if ! command -v fusesoc &> /dev/null; then
+    echo "FuseSoC not found. Installing..."
+    python3 -m pip install fusesoc
+fi
+
+if ! command -v sbt &> /dev/null; then
+    echo "Error: SBT not found. Please install it first:"
+    echo "  # Add SBT repository"
+    echo '  echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | sudo tee /etc/apt/sources.list.d/sbt.list'
+    echo '  echo "deb https://repo.scala-sbt.org/scalasbt/debian /" | sudo tee /etc/apt/sources.list.d/sbt_old.list'
+    echo '  curl -sL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" | sudo apt-key add'
+    echo "  sudo apt-get update && sudo apt-get install sbt"
     exit 1
 fi
 
-if [ -z "$WINDOWS_PROJECT_PATH" ]; then
-    echo "Error: WINDOWS_PROJECT_PATH not found in .env"
-    echo "Please add: WINDOWS_PROJECT_PATH=/mnt/c/Users/your_username/src/retrobus-explorer"
-    exit 1
-fi
+# Change to the gateware directory before running Python script
+cd "$(dirname "$SCRIPT_DIR")"
 
-echo "=== RetroBus Explorer Local Build ==="
-echo "Project: $PROJECT_NAME"
-echo ""
-echo "Running build on Windows WSL..."
+# Run the Python build script with the project name
+echo "Starting build process for $PROJECT_NAME..."
+python3 "$SCRIPT_DIR/fusesoc_build.py" "$PROJECT_NAME" "$@"
 
-# Run the build on Windows
-ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd $WINDOWS_PROJECT_PATH && ./gateware/build-scripts/build_fusesoc.sh $PROJECT_NAME $*"
-
-# Check if build succeeded
+# Check exit status
 if [ $? -eq 0 ]; then
     echo ""
-    echo "Build completed on Windows. Copying bitstream to local machine..."
+    echo "Build completed successfully!"
+    echo "Check logs/ directory for detailed build logs"
+    echo "Bitstream available at: bitstreams/${PROJECT_NAME}_latest.bit"
     
-    # Create local bitstreams directory
-    mkdir -p bitstreams
-    
-    # Convert project name to safe filename
-    SAFE_NAME=$(echo $PROJECT_NAME | tr '-' '_')
-    
-    # Copy the bitstream
-    scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${WINDOWS_PROJECT_PATH}/bitstreams/${SAFE_NAME}_latest.bit bitstreams/
-    
-    if [ $? -eq 0 ]; then
-        echo ""
-        echo "Build completed successfully!"
-        echo "Bitstream available locally at: bitstreams/${SAFE_NAME}_latest.bit"
-        ls -la bitstreams/${SAFE_NAME}_latest.bit
-        
-        # Also copy the timestamped version if it exists
-        LATEST_TIMESTAMPED=$(ssh -p $SSH_PORT ${SSH_USER}@${SSH_HOST} "cd ${WINDOWS_PROJECT_PATH}/bitstreams && ls -t ${SAFE_NAME}_2*.bit 2>/dev/null | head -1")
-        if [ -n "$LATEST_TIMESTAMPED" ]; then
-            scp -P $SCP_PORT ${SCP_USER}@${SCP_HOST}:${WINDOWS_PROJECT_PATH}/bitstreams/$LATEST_TIMESTAMPED bitstreams/
-            echo "Also copied: bitstreams/$LATEST_TIMESTAMPED"
-        fi
-    else
-        echo "Error: Failed to copy bitstream from Windows"
-        exit 1
-    fi
 else
     echo ""
-    echo "Build failed on Windows. Check remote logs for details."
+    echo "Build failed! Check logs for details"
     exit 1
 fi

@@ -11,12 +11,12 @@ From the repository root:
 cp .env.example .env
 nano .env  # Set your Vivado paths
 
-# Build any project
-./gateware/build-scripts/build_fusesoc.sh <project-name>
+# Build any project locally (on WSL)
+./gateware/build-scripts/build_local.sh <project-name>
 
 # Examples
-./gateware/build-scripts/build_fusesoc.sh pin-tester
-./gateware/build-scripts/build_fusesoc.sh sharp-organizer-card
+./gateware/build-scripts/build_local.sh pin-tester
+./gateware/build-scripts/build_local.sh sharp-organizer-card
 ```
 
 ## Available Projects
@@ -28,11 +28,11 @@ nano .env  # Set your Vivado paths
 
 ```
 build-scripts/
-├── build_fusesoc.sh         # Generic build script (main entry point)
-├── build_local.sh          # Local build wrapper (runs on Windows via SSH)
-├── fusesoc_build.py         # Python build orchestrator
-├── build_pin_tester.sh      # Convenience wrapper for pin-tester
-└── README.md                # This file
+├── build_local.sh          # Local build script (runs directly on WSL)
+├── build_remote.sh         # Remote build wrapper (runs on Windows via SSH)
+├── fusesoc_build.py        # Python build orchestrator
+├── build_pin_tester.sh     # Convenience wrapper for pin-tester
+└── README.md               # This file
 ```
 
 ## Build System Overview
@@ -125,25 +125,34 @@ All paths are relative to repository root:
 ## Build Options
 
 ```bash
-# Build with debug logging
-LOG_LEVEL=DEBUG ./gateware/build-scripts/build_fusesoc.sh pin-tester
+# Build with debug logging (local WSL build)
+LOG_LEVEL=DEBUG ./gateware/build-scripts/build_local.sh pin-tester
 
-# Build specific project
-./gateware/build-scripts/build_fusesoc.sh sharp-organizer-card
+# Build specific project locally
+./gateware/build-scripts/build_local.sh sharp-organizer-card
 
-# Use convenience wrapper
+# Use convenience wrapper for pin-tester
 ./gateware/build-scripts/build_pin_tester.sh
 ```
 
 ## Remote Builds
 
-For distributed builds or when running from a different machine:
+For distributed builds on a remote Windows/WSL machine (no repository checkout required on remote side):
 
 ```bash
 # Configure SSH/SCP settings in .env (see .env.example for documentation)
-# Then run remote build
-./gateware/build-scripts/build_local.sh pin-tester
+# Then run remote build - automatically copies gateware/ and runs build
+./gateware/build-scripts/build_remote.sh pin-tester
 ```
+
+The remote build process:
+1. **Copies gateware directory** to temporary location on remote machine
+2. **Checks dependencies** and provides installation instructions if needed
+3. **Runs complete build** (Chisel → FuseSoC → Vivado → Bitstream)
+4. **Copies results back** (bitstreams and logs)
+5. **Cleans up** temporary files on remote machine
+
+No need for a full repository checkout on the Windows side!
 
 ## Adding New Projects
 
@@ -208,7 +217,7 @@ Log levels: `ERROR`, `WARNING`, `INFO` (default), `DEBUG`
 To use different FuseSoC targets (e.g., simulation vs synthesis):
 ```bash
 # Modify the Python script or pass as parameter
-./build_fusesoc.sh project_name --target=sim
+./build_local.sh project_name --target=sim
 ```
 
 ### Parallel Builds
@@ -218,7 +227,7 @@ Adjust `VIVADO_JOBS` in `.env` to control synthesis parallelism.
 The build scripts can be called from CI systems:
 ```python
 import subprocess
-subprocess.run(["./gateware/build-scripts/build_fusesoc.sh", "pin-tester"])
+subprocess.run(["./gateware/build-scripts/build_local.sh", "pin-tester"])
 ```
 
 ## Security Notes
@@ -236,8 +245,8 @@ cd $WINDOWS_PROJECT_PATH  # Set in .env file
 cp .env.example .env
 nano .env  # Configure your paths
 
-# Build the project
-./gateware/build-scripts/build_fusesoc.sh pin-tester
+# Build the project locally on WSL
+./gateware/build-scripts/build_local.sh pin-tester
 
 # Check the results
 ls -la bitstreams/pin_tester_latest.bit
