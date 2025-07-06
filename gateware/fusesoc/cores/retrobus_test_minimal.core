@@ -21,11 +21,10 @@ targets:
 
   synth:
     <<: *default
-    default_tool: vivado
+    flow: vivado
     filesets_append: [constraints]
-    tools:
-      vivado:
-        part: xc7a35tftg256-1
+    flow_options:
+      part: xc7a35tftg256-1
 
 generate:
   chisel:

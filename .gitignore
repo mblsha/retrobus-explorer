@@ -14,6 +14,14 @@ build_windows/
 .fusesoc_cache/
 logs/
 bitstreams/
+build_verification.log
+
+# Lucid/Alchitry build directories
+gateware/*/build/
+gateware/build/
+
+# Python animations and test files
+py/animations/
 
 # IDE
 .vscode/

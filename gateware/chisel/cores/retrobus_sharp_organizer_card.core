@@ -46,16 +46,17 @@ targets:
     
   synth:
     <<: *default
-    tools:
-      vivado:
-        part: xc7a35tftg256-1
+    flow: vivado
+    flow_options:
+      part: xc7a35tftg256-1
 
   sim:
     <<: *default
-    tools:
-      verilator:
-        mode: cc
-        verilator_options:
-          - "--assert"
-          - "--coverage"
-          - "--trace"
+    flow: sim
+    flow_options:
+      tool: verilator
+      verilator_options:
+        - "--assert"
+        - "--coverage"
+        - "--trace"
+      mode: cc

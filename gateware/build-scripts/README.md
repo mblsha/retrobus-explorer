@@ -161,7 +161,7 @@ To add a new project:
 1. Create Chisel project in `gateware/chisel/projects/<name>/`
 2. Add SBT configuration to `gateware/chisel/build.sbt`
 3. Create FuseSoC core file in `gateware/chisel/cores/`
-   - Specify the FPGA part in the core file's `tools.vivado.part` field
+   - Specify the FPGA part in the core file's `flow_options.part` field
    - This allows different projects to target different FPGA boards
 4. Edit `fusesoc_build.py` and add to `PROJECT_CONFIGS`:
    ```python

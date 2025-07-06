@@ -20,15 +20,14 @@ filesets:
 targets:
   alchitry_au: &alchitry_au
     description: Alchitry Au FPGA board (Xilinx Artix-7)
-    default_tool: vivado
+    flow: vivado
     filesets:
       - rtl
       - constraints_alchitry_au
     parameters:
       - UART_BAUD=1000000
-    tools:
-      vivado:
-        part: xc7a35tftg256-1
+    flow_options:
+      part: xc7a35tftg256-1
     toplevel: PinTesterBidirectional
 
   default: &default

@@ -661,7 +661,6 @@ def run_fusesoc_build(project_name: str, fusesoc_core: str, config: Dict[str, st
             f"--config={os.environ['FUSESOC_CONFIG']}" if 'FUSESOC_CONFIG' in os.environ else "",
             "--verbose" if config.get('LOG_LEVEL') == 'DEBUG' else "",
             "run",
-            "--tool=vivado",
             "--target=default",
             fusesoc_core
         ]
