@@ -7,12 +7,13 @@ description: Pin Tester project for retrobus-explorer - migrated from Lucid to C
 filesets:
   rtl:
     files:
-      - ../generated/PinTesterTop.sv
+      - ../generated/PinTesterBidirectional.sv
+      - ../generated/IOBUFGenerator.v
     file_type: systemVerilogSource
 
   constraints_alchitry_au:
     files:
-      - ../constraints/pin_tester.xdc
+      - ../constraints/pin_tester_corrected.xdc
     file_type: xdc
 
 targets:
@@ -27,7 +28,7 @@ targets:
     tools:
       vivado:
         part: xc7a35tftg256-1
-    toplevel: PinTesterTop
+    toplevel: PinTesterBidirectional
 
   default: &default
     <<: *alchitry_au
@@ -39,8 +40,4 @@ parameters:
     description: UART baud rate (default 1Mbaud)
     paramtype: vlogparam
 
-provider:
-  name: github
-  user: retrobus-explorer
-  repo: retrobus-explorer
-  version: v1.0.0
+# Local project - no provider needed

@@ -58,6 +58,24 @@ communication on the system bus and the external bus card.
 * [RPi 40-pin to RPi Pico](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/rpi-pico-40-pin-adapter.stanza)
 * [Saleae to DSLab probes](https://github.com/mblsha/retrobus-explorer/blob/master/jitx/saleae-dslab-adapter.stanza)
 
+# Building FPGA Projects
+
+The FPGA gateware uses a FuseSoC-based build system with Chisel HDL.
+
+## Quick Start
+
+```bash
+# First time setup
+cp .env.example .env
+nano .env  # Configure your Vivado paths
+
+# Build a project
+./gateware/build-scripts/build_fusesoc.sh pin-tester
+./gateware/build-scripts/build_fusesoc.sh sharp-organizer-card
+```
+
+See [gateware/build-scripts/](gateware/build-scripts/) for detailed build documentation.
+
 # License
 
 * PCB Design Files
