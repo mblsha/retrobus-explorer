@@ -163,6 +163,10 @@ class BaseBusParser:
                 return addr, 0
             return addr, None
 
+        if self.rom_bank is None:
+            # This shouldn't happen in normal operation, but we need to handle it for type safety
+            raise ValueError("rom_bank is None when trying to calculate full address for banked memory")
+
         return addr + BANK_SIZE * (self.rom_bank - 1), self.rom_bank
 
 
