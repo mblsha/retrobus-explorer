@@ -437,87 +437,66 @@ def format_acf_content(pin_list: list[tuple[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def generate_pin_tester_acf() -> str:
-    """Generate Pin Tester ACF content"""
+def _generate_simple_acf(pin_map: dict[int, str], name_template: str, limit: int | None = None) -> str:
+    """Helper to generate ACF from a simple pin mapping"""
+    alchitry_mapping = get_alchitry_element_mapping()
+
+    pins = []
+    for src_pin in sorted(pin_map.keys()):
+        if limit is None or src_pin < limit:
+            alchitry_pin = pin_map[src_pin]
+            pins.append((name_template.format(src_pin), alchitry_mapping[alchitry_pin]))
+
+    return format_acf_content(pins)
+
+
+def _generate_bus_acf(bus_mapping: dict[str, str]) -> str:
+    """Helper to generate ACF files for bus based boards"""
     ffc = get_alchitry_ffc_mapping()
     alchitry_mapping = get_alchitry_element_mapping()
 
     pins = []
-    for ffc_pin in sorted(ffc.keys()):
-        if ffc_pin < 48:  # Only first 48 pins
-            alchitry_pin = ffc[ffc_pin]
-            pins.append((f"ffc_data[{ffc_pin}]", alchitry_mapping[alchitry_pin]))
+    for pin, name in sorted(bus_mapping.items(), key=lambda x: int(x[0])):
+        alchitry_pin = ffc[int(pin)]
+        pins.append((name, alchitry_mapping[alchitry_pin]))
 
     return format_acf_content(pins)
+
+
+def generate_pin_tester_acf() -> str:
+    """Generate Pin Tester ACF content"""
+    ffc = get_alchitry_ffc_mapping()
+    return _generate_simple_acf(ffc, "ffc_data[{0}]", limit=48)
 
 
 def generate_saleae_acf() -> str:
     """Generate Saleae ACF content"""
     saleae = get_saleae_mapping()
-    alchitry_mapping = get_alchitry_element_mapping()
-
-    pins = []
-    for saleae_pin in saleae:
-        alchitry_pin = saleae[saleae_pin]
-        pins.append((f"saleae[{saleae_pin}]", alchitry_mapping[alchitry_pin]))
-
-    return format_acf_content(pins)
+    return _generate_simple_acf(saleae, "saleae[{0}]")
 
 
 def generate_sharp_pc_g850_bus_acf() -> str:
     """Generate Sharp PC-G850 Bus ACF content"""
-    ffc = get_alchitry_ffc_mapping()
-    alchitry_mapping = get_alchitry_element_mapping()
     pcg850_mapping = get_sharp_pc_g850_bus_mapping()
-
-    pins = []
-    for pin, name in sorted(pcg850_mapping.items(), key=lambda x: int(x[0])):
-        alchitry_pin = ffc[int(pin)]
-        pins.append((name, alchitry_mapping[alchitry_pin]))
-
-    return format_acf_content(pins)
+    return _generate_bus_acf(pcg850_mapping)
 
 
 def generate_sharp_pc_e500_bus_acf() -> str:
     """Generate Sharp PC-E500 Bus ACF content"""
-    ffc = get_alchitry_ffc_mapping()
-    alchitry_mapping = get_alchitry_element_mapping()
     pce500_mapping = get_sharp_pc_e500_bus_mapping()
-
-    pins = []
-    for pin, name in sorted(pce500_mapping.items(), key=lambda x: int(x[0])):
-        alchitry_pin = ffc[int(pin)]
-        pins.append((name, alchitry_mapping[alchitry_pin]))
-
-    return format_acf_content(pins)
+    return _generate_bus_acf(pce500_mapping)
 
 
 def generate_sharp_organizer_card_acf() -> str:
     """Generate Sharp Organizer Card ACF content"""
-    ffc = get_alchitry_ffc_mapping()
-    alchitry_mapping = get_alchitry_element_mapping()
     organizer_mapping = get_sharp_organizer_card_mapping()
-
-    pins = []
-    for pin, name in sorted(organizer_mapping.items(), key=lambda x: int(x[0])):
-        alchitry_pin = ffc[int(pin)]
-        pins.append((name, alchitry_mapping[alchitry_pin]))
-
-    return format_acf_content(pins)
+    return _generate_bus_acf(organizer_mapping)
 
 
 def generate_sharp_sc62015_acf() -> str:
     """Generate Sharp SC62015 ACF content"""
-    ffc = get_alchitry_ffc_mapping()
-    alchitry_mapping = get_alchitry_element_mapping()
     sc62015_mapping = get_sharp_sc62015_mapping()
-
-    pins = []
-    for pin, name in sorted(sc62015_mapping.items(), key=lambda x: int(x[0])):
-        alchitry_pin = ffc[int(pin)]
-        pins.append((name, alchitry_mapping[alchitry_pin]))
-
-    return format_acf_content(pins)
+    return _generate_bus_acf(sc62015_mapping)
 
 
 if __name__ == "__main__":
