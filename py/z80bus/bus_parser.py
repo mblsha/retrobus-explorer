@@ -150,6 +150,26 @@ def extend_address(instruction_addr, addr):
     return addr + BANK_SIZE * (bank - 1)
 
 
+class BaseBusParser:
+    rom_bank: int | None
+    pc: int | None
+
+    def is_stack_addr(self, addr: int) -> bool:
+        return addr < ROM_ADDR_START and addr > ROM_ADDR_START - STACK_SIZE
+
+    def full_addr(self, addr: int) -> tuple[int, int | None]:
+        if addr < BANK_ADDR_START:
+            if addr >= ROM_ADDR_START:
+                return addr, 0
+            return addr, None
+
+        if self.rom_bank is None:
+            # This shouldn't happen in normal operation, but we need to handle it for type safety
+            raise ValueError("rom_bank is None when trying to calculate full address for banked memory")
+
+        return addr + BANK_SIZE * (self.rom_bank - 1), self.rom_bank
+
+
 # like BusParser, but only parses type, val, addr
 class SimpleBusParser:
     def parse(self, data):
@@ -178,22 +198,10 @@ class SimpleBusParser:
         return r
 
 
-class BusParser:
+class BusParser(BaseBusParser):
     def __init__(self):
         self.rom_bank = None
         self.pc = None
-
-    def is_stack_addr(self, addr):
-        return addr < ROM_ADDR_START and addr > ROM_ADDR_START - STACK_SIZE
-
-    def full_addr(self, addr):
-        # bank 1 is at BANK_ADDR_START, bank 2 is at BANK_ADDR_START + 0x4000
-        if addr < BANK_ADDR_START:
-            if addr >= ROM_ADDR_START:
-                return addr, 0
-            return addr, None
-
-        return addr + BANK_SIZE * (self.rom_bank - 1), self.rom_bank
 
     def parse(self, data):
         errors = []
@@ -304,7 +312,7 @@ class BusParser:
         return r, errors
 
 
-class PipelineBusParser:
+class PipelineBusParser(BaseBusParser):
     def __init__(self, errors_queue, out_ports_queue, save_all_events=False):
         self.save_all_events = save_all_events
         self.status_num_errors = 0
@@ -354,17 +362,6 @@ class PipelineBusParser:
         self.last_call_conditional = None
         self.last_ret_conditional = None
 
-    def is_stack_addr(self, addr):
-        return addr < ROM_ADDR_START and addr > ROM_ADDR_START - STACK_SIZE
-
-    def full_addr(self, addr):
-        # bank 1 is at BANK_ADDR_START, bank 2 is at BANK_ADDR_START + 0x4000
-        if addr < BANK_ADDR_START:
-            if addr >= ROM_ADDR_START:
-                return addr, 0
-            return addr, None
-
-        return addr + BANK_SIZE * (self.rom_bank - 1), self.rom_bank
 
     def event(self, type, val, addr):
         instr = None
