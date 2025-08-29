@@ -28,6 +28,12 @@
                     "type": "Component",
                     "path": "Interfaces/uart_tx.luc"
                 }
+            },
+            {
+                "file": {
+                    "type": "DiskFile",
+                    "path": "source/alchitry_top_tb.luc"
+                }
             }
         ],
         "constraintFiles": [
