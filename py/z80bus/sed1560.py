@@ -271,20 +271,18 @@ class SED1560Interpreter:
         image = Image.new("RGB", (img_width, img_height), off_color)
         draw = ImageDraw.Draw(image)
 
-        for row in range(len(self.vram)):
-            for col in range(len(self.vram[row])):
-                byte = self.vram[row][col]
+        for row_index, row in enumerate(self.vram):
+            for col, byte in enumerate(row):
                 for bit in range(8):
                     pixel_state = (byte >> bit) & 1
                     color = on_color if pixel_state else off_color
 
-                    dx = col
-                    dy = row * 8 + bit
+                    dy = row_index * 8 + bit
                     draw.rectangle(
                         [
-                            dx * zoom,
+                            col * zoom,
                             dy * zoom,
-                            dx * zoom + zoom - 1,
+                            col * zoom + zoom - 1,
                             dy * zoom + zoom - 1,
                         ],
                         fill=color,
