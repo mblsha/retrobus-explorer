@@ -513,9 +513,11 @@ def main():
             error_log_path = Path(os.getcwd()) / log_dir / "vivado_calls.log"
             with open(error_log_path, "a") as log:
                 log.write(f"  ERROR in Vivado wrapper: " + str(e) + "\\n")
-        except:
-            # If logging fails, at least print the error
-            print(f"ERROR in Vivado wrapper: " + str(e))
+        except Exception as log_error:
+            # If logging fails, print both the original error and the logging error
+            print(
+                f"ERROR in Vivado wrapper: {e}; logging failed: {log_error}"
+            )
         sys.exit(1)
 
 if __name__ == "__main__":
