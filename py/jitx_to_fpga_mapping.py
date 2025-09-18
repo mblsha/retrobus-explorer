@@ -327,6 +327,24 @@ FPGA_MAP: 46 → cpu.MRQ
 """.strip()
 
 
+_BUS_PIN_SKIP_VALUES = {"GND"}
+
+_SHARP_PC_G850_PATTERN = re.compile(r"^(\d+) → bus\.(\w+)$", re.MULTILINE)
+_SHARP_PC_E500_PATTERN = re.compile(r"^FPGA_MAP: (\d+) → bus\.(\w+)$", re.MULTILINE)
+_SHARP_ORGANIZER_PATTERN = re.compile(r"^FPGA_MAP: (\d+) → (\w+)$", re.MULTILINE)
+_SHARP_SC62015_PATTERN = re.compile(r"^FPGA_MAP: (\d+) → cpu\.([\w\[\]]+)$", re.MULTILINE)
+
+
+def _parse_bus_mapping(mapping_text: str, pattern: re.Pattern[str]) -> dict[str, str]:
+    """Extract pin mappings from ``mapping_text`` using ``pattern``."""
+
+    return {
+        pin: name
+        for pin, name in pattern.findall(mapping_text)
+        if name not in _BUS_PIN_SKIP_VALUES
+    }
+
+
 def get_alchitry_element_mapping() -> dict[str, str]:
     """
     Maps from internal shield mapping to the Alchitry Labs constraint pin name
@@ -370,62 +388,28 @@ def get_sharp_pc_g850_bus_mapping() -> dict[str, str]:
     """
     Maps from internal shield mapping to the Sharp PC-G850 bus pin name
     """
-    mapping = {}
-    for line in SHARP_PC_G850_BUS_MAPPING.split("\n"):
-        m = re.match(r"(\d+) → bus.(\w+)", line)
-        if m:
-            pin, name = m.groups()
-            if name != "GND":
-                mapping[pin] = name
-    return mapping
+    return _parse_bus_mapping(SHARP_PC_G850_BUS_MAPPING, _SHARP_PC_G850_PATTERN)
 
 
 def get_sharp_pc_e500_bus_mapping() -> dict[str, str]:
     """
     Maps from internal element mapping to the Sharp PC-E500 bus pin name
     """
-    mapping = {}
-    for line in SHARP_PC_E500_BUS_MAPPING.split("\n"):
-        if not line:
-            continue
-        m = re.match(r"FPGA_MAP: (\d+) → bus\.(\w+)", line)
-        if m:
-            pin, name = m.groups()
-            if name != "GND":
-                mapping[pin] = name
-    return mapping
+    return _parse_bus_mapping(SHARP_PC_E500_BUS_MAPPING, _SHARP_PC_E500_PATTERN)
 
 
 def get_sharp_organizer_card_mapping() -> dict[str, str]:
     """
     Maps from internal element mapping to the Sharp Organizer Card
     """
-    mapping = {}
-    for line in SHARP_ORGANIZER_CARD_MAPPING.split("\n"):
-        if not line:
-            continue
-        m = re.match(r"FPGA_MAP: (\d+) → (\w+)", line)
-        if m:
-            pin, name = m.groups()
-            if name != "GND":
-                mapping[pin] = name
-    return mapping
+    return _parse_bus_mapping(SHARP_ORGANIZER_CARD_MAPPING, _SHARP_ORGANIZER_PATTERN)
 
 
 def get_sharp_sc62015_mapping() -> dict[str, str]:
     """
     Maps from internal element mapping to the Sharp sc62015
     """
-    mapping = {}
-    for line in SHARP_SC62015_MAPPING.split("\n"):
-        if not line:
-            continue
-        m = re.match(r"FPGA_MAP: (\d+) → cpu.([\w\[\]]+)", line)
-        if m:
-            pin, name = m.groups()
-            if name != "GND":
-                mapping[pin] = name
-    return mapping
+    return _parse_bus_mapping(SHARP_SC62015_MAPPING, _SHARP_SC62015_PATTERN)
 
 
 def format_acf_content(pin_list: list[tuple[str, str]]) -> str:
