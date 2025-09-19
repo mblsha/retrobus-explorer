@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 
 from z80bus.bus_parser import Event, IOPort
@@ -85,8 +84,7 @@ class KeyMatrixInterpreter:
                 strobe = (self.strobe_hi << 8) | self.strobe_lo
                 if event.val == 0 or strobe == 0:
                     return
-                # row is the power of 2 of the strobe value, only has 1 bit set
-                row = int(math.log2(strobe))
+                row = self._row_from_strobe(strobe)
                 for i in range(8):
                     if event.val & (1 << i):
                         self.cur.append(PressedKey(row=row, col=i))
@@ -95,3 +93,8 @@ class KeyMatrixInterpreter:
                 self.last_full_state = self.cur.copy()
                 self.last_shift_state = event.val
                 self.cur = []
+
+    @staticmethod
+    def _row_from_strobe(strobe: int) -> int:
+        """Return the index of the active row for the given strobe mask."""
+        return strobe.bit_length() - 1
