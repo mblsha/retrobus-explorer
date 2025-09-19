@@ -335,11 +335,11 @@ _SHARP_ORGANIZER_PATTERN = re.compile(r"^FPGA_MAP: (\d+) → (\w+)$", re.MULTILI
 _SHARP_SC62015_PATTERN = re.compile(r"^FPGA_MAP: (\d+) → cpu\.([\w\[\]]+)$", re.MULTILINE)
 
 
-def _parse_bus_mapping(mapping_text: str, pattern: re.Pattern[str]) -> dict[str, str]:
+def _parse_bus_mapping(mapping_text: str, pattern: re.Pattern[str]) -> dict[int, str]:
     """Extract pin mappings from ``mapping_text`` using ``pattern``."""
 
     return {
-        pin: name
+        int(pin): name
         for pin, name in pattern.findall(mapping_text)
         if name not in _BUS_PIN_SKIP_VALUES
     }
@@ -384,28 +384,28 @@ def get_saleae_mapping() -> dict[int, str]:
     return mapping
 
 
-def get_sharp_pc_g850_bus_mapping() -> dict[str, str]:
+def get_sharp_pc_g850_bus_mapping() -> dict[int, str]:
     """
     Maps from internal shield mapping to the Sharp PC-G850 bus pin name
     """
     return _parse_bus_mapping(SHARP_PC_G850_BUS_MAPPING, _SHARP_PC_G850_PATTERN)
 
 
-def get_sharp_pc_e500_bus_mapping() -> dict[str, str]:
+def get_sharp_pc_e500_bus_mapping() -> dict[int, str]:
     """
     Maps from internal element mapping to the Sharp PC-E500 bus pin name
     """
     return _parse_bus_mapping(SHARP_PC_E500_BUS_MAPPING, _SHARP_PC_E500_PATTERN)
 
 
-def get_sharp_organizer_card_mapping() -> dict[str, str]:
+def get_sharp_organizer_card_mapping() -> dict[int, str]:
     """
     Maps from internal element mapping to the Sharp Organizer Card
     """
     return _parse_bus_mapping(SHARP_ORGANIZER_CARD_MAPPING, _SHARP_ORGANIZER_PATTERN)
 
 
-def get_sharp_sc62015_mapping() -> dict[str, str]:
+def get_sharp_sc62015_mapping() -> dict[int, str]:
     """
     Maps from internal element mapping to the Sharp sc62015
     """
@@ -434,14 +434,14 @@ def _generate_simple_acf(pin_map: dict[int, str], name_template: str, limit: int
     return format_acf_content(pins)
 
 
-def _generate_bus_acf(bus_mapping: dict[str, str]) -> str:
+def _generate_bus_acf(bus_mapping: dict[int, str]) -> str:
     """Helper to generate ACF files for bus based boards"""
     ffc = get_alchitry_ffc_mapping()
     alchitry_mapping = get_alchitry_element_mapping()
 
     pins = []
-    for pin, name in sorted(bus_mapping.items(), key=lambda x: int(x[0])):
-        alchitry_pin = ffc[int(pin)]
+    for pin, name in sorted(bus_mapping.items()):
+        alchitry_pin = ffc[pin]
         pins.append((name, alchitry_mapping[alchitry_pin]))
 
     return format_acf_content(pins)
