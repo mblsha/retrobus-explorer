@@ -50,12 +50,15 @@ class KeyMatrixInterpreter:
         self.last_full_state = []
         self.last_shift_state = False
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, KeyMatrixInterpreter):
+            return NotImplemented
         return (
             self.strobe_hi == other.strobe_hi
             and self.strobe_lo == other.strobe_lo
             and self.cur == other.cur
             and self.last_full_state == other.last_full_state
+            and self.last_shift_state == other.last_shift_state
         )
 
     def pressed_keys(self):
