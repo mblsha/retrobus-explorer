@@ -44,15 +44,15 @@ class KeyMatrixState:
 class KeyMatrixInterpreter:
     def __init__(self):
         # strobing rows
-        self.strobe_hi = 0
-        self.strobe_lo = 0
-        self.cur = []
-        self.last_full_state = []
-        self.last_shift_state = False
+        self.strobe_hi: int = 0
+        self.strobe_lo: int = 0
+        self.cur: list[PressedKey] = []
+        self.last_full_state: list[PressedKey] = []
+        self.last_shift_state: bool = False
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, KeyMatrixInterpreter):
-            return NotImplemented
+            return False
         return (
             self.strobe_hi == other.strobe_hi
             and self.strobe_lo == other.strobe_lo
@@ -61,7 +61,7 @@ class KeyMatrixInterpreter:
             and self.last_shift_state == other.last_shift_state
         )
 
-    def pressed_keys(self):
+    def pressed_keys(self) -> list[PressedKey]:
         if self.last_shift_state:
             return self.last_full_state + [PressedKey(row=0xff, col=0xff)]
         return self.last_full_state
@@ -94,7 +94,7 @@ class KeyMatrixInterpreter:
             case IOPort.SHIFT_KEY_INPUT:
                 # key matrix scanning ends with SHIFT_KEY_INPUT query
                 self.last_full_state = self.cur.copy()
-                self.last_shift_state = event.val
+                self.last_shift_state = bool(event.val)
                 self.cur = []
 
     @staticmethod
