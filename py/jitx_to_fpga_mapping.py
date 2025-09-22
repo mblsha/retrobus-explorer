@@ -345,6 +345,20 @@ def _parse_bus_mapping(mapping_text: str, pattern: re.Pattern[str]) -> dict[int,
     }
 
 
+def _parse_alchitry_data_mapping(mapping_text: str, prefix: str) -> dict[int, str]:
+    """Extract Alchitry data mappings using a common ``prefix`` for pin names."""
+
+    pattern = re.compile(
+        rf"{re.escape(prefix)}(\d+) → fpga\.data_([a-d])\[(\d+)\]",
+        re.MULTILINE,
+    )
+
+    return {
+        int(pin): f"{bank.upper()}{index}"
+        for pin, bank, index in pattern.findall(mapping_text)
+    }
+
+
 def get_alchitry_element_mapping() -> dict[str, str]:
     """
     Maps from internal shield mapping to the Alchitry Labs constraint pin name
@@ -362,26 +376,14 @@ def get_alchitry_ffc_mapping() -> dict[int, str]:
     """
     Maps from FFC data pin to the internal bank name
     """
-    mapping = {}
-    for line in FFC_TO_ALCHITRY_MAPPING.split("\n"):
-        m = re.match(r"loDATA(\d+) → fpga.data_([a-d])\[(\d+)\]", line)
-        if m:
-            ffc_pin, bank, bank_num = m.groups()
-            mapping[int(ffc_pin)] = f"{bank.upper()}{bank_num}"
-    return mapping
+    return _parse_alchitry_data_mapping(FFC_TO_ALCHITRY_MAPPING, "loDATA")
 
 
 def get_saleae_mapping() -> dict[int, str]:
     """
     Maps from Saleae pin to the internal bank name
     """
-    mapping = {}
-    for line in SALEAE_TO_ALCHITRY_MAPPING.split("\n"):
-        m = re.match(r"saleae(\d+) → fpga.data_([a-d])\[(\d+)\]", line)
-        if m:
-            saleae_pin, bank, bank_num = m.groups()
-            mapping[int(saleae_pin)] = f"{bank.upper()}{bank_num}"
-    return mapping
+    return _parse_alchitry_data_mapping(SALEAE_TO_ALCHITRY_MAPPING, "saleae")
 
 
 def get_sharp_pc_g850_bus_mapping() -> dict[int, str]:
