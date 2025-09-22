@@ -9,55 +9,54 @@ on:
 jobs:
   ruff:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: py
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: astral-sh/setup-uv@v1
       with:
         python-version: '3.12'
-    
-    - name: Install dependencies
-      run: python -m pip install -e ./py[dev]
-    
+
+    - name: Sync dependencies
+      run: uv sync --extra dev
+
     - name: Run Ruff
-      run: |
-        cd py
-        ruff check . || (echo "Ruff check failed" && exit 1)
+      run: uv run ruff check . || (echo "Ruff check failed" && exit 1)
 
   mypy:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: py
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: astral-sh/setup-uv@v1
       with:
         python-version: '3.12'
-    
-    - name: Install dependencies
-      run: python -m pip install -e ./py[dev]
-    
+
+    - name: Sync dependencies
+      run: uv sync --extra dev
+
     - name: Run Mypy
-      run: ./.github/scripts/run-mypy.sh
+      run: uv run -- ../.github/scripts/run-mypy.sh
 
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: py
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: astral-sh/setup-uv@v1
       with:
         python-version: '3.12'
-    
-    - name: Install dependencies
-      run: python -m pip install -e ./py[dev]
-    
+
+    - name: Sync dependencies
+      run: uv sync --extra dev
+
     - name: Run tests
-      run: |
-        cd py
-        pytest
+      run: uv run pytest
 
   summary:
     if: always()
