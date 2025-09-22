@@ -62,3 +62,24 @@ def test_key_matrix():
         + in_port(0x02, IOPort.KEY_INPUT)
         + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
     )) == "S"
+
+
+def test_key_matrix_equality_compares_shift_state():
+    base_state = eval(
+        out_port(0x02, IOPort.SET_KEY_STROBE_LO)
+        + in_port(0x02, IOPort.KEY_INPUT)
+        + in_port(0x00, IOPort.SHIFT_KEY_INPUT)
+    )
+    shift_state = eval(
+        out_port(0x02, IOPort.SET_KEY_STROBE_LO)
+        + in_port(0x02, IOPort.KEY_INPUT)
+        + in_port(0x01, IOPort.SHIFT_KEY_INPUT)
+    )
+
+    assert base_state != shift_state
+
+
+def test_key_matrix_equality_handles_other_types():
+    interpreter = KeyMatrixInterpreter()
+    assert interpreter == KeyMatrixInterpreter()
+    assert interpreter != object()
