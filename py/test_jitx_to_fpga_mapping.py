@@ -92,12 +92,12 @@ class TestPinMappings:
         """Ensure no physical pins are used twice in same board"""
         for config in BOARD_CONFIGS:
             content = config.generator()
-            pins = []
+            pins: set[str] = set()
             for line in content.split("\n"):
                 if line.strip().startswith("pin"):
                     pin = line.split()[-1]
                     assert pin not in pins, f"Duplicate pin {pin} in {config.name} mapping"
-                    pins.append(pin)
+                    pins.add(pin)
 
 
 
