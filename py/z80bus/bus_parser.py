@@ -445,17 +445,17 @@ def parse_data_thread(
     status_num_input_data = 0
     status_num_empty_queue = 0
 
-    buf = b""
+    buf = bytearray()
     while True:
         data = input_queue.get()
         if data is None:
             break
 
         status_num_input_data += 1
-        buf += data
-        buf = parser.parse(buf)
+        buf.extend(data)
+        buf = bytearray(parser.parse(buf))
 
-    buf = parser.parse(buf)
+    buf = bytearray(parser.parse(buf))
     parser.flush()
 
     # all_events_output.put(parser.all_events)

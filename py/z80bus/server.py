@@ -35,7 +35,11 @@ class ParseRenderManager:
         self.errors_queue = queue.SimpleQueue()
         self.parser = PipelineBusParser(self.errors_queue, self.out_ports_queue)
 
-        self.buf = b""
+        # ``PipelineBusParser`` expects a bytes-like object and returns the
+        # unconsumed remainder of the buffer.  ``bytearray`` lets us extend the
+        # buffer without repeatedly creating new temporary ``bytes`` objects
+        # for every chunk of incoming data.
+        self.buf = bytearray()
         self.status_num_out_ports = 0
         self.status_num_lcd_commands = 0
         self.status_num_errors = 0
@@ -57,14 +61,14 @@ class ParseRenderManager:
             self.lcd.eval(c)
 
     def process_raw_data(self, data: bytes) -> None:
-        self.buf += data
-        self.buf = self.parser.parse(self.buf)
+        self.buf.extend(data)
+        self.buf = bytearray(self.parser.parse(self.buf))
         self.process_queues()
 
     def stats(self):
         out_ports_queue_size_before = self.out_ports_queue.qsize()
 
-        self.buf = self.parser.parse(self.buf)
+        self.buf = bytearray(self.parser.parse(self.buf))
         self.parser.flush()
         self.process_queues()
 
