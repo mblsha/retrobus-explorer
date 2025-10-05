@@ -5,6 +5,7 @@ import multiprocessing as mp
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from types import TracebackType
 
 
 # http://park19.wakwak.com/~gadget_factory/factory/pokecom/io.html
@@ -497,7 +498,12 @@ class ParseContext:
         print(f"ParseContext pid: {self.process.pid}")
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        exc_traceback: TracebackType | None,
+    ) -> None:
         self.input_queue.put(None)
 
         print(f"ParseContext: exit1 {datetime.datetime.now()}")
