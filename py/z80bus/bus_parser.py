@@ -459,17 +459,14 @@ def parse_data_thread(
     parser.flush()
 
     # all_events_output.put(parser.all_events)
-    status_queue.put(
+    status = parser.stats()
+    status.update(
         {
-            "len_all_events": len(parser.all_events),
             "num_input_data": status_num_input_data,
-            "num_errors": parser.status_num_errors,
-            "num_out_ports": parser.status_num_out_ports,
             "num_empty_queue": status_num_empty_queue,
-            "num_errors_full_buffer": parser.status_num_errors_full_buffer,
-            # "num_out_ports_full_buffer": parser.status_num_out_ports_full_buffer,
         }
     )
+    status_queue.put(status)
 
 
 class ParseContext:
