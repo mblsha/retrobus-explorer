@@ -1,23 +1,18 @@
 # pypy server.py -m z80bus
 
 import io
-import os
 import queue
-import sys
 import threading
 from typing import Any
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import ImageFont
 
-from z80bus.bus_parser import PipelineBusParser
-from z80bus.key_matrix import KeyMatrixInterpreter
-from z80bus.sed1560 import SED1560Interpreter, SED1560Parser
+from .bus_parser import PipelineBusParser
+from .key_matrix import KeyMatrixInterpreter
+from .sed1560 import SED1560Interpreter, SED1560Parser
 
 
 class ParseRenderManager:
