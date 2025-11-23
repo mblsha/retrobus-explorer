@@ -1,7 +1,0 @@
-# FuseSOC downloaded libraries
-fusesoc-cores/
-xilinx/
-
-# Build artifacts
-build/
-*.log
