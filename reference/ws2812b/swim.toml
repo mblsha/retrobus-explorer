@@ -1,0 +1,17 @@
+name = "ws2812b"
+
+[synthesis]
+top = "main"
+command = "synth_ice40"
+
+[pnr]
+architecture = "ice40"
+device = "iCE40HX8K"
+pin_file = "cu.pcf"
+package = "cb132"
+
+[packing]
+tool = "icepack"
+
+[upload]
+tool = "iceprog"
