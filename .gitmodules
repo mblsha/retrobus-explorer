@@ -2,5 +2,5 @@
 	path = py/shared/pyz80/z80
 	url = https://github.com/suzukiplan/z80.git
 [submodule "reference/spade"]
-	path = reference/spade
+	path = gateware/reference/spade
 	url = https://gitlab.com/spade-lang/book
