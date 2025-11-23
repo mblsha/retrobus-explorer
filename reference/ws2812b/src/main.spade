@@ -1,0 +1,19 @@
+#[no_mangle]
+entity main(
+    #[no_mangle] clk: clock, 
+    #[no_mangle] rst_n: bool, 
+    #[no_mangle] LED: inv &[bool; 8],
+) {
+    // The button is active when released, but we want the reset to be active high, so
+    // we'll invert it
+    let rst = !rst_n;
+
+    // This board has a 100 MHz oscillator. Generate a 10 Hz signal
+    let MAX = 10_000_000;
+    reg(clk) counter: uint<28> reset(rst: 0) = if counter == MAX {0} else {trunc(counter + 1)};
+
+    // Use that 10 Hz signal to increment a counter which we'll output on the LEDs
+    reg(clk) led: uint<8> reset(rst: 0) = if counter == 0 {trunc(led + 1)} else {led};
+
+    set LED = &led.to_bits();
+}
