@@ -4,7 +4,7 @@
 - `pin-tester/`, `sharp-organizer-card/`, `sharp-pc-g850-*`, and `test-minimal/` are Alchitry Lucid projects; each includes a `<project>.alp`, `source/` modules, and `constraint/*.acf` files.
 - `shared-lib/` hosts reusable Lucid blocks (e.g., UART); reference them via relative paths from project files to avoid duplication.
 - `shared-constraints/` holds pin maps shared across boards; keep board-specific notes there.
-- `reference/spade/src/` is a Spade language book submodule; use it for language guidance and WS2812 reference material.
+- `reference/spade/src/` is a Spade language book submodule; use it for language guidance and reference designs.
 - Keep generated Alchitry outputs in each project's `build/` folder; do not commit them.
 
 ## Build, Test, and Development
