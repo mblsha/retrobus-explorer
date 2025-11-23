@@ -4,7 +4,8 @@
 - `pin-tester/`, `sharp-organizer-card/`, `sharp-pc-g850-*`, and `test-minimal/` are Alchitry Lucid projects; each includes a `<project>.alp`, `source/` modules, and `constraint/*.acf` files.
 - `shared-lib/` hosts reusable Lucid blocks (e.g., UART); reference them via relative paths from project files to avoid duplication.
 - `shared-constraints/` holds pin maps shared across boards; keep board-specific notes there.
-- Generated artifacts from Alchitry Designer should remain in each project’s `build/` outputs and stay out of version control.
+- `reference/spade/src/` is a Spade language book submodule; use it for language guidance and WS2812 reference material.
+- Keep generated Alchitry outputs in each project's `build/` folder; do not commit them.
 
 ## Build, Test, and Development
 - Open `<project>/<project>.alp` in Alchitry Designer, select the correct board, and build/flash directly from the IDE.
@@ -14,7 +15,7 @@
 
 ## Coding Style & Naming Conventions
 - Lucid: four-space indentation, `snake_case` signals, `ALL_CAPS` enums/constants; default combinational outputs to avoid unintended latches; align port names with connector labels in constraint files.
-- Directory names should match project targets (e.g., `pin-tester`); keep shared modules centralized in `shared-lib/` instead of copying into project folders.
+- Directory names should match project targets; keep shared modules in `shared-lib/` instead of copying into project folders.
 
 ## Testing Guidelines
 - Maintain lightweight Lucid testbenches alongside designs (see `test-minimal/` for structure); simulate in Alchitry Designer or an HDL simulator before synthesis.
