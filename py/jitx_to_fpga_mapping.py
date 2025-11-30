@@ -5,6 +5,7 @@ Converts JITX pin definitions to Alchitry Labs constraint files.
 """
 
 import re
+from functools import cache
 
 # AlchitryAu.stanza (print pin mapping)
 ALCHITRY_ELEMENT_MAPPING = """
@@ -359,6 +360,7 @@ def _parse_alchitry_data_mapping(mapping_text: str, prefix: str) -> dict[int, st
     }
 
 
+@cache
 def get_alchitry_element_mapping() -> dict[str, str]:
     """
     Maps from internal shield mapping to the Alchitry Labs constraint pin name
@@ -372,6 +374,7 @@ def get_alchitry_element_mapping() -> dict[str, str]:
     return mapping
 
 
+@cache
 def get_alchitry_ffc_mapping() -> dict[int, str]:
     """
     Maps from FFC data pin to the internal bank name
@@ -379,6 +382,7 @@ def get_alchitry_ffc_mapping() -> dict[int, str]:
     return _parse_alchitry_data_mapping(FFC_TO_ALCHITRY_MAPPING, "loDATA")
 
 
+@cache
 def get_saleae_mapping() -> dict[int, str]:
     """
     Maps from Saleae pin to the internal bank name
@@ -386,6 +390,7 @@ def get_saleae_mapping() -> dict[int, str]:
     return _parse_alchitry_data_mapping(SALEAE_TO_ALCHITRY_MAPPING, "saleae")
 
 
+@cache
 def get_sharp_pc_g850_bus_mapping() -> dict[int, str]:
     """
     Maps from internal shield mapping to the Sharp PC-G850 bus pin name
@@ -393,6 +398,7 @@ def get_sharp_pc_g850_bus_mapping() -> dict[int, str]:
     return _parse_bus_mapping(SHARP_PC_G850_BUS_MAPPING, _SHARP_PC_G850_PATTERN)
 
 
+@cache
 def get_sharp_pc_e500_bus_mapping() -> dict[int, str]:
     """
     Maps from internal element mapping to the Sharp PC-E500 bus pin name
@@ -400,6 +406,7 @@ def get_sharp_pc_e500_bus_mapping() -> dict[int, str]:
     return _parse_bus_mapping(SHARP_PC_E500_BUS_MAPPING, _SHARP_PC_E500_PATTERN)
 
 
+@cache
 def get_sharp_organizer_card_mapping() -> dict[int, str]:
     """
     Maps from internal element mapping to the Sharp Organizer Card
@@ -407,6 +414,7 @@ def get_sharp_organizer_card_mapping() -> dict[int, str]:
     return _parse_bus_mapping(SHARP_ORGANIZER_CARD_MAPPING, _SHARP_ORGANIZER_PATTERN)
 
 
+@cache
 def get_sharp_sc62015_mapping() -> dict[int, str]:
     """
     Maps from internal element mapping to the Sharp sc62015
