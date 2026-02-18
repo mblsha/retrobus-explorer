@@ -4,3 +4,9 @@
 [submodule "reference/spade"]
 	path = gateware/reference/spade
 	url = https://gitlab.com/spade-lang/book
+[submodule "gateware/reference/spadeforge"]
+	path = gateware/reference/spadeforge
+	url = https://github.com/mblsha/spadeforge.git
+[submodule "gateware/reference/Alchitry-Labs-V2"]
+	path = gateware/reference/Alchitry-Labs-V2
+	url = https://github.com/alchitry/Alchitry-Labs-V2

@@ -1,0 +1,24 @@
+use shared_components::primitives::counter_u128;
+
+#[no_mangle(all)]
+entity main(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+    ffc_data: inv &[bool; 48],
+    saleae: inv &[bool; 8],
+) {
+    let rst = !rst_n;
+    let counter = inst counter_u128(clk, rst);
+    let led_byte: uint<8> = trunc(counter);
+    let ffc_word: uint<48> = trunc(counter);
+    let led_bits = led_byte.to_bits();
+    let ffc_bits = ffc_word.to_bits();
+
+    set led = &led_bits;
+    set saleae = &led_bits;
+    set ffc_data = &ffc_bits;
+    set usb_tx = &usb_rx;
+}

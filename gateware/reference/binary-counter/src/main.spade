@@ -1,0 +1,27 @@
+#[no_mangle(all)]
+entity main(
+    clk: clock,
+    rst_n: bool,
+    pin0: inv &bool,
+    pin1: inv &bool,
+    pin2: inv &bool,
+    pin3: inv &bool,
+    pin4: inv &bool,
+    pin5: inv &bool,
+    pin6: inv &bool,
+    pin7: inv &bool,
+) {
+    let rst = !rst_n;
+
+    reg(clk) counter: uint<8> reset(rst: 0) = trunc(counter + 1);
+    let bits = counter.to_bits();
+
+    set pin0 = &bits[0];
+    set pin1 = &bits[1];
+    set pin2 = &bits[2];
+    set pin3 = &bits[3];
+    set pin4 = &bits[4];
+    set pin5 = &bits[5];
+    set pin6 = &bits[6];
+    set pin7 = &bits[7];
+}

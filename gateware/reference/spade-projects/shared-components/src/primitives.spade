@@ -1,0 +1,64 @@
+pub entity sync2(
+    clk: clock,
+    input_signal: bool,
+) -> bool {
+    reg(clk) stage0: bool = input_signal;
+    reg(clk) stage1: bool = stage0;
+    stage1
+}
+
+pub entity rising_edge(
+    clk: clock,
+    signal: bool,
+) -> bool {
+    reg(clk) prev: bool = signal;
+    signal && !prev
+}
+
+pub entity falling_edge(
+    clk: clock,
+    signal: bool,
+) -> bool {
+    reg(clk) prev: bool = signal;
+    !signal && prev
+}
+
+pub entity counter_u8(
+    clk: clock,
+    rst: bool,
+) -> uint<8> {
+    reg(clk) value: uint<8> reset(rst: 0) = trunc(value + 1);
+    value
+}
+
+pub entity counter_u16(
+    clk: clock,
+    rst: bool,
+) -> uint<16> {
+    reg(clk) value: uint<16> reset(rst: 0) = trunc(value + 1);
+    value
+}
+
+pub entity counter_u26(
+    clk: clock,
+    rst: bool,
+) -> uint<26> {
+    reg(clk) value: uint<26> reset(rst: 0) = trunc(value + 1);
+    value
+}
+
+pub entity counter_u32(
+    clk: clock,
+    rst: bool,
+) -> uint<32> {
+    reg(clk) value: uint<32> reset(rst: 0) = trunc(value + 1);
+    value
+}
+
+pub entity counter_u128(
+    clk: clock,
+    rst: bool,
+) -> uint<128> {
+    reg(clk) value: uint<128> reset(rst: 0) = trunc(value + 1);
+    value
+}

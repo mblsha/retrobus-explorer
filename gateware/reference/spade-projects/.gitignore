@@ -1,0 +1,11 @@
+# Generated build and simulation outputs
+**/build/
+**/.venv-host/
+**/.surfer/
+**/test/__pycache__/
+**/test/dump.vcd
+**/test/dump.surfer.vcd
+**/test/results.xml
+
+# Remote build artifacts
+**/forge-output-*/

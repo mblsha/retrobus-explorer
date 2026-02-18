@@ -1,0 +1,89 @@
+#[no_mangle(all)]
+entity main(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+
+    ft_clk: bool,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: [bool; 16],
+    ft_be: [bool; 2],
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+
+    saleae: inv &[bool; 8],
+
+    z80_mreq: bool,
+    z80_m1: bool,
+    z80_ioreset: bool,
+    z80_iorq: bool,
+    z80_int1: bool,
+    z80_wait: bool,
+    z80_rd: bool,
+    z80_wr: bool,
+
+    data: inv &[bool; 8],
+    addr: [bool; 16],
+
+    addr_bnk: [bool; 2],
+    addr_ceram2: bool,
+    addr_cerom2: bool,
+) {
+    let rst = !rst_n;
+
+    reg(clk) stream_counter: uint<8> reset(rst: 0) = if !ft_rxf {
+        trunc(stream_counter + 1)
+    } else {
+        stream_counter
+    };
+
+    let c = stream_counter.to_bits();
+    let read_enable = !z80_mreq && !z80_rd && addr_cerom2;
+
+    let rom_byte = [
+        addr[0] != addr_bnk[0],
+        addr[1] != addr_bnk[1],
+        addr[2] != c[0],
+        addr[3] != c[1],
+        addr[4] != c[2],
+        addr[5] != c[3],
+        (addr[6] != addr_bnk[0]) != c[4],
+        (addr[7] != addr_bnk[1]) != c[5],
+    ];
+    let zero_byte = [false, false, false, false, false, false, false, false];
+    let out_byte = if read_enable { rom_byte } else { zero_byte };
+
+    let aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1] || z80_wait || z80_m1 || z80_ioreset || z80_int1;
+
+    set data = &out_byte;
+    set usb_tx = &usb_rx;
+    set ft_rd = &!ft_rxf;
+    set ft_wr = &false;
+    set ft_oe = &false;
+
+    set led = &[
+        read_enable,
+        !z80_iorq,
+        !z80_wr,
+        !z80_rd,
+        addr_bnk[0],
+        addr_bnk[1],
+        c[0],
+        aux,
+    ];
+
+    set saleae = &[
+        !z80_mreq,
+        !z80_iorq,
+        !z80_rd,
+        !z80_wr,
+        addr_ceram2,
+        addr_cerom2,
+        rom_byte[0],
+        rom_byte[1],
+    ];
+}
