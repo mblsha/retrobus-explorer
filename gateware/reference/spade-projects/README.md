@@ -23,3 +23,11 @@ Build through spadeforge-cli:
 ```sh
 SPADEFORGE_TOKEN=test123 ./tools/project.py build-with-spadeforge --project ./sharp-pc-g850-bus-spade
 ```
+
+Run a local web UI to pick projects, run testbenches, and inspect `dump.surfer.vcd` in Surfer Web:
+
+```sh
+./tools/web_wave_server.py --host 0.0.0.0 --port 8090
+```
+
+Then open `http://<your-machine-ip>:8090` from other LAN devices.
