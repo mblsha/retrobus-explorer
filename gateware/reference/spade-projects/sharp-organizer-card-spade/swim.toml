@@ -3,5 +3,8 @@ name = "sharp_organizer_card_spade"
 [libraries]
 shared_components = { path = "../shared-components" }
 
+[verilog]
+sources = ["verilog/*.v"]
+
 [simulation]
 testbench_dir = "test"

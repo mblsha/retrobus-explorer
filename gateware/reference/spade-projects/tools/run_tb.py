@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -21,6 +22,18 @@ def require_command(name: str, help_text: str) -> None:
     if shutil.which(name) is None:
         print(f"error: missing `{name}` ({help_text})", file=sys.stderr)
         raise SystemExit(1)
+
+
+def resolve_verilog_sources(project: Path) -> list[Path]:
+    config_path = project / "swim.toml"
+    config = tomllib.loads(config_path.read_text())
+
+    sources = [project / "build" / "spade.sv"]
+    for pattern in config.get("verilog", {}).get("sources", []):
+        for match in sorted(project.glob(pattern)):
+            if match.is_file():
+                sources.append(match.resolve())
+    return sources
 
 
 def main() -> int:
@@ -55,11 +68,13 @@ def main() -> int:
         env=env,
     )
 
+    verilog_sources = resolve_verilog_sources(project)
+    verilog_list_repr = ", ".join(f"Path(r'{p}')" for p in verilog_sources)
     driver = (
         "from pathlib import Path\n"
         "from cocotb.runner import get_runner\n"
         "runner = get_runner('verilator')\n"
-        f"runner.build(verilog_sources=[Path('build/spade.sv')], hdl_toplevel='{args.top}', always=True, waves=True, build_dir='{args.build_dir}')\n"
+        f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{args.top}', always=True, waves=True, build_dir='{args.build_dir}')\n"
         f"runner.test(hdl_toplevel='{args.top}', test_module='{args.test_module}', test_dir=Path('test'), waves=True)\n"
     )
     run([str(venv_python), "-c", driver], cwd=project, env=env)
