@@ -1,15 +1,8 @@
 # top = main
 
 import cocotb
-from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge
-from cocotb.triggers import Timer
-
-
-async def tick(clk, cycles=1):
-    for _ in range(cycles):
-        await RisingEdge(clk)
-        await Timer(1, units="ps")
+from cocotb_helpers import start_clock
+from cocotb_helpers import tick
 
 
 def expected_byte(addr, bnk, c0=0, c1=0, c2=0, c3=0, c4=0, c5=0):
@@ -31,7 +24,7 @@ def expected_byte(addr, bnk, c0=0, c1=0, c2=0, c3=0, c4=0, c5=0):
 
 @cocotb.test()
 async def drives_rom_pattern_when_read_is_active(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    start_clock(dut.clk)
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 0

@@ -10,8 +10,11 @@ import os
 import shutil
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
+
+from project_meta import resolve_verilog_sources
+from project_meta import tooling_test_module
+from project_meta import tooling_top
 
 
 def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
@@ -24,23 +27,11 @@ def require_command(name: str, help_text: str) -> None:
         raise SystemExit(1)
 
 
-def resolve_verilog_sources(project: Path) -> list[Path]:
-    config_path = project / "swim.toml"
-    config = tomllib.loads(config_path.read_text())
-
-    sources = [project / "build" / "spade.sv"]
-    for pattern in config.get("verilog", {}).get("sources", []):
-        for match in sorted(project.glob(pattern)):
-            if match.is_file():
-                sources.append(match.resolve())
-    return sources
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run cocotb test and emit VCD for Surfer")
     parser.add_argument("--project", required=True, type=Path, help="Spade project directory")
-    parser.add_argument("--top", default="main", help="HDL top module name")
-    parser.add_argument("--test-module", required=True, help="Python test module name")
+    parser.add_argument("--top", help="HDL top module name (default: tooling.top or main)")
+    parser.add_argument("--test-module", help="Python test module name (default: tooling.test_module)")
     parser.add_argument("--build-dir", default="build/main_cocotb", help="Cocotb build directory")
     args = parser.parse_args()
 
@@ -48,11 +39,22 @@ def main() -> int:
     require_command("swim", "install swim from spade-lang")
 
     project = args.project.resolve()
+    top = tooling_top(project, args.top)
+    test_module = tooling_test_module(project, args.test_module)
+    if not test_module:
+        print(
+            "error: missing test module; pass --test-module or set [tooling].test_module in swim.toml",
+            file=sys.stderr,
+        )
+        return 2
+
     test_dir = project / "test"
     venv_python = project / ".venv-host" / "bin" / "python"
+    tools_dir = Path(__file__).resolve().parent
 
     env = os.environ.copy()
     env["PATH"] = f"{Path.home()}/.local/share/swim/bin/oss-cad-suite/bin:{env['PATH']}"
+    env["PYTHONPATH"] = str(tools_dir) + os.pathsep + env.get("PYTHONPATH", "")
     if shutil.which("verilator", path=env["PATH"]) is None:
         print("error: verilator not found in PATH", file=sys.stderr)
         return 1
@@ -68,14 +70,14 @@ def main() -> int:
         env=env,
     )
 
-    verilog_sources = resolve_verilog_sources(project)
+    verilog_sources = [project / "build" / "spade.sv"] + resolve_verilog_sources(project)
     verilog_list_repr = ", ".join(f"Path(r'{p}')" for p in verilog_sources)
     driver = (
         "from pathlib import Path\n"
         "from cocotb.runner import get_runner\n"
         "runner = get_runner('verilator')\n"
-        f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{args.top}', always=True, waves=True, build_dir='{args.build_dir}')\n"
-        f"runner.test(hdl_toplevel='{args.top}', test_module='{args.test_module}', test_dir=Path('test'), waves=True)\n"
+        f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{top}', always=True, waves=True, build_dir='{args.build_dir}')\n"
+        f"runner.test(hdl_toplevel='{top}', test_module='{test_module}', test_dir=Path('test'), waves=True)\n"
     )
     run([str(venv_python), "-c", driver], cwd=project, env=env)
 

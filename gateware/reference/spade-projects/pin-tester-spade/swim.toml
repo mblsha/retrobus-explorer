@@ -3,5 +3,9 @@ name = "pin_tester_spade"
 [libraries]
 shared_components = { path = "../shared-components" }
 
+[tooling]
+top = "main"
+test_module = "test_pin_tester"
+
 [simulation]
 testbench_dir = "test"

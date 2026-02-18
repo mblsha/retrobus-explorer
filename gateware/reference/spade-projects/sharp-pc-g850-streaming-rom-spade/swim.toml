@@ -4,7 +4,11 @@ name = "sharp_pc_g850_streaming_rom_spade"
 shared_components = { path = "../shared-components" }
 
 [verilog]
-sources = ["verilog/*.v"]
+sources = ["../shared-verilog/clk_wiz_0.v"]
+
+[tooling]
+top = "main"
+test_module = "test_sharp_pc_g850_streaming_rom"
 
 [simulation]
 testbench_dir = "test"

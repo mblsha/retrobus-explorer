@@ -6,22 +6,15 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 
 def main() -> int:
     here = Path(__file__).resolve().parent.parent
-    tools = here.parent / "tools" / "run_tb.py"
+    tool = here.parent / "tools" / "project.py"
     subprocess.run(
-        [
-            str(tools),
-            "--project",
-            str(here),
-            "--top",
-            "main",
-            "--test-module",
-            "test_sharp_organizer_card",
-        ],
+        [sys.executable, str(tool), "test-with-vcd", "--project", str(here), *sys.argv[1:]],
         check=True,
     )
     return 0
