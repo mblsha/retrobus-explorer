@@ -1,0 +1,91 @@
+use shared_components::primitives::falling_edge;
+use shared_components::primitives::sync2;
+
+#[no_mangle(all)]
+entity main(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+
+    ft_clk: bool,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: [bool; 16],
+    ft_be: [bool; 2],
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+
+    saleae: inv &[bool; 8],
+
+    conn_rw: bool,
+    conn_oe: bool,
+    conn_ci: bool,
+    conn_e2: bool,
+
+    conn_mskrom: bool,
+    conn_sram1: bool,
+    conn_sram2: bool,
+    conn_eprom: bool,
+    conn_stnby: bool,
+    conn_vbatt: bool,
+    conn_vpp: bool,
+
+    addr: [bool; 20],
+    data: [bool; 8],
+) {
+    let rst = !rst_n;
+
+    let conn_rw_sync = inst sync2(clk, conn_rw);
+    let conn_oe_sync = inst sync2(clk, conn_oe);
+    let conn_ci_sync = inst sync2(clk, conn_ci);
+    let conn_e2_sync = inst sync2(clk, conn_e2);
+
+    let conn_mskrom_sync = inst sync2(clk, conn_mskrom);
+    let conn_sram1_sync = inst sync2(clk, conn_sram1);
+    let conn_sram2_sync = inst sync2(clk, conn_sram2);
+    let conn_eprom_sync = inst sync2(clk, conn_eprom);
+    let conn_stnby_sync = inst sync2(clk, conn_stnby);
+    let conn_vbatt_sync = inst sync2(clk, conn_vbatt);
+    let conn_vpp_sync = inst sync2(clk, conn_vpp);
+
+    let rw_fall = inst falling_edge(clk, conn_rw_sync);
+
+    reg(clk) event_counter: uint<8> reset(rst: 0) = if rw_fall {
+        trunc(event_counter + 1)
+    } else {
+        event_counter
+    };
+
+    let event_bits = event_counter.to_bits();
+    let aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1];
+
+    set led = &[
+        event_bits[0],
+        event_bits[1],
+        event_bits[2],
+        event_bits[3],
+        conn_mskrom_sync,
+        conn_sram1_sync,
+        conn_sram2_sync,
+        aux,
+    ];
+
+    set saleae = &[
+        conn_rw_sync,
+        conn_oe_sync,
+        conn_ci_sync,
+        conn_e2_sync,
+        addr[0],
+        addr[1],
+        data[0],
+        rw_fall,
+    ];
+
+    set usb_tx = &usb_rx;
+    set ft_rd = &!ft_rxf;
+    set ft_wr = &(!ft_txe && conn_rw_sync);
+    set ft_oe = &(conn_oe_sync || conn_eprom_sync || conn_stnby_sync || conn_vbatt_sync || conn_vpp_sync);
+}

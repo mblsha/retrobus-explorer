@@ -1,0 +1,93 @@
+use shared_components::primitives::falling_edge;
+use shared_components::primitives::rising_edge;
+use shared_components::primitives::sync2;
+
+#[no_mangle(all)]
+entity main(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+
+    ft_clk: bool,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: [bool; 16],
+    ft_be: [bool; 2],
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+
+    saleae: inv &[bool; 8],
+
+    z80_mreq: bool,
+    z80_m1: bool,
+    z80_ioreset: bool,
+    z80_iorq: bool,
+    z80_int1: bool,
+    z80_wait: inv &bool,
+    z80_rd: bool,
+    z80_wr: bool,
+
+    data: [bool; 8],
+    addr: [bool; 16],
+
+    addr_bnk: [bool; 2],
+    addr_ceram2: bool,
+    addr_cerom2: bool,
+) {
+    let rst = !rst_n;
+
+    let mreq_sync = inst sync2(clk, z80_mreq);
+    let iorq_sync = inst sync2(clk, z80_iorq);
+    let rd_sync = inst sync2(clk, z80_rd);
+    let wr_sync = inst sync2(clk, z80_wr);
+
+    let mreq_fall = inst falling_edge(clk, mreq_sync);
+    let iorq_fall = inst falling_edge(clk, iorq_sync);
+    let rd_rise = inst rising_edge(clk, rd_sync);
+    let wr_rise = inst rising_edge(clk, wr_sync);
+    let wait_reload: uint<4> = 3;
+    let wait_zero: uint<4> = 0;
+
+    reg(clk) wait_counter: uint<4> reset(rst: 0) = if mreq_fall || iorq_fall {
+        wait_reload
+    } else if wait_counter != 0 {
+        trunc(wait_counter - 1)
+    } else {
+        wait_zero
+    };
+
+    let hold_wait = wait_counter != 0;
+    let ft_aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1];
+    let bus_aux = z80_m1 || z80_ioreset || z80_int1;
+
+    set z80_wait = &!hold_wait;
+    set usb_tx = &usb_rx;
+    set ft_rd = &!ft_rxf;
+    set ft_wr = &(!ft_txe && (mreq_fall || iorq_fall));
+    set ft_oe = &(rd_sync || wr_sync);
+
+    set led = &[
+        !mreq_sync,
+        !iorq_sync,
+        !rd_sync,
+        !wr_sync,
+        mreq_fall,
+        iorq_fall,
+        rd_rise,
+        ft_aux,
+    ];
+
+    set saleae = &[
+        addr[0],
+        addr[1],
+        data[0],
+        data[1],
+        addr_bnk[0],
+        addr_bnk[1],
+        addr_ceram2,
+        addr_cerom2 != bus_aux,
+    ];
+}

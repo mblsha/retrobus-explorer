@@ -1,0 +1,14 @@
+use shared_components::primitives::counter_u26;
+
+#[no_mangle(all)]
+entity main(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+) {
+    let rst = !rst_n;
+    let counter = inst counter_u26(clk, rst);
+    let led_counter: uint<8> = trunc(counter >> 18);
+
+    set led = &led_counter.to_bits();
+}

@@ -1,0 +1,7 @@
+name = "pin_tester_spade"
+
+[libraries]
+shared_components = { path = "../shared-components" }
+
+[simulation]
+testbench_dir = "test"

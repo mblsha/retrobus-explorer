@@ -1,0 +1,13 @@
+# Clock and reset
+set_io clk P7
+set_io rst_n P8
+
+# 8 separate output pins (mapped to onboard LEDs on Alchitry Cu)
+set_io pin0 N14
+set_io pin1 M12
+set_io pin2 L14
+set_io pin3 L12
+set_io pin4 K14
+set_io pin5 K12
+set_io pin6 K11
+set_io pin7 J11
