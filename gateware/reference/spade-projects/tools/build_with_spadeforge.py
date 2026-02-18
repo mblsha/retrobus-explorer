@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -50,6 +51,32 @@ def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
+def resolve_extra_verilog(project: Path) -> list[Path]:
+    config = tomllib.loads((project / "swim.toml").read_text())
+    extras: list[Path] = []
+    for pattern in config.get("verilog", {}).get("sources", []):
+        for match in sorted(project.glob(pattern)):
+            if match.is_file():
+                extras.append(match.resolve())
+    return extras
+
+
+def build_source_bundle(project: Path, main_source: Path, extra_sources: list[Path]) -> Path:
+    if not extra_sources:
+        return main_source
+
+    bundle = project / "build" / "spade_bundle.sv"
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    with bundle.open("w") as out:
+        out.write(main_source.read_text())
+        out.write("\n")
+        for src in extra_sources:
+            out.write(f"\n// ----- BEGIN INCLUDED VERILOG: {src} -----\n")
+            out.write(src.read_text())
+            out.write(f"\n// ----- END INCLUDED VERILOG: {src} -----\n")
+    return bundle
+
+
 def main() -> int:
     args = parse_args()
     project = args.project.resolve()
@@ -67,6 +94,8 @@ def main() -> int:
     out_zip = output_dir / "artifacts.zip"
 
     run(["swim", "build"], cwd=project)
+    main_source = (project / args.source).resolve()
+    bundled_source = build_source_bundle(project, main_source, resolve_extra_verilog(project))
 
     cmd = [
         resolve_cli(args.cli),
@@ -77,7 +106,7 @@ def main() -> int:
         "--part",
         args.part,
         "--source",
-        str((project / args.source).resolve()),
+        str(bundled_source),
         "--xdc",
         str((project / args.xdc).resolve()),
         "--output-dir",

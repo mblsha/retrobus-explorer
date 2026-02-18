@@ -3,6 +3,13 @@ use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync2;
 
 #[no_mangle(all)]
+extern entity clk_wiz_0(
+    clk_out200: inv &bool,
+    clk_out400: inv &bool,
+    clk_in100: clock,
+);
+
+#[no_mangle(all)]
 entity main(
     clk: clock,
     rst_n: bool,
@@ -38,6 +45,10 @@ entity main(
     addr_cerom2: bool,
 ) {
     let rst = !rst_n;
+    let (_clk200_read, clk200_write): (&bool, inv &bool) = port;
+    let (clk400_read, clk400_write): (&bool, inv &bool) = port;
+    let _ = inst clk_wiz_0(clk200_write, clk400_write, clk);
+    let clk_uart = unsafe { inst std::conv::bool_to_clock(*clk400_read) };
 
     let mreq_sync = inst sync2(clk, z80_mreq);
     let iorq_sync = inst sync2(clk, z80_iorq);
@@ -58,8 +69,10 @@ entity main(
     } else {
         wait_zero
     };
+    reg(clk_uart) fast_counter: uint<8> reset(rst: 0) = trunc(fast_counter + 1);
 
     let hold_wait = wait_counter != 0;
+    let fast_bits = fast_counter.to_bits();
     let ft_aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1];
     let bus_aux = z80_m1 || z80_ioreset || z80_int1;
 
@@ -77,7 +90,7 @@ entity main(
         mreq_fall,
         iorq_fall,
         rd_rise,
-        ft_aux,
+        ft_aux || fast_bits[0],
     ];
 
     set saleae = &[
