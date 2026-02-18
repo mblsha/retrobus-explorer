@@ -11,9 +11,11 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
+
+from project_meta import resolve_verilog_sources
+from project_meta import tooling_top
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cli", help="spadeforge-cli path/command")
     parser.add_argument("--server", help="Optional server URL; omit for zeroconf discovery")
     parser.add_argument("--discover-timeout", default="45s", help="mDNS discovery timeout")
-    parser.add_argument("--top", default="main")
+    parser.add_argument("--top", help="Top module name (default: tooling.top or main)")
     parser.add_argument("--part", default="xc7a35tcsg324-1")
     parser.add_argument("--source", default="build/spade.sv")
     parser.add_argument("--xdc", default="constraints/pins.xdc")
@@ -51,16 +53,6 @@ def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
-def resolve_extra_verilog(project: Path) -> list[Path]:
-    config = tomllib.loads((project / "swim.toml").read_text())
-    extras: list[Path] = []
-    for pattern in config.get("verilog", {}).get("sources", []):
-        for match in sorted(project.glob(pattern)):
-            if match.is_file():
-                extras.append(match.resolve())
-    return extras
-
-
 def build_source_bundle(project: Path, main_source: Path, extra_sources: list[Path]) -> Path:
     if not extra_sources:
         return main_source
@@ -80,6 +72,7 @@ def build_source_bundle(project: Path, main_source: Path, extra_sources: list[Pa
 def main() -> int:
     args = parse_args()
     project = args.project.resolve()
+    top = tooling_top(project, args.top)
     token = args.token or os.environ.get("SPADEFORGE_TOKEN")
     if not token:
         print("error: missing token; pass --token or set SPADEFORGE_TOKEN", file=sys.stderr)
@@ -95,14 +88,14 @@ def main() -> int:
 
     run(["swim", "build"], cwd=project)
     main_source = (project / args.source).resolve()
-    bundled_source = build_source_bundle(project, main_source, resolve_extra_verilog(project))
+    bundled_source = build_source_bundle(project, main_source, resolve_verilog_sources(project))
 
     cmd = [
         resolve_cli(args.cli),
         "--token",
         token,
         "--top",
-        args.top,
+        top,
         "--part",
         args.part,
         "--source",

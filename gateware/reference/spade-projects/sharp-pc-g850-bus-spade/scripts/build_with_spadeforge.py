@@ -6,14 +6,17 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 
 def main() -> int:
     here = Path(__file__).resolve().parent.parent
-    tools = here.parent / "tools" / "build_with_spadeforge.py"
-    args = [str(tools), "--project", str(here)]
-    subprocess.run(args + __import__("sys").argv[1:], check=True)
+    tool = here.parent / "tools" / "project.py"
+    subprocess.run(
+        [sys.executable, str(tool), "build-with-spadeforge", "--project", str(here), *sys.argv[1:]],
+        check=True,
+    )
     return 0
 
 

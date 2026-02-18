@@ -1,9 +1,7 @@
-#[no_mangle(all)]
-extern entity clk_wiz_0(
-    clk_out200: inv &bool,
-    clk_out400: inv &bool,
-    clk_in100: clock,
-);
+use shared_components::clocking::clk_wiz_400;
+use shared_components::sharp::g850_rom_byte;
+use shared_components::sharp::g850_stream_counter;
+use shared_components::sharp::gate_byte8;
 
 #[no_mangle(all)]
 entity main(
@@ -41,32 +39,12 @@ entity main(
     addr_cerom2: bool,
 ) {
     let rst = !rst_n;
-    let (_clk200_read, clk200_write): (&bool, inv &bool) = port;
-    let (clk400_read, clk400_write): (&bool, inv &bool) = port;
-    let _ = inst clk_wiz_0(clk200_write, clk400_write, clk);
-    let clk_uart = unsafe { inst std::conv::bool_to_clock(*clk400_read) };
-
-    reg(clk_uart) stream_counter: uint<8> reset(rst: 0) = if !ft_rxf {
-        trunc(stream_counter + 1)
-    } else {
-        stream_counter
-    };
-
+    let clk_uart = inst clk_wiz_400(clk);
+    let stream_counter = inst g850_stream_counter(clk_uart, rst, !ft_rxf);
     let c = stream_counter.to_bits();
     let read_enable = !z80_mreq && !z80_rd && addr_cerom2;
-
-    let rom_byte = [
-        addr[0] != addr_bnk[0],
-        addr[1] != addr_bnk[1],
-        addr[2] != c[0],
-        addr[3] != c[1],
-        addr[4] != c[2],
-        addr[5] != c[3],
-        (addr[6] != addr_bnk[0]) != c[4],
-        (addr[7] != addr_bnk[1]) != c[5],
-    ];
-    let zero_byte = [false, false, false, false, false, false, false, false];
-    let out_byte = if read_enable { rom_byte } else { zero_byte };
+    let rom_byte = inst g850_rom_byte(addr, addr_bnk, stream_counter);
+    let out_byte = inst gate_byte8(read_enable, rom_byte);
 
     let aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1] || z80_wait || z80_m1 || z80_ioreset || z80_int1;
 

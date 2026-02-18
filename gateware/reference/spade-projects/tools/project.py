@@ -1,0 +1,38 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generic project entrypoint for test/build flows")
+    parser.add_argument("action", choices=["test-with-vcd", "build-with-spadeforge"])
+    parser.add_argument("--project", required=True, type=Path, help="Spade project directory")
+    args, extra = parser.parse_known_args()
+    args.extra = extra
+    return args
+
+
+def main() -> int:
+    args = parse_args()
+    project = args.project.resolve()
+    tools_dir = Path(__file__).resolve().parent
+    if args.action == "test-with-vcd":
+        tool = tools_dir / "run_tb.py"
+    else:
+        tool = tools_dir / "build_with_spadeforge.py"
+
+    cmd = [sys.executable, str(tool), "--project", str(project), *args.extra]
+    subprocess.run(cmd, check=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

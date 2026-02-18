@@ -1,0 +1,69 @@
+pub entity count_on_event_u8(
+    clk: clock,
+    rst: bool,
+    event: bool,
+) -> uint<8> {
+    reg(clk) value: uint<8> reset(rst: 0) = if event {
+        trunc(value + 1)
+    } else {
+        value
+    };
+    value
+}
+
+pub entity g850_wait_hold(
+    clk: clock,
+    rst: bool,
+    mreq_fall: bool,
+    iorq_fall: bool,
+) -> bool {
+    let wait_reload: uint<4> = 3;
+    let wait_zero: uint<4> = 0;
+    reg(clk) wait_counter: uint<4> reset(rst: 0) = if mreq_fall || iorq_fall {
+        wait_reload
+    } else if wait_counter != 0 {
+        trunc(wait_counter - 1)
+    } else {
+        wait_zero
+    };
+    wait_counter != 0
+}
+
+pub entity g850_stream_counter(
+    clk: clock,
+    rst: bool,
+    advance: bool,
+) -> uint<8> {
+    reg(clk) value: uint<8> reset(rst: 0) = if advance {
+        trunc(value + 1)
+    } else {
+        value
+    };
+    value
+}
+
+pub entity g850_rom_byte(
+    addr: [bool; 16],
+    addr_bnk: [bool; 2],
+    stream_counter: uint<8>,
+) -> [bool; 8] {
+    let c = stream_counter.to_bits();
+    [
+        addr[0] != addr_bnk[0],
+        addr[1] != addr_bnk[1],
+        addr[2] != c[0],
+        addr[3] != c[1],
+        addr[4] != c[2],
+        addr[5] != c[3],
+        (addr[6] != addr_bnk[0]) != c[4],
+        (addr[7] != addr_bnk[1]) != c[5],
+    ]
+}
+
+pub entity gate_byte8(
+    enable: bool,
+    value: [bool; 8],
+) -> [bool; 8] {
+    let zero = [false, false, false, false, false, false, false, false];
+    if enable { value } else { zero }
+}

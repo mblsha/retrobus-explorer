@@ -1,20 +1,13 @@
 # top = main
 
 import cocotb
-from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge
-from cocotb.triggers import Timer
-
-
-async def tick(clk, cycles=1):
-    for _ in range(cycles):
-        await RisingEdge(clk)
-        await Timer(1, units="ps")
+from cocotb_helpers import start_clock
+from cocotb_helpers import tick
 
 
 @cocotb.test()
 async def counter_drives_led_saleae_and_ffc(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    start_clock(dut.clk)
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1
