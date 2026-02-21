@@ -6,6 +6,7 @@ use shared_components::primitives::sync_delay;
 use shared_components::primitives::sync2;
 use shared_components::memory::fifo_u8x8;
 use shared_components::memory::async_fifo_u8x8;
+use shared_components::serial::ft_u16;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx;
 use shared_components::sharp::count_on_event_u8;
@@ -207,4 +208,51 @@ entity tb_async_fifo_u8(
     set full = &out.full;
     set empty = &out.empty;
     set dout = &out.dout;
+}
+
+#[no_mangle(all)]
+entity tb_ft_u16(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+    ft_data_out: inv &uint<16>,
+    ft_be_out: inv &uint<2>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<16>,
+    ui_dout_be: inv &uint<2>,
+    ui_dout_empty: inv &bool,
+) {
+    let out = inst ft_u16(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_dout_get,
+    );
+    set ft_data_out = &out.ft_data_out;
+    set ft_be_out = &out.ft_be_out;
+    set ft_rd = &out.ft_rd;
+    set ft_wr = &out.ft_wr;
+    set ft_oe = &out.ft_oe;
+    set ui_din_full = &out.ui_din_full;
+    set ui_dout = &out.ui_dout;
+    set ui_dout_be = &out.ui_dout_be;
+    set ui_dout_empty = &out.ui_dout_empty;
 }
