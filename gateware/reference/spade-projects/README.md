@@ -24,6 +24,8 @@ Build through spadeforge-cli:
 SPADEFORGE_TOKEN=test123 ./tools/project.py build-with-spadeforge --project ./sharp-pc-g850-bus-spade
 ```
 
+By default, build artifacts are written under `build/forge-output-<timestamp>/` inside each project.
+
 Run a local web UI to pick projects, run testbenches, and inspect `dump.surfer.vcd` in Surfer Web:
 
 ```sh

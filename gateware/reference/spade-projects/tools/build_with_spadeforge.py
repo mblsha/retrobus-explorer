@@ -81,7 +81,7 @@ def main() -> int:
     output_dir = (
         Path(args.output_dir).resolve()
         if args.output_dir
-        else project / f"forge-output-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+        else project / "build" / f"forge-output-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     out_zip = output_dir / "artifacts.zip"
