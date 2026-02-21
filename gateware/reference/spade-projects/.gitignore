@@ -7,6 +7,8 @@
 **/test/dump.vcd
 **/test/dump.surfer.vcd
 **/test/results.xml
+**/test/waveforms/*.vcd
+**/test/waveforms/*.xml
 
 # Remote build artifacts
 **/forge-output-*/
