@@ -5,6 +5,7 @@ use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::primitives::sync2;
 use shared_components::memory::fifo_u8x8;
+use shared_components::memory::async_fifo_u8x8;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx;
 use shared_components::sharp::count_on_event_u8;
@@ -187,4 +188,23 @@ entity tb_fifo_u8(
     set empty = &out.empty;
     set dout = &out.dout;
     set used = &out.used;
+}
+
+#[no_mangle(all)]
+entity tb_async_fifo_u8(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    rget: bool,
+    full: inv &bool,
+    empty: inv &bool,
+    dout: inv &uint<8>,
+) {
+    let out = inst async_fifo_u8x8(wclk, wrst, din, wput, rclk, rrst, rget);
+    set full = &out.full;
+    set empty = &out.empty;
+    set dout = &out.dout;
 }

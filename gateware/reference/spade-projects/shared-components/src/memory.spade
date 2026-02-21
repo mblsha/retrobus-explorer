@@ -1,3 +1,17 @@
+#[no_mangle(all)]
+extern entity async_fifo_u8x8_v(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    full: inv &bool,
+    rclk: clock,
+    rrst: bool,
+    dout: inv &uint<8>,
+    rget: bool,
+    empty: inv &bool,
+);
+
 fn write_at_u8<#uint N, #uint W>(
     arr: [uint<8>; N],
     idx: uint<W>,
@@ -24,6 +38,12 @@ pub struct FifoU8x8Out {
     empty: bool,
     dout: uint<8>,
     used: uint<4>,
+}
+
+pub struct AsyncFifoU8Out {
+    full: bool,
+    empty: bool,
+    dout: uint<8>,
 }
 
 // Synchronous first-word-fall-through FIFO for uint<8> payloads.
@@ -112,5 +132,36 @@ pub entity fifo_u8x8(
         empty,
         dout,
         used,
+    )
+}
+
+pub entity async_fifo_u8x8(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    rget: bool,
+) -> AsyncFifoU8Out {
+    let (full, full_write): (&bool, inv &bool) = port;
+    let (empty, empty_write): (&bool, inv &bool) = port;
+    let (dout, dout_write): (&uint<8>, inv &uint<8>) = port;
+    let _ = inst async_fifo_u8x8_v(
+        wclk,
+        wrst,
+        din,
+        wput,
+        full_write,
+        rclk,
+        rrst,
+        dout_write,
+        rget,
+        empty_write,
+    );
+    AsyncFifoU8Out$(
+        full: *full,
+        empty: *empty,
+        dout: *dout,
     )
 }

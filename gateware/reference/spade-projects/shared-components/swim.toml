@@ -7,5 +7,8 @@ protocols.git = "https://gitlab.com/spade-lang/lib/protocols"
 top = "tb_sync2"
 test_module = "test_sync2"
 
+[verilog]
+sources = ["verilog/**/*.v"]
+
 [simulation]
 testbench_dir = "test"
