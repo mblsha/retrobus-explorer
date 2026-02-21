@@ -1,0 +1,60 @@
+use protocols::uart::UartConfig;
+use protocols::uart::UartOut;
+use ready_valid::Rv;
+
+pub struct UartTxOut {
+    tx: bool,
+    ready: bool,
+}
+
+pub struct UartRxOut {
+    valid: bool,
+    parity_error: bool,
+    byte: uint<8>,
+}
+
+pub entity uart_tx(
+    clk: clock,
+    rst: bool,
+    send: bool,
+    data_byte: uint<8>,
+    bit_time: uint<15>,
+    parity: bool,
+    stop_bits: uint<3>,
+) -> UartTxOut {
+    let config = UartConfig$(
+        bit_time,
+        parity,
+        stop_bits,
+    );
+    let tx_word = if send { Some(data_byte) } else { None() };
+    let (ready, ready_inv): (&bool, inv &bool) = port;
+    let tx = inst protocols::uart::uart_tx(clk, rst, Rv(&tx_word, ready_inv), config);
+
+    UartTxOut$(
+        tx,
+        ready: *ready,
+    )
+}
+
+pub entity uart_rx(
+    clk: clock,
+    rst: bool,
+    rx: bool,
+    bit_time: uint<15>,
+    parity: bool,
+    stop_bits: uint<3>,
+) -> UartRxOut {
+    let config = UartConfig$(
+        bit_time,
+        parity,
+        stop_bits,
+    );
+    let rx_out = inst protocols::uart::uart_rx(clk, rst, rx, config);
+
+    match rx_out {
+        UartOut::Ok(val) => UartRxOut$(valid: true, parity_error: false, byte: val),
+        UartOut::ParityError(val) => UartRxOut$(valid: true, parity_error: true, byte: val),
+        UartOut::None => UartRxOut$(valid: false, parity_error: false, byte: 0),
+    }
+}

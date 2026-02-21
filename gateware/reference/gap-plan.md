@@ -13,8 +13,8 @@ The Lucid projects in this repo include a subset of Alchitry components. We shou
 ### Required Alchitry Components (from `.alp` usage)
 
 1. `DONE` `P0` `Conditioning/reset_conditioner.luc` -> `shared_components::primitives::reset_conditioner`
-2. `P0` `Interfaces/uart_rx.luc`
-3. `P0` `Interfaces/uart_tx.luc`
+2. `DONE` `P0` `Interfaces/uart_rx.luc` -> `shared_components::serial::uart_rx`
+3. `DONE` `P0` `Interfaces/uart_tx.luc` -> `shared_components::serial::uart_tx`
 4. `P0` `Miscellaneous/pipeline.luc`
 5. `DONE` `P0` `Pulses/edge_detector.luc` -> `shared_components::primitives::{rising_edge, falling_edge}`
 6. `P1` `Memory/fifo.luc`
@@ -42,8 +42,8 @@ The Lucid projects in this repo include a subset of Alchitry components. We shou
 Every ported component needs a focused cocotb testbench that validates only that component behavior before integrating into project tops.
 
 1. `DONE` `test_reset_conditioner.py`
-2. `test_uart_rx.py`
-3. `test_uart_tx.py`
+2. `DONE` `test_uart_rx.py`
+3. `DONE` `test_uart_tx.py`
 4. `test_my_uart_tx.py`
 5. `test_pipeline.py`
 6. `DONE` `test_rising_edge.py`, `test_falling_edge.py`
@@ -95,7 +95,7 @@ This section tracks the remaining `pin-tester` behavior parity work between:
 ## Execution Order
 
 1. Port and unit-test `reset_conditioner`, `pipeline`, `edge_detector`.
-2. Port and unit-test `uart_rx`, `uart_tx`, `my_uart_tx`.
+2. Port and unit-test remaining `my_uart_tx` (`uart_rx`/`uart_tx` done).
 3. Port and unit-test `fifo`, `async_fifo`, `simple_dual_port_ram`.
 4. Port and unit-test `ft`.
 5. Rebuild `pin-tester-spade` using only reusable components.

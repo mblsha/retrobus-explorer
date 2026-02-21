@@ -4,6 +4,8 @@ use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::primitives::sync2;
+use shared_components::serial::uart_rx;
+use shared_components::serial::uart_tx;
 use shared_components::sharp::count_on_event_u8;
 use shared_components::sharp::g850_rom_byte;
 use shared_components::sharp::g850_stream_counter;
@@ -130,4 +132,39 @@ entity tb_g850_rom_gate(
 
     set rom_byte = &rom;
     set gated_byte = &gated;
+}
+
+#[no_mangle(all)]
+entity tb_uart_tx(
+    clk: clock,
+    rst: bool,
+    send: bool,
+    data_byte: uint<8>,
+    bit_time: uint<15>,
+    parity: bool,
+    stop_bits: uint<3>,
+    tx_line: inv &bool,
+    tx_ready: inv &bool,
+) {
+    let tx_out = inst uart_tx(clk, rst, send, data_byte, bit_time, parity, stop_bits);
+    set tx_line = &tx_out.tx;
+    set tx_ready = &tx_out.ready;
+}
+
+#[no_mangle(all)]
+entity tb_uart_rx(
+    clk: clock,
+    rst: bool,
+    rx_line: bool,
+    bit_time: uint<15>,
+    parity: bool,
+    stop_bits: uint<3>,
+    rx_valid: inv &bool,
+    rx_parity_error: inv &bool,
+    rx_byte: inv &uint<8>,
+) {
+    let rx_out = inst uart_rx(clk, rst, rx_line, bit_time, parity, stop_bits);
+    set rx_valid = &rx_out.valid;
+    set rx_parity_error = &rx_out.parity_error;
+    set rx_byte = &rx_out.byte;
 }
