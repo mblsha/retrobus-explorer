@@ -19,6 +19,7 @@ COMPONENTS = [
     "uart_tx",
     "uart_rx",
     "fifo_u8",
+    "async_fifo_u8",
     "counter_u8",
     "count_on_event_u8",
     "g850_wait_hold",
