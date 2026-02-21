@@ -1,1 +1,8 @@
 name = "shared_components"
+
+[tooling]
+top = "tb_sync2"
+test_module = "test_sync2"
+
+[simulation]
+testbench_dir = "test"

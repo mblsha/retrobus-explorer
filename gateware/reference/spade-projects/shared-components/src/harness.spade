@@ -1,0 +1,102 @@
+use shared_components::primitives::counter_u8;
+use shared_components::primitives::falling_edge;
+use shared_components::primitives::rising_edge;
+use shared_components::primitives::sync2;
+use shared_components::sharp::count_on_event_u8;
+use shared_components::sharp::g850_rom_byte;
+use shared_components::sharp::g850_stream_counter;
+use shared_components::sharp::g850_wait_hold;
+use shared_components::sharp::gate_byte8;
+
+#[no_mangle(all)]
+entity tb_sync2(
+    clk: clock,
+    input_signal: bool,
+    output_signal: inv &bool,
+) {
+    let synced = inst sync2(clk, input_signal);
+    set output_signal = &synced;
+}
+
+#[no_mangle(all)]
+entity tb_rising_edge(
+    clk: clock,
+    signal_in: bool,
+    edge_pulse: inv &bool,
+) {
+    let pulse = inst rising_edge(clk, signal_in);
+    set edge_pulse = &pulse;
+}
+
+#[no_mangle(all)]
+entity tb_falling_edge(
+    clk: clock,
+    signal_in: bool,
+    edge_pulse: inv &bool,
+) {
+    let pulse = inst falling_edge(clk, signal_in);
+    set edge_pulse = &pulse;
+}
+
+#[no_mangle(all)]
+entity tb_counter_u8(
+    clk: clock,
+    rst: bool,
+    value_bits: inv &[bool; 8],
+) {
+    let value = inst counter_u8(clk, rst);
+    let bits = value.to_bits();
+    set value_bits = &bits;
+}
+
+#[no_mangle(all)]
+entity tb_count_on_event_u8(
+    clk: clock,
+    rst: bool,
+    event_in: bool,
+    value_bits: inv &[bool; 8],
+) {
+    let value = inst count_on_event_u8(clk, rst, event_in);
+    let bits = value.to_bits();
+    set value_bits = &bits;
+}
+
+#[no_mangle(all)]
+entity tb_g850_wait_hold(
+    clk: clock,
+    rst: bool,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    hold_wait: inv &bool,
+) {
+    let hold = inst g850_wait_hold(clk, rst, mreq_fall, iorq_fall);
+    set hold_wait = &hold;
+}
+
+#[no_mangle(all)]
+entity tb_g850_stream_counter(
+    clk: clock,
+    rst: bool,
+    advance: bool,
+    value_bits: inv &[bool; 8],
+) {
+    let value = inst g850_stream_counter(clk, rst, advance);
+    let bits = value.to_bits();
+    set value_bits = &bits;
+}
+
+#[no_mangle(all)]
+entity tb_g850_rom_gate(
+    addr: [bool; 16],
+    addr_bnk: [bool; 2],
+    stream_counter: uint<8>,
+    enable: bool,
+    rom_byte: inv &[bool; 8],
+    gated_byte: inv &[bool; 8],
+) {
+    let rom = inst g850_rom_byte(addr, addr_bnk, stream_counter);
+    let gated = inst gate_byte8(enable, rom);
+
+    set rom_byte = &rom;
+    set gated_byte = &gated;
+}

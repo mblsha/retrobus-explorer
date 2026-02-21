@@ -29,6 +29,14 @@ Run testbench + generate VCD/Surfer:
 ./tools/project.py test-with-vcd --project ./sharp-pc-g850-bus-spade
 ```
 
+Run shared-component unit testbenches (in-place under `shared-components`):
+
+```sh
+cd shared-components
+./scripts/test_component.py sync2
+./scripts/test_all_components.py
+```
+
 Build through spadeforge-cli:
 
 ```sh

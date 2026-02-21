@@ -32,18 +32,58 @@ class Project:
     path: Path
 
     @property
-    def wave_path(self) -> Path:
+    def default_wave_path(self) -> Path:
         return self.path / "test" / "dump.surfer.vcd"
 
     @property
     def test_script(self) -> Path:
         return self.path / "scripts" / "test_with_vcd.py"
 
+    def wave_candidates(self) -> list[Path]:
+        candidates: list[Path] = []
+        if self.default_wave_path.is_file():
+            candidates.append(self.default_wave_path)
+
+        wave_dir = self.path / "test" / "waveforms"
+        if wave_dir.is_dir():
+            for pattern in ("*.surfer.vcd", "*.vcd"):
+                for path in sorted(wave_dir.glob(pattern)):
+                    if path.is_file():
+                        candidates.append(path)
+
+        unique: list[Path] = []
+        seen: set[Path] = set()
+        for path in candidates:
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            unique.append(path)
+        return unique
+
+    def wave_entries(self, base_url: str) -> list[dict[str, str]]:
+        entries: list[dict[str, str]] = []
+        for path in self.wave_candidates():
+            rel = path.relative_to(self.path).as_posix()
+            encoded_project = urllib.parse.quote(self.name, safe="")
+            encoded_wave = urllib.parse.quote(rel, safe="")
+            entries.append(
+                {
+                    "id": rel,
+                    "name": rel,
+                    "wave_url": f"{base_url}/wave/{encoded_project}/{encoded_wave}",
+                    "viewer_url": f"{base_url}/open/{encoded_project}/{encoded_wave}",
+                }
+            )
+        return entries
+
 
 def list_projects() -> list[Project]:
     projects: list[Project] = []
-    for path in sorted(ROOT.glob("*-spade")):
+    for path in sorted(ROOT.iterdir()):
         if not path.is_dir():
+            continue
+        if path.name.startswith("."):
             continue
         if not (path / "scripts" / "test_with_vcd.py").is_file():
             continue
@@ -59,15 +99,17 @@ def find_project(name: str) -> Project | None:
 
 
 def project_payload(project: Project, base_url: str) -> dict[str, Any]:
-    wave_exists = project.wave_path.is_file()
-    wave_url = f"{base_url}/wave/{urllib.parse.quote(project.name)}"
-    viewer_url = f"{base_url}/open/{urllib.parse.quote(project.name)}"
+    waves = project.wave_entries(base_url)
+    wave_exists = len(waves) > 0
+    wave_url = waves[0]["wave_url"] if wave_exists else f"{base_url}/wave/{urllib.parse.quote(project.name, safe='')}"
+    viewer_url = waves[0]["viewer_url"] if wave_exists else f"{base_url}/open/{urllib.parse.quote(project.name, safe='')}"
     return {
         "name": project.name,
         "path": str(project.path),
         "wave_exists": wave_exists,
         "wave_url": wave_url,
         "viewer_url": viewer_url,
+        "waves": waves,
     }
 
 
@@ -116,6 +158,8 @@ def html_page() -> str:
   <div class="row">
     <label for="project">Project</label>
     <select id="project"></select>
+    <label for="wave">Wave</label>
+    <select id="wave"></select>
     <button id="refresh">Refresh</button>
   </div>
 
@@ -130,12 +174,17 @@ def html_page() -> str:
 
   <script>
     const projectSelect = document.getElementById("project");
+    const waveSelect = document.getElementById("wave");
     const statusEl = document.getElementById("status");
     const logEl = document.getElementById("log");
     let projects = [];
 
     function selected() {
       return projectSelect.value;
+    }
+
+    function selectedWave() {
+      return waveSelect.value;
     }
 
     function setStatus(text) {
@@ -146,7 +195,35 @@ def html_page() -> str:
       logEl.textContent = text || "";
     }
 
+    function loadWaveList(preferredWave = "") {
+      const name = selected();
+      const project = projects.find((p) => p.name === name);
+      waveSelect.innerHTML = "";
+      if (!project || !project.waves || project.waves.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "no wave files";
+        waveSelect.appendChild(opt);
+        waveSelect.disabled = true;
+        return;
+      }
+
+      waveSelect.disabled = false;
+      for (const wave of project.waves) {
+        const opt = document.createElement("option");
+        opt.value = wave.id;
+        opt.textContent = wave.name;
+        waveSelect.appendChild(opt);
+      }
+
+      if (preferredWave && project.waves.some((w) => w.id === preferredWave)) {
+        waveSelect.value = preferredWave;
+      }
+    }
+
     async function loadProjects() {
+      const prevProject = selected();
+      const prevWave = selectedWave();
       setStatus("Loading projects...");
       const resp = await fetch("/api/projects");
       const data = await resp.json();
@@ -155,9 +232,16 @@ def html_page() -> str:
       for (const p of projects) {
         const opt = document.createElement("option");
         opt.value = p.name;
-        opt.textContent = p.wave_exists ? `${p.name} (wave ready)` : `${p.name} (no wave yet)`;
+        const waveCount = (p.waves || []).length;
+        opt.textContent = waveCount > 0 ? `${p.name} (${waveCount} wave file(s))` : `${p.name} (no wave yet)`;
         projectSelect.appendChild(opt);
       }
+
+      if (projects.length > 0 && prevProject && projects.some((p) => p.name === prevProject)) {
+        projectSelect.value = prevProject;
+      }
+      loadWaveList(prevWave);
+
       if (projects.length === 0) {
         setStatus("No Spade projects found.");
       } else {
@@ -183,20 +267,23 @@ def html_page() -> str:
 
     function openViewer() {
       const name = selected();
-      if (!name) return;
-      window.open(`/open/${encodeURIComponent(name)}`, "_blank");
+      const wave = selectedWave();
+      if (!name || !wave) return;
+      window.open(`/open/${encodeURIComponent(name)}/${encodeURIComponent(wave)}`, "_blank");
     }
 
     function openRaw() {
       const name = selected();
-      if (!name) return;
-      window.open(`/wave/${encodeURIComponent(name)}`, "_blank");
+      const wave = selectedWave();
+      if (!name || !wave) return;
+      window.open(`/wave/${encodeURIComponent(name)}/${encodeURIComponent(wave)}`, "_blank");
     }
 
     document.getElementById("refresh").addEventListener("click", loadProjects);
     document.getElementById("run").addEventListener("click", runProject);
     document.getElementById("open").addEventListener("click", openViewer);
     document.getElementById("raw").addEventListener("click", openRaw);
+    projectSelect.addEventListener("change", () => loadWaveList(""));
 
     loadProjects().catch((err) => setStatus(`Failed to load projects: ${err}`));
   </script>
@@ -248,15 +335,29 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.URLError as err:
             self._send_text(f"Upstream unavailable: {err}", status=HTTPStatus.BAD_GATEWAY)
 
-    def _serve_wave(self, project_name: str) -> None:
+    def _resolve_wave_path(self, project: Project, wave_id: str | None) -> Path | None:
+        entries = {entry["id"]: project.path / entry["id"] for entry in project.wave_entries(self._base_url())}
+        if not entries:
+            return None
+        if wave_id:
+            return entries.get(wave_id)
+        return next(iter(entries.values()))
+
+    def _serve_wave(self, project_name: str, wave_id: str | None = None) -> None:
         project = find_project(project_name)
         if project is None:
             self._send_text(f"Unknown project: {project_name}\n", status=HTTPStatus.NOT_FOUND)
             return
-        wave = project.wave_path
-        if not wave.is_file():
+        wave = self._resolve_wave_path(project, wave_id)
+        if wave is None:
             self._send_text(
                 f"Waveform not found for {project_name}.\nRun the testbench first.\n",
+                status=HTTPStatus.NOT_FOUND,
+            )
+            return
+        if not wave.is_file():
+            self._send_text(
+                f"Waveform not found: {wave_id or 'default'}\nRun the testbench first.\n",
                 status=HTTPStatus.NOT_FOUND,
             )
             return
@@ -284,17 +385,47 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/wave/"):
-            name = urllib.parse.unquote(path.removeprefix("/wave/"))
-            self._serve_wave(name)
+            suffix = path.removeprefix("/wave/")
+            if "/" in suffix:
+                name_part, wave_part = suffix.split("/", 1)
+                name = urllib.parse.unquote(name_part)
+                wave_id = urllib.parse.unquote(wave_part)
+            else:
+                name = urllib.parse.unquote(suffix)
+                wave_id = query.get("wave", [None])[0]
+                if wave_id is not None:
+                    wave_id = urllib.parse.unquote(wave_id)
+            self._serve_wave(name, wave_id)
             return
 
         if path.startswith("/open/"):
-            name = urllib.parse.unquote(path.removeprefix("/open/"))
+            suffix = path.removeprefix("/open/")
+            if "/" in suffix:
+                name_part, wave_part = suffix.split("/", 1)
+                name = urllib.parse.unquote(name_part)
+                wave_id = urllib.parse.unquote(wave_part)
+            else:
+                name = urllib.parse.unquote(suffix)
+                wave_id = query.get("wave", [None])[0]
+                if wave_id is not None:
+                    wave_id = urllib.parse.unquote(wave_id)
             project = find_project(name)
             if project is None:
                 self._send_text(f"Unknown project: {name}\n", status=HTTPStatus.NOT_FOUND)
                 return
-            load_url = f"{self._base_url()}/wave/{urllib.parse.quote(project.name)}"
+            wave = self._resolve_wave_path(project, wave_id)
+            if wave is None:
+                self._send_text(
+                    f"Waveform not found for {name}.\nRun the testbench first.\n",
+                    status=HTTPStatus.NOT_FOUND,
+                )
+                return
+            rel = wave.relative_to(project.path).as_posix()
+            load_url = (
+                f"{self._base_url()}/wave/"
+                f"{urllib.parse.quote(project.name, safe='')}/"
+                f"{urllib.parse.quote(rel, safe='')}"
+            )
             target = f"/surfer/?load_url={urllib.parse.quote(load_url, safe='')}"
             self.send_response(HTTPStatus.FOUND)
             self.send_header("Location", target)
