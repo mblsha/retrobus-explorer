@@ -1,6 +1,7 @@
 use shared_components::primitives::counter_u8;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::rising_edge;
+use shared_components::primitives::sync_delay;
 use shared_components::primitives::sync2;
 use shared_components::sharp::count_on_event_u8;
 use shared_components::sharp::g850_rom_byte;
@@ -16,6 +17,22 @@ entity tb_sync2(
 ) {
     let synced = inst sync2(clk, input_signal);
     set output_signal = &synced;
+}
+
+#[no_mangle(all)]
+entity tb_sync_delay(
+    clk: clock,
+    input_signal: bool,
+    output_stage2: inv &bool,
+    output_stage4: inv &bool,
+    output_stage6: inv &bool,
+) {
+    let sync2 = inst sync_delay::<2>(clk, input_signal);
+    let sync4 = inst sync_delay::<4>(clk, input_signal);
+    let sync6 = inst sync_delay::<6>(clk, input_signal);
+    set output_stage2 = &sync2;
+    set output_stage4 = &sync4;
+    set output_stage6 = &sync6;
 }
 
 #[no_mangle(all)]

@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 COMPONENTS = [
+    "sync_delay",
     "rising_edge",
     "falling_edge",
     "sync2",
