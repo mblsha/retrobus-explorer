@@ -78,3 +78,36 @@ async def reset_conditioner_reassertion_reloads_all_stages(dut):
     _assert_outputs(dut, 0, 1)
     await tick(dut.clk, 2)
     _assert_outputs(dut, 0, 0)
+
+    # Pattern coverage: high for 1 cycle, low for 2 cycles, high for 1 cycle.
+    await FallingEdge(dut.clk)
+    dut.in_reset.value = 1
+    await Timer(1, units="ps")
+    _assert_outputs(dut, 1, 1)
+    await tick(dut.clk, 1)
+    _assert_outputs(dut, 1, 1)
+
+    # Pattern coverage: high for 1 cycle, low for 1 cycle, high for 1 cycle.
+    dut.in_reset.value = 0
+    await tick(dut.clk, 1)
+    _assert_outputs(dut, 1, 1)
+
+    await FallingEdge(dut.clk)
+    dut.in_reset.value = 1
+    await Timer(1, units="ps")
+    _assert_outputs(dut, 1, 1)
+    await tick(dut.clk, 1)
+    _assert_outputs(dut, 1, 1)
+
+    dut.in_reset.value = 0
+    await tick(dut.clk, 1)
+    _assert_outputs(dut, 1, 1)
+    await tick(dut.clk, 1)
+    _assert_outputs(dut, 0, 1)
+
+    await FallingEdge(dut.clk)
+    dut.in_reset.value = 1
+    await Timer(1, units="ps")
+    _assert_outputs(dut, 1, 1)
+    await tick(dut.clk, 1)
+    _assert_outputs(dut, 1, 1)

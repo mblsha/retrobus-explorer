@@ -12,7 +12,7 @@ The Lucid projects in this repo include a subset of Alchitry components. We shou
 
 ### Required Alchitry Components (from `.alp` usage)
 
-1. `P0` `Conditioning/reset_conditioner.luc`
+1. `DONE` `P0` `Conditioning/reset_conditioner.luc` -> `shared_components::primitives::reset_conditioner`
 2. `P0` `Interfaces/uart_rx.luc`
 3. `P0` `Interfaces/uart_tx.luc`
 4. `P0` `Miscellaneous/pipeline.luc`
@@ -41,7 +41,7 @@ The Lucid projects in this repo include a subset of Alchitry components. We shou
 
 Every ported component needs a focused cocotb testbench that validates only that component behavior before integrating into project tops.
 
-1. `test_reset_conditioner.py`
+1. `DONE` `test_reset_conditioner.py`
 2. `test_uart_rx.py`
 3. `test_uart_tx.py`
 4. `test_my_uart_tx.py`
