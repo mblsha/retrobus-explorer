@@ -10,6 +10,17 @@ This directory contains Spade rewrites of the Lucid projects in `../../`:
 
 Shared logic lives in `shared-components`, shared vendor HDL lives in `shared-verilog`, and reusable scripts are in `tools`.
 
+## UV Workspace
+
+`spade-projects` is a single uv umbrella workspace with `*-spade` members. Testbench Python dependencies live in one shared env at `spade-projects/.venv`.
+
+One-time setup:
+
+```sh
+cd spade-projects
+uv sync
+```
+
 ## Common Commands
 
 Run testbench + generate VCD/Surfer:
