@@ -15,9 +15,9 @@ The Lucid projects in this repo include a subset of Alchitry components. We shou
 1. `DONE` `P0` `Conditioning/reset_conditioner.luc` -> `shared_components::primitives::reset_conditioner`
 2. `DONE` `P0` `Interfaces/uart_rx.luc` -> `shared_components::serial::uart_rx`
 3. `DONE` `P0` `Interfaces/uart_tx.luc` -> `shared_components::serial::uart_tx`
-4. `P0` `Miscellaneous/pipeline.luc`
+4. `DONE` `P0` `Miscellaneous/pipeline.luc` -> `shared_components::primitives::sync_delay`
 5. `DONE` `P0` `Pulses/edge_detector.luc` -> `shared_components::primitives::{rising_edge, falling_edge}`
-6. `P1` `Memory/fifo.luc`
+6. `DONE` `P1` `Memory/fifo.luc` -> `shared_components::memory::fifo_u8x8`
 7. `P1` `Memory/async_fifo.luc`
 8. `P1` `Interfaces/ft.luc`
 9. `P1` `Memory/simple_dual_port_ram.v` (as external Verilog module + Spade wrapper)
@@ -45,9 +45,9 @@ Every ported component needs a focused cocotb testbench that validates only that
 2. `DONE` `test_uart_rx.py`
 3. `DONE` `test_uart_tx.py`
 4. `test_my_uart_tx.py`
-5. `test_pipeline.py`
+5. `DONE` `test_pipeline.py` (covered by `test_sync_delay.py`)
 6. `DONE` `test_rising_edge.py`, `test_falling_edge.py`
-7. `test_fifo.py`
+7. `DONE` `test_fifo.py` (implemented as `test_fifo_u8.py`)
 8. `test_async_fifo.py`
 9. `test_simple_dual_port_ram.py`
 10. `test_ft.py`

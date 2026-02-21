@@ -1,0 +1,116 @@
+fn write_at_u8<#uint N, #uint W>(
+    arr: [uint<8>; N],
+    idx: uint<W>,
+    val: uint<8>,
+) -> [uint<8>; N]
+where W: {uint_bits_to_fit(N - 1)}
+{
+    arr.enumerate().map(fn |(i, item)| {
+        if i == idx {
+            val
+        } else {
+            item
+        }
+    })
+}
+
+fn ptr_inc<#uint W>(ptr: uint<W>) -> uint<W> {
+    // ENTRIES is expected to be a power of two, so trunc() wraps correctly.
+    trunc(ptr + 1)
+}
+
+pub struct FifoU8x8Out {
+    full: bool,
+    empty: bool,
+    dout: uint<8>,
+    used: uint<4>,
+}
+
+// Synchronous first-word-fall-through FIFO for uint<8> payloads.
+// Matches Alchitry's fifo.luc behavior:
+// - full when next write pointer equals read pointer (usable depth = ENTRIES-1)
+// - empty based on delayed write pointer (first write appears after one extra cycle)
+pub entity fifo_u8<#uint ENTRIES, #uint ADDR_W, #uint COUNT_W>(
+    clk: clock,
+    rst: bool,
+    din: uint<8>,
+    wput: bool,
+    rget: bool,
+) -> (bool, bool, uint<8>, uint<COUNT_W>)
+where
+    ADDR_W: {uint_bits_to_fit(ENTRIES - 1)},
+    COUNT_W: {uint_bits_to_fit(ENTRIES)}
+{
+    // Packed state to avoid declaration-order dependency issues across interlocked regs.
+    reg(clk) state:
+        (uint<ADDR_W>, uint<ADDR_W>, uint<ADDR_W>, uint<COUNT_W>, uint<8>, [uint<8>; ENTRIES])
+        reset(rst: (0, 0, 0, 0, 0, [0; ENTRIES]))
+        = {
+            let waddr: uint<ADDR_W> = state.0;
+            let waddr_delay: uint<ADDR_W> = state.1;
+            let raddr: uint<ADDR_W> = state.2;
+            let used: uint<COUNT_W> = state.3;
+            let storage: [uint<8>; ENTRIES] = state.5;
+
+            let next_write = ptr_inc(waddr);
+            let wrdy = next_write != raddr;
+            let rrdy = raddr != waddr_delay;
+            let do_write = wput && wrdy;
+            let do_read = rget && rrdy;
+
+            let next_waddr = if do_write { next_write } else { waddr };
+            let next_raddr = if do_read { ptr_inc(raddr) } else { raddr };
+            let next_used = if do_write && !do_read {
+                trunc(used + 1)
+            } else if do_read && !do_write {
+                trunc(used - 1)
+            } else {
+                used
+            };
+            let read_addr = if do_read { ptr_inc(raddr) } else { raddr };
+            let next_read_data = storage[read_addr];
+            let next_storage = if do_write {
+                write_at_u8::<ENTRIES, ADDR_W>(storage, waddr, din)
+            } else {
+                storage
+            };
+
+            (
+                next_waddr,
+                waddr,
+                next_raddr,
+                next_used,
+                next_read_data,
+                next_storage,
+            )
+        };
+
+    let waddr: uint<ADDR_W> = state.0;
+    let waddr_delay: uint<ADDR_W> = state.1;
+    let raddr: uint<ADDR_W> = state.2;
+    let used: uint<COUNT_W> = state.3;
+    let read_data: uint<8> = state.4;
+
+    let next_write = ptr_inc(waddr);
+    let wrdy = next_write != raddr;
+    let rrdy = raddr != waddr_delay;
+    let full = !wrdy;
+    let empty = !rrdy;
+    (full, empty, read_data, used)
+}
+
+pub entity fifo_u8x8(
+    clk: clock,
+    rst: bool,
+    din: uint<8>,
+    wput: bool,
+    rget: bool,
+) -> FifoU8x8Out {
+    let (full, empty, dout, used) = inst fifo_u8::<8, _, _>(clk, rst, din, wput, rget);
+    FifoU8x8Out$(
+        full,
+        empty,
+        dout,
+        used,
+    )
+}
