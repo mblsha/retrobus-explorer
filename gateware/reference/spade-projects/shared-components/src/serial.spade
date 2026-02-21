@@ -1,7 +1,3 @@
-use protocols::uart::UartConfig;
-use protocols::uart::UartOut;
-use ready_valid::Rv;
-
 pub struct UartTxOut {
     tx: bool,
     ready: bool,
@@ -13,6 +9,39 @@ pub struct UartRxOut {
     byte: uint<8>,
 }
 
+fn bit_time_last(bit_time: uint<15>) -> uint<15> {
+    if bit_time == 0 {
+        0
+    } else {
+        trunc(bit_time - 1)
+    }
+}
+
+fn normalized_stop_bits(stop_bits: uint<3>) -> uint<3> {
+    if stop_bits == 0 {
+        1
+    } else {
+        stop_bits
+    }
+}
+
+fn extra_stop_bits(stop_bits: uint<3>) -> uint<3> {
+    let normalized = normalized_stop_bits(stop_bits);
+    if normalized > 1 {
+        trunc(normalized - 1)
+    } else {
+        0
+    }
+}
+
+enum TxState {
+    Idle,
+    StartBit{time: uint<15>, data: uint<8>, odd_parity: bool},
+    DataBit{time: uint<15>, num_left: uint<4>, data: uint<8>, odd_parity: bool},
+    ParityBit{time: uint<15>, odd_parity: bool},
+    StopBit{time: uint<15>, count: uint<3>},
+}
+
 pub entity uart_tx(
     clk: clock,
     rst: bool,
@@ -22,19 +51,90 @@ pub entity uart_tx(
     parity: bool,
     stop_bits: uint<3>,
 ) -> UartTxOut {
-    let config = UartConfig$(
-        bit_time,
-        parity,
-        stop_bits,
-    );
-    let tx_word = if send { Some(data_byte) } else { None() };
-    let (ready, ready_inv): (&bool, inv &bool) = port;
-    let tx = inst protocols::uart::uart_tx(clk, rst, Rv(&tx_word, ready_inv), config);
+    let last = bit_time_last(bit_time);
+    let stop_count = normalized_stop_bits(stop_bits);
+    reg(clk) state: TxState reset(rst: TxState::Idle()) = {
+        match state {
+            TxState::Idle => {
+                if send {
+                    TxState::StartBit(0, data_byte, false)
+                } else {
+                    TxState::Idle()
+                }
+            },
+            TxState::StartBit$(time, data, odd_parity) => {
+                if time == last {
+                    TxState::DataBit(0, 7, data, odd_parity)
+                } else {
+                    TxState::StartBit(trunc(time + 1), data, odd_parity)
+                }
+            },
+            TxState::DataBit$(time, num_left, data, odd_parity) => {
+                let bit = (data & 1) == 1;
+                let next_odd = odd_parity ^^ bit;
+                if time == last {
+                    if num_left == 0 {
+                        if parity {
+                            TxState::ParityBit(0, next_odd)
+                        } else {
+                            TxState::StopBit(0, stop_count)
+                        }
+                    } else {
+                        TxState::DataBit(0, trunc(num_left - 1), data >> 1, next_odd)
+                    }
+                } else {
+                    TxState::DataBit(trunc(time + 1), num_left, data, odd_parity)
+                }
+            },
+            TxState::ParityBit$(time, odd_parity) => {
+                if time == last {
+                    TxState::StopBit(0, stop_count)
+                } else {
+                    TxState::ParityBit(trunc(time + 1), odd_parity)
+                }
+            },
+            TxState::StopBit$(time, count) => {
+                if time == last {
+                    if count == 1 {
+                        TxState::Idle()
+                    } else {
+                        TxState::StopBit(0, trunc(count - 1))
+                    }
+                } else {
+                    TxState::StopBit(trunc(time + 1), count)
+                }
+            },
+        }
+    };
+
+    // Match Alchitry timing semantics: tx is a registered output derived from
+    // the previous state's drive value.
+    reg(clk) tx_reg: bool reset(rst: true) = {
+        match state {
+            TxState::Idle => true,
+            TxState::StartBit(_, _, _) => false,
+            TxState::DataBit(_, _, data, _) => (data & 1) == 1,
+            TxState::ParityBit(_, odd_parity) => odd_parity,
+            TxState::StopBit(_, _) => true,
+        }
+    };
 
     UartTxOut$(
-        tx,
-        ready: *ready,
+        tx: tx_reg,
+        ready: match state {
+            TxState::Idle => true,
+            _ => false,
+        },
     )
+}
+
+enum RxState {
+    Idle,
+    WaitHalf{time: uint<15>},
+    WaitData{time: uint<15>, bit_idx: uint<4>, data: uint<8>, odd_parity: bool},
+    WaitParity{time: uint<15>, data: uint<8>, odd_parity: bool},
+    WaitExtraStop{time: uint<15>, count: uint<3>},
+    WaitHigh,
 }
 
 pub entity uart_rx(
@@ -45,16 +145,139 @@ pub entity uart_rx(
     parity: bool,
     stop_bits: uint<3>,
 ) -> UartRxOut {
-    let config = UartConfig$(
-        bit_time,
-        parity,
-        stop_bits,
-    );
-    let rx_out = inst protocols::uart::uart_rx(clk, rst, rx, config);
+    let last = bit_time_last(bit_time);
+    let half = bit_time >> 1;
+    let stops_after_first = extra_stop_bits(stop_bits);
 
-    match rx_out {
-        UartOut::Ok(val) => UartRxOut$(valid: true, parity_error: false, byte: val),
-        UartOut::ParityError(val) => UartRxOut$(valid: true, parity_error: true, byte: val),
-        UartOut::None => UartRxOut$(valid: false, parity_error: false, byte: 0),
-    }
+    // Alchitry compatibility: use a 3-stage synchronizer and sample from
+    // the oldest stage for start/bit detection.
+    reg(clk) rx_d0: bool reset(rst: true) = rx;
+    reg(clk) rx_d1: bool reset(rst: true) = rx_d0;
+    reg(clk) rx_d2: bool reset(rst: true) = rx_d1;
+    let rx_sync = rx_d2;
+
+    reg(clk) state: RxState reset(rst: RxState::Idle()) = {
+        match state {
+            RxState::Idle => {
+                if !rx_sync {
+                    RxState::WaitHalf(0)
+                } else {
+                    RxState::Idle()
+                }
+            },
+            RxState::WaitHalf(time) => {
+                if time == half {
+                    RxState::WaitData(0, 0, 0, false)
+                } else {
+                    RxState::WaitHalf(trunc(time + 1))
+                }
+            },
+            RxState::WaitData$(time, bit_idx, data, odd_parity) => {
+                let incoming: uint<8> = if rx_sync { 0x80 } else { 0x00 };
+                let next_data = trunc((data >> 1) | incoming);
+                let next_odd = odd_parity ^^ rx_sync;
+                if time == last {
+                    if bit_idx == 7 {
+                        if parity {
+                            RxState::WaitParity(0, next_data, next_odd)
+                        } else {
+                            if stops_after_first == 0 {
+                                RxState::WaitHigh()
+                            } else {
+                                RxState::WaitExtraStop(0, stops_after_first)
+                            }
+                        }
+                    } else {
+                        RxState::WaitData(0, trunc(bit_idx + 1), next_data, next_odd)
+                    }
+                } else {
+                    RxState::WaitData(trunc(time + 1), bit_idx, data, odd_parity)
+                }
+            },
+            RxState::WaitParity$(time, data, odd_parity) => {
+                if time == last {
+                    if stops_after_first == 0 {
+                        RxState::WaitHigh()
+                    } else {
+                        RxState::WaitExtraStop(0, stops_after_first)
+                    }
+                } else {
+                    RxState::WaitParity(trunc(time + 1), data, odd_parity)
+                }
+            },
+            RxState::WaitExtraStop$(time, count) => {
+                if time == last {
+                    if count == 1 {
+                        RxState::WaitHigh()
+                    } else {
+                        RxState::WaitExtraStop(0, trunc(count - 1))
+                    }
+                } else {
+                    RxState::WaitExtraStop(trunc(time + 1), count)
+                }
+            },
+            RxState::WaitHigh => {
+                if rx_sync {
+                    RxState::Idle()
+                } else {
+                    RxState::WaitHigh()
+                }
+            },
+        }
+    };
+
+    reg(clk) out_valid: bool reset(rst: false) = {
+        match state {
+            RxState::WaitData$(time, bit_idx, data, odd_parity) => !parity && time == last && bit_idx == 7,
+            RxState::WaitParity$(time, data, odd_parity) => time == last,
+            _ => false,
+        }
+    };
+
+    reg(clk) out_byte: uint<8> reset(rst: 0) = {
+        match state {
+            RxState::WaitData$(time, bit_idx, data, odd_parity) => {
+                if !parity && time == last && bit_idx == 7 {
+                    let incoming: uint<8> = if rx_sync { 0x80 } else { 0x00 };
+                    trunc((data >> 1) | incoming)
+                } else {
+                    out_byte
+                }
+            },
+            RxState::WaitParity$(time, data, odd_parity) => {
+                if time == last {
+                    data
+                } else {
+                    out_byte
+                }
+            },
+            _ => out_byte,
+        }
+    };
+
+    reg(clk) out_parity_error: bool reset(rst: false) = {
+        match state {
+            RxState::WaitData$(time, bit_idx, data, odd_parity) => {
+                if !parity && time == last && bit_idx == 7 {
+                    false
+                } else {
+                    out_parity_error
+                }
+            },
+            RxState::WaitParity$(time, data, odd_parity) => {
+                if time == last {
+                    odd_parity ^^ rx_sync
+                } else {
+                    out_parity_error
+                }
+            },
+            _ => out_parity_error,
+        }
+    };
+
+    UartRxOut$(
+        valid: out_valid,
+        parity_error: if out_valid { out_parity_error } else { false },
+        byte: if out_valid { out_byte } else { 0 },
+    )
 }
