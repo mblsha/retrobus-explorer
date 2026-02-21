@@ -1,5 +1,6 @@
 use shared_components::primitives::counter_u8;
 use shared_components::primitives::falling_edge;
+use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::primitives::sync2;
@@ -33,6 +34,19 @@ entity tb_sync_delay(
     set output_stage2 = &sync2;
     set output_stage4 = &sync4;
     set output_stage6 = &sync6;
+}
+
+#[no_mangle(all)]
+entity tb_reset_conditioner(
+    clk: clock,
+    in_reset: bool,
+    output_stage2: inv &bool,
+    output_stage4: inv &bool,
+) {
+    let reset2 = inst reset_conditioner::<2>(clk, in_reset);
+    let reset4 = inst reset_conditioner::<4>(clk, in_reset);
+    set output_stage2 = &reset2;
+    set output_stage4 = &reset4;
 }
 
 #[no_mangle(all)]

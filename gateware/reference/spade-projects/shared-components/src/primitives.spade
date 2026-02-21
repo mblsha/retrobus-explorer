@@ -1,29 +1,17 @@
-pub entity sync_delay<#uint STAGES>(
+pipeline(STAGES) sync_delay_pipe<#int STAGES>(
     clk: clock,
     input_signal: bool,
 ) -> bool {
-    // Two stages are the minimum for metastability filtering.
-    // Additional stages can be used as intentional timing delay,
-    // matching Alchitry pipeline-depth patterns (2/4/6).
-    reg(clk) stage0: bool = input_signal;
-    reg(clk) stage1: bool = stage0;
-    reg(clk) stage2: bool = stage1;
-    reg(clk) stage3: bool = stage2;
-    reg(clk) stage4: bool = stage3;
-    reg(clk) stage5: bool = stage4;
+    reg * STAGES;
+    input_signal
+}
 
-    if STAGES == 0u32 || STAGES == 1u32 || STAGES == 2u32 {
-        stage1
-    } else if STAGES == 3u32 {
-        stage2
-    } else if STAGES == 4u32 {
-        stage3
-    } else if STAGES == 5u32 {
-        stage4
-    } else {
-        // STAGES >= 6 (or any unsupported large value) is treated as 6.
-        stage5
-    }
+pub entity sync_delay<#int STAGES>(
+    clk: clock,
+    input_signal: bool,
+) -> bool {
+    // Generic N-stage synchronizer/delay chain.
+    inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
 pub entity sync2(
@@ -47,6 +35,18 @@ pub entity sync6(
     input_signal: bool,
 ) -> bool {
     inst sync_delay::<6>(clk, input_signal)
+}
+
+pub entity reset_conditioner<#uint STAGES>(
+    clk: clock,
+    in_reset: bool,
+) -> bool {
+    // DRY generic implementation of Alchitry-style conditioner:
+    // assert immediately via `in_reset`, release after STAGES clocks.
+    reg(clk) stages: [bool; STAGES] reset(in_reset: [true; STAGES]) =
+        std::conv::concat_arrays([false], stages[0..STAGES - 1]);
+    let top = stages[STAGES - 1..STAGES][0];
+    in_reset || top
 }
 
 pub entity rising_edge(

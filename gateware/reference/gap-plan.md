@@ -16,7 +16,7 @@ The Lucid projects in this repo include a subset of Alchitry components. We shou
 2. `P0` `Interfaces/uart_rx.luc`
 3. `P0` `Interfaces/uart_tx.luc`
 4. `P0` `Miscellaneous/pipeline.luc`
-5. `P0` `Pulses/edge_detector.luc`
+5. `DONE` `P0` `Pulses/edge_detector.luc` -> `shared_components::primitives::{rising_edge, falling_edge}`
 6. `P1` `Memory/fifo.luc`
 7. `P1` `Memory/async_fifo.luc`
 8. `P1` `Interfaces/ft.luc`
@@ -46,7 +46,7 @@ Every ported component needs a focused cocotb testbench that validates only that
 3. `test_uart_tx.py`
 4. `test_my_uart_tx.py`
 5. `test_pipeline.py`
-6. `test_edge_detector.py`
+6. `DONE` `test_rising_edge.py`, `test_falling_edge.py`
 7. `test_fifo.py`
 8. `test_async_fifo.py`
 9. `test_simple_dual_port_ram.py`
