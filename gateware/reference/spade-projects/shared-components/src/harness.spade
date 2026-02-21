@@ -4,6 +4,7 @@ use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::primitives::sync2;
+use shared_components::memory::fifo_u8x8;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx;
 use shared_components::sharp::count_on_event_u8;
@@ -167,4 +168,23 @@ entity tb_uart_rx(
     set rx_valid = &rx_out.valid;
     set rx_parity_error = &rx_out.parity_error;
     set rx_byte = &rx_out.byte;
+}
+
+#[no_mangle(all)]
+entity tb_fifo_u8(
+    clk: clock,
+    rst: bool,
+    din: uint<8>,
+    wput: bool,
+    rget: bool,
+    full: inv &bool,
+    empty: inv &bool,
+    dout: inv &uint<8>,
+    used: inv &uint<4>,
+) {
+    let out = inst fifo_u8x8(clk, rst, din, wput, rget);
+    set full = &out.full;
+    set empty = &out.empty;
+    set dout = &out.dout;
+    set used = &out.used;
 }
