@@ -12,6 +12,7 @@ from pathlib import Path
 
 COMPONENTS = [
     "sync_delay",
+    "reset_conditioner",
     "rising_edge",
     "falling_edge",
     "sync2",
