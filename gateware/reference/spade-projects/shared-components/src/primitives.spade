@@ -1,10 +1,52 @@
+pub entity sync_delay<#uint STAGES>(
+    clk: clock,
+    input_signal: bool,
+) -> bool {
+    // Two stages are the minimum for metastability filtering.
+    // Additional stages can be used as intentional timing delay,
+    // matching Alchitry pipeline-depth patterns (2/4/6).
+    reg(clk) stage0: bool = input_signal;
+    reg(clk) stage1: bool = stage0;
+    reg(clk) stage2: bool = stage1;
+    reg(clk) stage3: bool = stage2;
+    reg(clk) stage4: bool = stage3;
+    reg(clk) stage5: bool = stage4;
+
+    if STAGES == 0u32 || STAGES == 1u32 || STAGES == 2u32 {
+        stage1
+    } else if STAGES == 3u32 {
+        stage2
+    } else if STAGES == 4u32 {
+        stage3
+    } else if STAGES == 5u32 {
+        stage4
+    } else {
+        // STAGES >= 6 (or any unsupported large value) is treated as 6.
+        stage5
+    }
+}
+
 pub entity sync2(
     clk: clock,
     input_signal: bool,
 ) -> bool {
-    reg(clk) stage0: bool = input_signal;
-    reg(clk) stage1: bool = stage0;
-    stage1
+    // Equivalent to Alchitry `pipeline` with `#DEPTH(2)`: a 2-FF synchronizer
+    // used for metastability hardening of asynchronous inputs.
+    inst sync_delay::<2>(clk, input_signal)
+}
+
+pub entity sync4(
+    clk: clock,
+    input_signal: bool,
+) -> bool {
+    inst sync_delay::<4>(clk, input_signal)
+}
+
+pub entity sync6(
+    clk: clock,
+    input_signal: bool,
+) -> bool {
+    inst sync_delay::<6>(clk, input_signal)
 }
 
 pub entity rising_edge(
