@@ -49,26 +49,23 @@ def main() -> int:
         return 2
 
     test_dir = project / "test"
-    venv_python = project / ".venv-host" / "bin" / "python"
     tools_dir = Path(__file__).resolve().parent
+    umbrella_project = tools_dir.parent
 
     env = os.environ.copy()
     env["PATH"] = f"{Path.home()}/.local/share/swim/bin/oss-cad-suite/bin:{env['PATH']}"
     env["PYTHONPATH"] = str(tools_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    env.pop("VIRTUAL_ENV", None)
     if shutil.which("verilator", path=env["PATH"]) is None:
         print("error: verilator not found in PATH", file=sys.stderr)
         return 1
 
     run(["swim", "build"], cwd=project, env=env)
 
-    if not venv_python.exists():
-        run(["uv", "venv", str(project / ".venv-host")], cwd=project, env=env)
-
-    run(
-        ["uv", "pip", "install", "--python", str(venv_python), "cocotb<2"],
-        cwd=project,
-        env=env,
-    )
+    # Avoid stale cocotb/verilator makefiles when the Python env path changes.
+    cocotb_build_dir = project / args.build_dir
+    if cocotb_build_dir.exists():
+        shutil.rmtree(cocotb_build_dir)
 
     verilog_sources = [project / "build" / "spade.sv"] + resolve_verilog_sources(project)
     verilog_list_repr = ", ".join(f"Path(r'{p}')" for p in verilog_sources)
@@ -79,7 +76,19 @@ def main() -> int:
         f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{top}', always=True, waves=True, build_dir='{args.build_dir}')\n"
         f"runner.test(hdl_toplevel='{top}', test_module='{test_module}', test_dir=Path('test'), waves=True)\n"
     )
-    run([str(venv_python), "-c", driver], cwd=project, env=env)
+    run(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(umbrella_project),
+            "python",
+            "-c",
+            driver,
+        ],
+        cwd=project,
+        env=env,
+    )
 
     vcd = test_dir / "dump.vcd"
     surfer_vcd = test_dir / "dump.surfer.vcd"
