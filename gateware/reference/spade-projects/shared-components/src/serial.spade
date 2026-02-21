@@ -9,6 +9,42 @@ pub struct UartRxOut {
     byte: uint<8>,
 }
 
+#[no_mangle(all)]
+extern entity ft_u16_v(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ft_data_out: inv &uint<16>,
+    ft_be_out: inv &uint<2>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<16>,
+    ui_dout_be: inv &uint<2>,
+    ui_dout_empty: inv &bool,
+    ui_dout_get: bool,
+);
+
+pub struct FtU16Out {
+    ft_data_out: uint<16>,
+    ft_be_out: uint<2>,
+    ft_rd: bool,
+    ft_wr: bool,
+    ft_oe: bool,
+    ui_din_full: bool,
+    ui_dout: uint<16>,
+    ui_dout_be: uint<2>,
+    ui_dout_empty: bool,
+}
+
 fn bit_time_last(bit_time: uint<15>) -> uint<15> {
     if bit_time == 0 {
         0
@@ -279,5 +315,64 @@ pub entity uart_rx(
         valid: out_valid,
         parity_error: if out_valid { out_parity_error } else { false },
         byte: if out_valid { out_byte } else { 0 },
+    )
+}
+
+pub entity ft_u16(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+) -> FtU16Out {
+    let (ft_data_out, ft_data_out_w): (&uint<16>, inv &uint<16>) = port;
+    let (ft_be_out, ft_be_out_w): (&uint<2>, inv &uint<2>) = port;
+    let (ft_rd, ft_rd_w): (&bool, inv &bool) = port;
+    let (ft_wr, ft_wr_w): (&bool, inv &bool) = port;
+    let (ft_oe, ft_oe_w): (&bool, inv &bool) = port;
+    let (ui_din_full, ui_din_full_w): (&bool, inv &bool) = port;
+    let (ui_dout, ui_dout_w): (&uint<16>, inv &uint<16>) = port;
+    let (ui_dout_be, ui_dout_be_w): (&uint<2>, inv &uint<2>) = port;
+    let (ui_dout_empty, ui_dout_empty_w): (&bool, inv &bool) = port;
+
+    let _ = inst ft_u16_v(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ft_data_out_w,
+        ft_be_out_w,
+        ft_rd_w,
+        ft_wr_w,
+        ft_oe_w,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_din_full_w,
+        ui_dout_w,
+        ui_dout_be_w,
+        ui_dout_empty_w,
+        ui_dout_get,
+    );
+
+    FtU16Out$(
+        ft_data_out: *ft_data_out,
+        ft_be_out: *ft_be_out,
+        ft_rd: *ft_rd,
+        ft_wr: *ft_wr,
+        ft_oe: *ft_oe,
+        ui_din_full: *ui_din_full,
+        ui_dout: *ui_dout,
+        ui_dout_be: *ui_dout_be,
+        ui_dout_empty: *ui_dout_empty,
     )
 }
