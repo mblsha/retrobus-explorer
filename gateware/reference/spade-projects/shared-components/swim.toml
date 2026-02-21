@@ -1,5 +1,8 @@
 name = "shared_components"
 
+[libraries]
+protocols.git = "https://gitlab.com/spade-lang/lib/protocols"
+
 [tooling]
 top = "tb_sync2"
 test_module = "test_sync2"

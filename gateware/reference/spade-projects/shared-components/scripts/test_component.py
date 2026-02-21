@@ -18,6 +18,8 @@ CASES: dict[str, tuple[str, str]] = {
     "rising_edge": ("tb_rising_edge", "test_rising_edge"),
     "falling_edge": ("tb_falling_edge", "test_falling_edge"),
     "sync2": ("tb_sync2", "test_sync2"),
+    "uart_tx": ("tb_uart_tx", "test_uart_tx"),
+    "uart_rx": ("tb_uart_rx", "test_uart_rx"),
     "counter_u8": ("tb_counter_u8", "test_counter_u8"),
     "count_on_event_u8": ("tb_count_on_event_u8", "test_count_on_event_u8"),
     "g850_wait_hold": ("tb_g850_wait_hold", "test_g850_wait_hold"),

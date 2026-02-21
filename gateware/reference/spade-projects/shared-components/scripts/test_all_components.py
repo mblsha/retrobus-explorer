@@ -16,6 +16,8 @@ COMPONENTS = [
     "rising_edge",
     "falling_edge",
     "sync2",
+    "uart_tx",
+    "uart_rx",
     "counter_u8",
     "count_on_event_u8",
     "g850_wait_hold",
