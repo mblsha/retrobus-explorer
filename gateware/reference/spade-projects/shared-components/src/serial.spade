@@ -1,6 +1,6 @@
 pub struct UartTxOut {
     tx: bool,
-    ready: bool,
+    busy: bool,
 }
 
 pub struct UartRxOut {
@@ -70,98 +70,103 @@ fn extra_stop_bits(stop_bits: uint<3>) -> uint<3> {
     }
 }
 
-enum TxState {
+enum MyUartTxState {
     Idle,
-    StartBit{time: uint<15>, data: uint<8>, odd_parity: bool},
-    DataBit{time: uint<15>, num_left: uint<4>, data: uint<8>, odd_parity: bool},
-    ParityBit{time: uint<15>, odd_parity: bool},
-    StopBit{time: uint<15>, count: uint<3>},
+    StartBit,
+    Data,
+    StopBit,
 }
 
-pub entity uart_tx(
+pub entity my_uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
-    send: bool,
-    data_byte: uint<8>,
-    bit_time: uint<15>,
-    parity: bool,
-    stop_bits: uint<3>,
+    block: bool,
+    data: uint<DATA_WIDTH>,
+    new_data: bool,
 ) -> UartTxOut {
-    let last = bit_time_last(bit_time);
-    let stop_count = normalized_stop_bits(stop_bits);
-    reg(clk) state: TxState reset(rst: TxState::Idle()) = {
-        match state {
-            TxState::Idle => {
-                if send {
-                    TxState::StartBit(0, data_byte, false)
-                } else {
-                    TxState::Idle()
-                }
-            },
-            TxState::StartBit$(time, data, odd_parity) => {
-                if time == last {
-                    TxState::DataBit(0, 7, data, odd_parity)
-                } else {
-                    TxState::StartBit(trunc(time + 1), data, odd_parity)
-                }
-            },
-            TxState::DataBit$(time, num_left, data, odd_parity) => {
-                let bit = (data & 1) == 1;
-                let next_odd = odd_parity ^^ bit;
-                if time == last {
-                    if num_left == 0 {
-                        if parity {
-                            TxState::ParityBit(0, next_odd)
+    // Match Lucid:
+    // CLK_PER_BIT = (CLK_FREQ + BAUD) / BAUD - 1
+    // and transitions when ctr == CLK_PER_BIT - 1.
+    let clk_per_bit = ((CLK_FREQ + BAUD) `std::ops::comb_div` BAUD) - 1;
+    let ctr_last = clk_per_bit - 1;
+
+    reg(clk) regs: (MyUartTxState, uint<32>, uint<32>, uint<DATA_WIDTH>, bool, bool)
+        reset(rst: (MyUartTxState::Idle(), 0, 0, 0, false, false))
+        = {
+            let state: MyUartTxState = regs.0;
+            let ctr: uint<32> = regs.1;
+            let bit_ctr: uint<32> = regs.2;
+            let saved_data: uint<DATA_WIDTH> = regs.3;
+            let block_flag: bool = regs.5;
+
+            let ctr_inc: uint<32> = trunc(ctr + 1);
+            let block_flag_next = block;
+
+            match state {
+                MyUartTxState::Idle => {
+                    if !block_flag {
+                        if new_data {
+                            // Accept a new payload and move to start bit.
+                            (MyUartTxState::StartBit(), 0, 0, data, true, block_flag_next)
                         } else {
-                            TxState::StopBit(0, stop_count)
+                            (MyUartTxState::Idle(), 0, 0, saved_data, true, block_flag_next)
                         }
                     } else {
-                        TxState::DataBit(0, trunc(num_left - 1), data >> 1, next_odd)
+                        (MyUartTxState::Idle(), ctr, bit_ctr, saved_data, true, block_flag_next)
                     }
-                } else {
-                    TxState::DataBit(trunc(time + 1), num_left, data, odd_parity)
-                }
-            },
-            TxState::ParityBit$(time, odd_parity) => {
-                if time == last {
-                    TxState::StopBit(0, stop_count)
-                } else {
-                    TxState::ParityBit(trunc(time + 1), odd_parity)
-                }
-            },
-            TxState::StopBit$(time, count) => {
-                if time == last {
-                    if count == 1 {
-                        TxState::Idle()
+                },
+                MyUartTxState::StartBit => {
+                    if ctr == ctr_last {
+                        (MyUartTxState::Data(), 0, bit_ctr, saved_data, false, block_flag_next)
                     } else {
-                        TxState::StopBit(0, trunc(count - 1))
+                        (MyUartTxState::StartBit(), ctr_inc, bit_ctr, saved_data, false, block_flag_next)
                     }
-                } else {
-                    TxState::StopBit(trunc(time + 1), count)
-                }
-            },
-        }
-    };
+                },
+                MyUartTxState::Data => {
+                    let tx_bit = saved_data.to_bits()[trunc(bit_ctr)];
+                    if ctr == ctr_last {
+                        let bit_ctr_inc: uint<32> = trunc(bit_ctr + 1);
+                        if bit_ctr == DATA_WIDTH - 1 {
+                            (MyUartTxState::StopBit(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
+                        } else {
+                            (MyUartTxState::Data(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
+                        }
+                    } else {
+                        (MyUartTxState::Data(), ctr_inc, bit_ctr, saved_data, tx_bit, block_flag_next)
+                    }
+                },
+                MyUartTxState::StopBit => {
+                    if ctr == ctr_last {
+                        (MyUartTxState::Idle(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
+                    } else {
+                        (MyUartTxState::StopBit(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
+                    }
+                },
+            }
+        };
 
-    // Match Alchitry timing semantics: tx is a registered output derived from
-    // the previous state's drive value.
-    reg(clk) tx_reg: bool reset(rst: true) = {
-        match state {
-            TxState::Idle => true,
-            TxState::StartBit(_, _, _) => false,
-            TxState::DataBit(_, _, data, _) => (data & 1) == 1,
-            TxState::ParityBit(_, odd_parity) => odd_parity,
-            TxState::StopBit(_, _) => true,
-        }
+    let state: MyUartTxState = regs.0;
+    let tx_reg: bool = regs.4;
+    let block_flag: bool = regs.5;
+    let busy = match state {
+        MyUartTxState::Idle => block_flag,
+        _ => true,
     };
 
     UartTxOut$(
         tx: tx_reg,
-        ready: match state {
-            TxState::Idle => true,
-            _ => false,
-        },
+        busy: busy,
     )
+}
+
+pub entity uart_tx<#uint CLK_FREQ, #uint BAUD>(
+    clk: clock,
+    rst: bool,
+    data: uint<8>,
+    new_data: bool,
+) -> UartTxOut {
+    // Convenience wrapper for fixed 8-bit TX without external block control.
+    inst my_uart_tx::<CLK_FREQ, BAUD, 8>(clk, rst, false, data, new_data)
 }
 
 enum RxState {

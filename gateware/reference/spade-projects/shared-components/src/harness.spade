@@ -7,8 +7,8 @@ use shared_components::primitives::sync2;
 use shared_components::memory::fifo_u8x8;
 use shared_components::memory::async_fifo_u8x8;
 use shared_components::serial::ft_u16;
+use shared_components::serial::my_uart_tx;
 use shared_components::serial::uart_rx;
-use shared_components::serial::uart_tx;
 use shared_components::sharp::count_on_event_u8;
 use shared_components::sharp::g850_rom_byte;
 use shared_components::sharp::g850_stream_counter;
@@ -138,20 +138,19 @@ entity tb_g850_rom_gate(
 }
 
 #[no_mangle(all)]
-entity tb_uart_tx(
+entity tb_my_uart_tx(
     clk: clock,
     rst: bool,
-    send: bool,
-    data_byte: uint<8>,
-    bit_time: uint<15>,
-    parity: bool,
-    stop_bits: uint<3>,
+    block: bool,
+    data_word: uint<20>,
+    new_data: bool,
     tx_line: inv &bool,
-    tx_ready: inv &bool,
+    tx_busy: inv &bool,
 ) {
-    let tx_out = inst uart_tx(clk, rst, send, data_byte, bit_time, parity, stop_bits);
+    // Testbench instance for Lucid-compatible my_uart_tx.
+    let tx_out = inst my_uart_tx::<40, 10, 20>(clk, rst, block, data_word, new_data);
     set tx_line = &tx_out.tx;
-    set tx_ready = &tx_out.ready;
+    set tx_busy = &tx_out.busy;
 }
 
 #[no_mangle(all)]
