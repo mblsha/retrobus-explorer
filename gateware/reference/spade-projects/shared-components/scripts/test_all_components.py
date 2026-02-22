@@ -16,7 +16,7 @@ COMPONENTS = [
     "rising_edge",
     "falling_edge",
     "sync2",
-    "uart_tx",
+    "my_uart_tx",
     "uart_rx",
     "ft_u16",
     "fifo_u8",
