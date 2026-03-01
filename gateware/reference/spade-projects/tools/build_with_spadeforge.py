@@ -17,6 +17,27 @@ from pathlib import Path
 from project_meta import resolve_verilog_sources
 from project_meta import tooling_top
 
+BOARD_PARTS: dict[str, str] = {
+    "alchitry_au": "xc7a35tftg256-1",
+    "alchitry_au_plus": "xc7a100tftg256-1",
+    "alchitry_au_v2": "xc7a35tftg256-2",
+    "alchitry_pt_v2": "xc7a100tfgg484-2",
+}
+
+BOARD_ALIASES: dict[str, str] = {
+    "au": "alchitry_au",
+    "au1": "alchitry_au",
+    "alchitry_au1": "alchitry_au",
+    "au_plus": "alchitry_au_plus",
+    "alchitry_auplus": "alchitry_au_plus",
+    "au_v2": "alchitry_au_v2",
+    "auv2": "alchitry_au_v2",
+    "alchitry_auv2": "alchitry_au_v2",
+    "pt_v2": "alchitry_pt_v2",
+    "ptv2": "alchitry_pt_v2",
+    "alchitry_ptv2": "alchitry_pt_v2",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -28,7 +49,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server", help="Optional server URL; omit for zeroconf discovery")
     parser.add_argument("--discover-timeout", default="45s", help="mDNS discovery timeout")
     parser.add_argument("--top", help="Top module name (default: tooling.top or main)")
-    parser.add_argument("--part", default="xc7a35tftg256-1")
+    parser.add_argument(
+        "--board",
+        default="alchitry_au",
+        help="Board alias (default: alchitry_au). Supported: alchitry_au, alchitry_au_plus, alchitry_au_v2, alchitry_pt_v2",
+    )
+    parser.add_argument("--part", help="Target FPGA part (overrides --board)")
     parser.add_argument("--source", default="build/spade.sv")
     parser.add_argument("--xdc", default="constraints/pins.xdc")
     parser.add_argument("--output-dir", help="Artifact output directory")
@@ -36,6 +62,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-stream-events", action="store_true")
     parser.add_argument("extra", nargs="*", help="Extra flags passed to spadeforge-cli")
     return parser.parse_args()
+
+
+def resolve_target_part(explicit_part: str | None, board: str) -> str:
+    if explicit_part:
+        return explicit_part
+
+    key = board.strip().lower().replace("-", "_").replace("+", "_plus")
+    canonical = BOARD_ALIASES.get(key, key)
+    part = BOARD_PARTS.get(canonical)
+    if part:
+        return part
+
+    supported = ", ".join(sorted(BOARD_PARTS.keys()))
+    raise SystemExit(
+        f"error: unsupported --board {board!r}; supported values: {supported}"
+    )
 
 
 def resolve_cli(explicit: str | None) -> str:
@@ -74,6 +116,7 @@ def main() -> int:
     args = parse_args()
     project = args.project.resolve()
     top = tooling_top(project, args.top)
+    part = resolve_target_part(args.part, args.board)
     token = args.token or os.environ.get("SPADEFORGE_TOKEN")
     if not token:
         print("error: missing token; pass --token or set SPADEFORGE_TOKEN", file=sys.stderr)
@@ -110,7 +153,7 @@ def main() -> int:
         "--top",
         top,
         "--part",
-        args.part,
+        part,
         "--source",
         str(bundled_source),
         "--xdc",
