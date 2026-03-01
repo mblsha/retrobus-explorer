@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cli", help="spadeforge-cli path/command (default: PATH or /tmp/spadeforge-cli)")
     parser.add_argument("--server", help="Optional server URL; omit to use zeroconf discovery")
     parser.add_argument("--discover-timeout", default="45s", help="mDNS discovery timeout")
-    parser.add_argument("--output-dir", help="Optional output dir (default: forge-output-auto-<UTC timestamp>)")
+    parser.add_argument("--output-dir", help="Optional output dir (default: build/forge-output-<UTC timestamp>)")
     parser.add_argument("--no-stream-events", action="store_true", help="Disable --stream-events")
     parser.add_argument("extra", nargs="*", help="Additional flags appended to spadeforge-cli")
     return parser.parse_args()
@@ -49,10 +49,16 @@ def main() -> int:
         print("error: missing token; pass --token or set SPADEFORGE_TOKEN", file=sys.stderr)
         return 2
 
-    output_dir = Path(args.output_dir) if args.output_dir else root / f"forge-output-auto-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+    output_dir = (
+        Path(args.output_dir)
+        if args.output_dir
+        else root / "build" / f"forge-output-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+    )
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     out_zip = output_dir / "artifacts.zip"
+
+    subprocess.run(["swim", "build"], cwd=root, check=True)
 
     cmd = [
         resolve_cli(args.cli),
@@ -61,11 +67,11 @@ def main() -> int:
         "--top",
         "main",
         "--part",
-        "xc7a35tcsg324-1",
+        "xc7a35tftg256-1",
         "--source",
         str((root / "build/spade.sv").resolve()),
         "--xdc",
-        str((root / "constraints/allow_unconstrained.xdc").resolve()),
+        str((root / "constraints/pins.xdc").resolve()),
         "--output-dir",
         str(output_dir),
         "--out-zip",
