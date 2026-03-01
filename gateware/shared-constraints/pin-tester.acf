@@ -1,3 +1,7 @@
+// @meta.schema: 1
+// @meta.name: pin_tester_ffc
+// @meta.board: alchitry_au1
+// @meta.description: 48-bit FFC level-shifter mapping used by pin tester designs.
 STANDARD(LVCMOS33) {
     pin ffc_data[0] A49
     pin ffc_data[1] A48
