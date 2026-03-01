@@ -169,7 +169,6 @@ module alchitry_top (
 
         usb_tx = tx.tx
         rx.rx = usb_rx
-        tx.block = 0
         tx.data = 8h00
         tx.new_data = 0
 

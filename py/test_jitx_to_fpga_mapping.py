@@ -10,6 +10,22 @@ import pytest
 import jitx_to_fpga_mapping as jfm
 
 
+def normalize_acf_for_compare(content: str) -> str:
+    """Normalize ACF content for stable comparison.
+
+    Shared constraint files may include metadata headers (`// @meta.*`) that are
+    not emitted by the JITX mapping generators. Ignore those lines while
+    preserving the functional ACF body.
+    """
+    normalized_lines: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("// @meta."):
+            continue
+        normalized_lines.append(line.rstrip())
+    return "\n".join(normalized_lines).strip()
+
+
 @dataclass
 class BoardConfig:
     """Configuration for a board's ACF generation"""
@@ -69,7 +85,8 @@ class TestPinMappings:
         if not expected_path.exists():
             pytest.skip(f"Expected file {config.expected_file} not found - run generate_all_acf_files() first")
 
-        expected = expected_path.read_text().strip()
+        expected = normalize_acf_for_compare(expected_path.read_text())
+        generated = normalize_acf_for_compare(generated)
 
         # Compare
         assert generated == expected, f"ACF mismatch for {config.name}"
@@ -120,4 +137,3 @@ if __name__ == "__main__":
         generate_all_acf_files()
     else:
         pytest.main([__file__, "-v"])
-
