@@ -35,7 +35,6 @@ def main() -> int:
     parser.add_argument("--build-dir", default="build/main_cocotb", help="Cocotb build directory")
     args = parser.parse_args()
 
-    require_command("uv", "https://docs.astral.sh/uv/")
     require_command("swim", "install swim from spade-lang")
 
     project = args.project.resolve()
@@ -76,19 +75,12 @@ def main() -> int:
         f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{top}', always=True, waves=True, build_dir='{args.build_dir}')\n"
         f"runner.test(hdl_toplevel='{top}', test_module='{test_module}', test_dir=Path('test'), waves=True)\n"
     )
-    run(
-        [
-            "uv",
-            "run",
-            "--project",
-            str(umbrella_project),
-            "python",
-            "-c",
-            driver,
-        ],
-        cwd=project,
-        env=env,
-    )
+    venv_python = umbrella_project / ".venv" / "bin" / "python"
+    if venv_python.is_file():
+        run([str(venv_python), "-c", driver], cwd=project, env=env)
+    else:
+        require_command("uv", "https://docs.astral.sh/uv/")
+        run(["uv", "run", "python", "-c", driver], cwd=project, env=env)
 
     vcd = test_dir / "dump.vcd"
     surfer_vcd = test_dir / "dump.surfer.vcd"
