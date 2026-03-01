@@ -1,17 +1,11 @@
-name = "binary-counter"
+name = "binary_counter"
 
-[synthesis]
+[libraries]
+shared_components = { path = "../spade-projects/shared-components" }
+
+[tooling]
 top = "main"
-command = "synth_ice40"
+test_module = "counter_pins"
 
-[pnr]
-architecture = "ice40"
-device = "iCE40HX8K"
-pin_file = "cu.pcf"
-package = "cb132"
-
-[packing]
-tool = "icepack"
-
-[upload]
-tool = "iceprog"
+[simulation]
+testbench_dir = "test"

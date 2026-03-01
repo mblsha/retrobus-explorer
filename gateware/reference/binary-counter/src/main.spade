@@ -1,27 +1,83 @@
+use shared_components::primitives::reset_conditioner;
+use shared_components::serial::uart_rx;
+use shared_components::serial::uart_tx;
+
+fn is_ascii_digit(byte: uint<8>) -> bool {
+    byte >= 0x30 && byte <= 0x39
+}
+
+fn divider_last(slow_factor: uint<4>) -> uint<10> {
+    if slow_factor == 0 {
+        0
+    } else if slow_factor == 1 {
+        1
+    } else if slow_factor == 2 {
+        3
+    } else if slow_factor == 3 {
+        7
+    } else if slow_factor == 4 {
+        15
+    } else if slow_factor == 5 {
+        31
+    } else if slow_factor == 6 {
+        63
+    } else if slow_factor == 7 {
+        127
+    } else if slow_factor == 8 {
+        255
+    } else {
+        511
+    }
+}
+
 #[no_mangle(all)]
 entity main(
     clk: clock,
     rst_n: bool,
-    pin0: inv &bool,
-    pin1: inv &bool,
-    pin2: inv &bool,
-    pin3: inv &bool,
-    pin4: inv &bool,
-    pin5: inv &bool,
-    pin6: inv &bool,
-    pin7: inv &bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+    saleae: inv &[bool; 8],
 ) {
-    let rst = !rst_n;
+    let rst_in = !rst_n;
+    let rst = inst reset_conditioner::<4>(clk, rst_in);
 
-    reg(clk) counter: uint<8> reset(rst: 0) = trunc(counter + 1);
+    let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
+    let rx_digit = rx_out.valid && !rx_out.parity_error && is_ascii_digit(rx_out.byte);
+    let tx_out = inst uart_tx::<100_000_000, 1_000_000>(clk, rst, rx_out.byte, rx_digit);
+    let accepted_digit = rx_digit && !tx_out.busy;
+    let rx_digit_value: uint<4> = trunc(rx_out.byte - 0x30);
+
+    reg(clk) slow_factor: uint<4> reset(rst: 0) = {
+        if accepted_digit {
+            rx_digit_value
+        } else {
+            slow_factor
+        }
+    };
+
+    let last = divider_last(slow_factor);
+
+    reg(clk) prescaler: uint<10> reset(rst: 0) = {
+        if accepted_digit || prescaler == last {
+            0
+        } else {
+            trunc(prescaler + 1)
+        }
+    };
+
+    reg(clk) counter: uint<8> reset(rst: 0) = {
+        if accepted_digit {
+            counter
+        } else if prescaler == last {
+            trunc(counter + 1)
+        } else {
+            counter
+        }
+    };
+
     let bits = counter.to_bits();
-
-    set pin0 = &bits[0];
-    set pin1 = &bits[1];
-    set pin2 = &bits[2];
-    set pin3 = &bits[3];
-    set pin4 = &bits[4];
-    set pin5 = &bits[5];
-    set pin6 = &bits[6];
-    set pin7 = &bits[7];
+    set led = &bits;
+    set saleae = &bits;
+    set usb_tx = &tx_out.tx;
 }
