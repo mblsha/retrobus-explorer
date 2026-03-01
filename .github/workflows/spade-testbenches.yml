@@ -79,12 +79,13 @@ jobs:
         run: |
           set -euo pipefail
           python <<'PY'
+          import os
           import re
           import subprocess
           from pathlib import Path
 
           root = Path(".").resolve()
-          cache_root = Path("/home/runner/.cache/spade-compilers")
+          cache_root = Path(os.environ["SPADE_COMPILER_CACHE_ROOT"])
           cache_root.mkdir(parents=True, exist_ok=True)
 
           def spade_commit(lock_file: Path) -> str:
@@ -113,18 +114,18 @@ jobs:
               return compiler_dir
 
           def set_compiler_path(swim_toml: Path, compiler_dir: Path) -> None:
-              section = f"[compiler]\\npath = \"{compiler_dir}\"\\n"
+              section = f"[compiler]\npath = \"{compiler_dir}\"\n"
               text = swim_toml.read_text()
-              if re.search(r"(?m)^\\[compiler\\]\\s*$", text):
+              if re.search(r"(?m)^\[compiler\]\s*$", text):
                   text = re.sub(
-                      r"(?ms)^\\[compiler\\]\\s*\\n.*?(?=^\\[[^\\]]+\\]\\s*$|\\Z)",
+                      r"(?ms)^\[compiler\]\s*\n.*?(?=^\[[^\]]+\]\s*$|\Z)",
                       section,
                       text,
                   )
               else:
-                  if not text.endswith("\\n"):
-                      text += "\\n"
-                  text += "\\n" + section
+                  if not text.endswith("\n"):
+                      text += "\n"
+                  text += "\n" + section
               swim_toml.write_text(text)
 
           projects = sorted(root.glob("*/swim.toml"))
