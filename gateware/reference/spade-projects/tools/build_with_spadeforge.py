@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server", help="Optional server URL; omit for zeroconf discovery")
     parser.add_argument("--discover-timeout", default="45s", help="mDNS discovery timeout")
     parser.add_argument("--top", help="Top module name (default: tooling.top or main)")
-    parser.add_argument("--part", default="xc7a35tcsg324-1")
+    parser.add_argument("--part", default="xc7a35tftg256-1")
     parser.add_argument("--source", default="build/spade.sv")
     parser.add_argument("--xdc", default="constraints/pins.xdc")
     parser.add_argument("--output-dir", help="Artifact output directory")
