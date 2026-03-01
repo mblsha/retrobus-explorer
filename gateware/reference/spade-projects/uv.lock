@@ -10,6 +10,7 @@ members = [
     "sharp-pc-g850-streaming-rom-spade",
     "spade-projects-umbrella",
     "test-minimal-spade",
+    "uart-saleae-loopback-spade",
 ]
 
 [[package]]
@@ -82,3 +83,8 @@ requires-dist = [{ name = "cocotb", specifier = "<2" }]
 name = "test-minimal-spade"
 version = "0.1.0"
 source = { virtual = "test-minimal-spade" }
+
+[[package]]
+name = "uart-saleae-loopback-spade"
+version = "0.1.0"
+source = { virtual = "uart-saleae-loopback-spade" }

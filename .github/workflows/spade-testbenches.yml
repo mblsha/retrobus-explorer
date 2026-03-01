@@ -168,6 +168,7 @@ jobs:
             sharp-organizer-card-spade
             sharp-pc-g850-bus-spade
             sharp-pc-g850-streaming-rom-spade
+            uart-saleae-loopback-spade
           )
           for project in "${projects[@]}"; do
             echo "== Running ${project} testbench =="

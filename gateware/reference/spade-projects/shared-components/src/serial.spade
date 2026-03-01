@@ -33,6 +33,30 @@ extern entity ft_u16_v(
     ui_dout_get: bool,
 );
 
+#[no_mangle(all)]
+extern entity ft_u16_v_tx8192(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ft_data_out: inv &uint<16>,
+    ft_be_out: inv &uint<2>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<16>,
+    ui_dout_be: inv &uint<2>,
+    ui_dout_empty: inv &bool,
+    ui_dout_get: bool,
+);
+
 pub struct FtU16Out {
     ft_data_out: uint<16>,
     ft_be_out: uint<2>,
@@ -167,6 +191,33 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD>(
 ) -> UartTxOut {
     // Convenience wrapper for fixed 8-bit TX without external block control.
     inst my_uart_tx::<CLK_FREQ, BAUD, 8>(clk, rst, false, data, new_data)
+}
+
+pub entity my_uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
+    clk: clock,
+    rst: bool,
+    block: bool,
+    data: uint<DATA_WIDTH>,
+    new_data: bool,
+    tx_line: inv &bool,
+    busy: inv &bool,
+) {
+    let out = inst my_uart_tx::<CLK_FREQ, BAUD, DATA_WIDTH>(clk, rst, block, data, new_data);
+    set tx_line = &out.tx;
+    set busy = &out.busy;
+}
+
+pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD>(
+    clk: clock,
+    rst: bool,
+    data: uint<8>,
+    new_data: bool,
+    tx_line: inv &bool,
+    busy: inv &bool,
+) {
+    let out = inst uart_tx::<CLK_FREQ, BAUD>(clk, rst, data, new_data);
+    set tx_line = &out.tx;
+    set busy = &out.busy;
 }
 
 enum RxState {
@@ -380,4 +431,155 @@ pub entity ft_u16(
         ui_dout_be: *ui_dout_be,
         ui_dout_empty: *ui_dout_empty,
     )
+}
+
+pub entity ft_u16_tap(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+    ft_data_out: inv &uint<16>,
+    ft_be_out: inv &uint<2>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<16>,
+    ui_dout_be: inv &uint<2>,
+    ui_dout_empty: inv &bool,
+) {
+    let out = inst ft_u16(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_dout_get,
+    );
+    set ft_data_out = &out.ft_data_out;
+    set ft_be_out = &out.ft_be_out;
+    set ft_rd = &out.ft_rd;
+    set ft_wr = &out.ft_wr;
+    set ft_oe = &out.ft_oe;
+    set ui_din_full = &out.ui_din_full;
+    set ui_dout = &out.ui_dout;
+    set ui_dout_be = &out.ui_dout_be;
+    set ui_dout_empty = &out.ui_dout_empty;
+}
+
+pub entity ft_u16_tx8192(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+) -> FtU16Out {
+    let (ft_data_out, ft_data_out_w): (&uint<16>, inv &uint<16>) = port;
+    let (ft_be_out, ft_be_out_w): (&uint<2>, inv &uint<2>) = port;
+    let (ft_rd, ft_rd_w): (&bool, inv &bool) = port;
+    let (ft_wr, ft_wr_w): (&bool, inv &bool) = port;
+    let (ft_oe, ft_oe_w): (&bool, inv &bool) = port;
+    let (ui_din_full, ui_din_full_w): (&bool, inv &bool) = port;
+    let (ui_dout, ui_dout_w): (&uint<16>, inv &uint<16>) = port;
+    let (ui_dout_be, ui_dout_be_w): (&uint<2>, inv &uint<2>) = port;
+    let (ui_dout_empty, ui_dout_empty_w): (&bool, inv &bool) = port;
+
+    let _ = inst ft_u16_v_tx8192(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ft_data_out_w,
+        ft_be_out_w,
+        ft_rd_w,
+        ft_wr_w,
+        ft_oe_w,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_din_full_w,
+        ui_dout_w,
+        ui_dout_be_w,
+        ui_dout_empty_w,
+        ui_dout_get,
+    );
+
+    FtU16Out$(
+        ft_data_out: *ft_data_out,
+        ft_be_out: *ft_be_out,
+        ft_rd: *ft_rd,
+        ft_wr: *ft_wr,
+        ft_oe: *ft_oe,
+        ui_din_full: *ui_din_full,
+        ui_dout: *ui_dout,
+        ui_dout_be: *ui_dout_be,
+        ui_dout_empty: *ui_dout_empty,
+    )
+}
+
+pub entity ft_u16_tx8192_tap(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+    ft_data_out: inv &uint<16>,
+    ft_be_out: inv &uint<2>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<16>,
+    ui_dout_be: inv &uint<2>,
+    ui_dout_empty: inv &bool,
+) {
+    let out = inst ft_u16_tx8192(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_dout_get,
+    );
+    set ft_data_out = &out.ft_data_out;
+    set ft_be_out = &out.ft_be_out;
+    set ft_rd = &out.ft_rd;
+    set ft_wr = &out.ft_wr;
+    set ft_oe = &out.ft_oe;
+    set ui_din_full = &out.ui_din_full;
+    set ui_dout = &out.ui_dout;
+    set ui_dout_be = &out.ui_dout_be;
+    set ui_dout_empty = &out.ui_dout_empty;
 }
