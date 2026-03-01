@@ -1,11 +1,75 @@
 use shared_components::clocking::clk_wiz_400;
+use shared_components::memory::async_fifo_u16x4_tap;
+use shared_components::memory::async_fifo_u8x4_tap;
+use shared_components::memory::fifo_u32x32768_tap;
 use shared_components::primitives::falling_edge;
+use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync2;
-use shared_components::sharp::g850_wait_hold;
+use shared_components::primitives::sync4;
+use shared_components::primitives::sync6;
+use shared_components::serial::ft_u16_tx8192_tap;
+use shared_components::serial::my_uart_tx_tap;
+use shared_components::serial::uart_rx;
+use shared_components::serial::uart_tx_tap;
+
+fn pack_event_word(addr: uint<16>, data: uint<8>, event: uint<8>) -> uint<32> {
+    let addr_wide: uint<32> = zext(addr);
+    let data_wide: uint<32> = zext(data);
+    let event_wide: uint<32> = zext(event);
+    (addr_wide << 16) | (data_wide << 8) | event_wide
+}
+
+fn pack_overflow_word(count: uint<24>, event: uint<8>) -> uint<32> {
+    let count_wide: uint<32> = zext(count);
+    let event_wide: uint<32> = zext(event);
+    (count_wide << 8) | event_wide
+}
+
+fn wait_window(counter: uint<128>, level: uint<8>) -> uint<8> {
+    if level == 0 {
+        trunc(counter)
+    } else if level == 1 {
+        trunc(counter >> 2)
+    } else if level == 2 {
+        trunc(counter >> 4)
+    } else if level == 3 {
+        trunc(counter >> 6)
+    } else if level == 4 {
+        trunc(counter >> 8)
+    } else if level == 5 {
+        trunc(counter >> 10)
+    } else if level == 6 {
+        trunc(counter >> 12)
+    } else if level == 7 {
+        trunc(counter >> 14)
+    } else if level == 8 {
+        trunc(counter >> 16)
+    } else {
+        trunc(counter >> 18)
+    }
+}
+
+enum SampleState {
+    SampleBus,
+    InsertWait,
+}
+
+enum FtState {
+    GetFifo,
+    Stream,
+}
+
+enum SaleaeState {
+    DataSignals,
+    SyncSignals,
+    RawSignals,
+    EdgeSignals,
+    Counter,
+}
 
 #[no_mangle(all)]
-entity main(
+entity main_core(
     clk: clock,
     rst_n: bool,
     led: inv &[bool; 8],
@@ -15,8 +79,10 @@ entity main(
     ft_clk: bool,
     ft_rxf: bool,
     ft_txe: bool,
-    ft_data: [bool; 16],
-    ft_be: [bool; 2],
+    ft_data: uint<16>,
+    ft_be: uint<2>,
+    ft_data_drive: inv &uint<16>,
+    ft_be_drive: inv &uint<2>,
     ft_rd: inv &bool,
     ft_wr: inv &bool,
     ft_oe: inv &bool,
@@ -32,57 +98,598 @@ entity main(
     z80_rd: bool,
     z80_wr: bool,
 
-    data: [bool; 8],
-    addr: [bool; 16],
+    data: uint<8>,
+    addr: uint<16>,
 
-    addr_bnk: [bool; 2],
+    addr_bnk: uint<2>,
     addr_ceram2: bool,
     addr_cerom2: bool,
 ) {
-    let rst = !rst_n;
+    let ascii_0: uint<8> = 0x30;
+    let ascii_9: uint<8> = 0x39;
+    let ascii_plus: uint<8> = 0x2b;
+    let ascii_minus: uint<8> = 0x2d;
+    let ascii_dot: uint<8> = 0x2e;
+    let ascii_s: uint<8> = 0x73;
+    let ascii_e: uint<8> = 0x65;
+    let ascii_d: uint<8> = 0x64;
+    let ascii_r: uint<8> = 0x72;
+    let ascii_c: uint<8> = 0x63;
+    let ascii_m_upper: uint<8> = 0x4d;
+    let ascii_r_upper: uint<8> = 0x52;
+    let ascii_w_upper: uint<8> = 0x57;
+    let ascii_w_lower: uint<8> = 0x77;
+    let ascii_s_upper: uint<8> = 0x53;
+    let ascii_e_upper: uint<8> = 0x45;
+
+    let rst = inst reset_conditioner::<4>(clk, !rst_n);
     let clk_uart = inst clk_wiz_400(clk);
+    let ft_clk_clock = unsafe { inst std::conv::bool_to_clock(ft_clk) };
 
-    let mreq_sync = inst sync2(clk, z80_mreq);
-    let iorq_sync = inst sync2(clk, z80_iorq);
-    let rd_sync = inst sync2(clk, z80_rd);
-    let wr_sync = inst sync2(clk, z80_wr);
+    let z80_m1_sync = inst sync6(clk, z80_m1);
+    let z80_mreq_sync = inst sync4(clk, z80_mreq);
+    let z80_iorq_sync = inst sync4(clk, z80_iorq);
+    let z80_rd_sync = inst sync2(clk, z80_rd);
+    let z80_wr_sync = inst sync2(clk, z80_wr);
 
-    let mreq_fall = inst falling_edge(clk, mreq_sync);
-    let iorq_fall = inst falling_edge(clk, iorq_sync);
-    let rd_rise = inst rising_edge(clk, rd_sync);
-    let wr_rise = inst rising_edge(clk, wr_sync);
-    let hold_wait = inst g850_wait_hold(clk, rst, mreq_fall, iorq_fall);
-    reg(clk_uart) fast_counter: uint<8> reset(rst: 0) = trunc(fast_counter + 1);
+    let mreq_fall = inst falling_edge(clk, z80_mreq_sync);
+    let iorq_fall = inst falling_edge(clk, z80_iorq_sync);
+    let rd_rise = inst rising_edge(clk, z80_rd_sync);
+    let wr_rise = inst rising_edge(clk, z80_wr_sync);
 
-    let fast_bits = fast_counter.to_bits();
-    let ft_aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1];
-    let bus_aux = z80_m1 || z80_ioreset || z80_int1;
+    let (tx_line, tx_line_w): (&bool, inv &bool) = port;
+    let (tx_busy, tx_busy_w): (&bool, inv &bool) = port;
+    let (tx_addr_line, tx_addr_line_w): (&bool, inv &bool) = port;
+    let (tx_addr_busy, tx_addr_busy_w): (&bool, inv &bool) = port;
+    let (tx_event_line, tx_event_line_w): (&bool, inv &bool) = port;
+    let (tx_event_busy, tx_event_busy_w): (&bool, inv &bool) = port;
 
-    set z80_wait = &!hold_wait;
-    set usb_tx = &usb_rx;
-    set ft_rd = &!ft_rxf;
-    set ft_wr = &(!ft_txe && (mreq_fall || iorq_fall));
-    set ft_oe = &(rd_sync || wr_sync);
+    let (ft_data_out, ft_data_out_w): (&uint<16>, inv &uint<16>) = port;
+    let (ft_be_out, ft_be_out_w): (&uint<2>, inv &uint<2>) = port;
+    let (ft_rd_sig, ft_rd_sig_w): (&bool, inv &bool) = port;
+    let (ft_wr_sig, ft_wr_sig_w): (&bool, inv &bool) = port;
+    let (ft_oe_sig, ft_oe_sig_w): (&bool, inv &bool) = port;
+    let (ft_ui_din_full, ft_ui_din_full_w): (&bool, inv &bool) = port;
+    let (ft_ui_dout, ft_ui_dout_w): (&uint<16>, inv &uint<16>) = port;
+    let (ft_ui_dout_be, ft_ui_dout_be_w): (&uint<2>, inv &uint<2>) = port;
+    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (&bool, inv &bool) = port;
 
-    set led = &[
-        !mreq_sync,
-        !iorq_sync,
-        !rd_sync,
-        !wr_sync,
-        mreq_fall,
-        iorq_fall,
-        rd_rise,
-        ft_aux || fast_bits[0],
+    let (addr_fifo_full, addr_fifo_full_w): (&bool, inv &bool) = port;
+    let (addr_fifo_empty, addr_fifo_empty_w): (&bool, inv &bool) = port;
+    let (addr_fifo_dout, addr_fifo_dout_w): (&uint<16>, inv &uint<16>) = port;
+    let (event_fifo_full, event_fifo_full_w): (&bool, inv &bool) = port;
+    let (event_fifo_empty, event_fifo_empty_w): (&bool, inv &bool) = port;
+    let (event_fifo_dout, event_fifo_dout_w): (&uint<8>, inv &uint<8>) = port;
+    let (stream_fifo_full, stream_fifo_full_w): (&bool, inv &bool) = port;
+    let (stream_fifo_empty, stream_fifo_empty_w): (&bool, inv &bool) = port;
+    let (stream_fifo_dout, stream_fifo_dout_w): (&uint<32>, inv &uint<32>) = port;
+
+    let rx = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
+
+    reg(clk) state:
+        (
+            SampleState,
+            uint<8>,
+            uint<128>,
+            uint<16>,
+            SaleaeState,
+            uint<8>,
+            bool,
+            FtState,
+            uint<32>,
+            uint<24>,
+            uint<16>,
+            uint<16>,
+            uint<8>,
+            uint<8>
+        )
+        reset(rst: (
+            SampleState::SampleBus(),
+            0,
+            0,
+            0,
+            SaleaeState::DataSignals(),
+            0,
+            false,
+            FtState::GetFifo(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ))
+        = {
+            let sample_state: SampleState = state.0;
+            let wait_enabled: uint<8> = state.1;
+            let wait_counter: uint<128> = state.2;
+            let last_addr: uint<16> = state.3;
+            let saleae_state: SaleaeState = state.4;
+            let saleae_counter: uint<8> = state.5;
+            let ft_enabled: bool = state.6;
+            let ft_state: FtState = state.7;
+            let ft_cur_value: uint<32> = state.8;
+            let fifo_full_counter: uint<24> = state.9;
+            let addr_sync_d0: uint<16> = state.10;
+            let addr_sync: uint<16> = state.11;
+            let data_sync_d0: uint<8> = state.12;
+            let data_sync: uint<8> = state.13;
+
+            let bus_start = mreq_fall || iorq_fall;
+            let sample_is_bus = match sample_state {
+                SampleState::SampleBus => true,
+                _ => false,
+            };
+            let sample_is_wait = match sample_state {
+                SampleState::InsertWait => true,
+                _ => false,
+            };
+
+            let wait_window_bits: uint<8> = wait_window(wait_counter, wait_enabled);
+            let wait_done = wait_window_bits > 1;
+
+            let invalid_bus_state = (z80_mreq_sync && z80_iorq_sync) || (!z80_mreq_sync && !z80_iorq_sync);
+            let rd_event_valid = rd_rise && !invalid_bus_state;
+            let wr_event_valid = wr_rise && !invalid_bus_state;
+            let bus_event_valid = rd_event_valid || wr_event_valid;
+            let bus_event_char: uint<8> = if rd_event_valid {
+                if !z80_m1_sync {
+                    ascii_m_upper
+                } else if !z80_mreq_sync {
+                    ascii_r_upper
+                } else {
+                    ascii_r
+                }
+            } else if wr_event_valid {
+                if !z80_mreq_sync {
+                    ascii_w_upper
+                } else {
+                    ascii_w_lower
+                }
+            } else {
+                0
+            };
+
+            let fifo_was_full = *stream_fifo_full;
+            let should_emit_overflow =
+                !rd_rise && !wr_rise && ft_enabled && !fifo_was_full && fifo_full_counter > 0;
+
+            let next_sample_state = if sample_is_bus {
+                if bus_start && wait_enabled > 0 {
+                    SampleState::InsertWait()
+                } else {
+                    sample_state
+                }
+            } else if wait_done {
+                SampleState::SampleBus()
+            } else {
+                sample_state
+            };
+
+            let next_wait_counter = if sample_is_bus {
+                if bus_start && wait_enabled > 0 {
+                    0
+                } else {
+                    wait_counter
+                }
+            } else {
+                trunc(wait_counter + 1)
+            };
+
+            let next_last_addr = if sample_is_bus && bus_start {
+                addr_sync
+            } else {
+                last_addr
+            };
+
+            let next_wait_enabled = if rx.valid && rx.byte >= ascii_0 && rx.byte <= ascii_9 {
+                trunc(rx.byte - ascii_0)
+            } else {
+                wait_enabled
+            };
+
+            let next_saleae_state = if rx.valid {
+                if rx.byte == ascii_s {
+                    SaleaeState::SyncSignals()
+                } else if rx.byte == ascii_e {
+                    SaleaeState::EdgeSignals()
+                } else if rx.byte == ascii_d {
+                    SaleaeState::DataSignals()
+                } else if rx.byte == ascii_r {
+                    SaleaeState::RawSignals()
+                } else if rx.byte == ascii_c {
+                    SaleaeState::Counter()
+                } else {
+                    saleae_state
+                }
+            } else {
+                saleae_state
+            };
+
+            let next_saleae_counter = match saleae_state {
+                SaleaeState::Counter => trunc(saleae_counter + 1),
+                _ => saleae_counter,
+            };
+
+            let ft_cmd_word = *ft_ui_dout;
+            let ft_cmd_b0: uint<8> = trunc(ft_cmd_word);
+            let ft_cmd_b1: uint<8> = trunc(ft_cmd_word >> 8);
+            let ft_cmd_enable =
+                !*ft_ui_dout_empty && ft_cmd_b0 == ascii_s_upper && ft_cmd_b1 == ascii_plus;
+            let ft_cmd_disable =
+                !*ft_ui_dout_empty && ft_cmd_b0 == ascii_s_upper && ft_cmd_b1 == ascii_minus;
+
+            let next_ft_enabled = if ft_cmd_enable {
+                true
+            } else if ft_cmd_disable {
+                false
+            } else {
+                ft_enabled
+            };
+
+            let next_ft_state = match ft_state {
+                FtState::GetFifo => {
+                    if !*ft_ui_din_full && !*stream_fifo_empty {
+                        FtState::Stream()
+                    } else {
+                        ft_state
+                    }
+                },
+                FtState::Stream => {
+                    if !*ft_ui_din_full {
+                        FtState::GetFifo()
+                    } else {
+                        ft_state
+                    }
+                },
+            };
+
+            let next_ft_cur_value = match ft_state {
+                FtState::GetFifo => {
+                    if !*ft_ui_din_full && !*stream_fifo_empty {
+                        *stream_fifo_dout
+                    } else {
+                        ft_cur_value
+                    }
+                },
+                FtState::Stream => ft_cur_value,
+            };
+
+            let next_fifo_full_counter = if bus_event_valid && ft_enabled && fifo_was_full {
+                trunc(fifo_full_counter + 1)
+            } else if should_emit_overflow {
+                0
+            } else {
+                fifo_full_counter
+            };
+
+            (
+                next_sample_state,
+                next_wait_enabled,
+                next_wait_counter,
+                next_last_addr,
+                next_saleae_state,
+                next_saleae_counter,
+                next_ft_enabled,
+                next_ft_state,
+                next_ft_cur_value,
+                next_fifo_full_counter,
+                addr,
+                addr_sync_d0,
+                data,
+                data_sync_d0,
+            )
+        };
+
+    let sample_state: SampleState = state.0;
+    let wait_enabled: uint<8> = state.1;
+    let wait_counter: uint<128> = state.2;
+    let last_addr: uint<16> = state.3;
+    let saleae_state: SaleaeState = state.4;
+    let saleae_counter: uint<8> = state.5;
+    let ft_enabled: bool = state.6;
+    let ft_state: FtState = state.7;
+    let ft_cur_value: uint<32> = state.8;
+    let fifo_full_counter: uint<24> = state.9;
+    let addr_sync: uint<16> = state.11;
+    let data_sync: uint<8> = state.13;
+
+    let sample_is_bus = match sample_state {
+        SampleState::SampleBus => true,
+        _ => false,
+    };
+    let sample_is_wait = match sample_state {
+        SampleState::InsertWait => true,
+        _ => false,
+    };
+    let wait_window_bits: uint<8> = wait_window(wait_counter, wait_enabled);
+    let wait_done = wait_window_bits > 1;
+    let bus_start = mreq_fall || iorq_fall;
+
+    let invalid_bus_state = (z80_mreq_sync && z80_iorq_sync) || (!z80_mreq_sync && !z80_iorq_sync);
+    let rd_event_valid = rd_rise && !invalid_bus_state;
+    let wr_event_valid = wr_rise && !invalid_bus_state;
+    let bus_event_valid = rd_event_valid || wr_event_valid;
+    let bus_error_tx = if rd_rise {
+        invalid_bus_state
+    } else if wr_rise {
+        invalid_bus_state
+    } else {
+        false
+    };
+    let bus_error_char: uint<8> = if rd_rise { ascii_e_upper } else { ascii_e };
+    let bus_event_char: uint<8> = if rd_event_valid {
+        if !z80_m1_sync {
+            ascii_m_upper
+        } else if !z80_mreq_sync {
+            ascii_r_upper
+        } else {
+            ascii_r
+        }
+    } else if wr_event_valid {
+        if !z80_mreq_sync {
+            ascii_w_upper
+        } else {
+            ascii_w_lower
+        }
+    } else {
+        0
+    };
+
+    let frame_word = pack_event_word(last_addr, data_sync, bus_event_char);
+    let overflow_word = pack_overflow_word(fifo_full_counter, ascii_e_upper);
+
+    let stream_write_event = bus_event_valid && ft_enabled && !*stream_fifo_full;
+    let stream_write_overflow =
+        !rd_rise && !wr_rise && ft_enabled && !*stream_fifo_full && fifo_full_counter > 0;
+    let stream_fifo_wput = stream_write_event || stream_write_overflow;
+    let stream_fifo_din: uint<32> = if stream_write_event {
+        frame_word
+    } else if stream_write_overflow {
+        overflow_word
+    } else {
+        0
+    };
+
+    let ft_get_fifo = match ft_state {
+        FtState::GetFifo => true,
+        _ => false,
+    };
+    let ft_stream = match ft_state {
+        FtState::Stream => true,
+        _ => false,
+    };
+    let ft_can_push = !*ft_ui_din_full;
+    let ft_ui_din_valid =
+        (ft_get_fifo && ft_can_push && !*stream_fifo_empty) || (ft_stream && ft_can_push);
+    let ft_ui_din: uint<16> = if ft_get_fifo && ft_can_push && !*stream_fifo_empty {
+        trunc(*stream_fifo_dout)
+    } else if ft_stream && ft_can_push {
+        trunc(ft_cur_value >> 16)
+    } else {
+        0
+    };
+    let ft_ui_din_be: uint<2> = if ft_ui_din_valid { 0x3 } else { 0x0 };
+    let ft_ui_dout_get = !*ft_ui_dout_empty;
+    let stream_fifo_rget = if ft_get_fifo {
+        ft_can_push && !*stream_fifo_empty
+    } else if ft_stream {
+        ft_can_push
+    } else {
+        false
+    };
+
+    let addr_fifo_wput = bus_start && sample_is_bus && !*addr_fifo_full;
+    let addr_fifo_rget = !*tx_addr_busy && !*addr_fifo_empty;
+    let tx_addr_new_data = addr_fifo_rget;
+    let tx_addr_data_word = *addr_fifo_dout;
+
+    let event_fifo_wput = bus_event_valid && !*event_fifo_full;
+    let event_fifo_rget = !*tx_event_busy && !*event_fifo_empty;
+    let tx_event_new_data = event_fifo_rget;
+    let tx_event_data_word = *event_fifo_dout;
+
+    let sample_tx_req = sample_is_wait && wait_done && !*tx_busy;
+    let stream_drop_tx = bus_event_valid && ft_enabled && *stream_fifo_full;
+    let bus_tx_req: (bool, uint<8>) = if bus_error_tx {
+        (true, bus_error_char)
+    } else if stream_drop_tx {
+        (true, bus_event_char)
+    } else if sample_tx_req {
+        (true, ascii_dot)
+    } else {
+        (false, 0)
+    };
+
+    let ft_cmd_word = *ft_ui_dout;
+    let ft_cmd_b0: uint<8> = trunc(ft_cmd_word);
+    let ft_cmd_b1: uint<8> = trunc(ft_cmd_word >> 8);
+    let ft_cmd_enable = !*ft_ui_dout_empty && ft_cmd_b0 == ascii_s_upper && ft_cmd_b1 == ascii_plus;
+    let ft_cmd_disable = !*ft_ui_dout_empty && ft_cmd_b0 == ascii_s_upper && ft_cmd_b1 == ascii_minus;
+    let ft_tx_req: (bool, uint<8>) = if ft_cmd_enable && !*tx_busy {
+        (true, ascii_plus)
+    } else if ft_cmd_disable && !*tx_busy {
+        (true, ascii_minus)
+    } else {
+        bus_tx_req
+    };
+
+    let rx_is_digit = rx.valid && rx.byte >= ascii_0 && rx.byte <= ascii_9;
+    let rx_is_saleae_cmd =
+        rx.valid && (rx.byte == ascii_s || rx.byte == ascii_e || rx.byte == ascii_d || rx.byte == ascii_r || rx.byte == ascii_c);
+    let rx_tx_req: (bool, uint<8>) = if (rx_is_digit || rx_is_saleae_cmd) && !*tx_busy {
+        (true, rx.byte)
+    } else {
+        ft_tx_req
+    };
+    let tx_new_data = rx_tx_req.0;
+    let tx_data = rx_tx_req.1;
+
+    let _tx = inst uart_tx_tap::<100_000_000, 1_000_000>(
+        clk,
+        rst,
+        tx_data,
+        tx_new_data,
+        tx_line_w,
+        tx_busy_w,
+    );
+
+    let _tx_addr = inst my_uart_tx_tap::<400_000_000, 100_000_000, 16>(
+        clk_uart,
+        rst,
+        false,
+        tx_addr_data_word,
+        tx_addr_new_data,
+        tx_addr_line_w,
+        tx_addr_busy_w,
+    );
+
+    let _tx_event = inst my_uart_tx_tap::<400_000_000, 100_000_000, 8>(
+        clk_uart,
+        rst,
+        false,
+        tx_event_data_word,
+        tx_event_new_data,
+        tx_event_line_w,
+        tx_event_busy_w,
+    );
+
+    let _addr_fifo = inst async_fifo_u16x4_tap(
+        clk,
+        rst,
+        addr_sync,
+        addr_fifo_wput,
+        clk_uart,
+        rst,
+        addr_fifo_rget,
+        addr_fifo_full_w,
+        addr_fifo_empty_w,
+        addr_fifo_dout_w,
+    );
+
+    let _event_fifo = inst async_fifo_u8x4_tap(
+        clk,
+        rst,
+        bus_event_char,
+        event_fifo_wput,
+        clk_uart,
+        rst,
+        event_fifo_rget,
+        event_fifo_full_w,
+        event_fifo_empty_w,
+        event_fifo_dout_w,
+    );
+
+    let _stream_fifo = inst fifo_u32x32768_tap(
+        clk,
+        rst,
+        stream_fifo_din,
+        stream_fifo_wput,
+        stream_fifo_rget,
+        stream_fifo_full_w,
+        stream_fifo_empty_w,
+        stream_fifo_dout_w,
+    );
+
+    let _ft = inst ft_u16_tx8192_tap(
+        clk,
+        rst,
+        ft_clk_clock,
+        ft_rxf,
+        ft_txe,
+        ft_data,
+        ft_be,
+        ft_ui_din,
+        ft_ui_din_be,
+        ft_ui_din_valid,
+        ft_ui_dout_get,
+        ft_data_out_w,
+        ft_be_out_w,
+        ft_rd_sig_w,
+        ft_wr_sig_w,
+        ft_oe_sig_w,
+        ft_ui_din_full_w,
+        ft_ui_dout_w,
+        ft_ui_dout_be_w,
+        ft_ui_dout_empty_w,
+    );
+
+    let _unused_ft_ui_dout_be = *ft_ui_dout_be;
+    let _unused_addr_bnk = addr_bnk;
+    let _unused_addr_ceram2 = addr_ceram2;
+    let _unused_addr_cerom2 = addr_cerom2;
+    let _unused_bus_aux = z80_m1 || z80_ioreset || z80_int1;
+
+    let led_out = [
+        ft_enabled,
+        *stream_fifo_empty,
+        *stream_fifo_full,
+        sample_is_wait,
+        !ft_txe,
+        !ft_rxf,
+        !*ft_ui_dout_empty,
+        *ft_ui_din_full,
     ];
 
-    set saleae = &[
-        addr[0],
-        addr[1],
-        data[0],
-        data[1],
-        addr_bnk[0],
-        addr_bnk[1],
-        addr_ceram2,
-        addr_cerom2 != bus_aux,
-    ];
+    let saleae_out = match saleae_state {
+        SaleaeState::DataSignals => {
+            [
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+                z80_m1_sync,
+                false,
+                *tx_event_line,
+                *tx_addr_line,
+            ]
+        },
+        SaleaeState::SyncSignals => {
+            [
+                wr_rise,
+                rd_rise,
+                mreq_fall,
+                z80_m1_sync,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::EdgeSignals => {
+            [
+                wr_rise,
+                rd_rise,
+                iorq_fall,
+                mreq_fall,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::RawSignals => {
+            [
+                z80_wr,
+                z80_rd,
+                z80_iorq,
+                z80_mreq,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::Counter => saleae_counter.to_bits(),
+    };
+
+    set ft_data_drive = &*ft_data_out;
+    set ft_be_drive = &*ft_be_out;
+    set usb_tx = &*tx_line;
+    set ft_rd = &*ft_rd_sig;
+    set ft_wr = &*ft_wr_sig;
+    set ft_oe = &*ft_oe_sig;
+    set z80_wait = &!sample_is_wait;
+    set led = &led_out;
+    set saleae = &saleae_out;
 }

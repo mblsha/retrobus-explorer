@@ -13,4 +13,5 @@ members = [
     "sharp-pc-g850-bus-spade",
     "sharp-pc-g850-streaming-rom-spade",
     "test-minimal-spade",
+    "uart-saleae-loopback-spade",
 ]

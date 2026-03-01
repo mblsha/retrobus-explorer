@@ -1,4 +1,4 @@
-name = "sharp_pc_g850_bus_spade"
+name = "uart_saleae_loopback_spade"
 
 [libraries]
 shared_components = { path = "../shared-components" }
@@ -8,14 +8,13 @@ auto = true
 
 [verilog]
 sources = [
-    "verilog/main_wrapper.v",
     "../shared-verilog/clk_wiz_0.v",
-    "../shared-components/verilog/**/*.v",
+    "../shared-components/verilog/async_fifo_u8x8.v",
 ]
 
 [tooling]
 top = "main"
-test_module = "test_sharp_pc_g850_bus"
+test_module = "test_uart_saleae_loopback"
 
 [simulation]
 testbench_dir = "test"
