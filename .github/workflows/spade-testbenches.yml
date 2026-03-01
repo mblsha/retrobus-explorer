@@ -1,0 +1,102 @@
+name: Spade Testbenches
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - "gateware/reference/spade-projects/**"
+      - ".github/workflows/spade-testbenches.yml"
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - "gateware/reference/spade-projects/**"
+      - ".github/workflows/spade-testbenches.yml"
+
+jobs:
+  spade-testbenches:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateware/reference/spade-projects
+    env:
+      CARGO_TERM_COLOR: always
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v1
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: spade-swim-${{ runner.os }}-${{ hashFiles('gateware/reference/spade/src/swim/install.md') }}
+          restore-keys: |
+            spade-swim-${{ runner.os }}-
+
+      - name: Install swim
+        run: |
+          if ! command -v swim >/dev/null 2>&1; then
+            cargo install --git https://gitlab.com/spade-lang/swim swim
+          fi
+          swim --version
+
+      - name: Install verilator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
+          verilator --version
+
+      - name: Sync Python dependencies
+        run: uv sync
+
+      - name: Run project testbenches
+        run: |
+          set -euo pipefail
+          projects=(
+            test-minimal-spade
+            pin-tester-spade
+            sharp-organizer-card-spade
+            sharp-pc-g850-bus-spade
+            sharp-pc-g850-streaming-rom-spade
+          )
+          for project in "${projects[@]}"; do
+            echo "== Running ${project} testbench =="
+            (cd "${project}" && python scripts/test_with_vcd.py)
+          done
+
+      - name: Run shared-components testbenches
+        run: |
+          set -euo pipefail
+          cd shared-components
+          python scripts/test_all_components.py
+
+      - name: Upload Spade waveform artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: spade-waveforms-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            gateware/reference/spade-projects/*-spade/test/dump.vcd
+            gateware/reference/spade-projects/*-spade/test/dump.surfer.vcd
+            gateware/reference/spade-projects/*-spade/test/results.xml
+            gateware/reference/spade-projects/shared-components/test/waveforms/*.vcd
+            gateware/reference/spade-projects/shared-components/test/waveforms/*.surfer.vcd
+            gateware/reference/spade-projects/shared-components/test/waveforms/*.results.xml
+          if-no-files-found: warn
+          retention-days: 14
