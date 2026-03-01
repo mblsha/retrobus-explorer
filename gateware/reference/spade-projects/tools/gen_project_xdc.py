@@ -67,6 +67,12 @@ def ensure_str_list(value: object, name: str) -> list[str]:
     return list(value)
 
 
+def ensure_positive_int(value: object, name: str) -> int:
+    if not isinstance(value, int) or value <= 0:
+        raise SystemExit(f"error: {name} must be a positive integer")
+    return value
+
+
 def strip_comments(text: str) -> str:
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     lines: list[str] = []
@@ -131,7 +137,26 @@ def relativize(project: Path, path: Path) -> str:
     return os.path.relpath(path, start=project)
 
 
-def load_constraint_config(project: Path) -> tuple[str, str, list[str], set[str]] | None:
+def parse_root_properties(constraints: dict[object, object], top_ports: set[str]) -> list[tuple[str, str, str]]:
+    root_props: list[tuple[str, str, str]] = []
+
+    if "saleae_drive" in constraints:
+        drive = ensure_positive_int(constraints["saleae_drive"], "[constraints].saleae_drive")
+        if drive != 4:
+            raise SystemExit("error: Saleae drive strength is fixed to 4 mA across projects")
+        if "saleae" in top_ports:
+            root_props.append(("saleae", "DRIVE", "4"))
+
+    if "saleae_slew" in constraints:
+        slew = ensure_str(constraints["saleae_slew"], "[constraints].saleae_slew").upper()
+        if slew not in {"FAST", "SLOW"}:
+            raise SystemExit("error: [constraints].saleae_slew must be FAST or SLOW")
+        root_props.append(("saleae", "SLEW", slew))
+
+    return root_props
+
+
+def load_constraint_config(project: Path) -> tuple[str, str, list[str], set[str], list[tuple[str, str, str]]] | None:
     swim_toml = project / "swim.toml"
     config = tomllib.loads(swim_toml.read_text())
     constraints = config.get("constraints", {})
@@ -149,10 +174,11 @@ def load_constraint_config(project: Path) -> tuple[str, str, list[str], set[str]
     top_entity_default = config.get("tooling", {}).get("top", DEFAULT_TOP_ENTITY)
     top_entity = ensure_str(constraints.get("top_entity", top_entity_default), "[constraints].top_entity")
     top_ports = parse_top_ports(project / top_file, top_entity)
+    root_props = parse_root_properties(constraints, top_ports)
 
     if acf is not None and not auto:
         acf_files = ensure_str_list(acf, "[constraints].acf")
-        return out, au_pin_map, acf_files, top_ports
+        return out, au_pin_map, acf_files, top_ports, root_props
 
     inferred = infer_profiles(top_ports)
     include_profiles = ensure_str_list(constraints.get("profiles", []), "[constraints].profiles") if "profiles" in constraints else []
@@ -165,7 +191,7 @@ def load_constraint_config(project: Path) -> tuple[str, str, list[str], set[str]
 
     profiles = [profile for profile in dedupe(inferred + include_profiles) if profile not in exclude_profiles]
     acf_files = [relativize(project, profile_path(profile)) for profile in profiles] + acf_extra
-    return out, au_pin_map, acf_files, top_ports
+    return out, au_pin_map, acf_files, top_ports, root_props
 
 
 def main() -> int:
@@ -180,7 +206,7 @@ def main() -> int:
             return 0
         raise SystemExit(f"error: {msg}")
 
-    out, au_pin_map, acf_files, top_ports = loaded
+    out, au_pin_map, acf_files, top_ports, root_props = loaded
     tools_dir = Path(__file__).resolve().parent
     generator = tools_dir / "gen_xdc_from_acf.py"
 
@@ -195,6 +221,8 @@ def main() -> int:
     ]
     for signal in sorted(top_ports):
         cmd.extend(["--signal", signal])
+    for root, prop, value in root_props:
+        cmd.extend(["--root-property", f"{root}:{prop}={value}"])
     subprocess.run(cmd, cwd=project, check=True)
     print(f"generated: {(project / out).resolve()}")
     return 0

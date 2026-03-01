@@ -1,3 +1,7 @@
+// @meta.schema: 1
+// @meta.name: sharp_pc_g850_bus
+// @meta.board: alchitry_au1
+// @meta.description: Sharp PC-G850 bus mapping for shared Alchitry designs.
 STANDARD(LVCMOS33) {
     pin MREQ A48
     pin M1 A46
