@@ -5,11 +5,13 @@ on:
     branches: [ master, main ]
     paths:
       - "gateware/reference/spade-projects/**"
+      - "gateware/reference/binary-counter/**"
       - ".github/workflows/spade-testbenches.yml"
   pull_request:
     branches: [ master, main ]
     paths:
       - "gateware/reference/spade-projects/**"
+      - "gateware/reference/binary-counter/**"
       - ".github/workflows/spade-testbenches.yml"
 
 jobs:
@@ -55,7 +57,7 @@ jobs:
         with:
           path: |
             /home/runner/.cache/spade-compilers
-          key: spade-compilers-${{ runner.os }}-${{ hashFiles('gateware/reference/spade-projects/*/swim.lock') }}
+          key: spade-compilers-${{ runner.os }}-${{ hashFiles('gateware/reference/spade-projects/*/swim.lock', 'gateware/reference/binary-counter/swim.lock') }}
           restore-keys: |
             spade-compilers-${{ runner.os }}-
 
@@ -139,6 +141,9 @@ jobs:
               swim_toml.write_text(text)
 
           projects = sorted(root.glob("*/swim.toml"))
+          binary_counter_swim = root.parent / "binary-counter" / "swim.toml"
+          if binary_counter_swim.is_file():
+              projects.append(binary_counter_swim)
           resolved: dict[str, Path] = {}
           for swim_toml in projects:
               project_dir = swim_toml.parent
@@ -169,6 +174,12 @@ jobs:
             (cd "${project}" && python scripts/test_with_vcd.py)
           done
 
+      - name: Run binary-counter testbench
+        run: |
+          set -euo pipefail
+          echo "== Running binary-counter testbench =="
+          python tools/run_tb.py --project ../binary-counter
+
       - name: Run shared-components testbenches
         run: |
           set -euo pipefail
@@ -184,6 +195,9 @@ jobs:
             gateware/reference/spade-projects/*-spade/test/dump.vcd
             gateware/reference/spade-projects/*-spade/test/dump.surfer.vcd
             gateware/reference/spade-projects/*-spade/test/results.xml
+            gateware/reference/binary-counter/test/dump.vcd
+            gateware/reference/binary-counter/test/dump.surfer.vcd
+            gateware/reference/binary-counter/test/results.xml
             gateware/reference/spade-projects/shared-components/test/waveforms/*.vcd
             gateware/reference/spade-projects/shared-components/test/waveforms/*.surfer.vcd
             gateware/reference/spade-projects/shared-components/test/waveforms/*.results.xml
