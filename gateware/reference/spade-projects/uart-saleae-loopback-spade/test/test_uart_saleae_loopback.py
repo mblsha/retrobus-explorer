@@ -7,10 +7,6 @@ from cocotb_helpers import tick
 
 USB_BIT_CYCLES = 100
 FAST_UART_CHANNELS = [
-    (0, 20_000_000),
-    (1, 10_000_000),
-    (2, 5_000_000),
-    (3, 2_500_000),
     (6, 100_000_000),
     (7, 200_000_000),
 ]

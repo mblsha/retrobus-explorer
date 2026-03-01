@@ -1,4 +1,4 @@
-use shared_components::clocking::clk_wiz_400;
+use shared_components::clocking::clk_wiz_200_400_tap;
 use shared_components::memory::async_fifo_u8x8;
 use shared_components::primitives::reset_conditioner;
 use shared_components::serial::uart_rx;
@@ -14,48 +14,31 @@ entity main(
     saleae: inv &[bool; 8],
 ) {
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
-    let clk_fast = inst clk_wiz_400(clk);
+    let (clk200_probe, clk200_probe_w): (&bool, inv &bool) = port;
+    let (clk400_probe, clk400_probe_w): (&bool, inv &bool) = port;
+    let _clk_wiz = inst clk_wiz_200_400_tap(clk, clk200_probe_w, clk400_probe_w);
+    let clk_fast = unsafe { inst std::conv::bool_to_clock(*clk400_probe) };
     let rx = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
 
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
     let (echo_line, echo_line_w): (&bool, inv &bool) = port;
     let (echo_busy, echo_busy_w): (&bool, inv &bool) = port;
 
-    let (tx0_line, tx0_line_w): (&bool, inv &bool) = port;
-    let (tx1_line, tx1_line_w): (&bool, inv &bool) = port;
-    let (tx2_line, tx2_line_w): (&bool, inv &bool) = port;
-    let (tx3_line, tx3_line_w): (&bool, inv &bool) = port;
     let (tx6_line, tx6_line_w): (&bool, inv &bool) = port;
     let (tx7_line, tx7_line_w): (&bool, inv &bool) = port;
-    let (tx0_busy, tx0_busy_w): (&bool, inv &bool) = port;
-    let (tx1_busy, tx1_busy_w): (&bool, inv &bool) = port;
-    let (tx2_busy, tx2_busy_w): (&bool, inv &bool) = port;
-    let (tx3_busy, tx3_busy_w): (&bool, inv &bool) = port;
     let (tx6_busy, tx6_busy_w): (&bool, inv &bool) = port;
     let (tx7_busy, tx7_busy_w): (&bool, inv &bool) = port;
-    let (tx0_fire, tx0_fire_w): (&bool, inv &bool) = port;
-    let (tx1_fire, tx1_fire_w): (&bool, inv &bool) = port;
-    let (tx2_fire, tx2_fire_w): (&bool, inv &bool) = port;
-    let (tx3_fire, tx3_fire_w): (&bool, inv &bool) = port;
     let (tx6_fire, tx6_fire_w): (&bool, inv &bool) = port;
     let (tx7_fire, tx7_fire_w): (&bool, inv &bool) = port;
 
-    let fifo0 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx0_fire);
-    let fifo1 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx1_fire);
-    let fifo2 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx2_fire);
-    let fifo3 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx3_fire);
     let fifo6 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fire);
     let fifo7 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fire);
 
     let rx_ok = rx.valid && !rx.parity_error;
-    let all_fifo_ready = !fifo0.full && !fifo1.full && !fifo2.full && !fifo3.full && !fifo6.full && !fifo7.full;
+    let all_fifo_ready = !fifo6.full && !fifo7.full;
     let can_accept = rx_ok && !*echo_busy && all_fifo_ready;
     set enqueue_w = &can_accept;
 
-    set tx0_fire_w = &(!fifo0.empty && !*tx0_busy);
-    set tx1_fire_w = &(!fifo1.empty && !*tx1_busy);
-    set tx2_fire_w = &(!fifo2.empty && !*tx2_busy);
-    set tx3_fire_w = &(!fifo3.empty && !*tx3_busy);
     set tx6_fire_w = &(!fifo6.empty && !*tx6_busy);
     set tx7_fire_w = &(!fifo7.empty && !*tx7_busy);
 
@@ -68,38 +51,6 @@ entity main(
         echo_busy_w,
     );
 
-    let _tx0 = inst uart_tx_tap::<400_000_000, 20_000_000>(
-        clk_fast,
-        rst,
-        fifo0.dout,
-        *tx0_fire,
-        tx0_line_w,
-        tx0_busy_w,
-    );
-    let _tx1 = inst uart_tx_tap::<400_000_000, 10_000_000>(
-        clk_fast,
-        rst,
-        fifo1.dout,
-        *tx1_fire,
-        tx1_line_w,
-        tx1_busy_w,
-    );
-    let _tx2 = inst uart_tx_tap::<400_000_000, 5_000_000>(
-        clk_fast,
-        rst,
-        fifo2.dout,
-        *tx2_fire,
-        tx2_line_w,
-        tx2_busy_w,
-    );
-    let _tx3 = inst uart_tx_tap::<400_000_000, 2_500_000>(
-        clk_fast,
-        rst,
-        fifo3.dout,
-        *tx3_fire,
-        tx3_line_w,
-        tx3_busy_w,
-    );
     let _tx6 = inst uart_tx_tap::<400_000_000, 100_000_000>(
         clk_fast,
         rst,
@@ -117,25 +68,30 @@ entity main(
         tx7_busy_w,
     );
 
+    reg(clk_fast) clk_div: uint<3> reset(rst: 0) = trunc(clk_div + 1);
+    let clk_200_div = clk_div.to_bits()[0];
+    let clk_100_div = clk_div.to_bits()[1];
+    let clk_50_div = clk_div.to_bits()[2];
+
     reg(clk) heartbeat: uint<24> reset(rst: 0) = trunc(heartbeat + 1);
     let dropped = rx_ok && !*enqueue;
 
     set usb_tx = &*echo_line;
     set saleae = &[
-        *tx0_line,
-        *tx1_line,
-        *tx2_line,
-        *tx3_line,
+        clk_100_div,
+        *clk200_probe,
+        *clk400_probe,
+        clk_50_div,
         usb_rx,
         *echo_line,
         *tx6_line,
         *tx7_line,
     ];
     set led = &[
-        !fifo0.empty,
-        !fifo1.empty,
-        !fifo2.empty,
-        !fifo3.empty,
+        !fifo6.empty,
+        !fifo7.empty,
+        false,
+        false,
         *echo_busy,
         *enqueue,
         dropped,

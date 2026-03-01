@@ -5,11 +5,19 @@ extern entity clk_wiz_0(
     clk_in100: clock,
 );
 
+pub entity clk_wiz_200_400_tap(
+    clk_in100: clock,
+    clk_out200: inv &bool,
+    clk_out400: inv &bool,
+) {
+    let _ = inst clk_wiz_0(clk_out200, clk_out400, clk_in100);
+}
+
 pub entity clk_wiz_400(
     clk_in100: clock,
 ) -> clock {
     let (_clk200_read, clk200_write): (&bool, inv &bool) = port;
     let (clk400_read, clk400_write): (&bool, inv &bool) = port;
-    let _ = inst clk_wiz_0(clk200_write, clk400_write, clk_in100);
+    let _ = inst clk_wiz_200_400_tap(clk_in100, clk200_write, clk400_write);
     unsafe { inst std::conv::bool_to_clock(*clk400_read) }
 }
