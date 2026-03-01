@@ -3,6 +3,9 @@ name = "binary_counter"
 [libraries]
 shared_components = { path = "../spade-projects/shared-components" }
 
+[constraints]
+auto = true
+
 [tooling]
 top = "main"
 test_module = "counter_pins"

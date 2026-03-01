@@ -75,6 +75,79 @@ Each test run must generate:
    - `spade-projects/shared-components/test/test_my_uart_tx.py`
    - Verified via `uv run python scripts/test_component.py my_uart_tx` -> PASS (3 tests)
 
+## Alchitry Board Configuration Baseline
+
+This section captures the ground truth board/pin configuration currently used by the original Lucid projects in `gateware/`, and how that maps to FPGA-level constraints.
+
+### All Local Lucid Projects Target the Same Board
+
+All user-authored Lucid projects are configured for `Alchitry Au`:
+
+1. `pin-tester` -> `/home/mblsha/src/retrobus-explorer/gateware/pin-tester/pin-tester.alp:5`
+2. `sharp-organizer-card` -> `/home/mblsha/src/retrobus-explorer/gateware/sharp-organizer-card/sharp-organizer-card.alp:5`
+3. `sharp-pc-g850-bus` -> `/home/mblsha/src/retrobus-explorer/gateware/sharp-pc-g850-bus/sharp-pc-g850-bus.alp:5`
+4. `sharp-pc-g850-streaming-rom` -> `/home/mblsha/src/retrobus-explorer/gateware/sharp-pc-g850-streaming-rom/sharp-pc-g850-streaming-rom.alp:5`
+5. `test-minimal` -> `/home/mblsha/src/retrobus-explorer/gateware/test-minimal/test-minimal.alp:5`
+
+### Alchitry Au FPGA/Toolchain Definition
+
+From local Alchitry board definitions:
+
+1. FPGA part: `xc7a35tftg256-1` (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/Board.kt:135`)
+2. Tool flow: `Vivado` (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/Board.kt:149`)
+3. JTAG ID code: `0362D093` (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/Board.kt:146`)
+
+### Common Base Pinout Used by All Projects
+
+From `Constraints/alchitry.acf` + `AuPin.kt` mapping:
+
+1. I/O standard: `LVCMOS33` (`Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf:5`)
+2. `clk` @ `100MHz` (`Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf:6`) -> FPGA pin `N14` (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt:117`)
+3. `rst_n` (`Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf:8`) -> FPGA pin `P6` (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt:116`)
+4. `usb_rx` / `usb_tx` (`Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf:19`, `Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf:20`) -> FPGA pins `P15` / `P16` (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt:120`, `Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt:121`)
+5. `led[0..7]` (`Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf:10`) -> FPGA pins `K13,K12,L14,L13,M16,M14,M12,N16` (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt:108`)
+
+### Project-Specific Pin Groups on Top of Base
+
+1. `pin-tester`
+   - Adds `ffc_data[0..47]`: `/home/mblsha/src/retrobus-explorer/gateware/pin-tester/constraint/level-shifter.acf:1`
+   - Adds `saleae[0..7]`: `/home/mblsha/src/retrobus-explorer/gateware/shared-constraints/saleae.acf:1`
+   - Full constraint stack in `.alp`:
+     - `Constraints/alchitry.acf`
+     - `constraint/level-shifter.acf`
+     - `../shared-constraints/saleae.acf`
+
+2. `sharp-organizer-card`
+   - Adds organizer connector bus: `/home/mblsha/src/retrobus-explorer/gateware/sharp-organizer-card/constraint/sharp-organizer-card.acf:1`
+   - Adds FT V1 interface pins: `Alchitry-Labs-V2/src/main/resources/library/components/Constraints/ft_v1.acf:5`
+   - Adds `saleae[0..7]`: `/home/mblsha/src/retrobus-explorer/gateware/shared-constraints/saleae.acf:1`
+   - Full constraint stack in `.alp`:
+     - `Constraints/alchitry.acf`
+     - `constraint/sharp-organizer-card.acf`
+     - `Constraints/ft_v1.acf`
+     - `../shared-constraints/saleae.acf`
+
+3. `sharp-pc-g850-bus` and `sharp-pc-g850-streaming-rom`
+   - Add PC-G850 bus group: `/home/mblsha/src/retrobus-explorer/gateware/sharp-pc-g850-bus/constraint/pc-g850-bus.acf:1`
+   - Add FT V1 interface pins: `Alchitry-Labs-V2/src/main/resources/library/components/Constraints/ft_v1.acf:5`
+   - Add `saleae[0..7]`: `/home/mblsha/src/retrobus-explorer/gateware/shared-constraints/saleae.acf:1`
+   - Full constraint stack in `.alp`:
+     - `Constraints/alchitry.acf`
+     - `constraint/pc-g850-bus.acf`
+     - `Constraints/ft_v1.acf`
+     - `../shared-constraints/saleae.acf`
+
+4. `test-minimal`
+   - Uses only base board constraints: `Constraints/alchitry.acf`
+
+### Electrical Bank/Vcco Notes for Au
+
+From `AuPin` board model (`Alchitry-Labs-V2/src/main/kotlin/com/alchitry/labs2/hardware/pinout/AuPin.kt:183`):
+
+1. Bank `15` supports `1.35V`
+2. Banks `14` and `35` support `3.3V`
+3. Bank `34` supports `3.3V` or `1.8V`
+
 ## Pin-Tester Parity Gaps (Depends on Library Port)
 
 This section tracks the remaining `pin-tester` behavior parity work between:

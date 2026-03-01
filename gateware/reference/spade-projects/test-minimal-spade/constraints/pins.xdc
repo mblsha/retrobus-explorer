@@ -1,5 +1,5 @@
 # Auto-generated from ACF constraints:
-# - test-minimal-spade/constraints/alchitry_minimal.acf
+# - ../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf
 
 set_property PACKAGE_PIN N14 [get_ports {clk}]
 set_property IOSTANDARD LVCMOS33 [get_ports {clk}]

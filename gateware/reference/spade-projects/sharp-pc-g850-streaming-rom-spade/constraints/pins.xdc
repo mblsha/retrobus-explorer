@@ -1,8 +1,8 @@
 # Auto-generated from ACF constraints:
-# - ../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf
-# - ../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/ft_v1.acf
-# - ../../sharp-pc-g850-streaming-rom/constraint/pc-g850-bus.acf
-# - ../../shared-constraints/saleae.acf
+# - ../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf
+# - ../../../shared-constraints/saleae.acf
+# - ../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/ft_v1.acf
+# - ../../../sharp-pc-g850-bus/constraint/pc-g850-bus.acf
 
 set_property PACKAGE_PIN N14 [get_ports {clk}]
 set_property IOSTANDARD LVCMOS33 [get_ports {clk}]
@@ -28,6 +28,22 @@ set_property PACKAGE_PIN P15 [get_ports {usb_rx}]
 set_property IOSTANDARD LVCMOS33 [get_ports {usb_rx}]
 set_property PACKAGE_PIN P16 [get_ports {usb_tx}]
 set_property IOSTANDARD LVCMOS33 [get_ports {usb_tx}]
+set_property PACKAGE_PIN M15 [get_ports {saleae[0]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[0]}]
+set_property PACKAGE_PIN P14 [get_ports {saleae[1]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[1]}]
+set_property PACKAGE_PIN E1 [get_ports {saleae[2]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[2]}]
+set_property PACKAGE_PIN F2 [get_ports {saleae[3]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[3]}]
+set_property PACKAGE_PIN F4 [get_ports {saleae[4]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[4]}]
+set_property PACKAGE_PIN F3 [get_ports {saleae[5]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[5]}]
+set_property PACKAGE_PIN C4 [get_ports {saleae[6]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[6]}]
+set_property PACKAGE_PIN D4 [get_ports {saleae[7]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {saleae[7]}]
 set_property PACKAGE_PIN F5 [get_ports {ft_clk}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ft_clk}]
 set_property PACKAGE_PIN N6 [get_ports {ft_rxf}]
@@ -148,22 +164,6 @@ set_property PACKAGE_PIN R12 [get_ports {addr_ceram2}]
 set_property IOSTANDARD LVCMOS33 [get_ports {addr_ceram2}]
 set_property PACKAGE_PIN P11 [get_ports {addr_cerom2}]
 set_property IOSTANDARD LVCMOS33 [get_ports {addr_cerom2}]
-set_property PACKAGE_PIN M15 [get_ports {saleae[0]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[0]}]
-set_property PACKAGE_PIN P14 [get_ports {saleae[1]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[1]}]
-set_property PACKAGE_PIN E1 [get_ports {saleae[2]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[2]}]
-set_property PACKAGE_PIN F2 [get_ports {saleae[3]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[3]}]
-set_property PACKAGE_PIN F4 [get_ports {saleae[4]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[4]}]
-set_property PACKAGE_PIN F3 [get_ports {saleae[5]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[5]}]
-set_property PACKAGE_PIN C4 [get_ports {saleae[6]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[6]}]
-set_property PACKAGE_PIN D4 [get_ports {saleae[7]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {saleae[7]}]
 
 create_clock -name clk -period 10.000 [get_ports {clk}]
 create_clock -name ft_clk -period 10.000 [get_ports {ft_clk}]

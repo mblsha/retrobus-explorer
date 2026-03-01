@@ -102,6 +102,20 @@ def dedupe_clocks(clocks: list[tuple[str, float]]) -> list[tuple[str, float]]:
     return out
 
 
+def root_signal(signal: str) -> str:
+    return signal.split("[", 1)[0]
+
+
+def filter_to_signals(
+    pins: list[tuple[str, str, str]],
+    clocks: list[tuple[str, float]],
+    allowed: set[str],
+) -> tuple[list[tuple[str, str, str]], list[tuple[str, float]]]:
+    filtered_pins = [entry for entry in pins if root_signal(entry[0]) in allowed]
+    filtered_clocks = [entry for entry in clocks if root_signal(entry[0]) in allowed]
+    return filtered_pins, filtered_clocks
+
+
 def render_xdc(pins: list[tuple[str, str, str]], clocks: list[tuple[str, float]], acf_files: list[Path]) -> str:
     lines: list[str] = []
     lines.append("# Auto-generated from ACF constraints:")
@@ -136,6 +150,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate an XDC from one or more ACF files")
     parser.add_argument("--au-pin-map", required=True, type=Path, help="Path to AuPin.kt")
     parser.add_argument("--out", required=True, type=Path, help="Output XDC path")
+    parser.add_argument("--signal", action="append", default=[], help="Optional top-level signal name filter (repeatable)")
     parser.add_argument("acf", nargs="+", type=Path, help="ACF files to merge")
     args = parser.parse_args()
 
@@ -143,6 +158,8 @@ def main() -> int:
     pins, clocks = parse_acf_files(args.acf, pin_map)
     pins = dedupe_pins(pins)
     clocks = dedupe_clocks(clocks)
+    if args.signal:
+        pins, clocks = filter_to_signals(pins, clocks, set(args.signal))
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(render_xdc(pins, clocks, args.acf))
