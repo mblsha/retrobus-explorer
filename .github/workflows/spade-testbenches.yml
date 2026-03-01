@@ -21,6 +21,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       PYTHONUNBUFFERED: "1"
+      SPADE_COMPILER_CACHE_ROOT: /home/runner/.cache/spade-compilers
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -49,6 +50,15 @@ jobs:
           restore-keys: |
             spade-swim-${{ runner.os }}-
 
+      - name: Cache shared Spade compiler builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            /home/runner/.cache/spade-compilers
+          key: spade-compilers-${{ runner.os }}-${{ hashFiles('gateware/reference/spade-projects/*/swim.lock') }}
+          restore-keys: |
+            spade-compilers-${{ runner.os }}-
+
       - name: Install swim
         run: |
           if ! command -v swim >/dev/null 2>&1; then
@@ -64,6 +74,70 @@ jobs:
 
       - name: Sync Python dependencies
         run: uv sync
+
+      - name: Prepare shared compiler directories and pin swim compiler paths
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          root = Path(".").resolve()
+          cache_root = Path("/home/runner/.cache/spade-compilers")
+          cache_root.mkdir(parents=True, exist_ok=True)
+
+          def spade_commit(lock_file: Path) -> str:
+              in_spade = False
+              for raw in lock_file.read_text().splitlines():
+                  line = raw.strip()
+                  if line == "[spade]":
+                      in_spade = True
+                      continue
+                  if in_spade and line.startswith("[") and line.endswith("]"):
+                      break
+                  if in_spade and line.startswith("commit = "):
+                      return line.split('"')[1]
+              raise RuntimeError(f"missing [spade].commit in {lock_file}")
+
+          def run(*cmd: str, cwd: Path | None = None) -> None:
+              subprocess.run(list(cmd), cwd=str(cwd) if cwd else None, check=True)
+
+          def ensure_compiler(commit: str) -> Path:
+              compiler_dir = cache_root / commit
+              if not (compiler_dir / ".git").is_dir():
+                  run("git", "clone", "--recurse-submodules", "https://gitlab.com/spade-lang/spade", str(compiler_dir))
+              run("git", "-C", str(compiler_dir), "fetch", "--all", "--tags")
+              run("git", "-C", str(compiler_dir), "checkout", "--force", commit)
+              run("git", "-C", str(compiler_dir), "submodule", "update", "--init", "--recursive")
+              return compiler_dir
+
+          def set_compiler_path(swim_toml: Path, compiler_dir: Path) -> None:
+              section = f"[compiler]\\npath = \"{compiler_dir}\"\\n"
+              text = swim_toml.read_text()
+              if re.search(r"(?m)^\\[compiler\\]\\s*$", text):
+                  text = re.sub(
+                      r"(?ms)^\\[compiler\\]\\s*\\n.*?(?=^\\[[^\\]]+\\]\\s*$|\\Z)",
+                      section,
+                      text,
+                  )
+              else:
+                  if not text.endswith("\\n"):
+                      text += "\\n"
+                  text += "\\n" + section
+              swim_toml.write_text(text)
+
+          projects = sorted(root.glob("*/swim.toml"))
+          for swim_toml in projects:
+              project_dir = swim_toml.parent
+              lock_file = project_dir / "swim.lock"
+              if not lock_file.is_file():
+                  continue
+              commit = spade_commit(lock_file)
+              compiler_dir = ensure_compiler(commit)
+              set_compiler_path(swim_toml, compiler_dir)
+              print(f"{project_dir.name}: compiler commit {commit} -> {compiler_dir}")
+          PY
 
       - name: Run project testbenches
         run: |
