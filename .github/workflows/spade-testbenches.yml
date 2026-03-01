@@ -68,8 +68,10 @@ jobs:
 
       - name: Install verilator
         run: |
-          sudo apt-get update
-          sudo apt-get install -y verilator
+          if ! command -v verilator >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y verilator
+          fi
           verilator --version
 
       - name: Sync Python dependencies
@@ -108,9 +110,17 @@ jobs:
               compiler_dir = cache_root / commit
               if not (compiler_dir / ".git").is_dir():
                   run("git", "clone", "--recurse-submodules", "https://gitlab.com/spade-lang/spade", str(compiler_dir))
-              run("git", "-C", str(compiler_dir), "fetch", "--all", "--tags")
-              run("git", "-C", str(compiler_dir), "checkout", "--force", commit)
-              run("git", "-C", str(compiler_dir), "submodule", "update", "--init", "--recursive")
+              current = subprocess.check_output(
+                  ["git", "-C", str(compiler_dir), "rev-parse", "HEAD"], text=True
+              ).strip()
+              if current != commit:
+                  run("git", "-C", str(compiler_dir), "fetch", "--all", "--tags")
+                  run("git", "-C", str(compiler_dir), "checkout", "--force", commit)
+              submodules = subprocess.check_output(
+                  ["git", "-C", str(compiler_dir), "submodule", "status", "--recursive"], text=True
+              ).splitlines()
+              if current != commit or any(line.startswith(("-", "+", "U")) for line in submodules):
+                  run("git", "-C", str(compiler_dir), "submodule", "update", "--init", "--recursive")
               return compiler_dir
 
           def set_compiler_path(swim_toml: Path, compiler_dir: Path) -> None:
@@ -129,13 +139,17 @@ jobs:
               swim_toml.write_text(text)
 
           projects = sorted(root.glob("*/swim.toml"))
+          resolved: dict[str, Path] = {}
           for swim_toml in projects:
               project_dir = swim_toml.parent
               lock_file = project_dir / "swim.lock"
               if not lock_file.is_file():
                   continue
               commit = spade_commit(lock_file)
-              compiler_dir = ensure_compiler(commit)
+              compiler_dir = resolved.get(commit)
+              if compiler_dir is None:
+                  compiler_dir = ensure_compiler(commit)
+                  resolved[commit] = compiler_dir
               set_compiler_path(swim_toml, compiler_dir)
               print(f"{project_dir.name}: compiler commit {commit} -> {compiler_dir}")
           PY
