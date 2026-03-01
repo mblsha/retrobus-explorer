@@ -3,6 +3,9 @@ name = "sharp_organizer_card_spade"
 [libraries]
 shared_components = { path = "../shared-components" }
 
+[constraints]
+auto = true
+
 [verilog]
 sources = ["../shared-verilog/clk_wiz_0.v"]
 

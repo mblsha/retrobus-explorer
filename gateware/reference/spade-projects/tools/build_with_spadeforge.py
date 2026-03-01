@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", default="build/spade.sv")
     parser.add_argument("--xdc", default="constraints/pins.xdc")
     parser.add_argument("--output-dir", help="Artifact output directory")
+    parser.add_argument("--no-regenerate-xdc", action="store_true", help="Skip regenerating constraints/pins.xdc from [constraints].acf")
     parser.add_argument("--no-stream-events", action="store_true")
     parser.add_argument("extra", nargs="*", help="Extra flags passed to spadeforge-cli")
     return parser.parse_args()
@@ -85,6 +86,18 @@ def main() -> int:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     out_zip = output_dir / "artifacts.zip"
+
+    if not args.no_regenerate_xdc:
+        run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parent / "gen_project_xdc.py"),
+                "--project",
+                str(project),
+                "--allow-missing",
+            ],
+            cwd=project,
+        )
 
     run(["swim", "build"], cwd=project)
     main_source = (project / args.source).resolve()

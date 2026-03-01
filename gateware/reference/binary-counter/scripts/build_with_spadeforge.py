@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server", help="Optional server URL; omit to use zeroconf discovery")
     parser.add_argument("--discover-timeout", default="45s", help="mDNS discovery timeout")
     parser.add_argument("--output-dir", help="Optional output dir (default: build/forge-output-<UTC timestamp>)")
+    parser.add_argument("--no-regenerate-xdc", action="store_true", help="Skip regenerating constraints/pins.xdc from [constraints].acf")
     parser.add_argument("--no-stream-events", action="store_true", help="Disable --stream-events")
     parser.add_argument("extra", nargs="*", help="Additional flags appended to spadeforge-cli")
     return parser.parse_args()
@@ -57,6 +58,18 @@ def main() -> int:
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     out_zip = output_dir / "artifacts.zip"
+
+    if not args.no_regenerate_xdc:
+        subprocess.run(
+            [
+                sys.executable,
+                str(root.parent / "spade-projects" / "tools" / "gen_project_xdc.py"),
+                "--project",
+                str(root),
+            ],
+            cwd=root,
+            check=True,
+        )
 
     subprocess.run(["swim", "build"], cwd=root, check=True)
 

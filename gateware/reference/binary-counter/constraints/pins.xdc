@@ -1,5 +1,5 @@
 # Auto-generated from ACF constraints:
-# - ../spade-projects/test-minimal-spade/constraints/alchitry_minimal.acf
+# - ../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf
 # - ../../shared-constraints/saleae.acf
 
 set_property PACKAGE_PIN N14 [get_ports {clk}]
