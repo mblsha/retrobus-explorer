@@ -80,22 +80,16 @@ pub struct FifoU8x8Out {
     used: uint<4>,
 }
 
-pub struct AsyncFifoU8Out {
+pub struct FifoOut<T> {
     full: bool,
     empty: bool,
-    dout: uint<8>,
+    dout: T,
 }
 
-pub struct AsyncFifoU16Out {
-    full: bool,
-    empty: bool,
-    dout: uint<16>,
-}
-
-pub struct FifoU32Out {
-    full: bool,
-    empty: bool,
-    dout: uint<32>,
+struct port FifoOutPort<T> {
+    full: &bool,
+    empty: &bool,
+    dout: &T,
 }
 
 // Synchronous first-word-fall-through FIFO for uint<8> payloads.
@@ -195,26 +189,24 @@ pub entity async_fifo_u8x8(
     rclk: clock,
     rrst: bool,
     rget: bool,
-) -> AsyncFifoU8Out {
-    let (full, full_write): (&bool, inv &bool) = port;
-    let (empty, empty_write): (&bool, inv &bool) = port;
-    let (dout, dout_write): (&uint<8>, inv &uint<8>) = port;
+) -> FifoOut<uint<8>> {
+    let (fifo, fifo_w): (FifoOutPort<uint<8>>, inv FifoOutPort<uint<8>>) = port;
     let _ = inst async_fifo_u8x8_v(
         wclk,
         wrst,
         din,
         wput,
-        full_write,
+        fifo_w.full,
         rclk,
         rrst,
-        dout_write,
+        fifo_w.dout,
         rget,
-        empty_write,
+        fifo_w.empty,
     );
-    AsyncFifoU8Out$(
-        full: *full,
-        empty: *empty,
-        dout: *dout,
+    FifoOut$(
+        full: *fifo.full,
+        empty: *fifo.empty,
+        dout: *fifo.dout,
     )
 }
 
@@ -226,26 +218,24 @@ pub entity async_fifo_u8x4(
     rclk: clock,
     rrst: bool,
     rget: bool,
-) -> AsyncFifoU8Out {
-    let (full, full_write): (&bool, inv &bool) = port;
-    let (empty, empty_write): (&bool, inv &bool) = port;
-    let (dout, dout_write): (&uint<8>, inv &uint<8>) = port;
+) -> FifoOut<uint<8>> {
+    let (fifo, fifo_w): (FifoOutPort<uint<8>>, inv FifoOutPort<uint<8>>) = port;
     let _ = inst async_fifo_u8x4_v(
         wclk,
         wrst,
         din,
         wput,
-        full_write,
+        fifo_w.full,
         rclk,
         rrst,
-        dout_write,
+        fifo_w.dout,
         rget,
-        empty_write,
+        fifo_w.empty,
     );
-    AsyncFifoU8Out$(
-        full: *full,
-        empty: *empty,
-        dout: *dout,
+    FifoOut$(
+        full: *fifo.full,
+        empty: *fifo.empty,
+        dout: *fifo.dout,
     )
 }
 
@@ -257,26 +247,24 @@ pub entity async_fifo_u16x4(
     rclk: clock,
     rrst: bool,
     rget: bool,
-) -> AsyncFifoU16Out {
-    let (full, full_write): (&bool, inv &bool) = port;
-    let (empty, empty_write): (&bool, inv &bool) = port;
-    let (dout, dout_write): (&uint<16>, inv &uint<16>) = port;
+) -> FifoOut<uint<16>> {
+    let (fifo, fifo_w): (FifoOutPort<uint<16>>, inv FifoOutPort<uint<16>>) = port;
     let _ = inst async_fifo_u16x4_v(
         wclk,
         wrst,
         din,
         wput,
-        full_write,
+        fifo_w.full,
         rclk,
         rrst,
-        dout_write,
+        fifo_w.dout,
         rget,
-        empty_write,
+        fifo_w.empty,
     );
-    AsyncFifoU16Out$(
-        full: *full,
-        empty: *empty,
-        dout: *dout,
+    FifoOut$(
+        full: *fifo.full,
+        empty: *fifo.empty,
+        dout: *fifo.dout,
     )
 }
 
@@ -286,25 +274,34 @@ pub entity fifo_u32x32768(
     din: uint<32>,
     wput: bool,
     rget: bool,
-) -> FifoU32Out {
-    let (full, full_write): (&bool, inv &bool) = port;
-    let (empty, empty_write): (&bool, inv &bool) = port;
-    let (dout, dout_write): (&uint<32>, inv &uint<32>) = port;
+) -> FifoOut<uint<32>> {
+    let (fifo, fifo_w): (FifoOutPort<uint<32>>, inv FifoOutPort<uint<32>>) = port;
     let _ = inst fifo_u32x32768_v(
         clk,
         rst,
         din,
         wput,
-        full_write,
-        dout_write,
+        fifo_w.full,
+        fifo_w.dout,
         rget,
-        empty_write,
+        fifo_w.empty,
     );
-    FifoU32Out$(
-        full: *full,
-        empty: *empty,
-        dout: *dout,
+    FifoOut$(
+        full: *fifo.full,
+        empty: *fifo.empty,
+        dout: *fifo.dout,
     )
+}
+
+pub entity fifo_out_tap<T>(
+    out: FifoOut<T>,
+    full: inv &bool,
+    empty: inv &bool,
+    dout: inv &T,
+) {
+    set full = &out.full;
+    set empty = &out.empty;
+    set dout = &out.dout;
 }
 
 pub entity async_fifo_u8x4_tap(
@@ -320,9 +317,7 @@ pub entity async_fifo_u8x4_tap(
     dout: inv &uint<8>,
 ) {
     let out = inst async_fifo_u8x4(wclk, wrst, din, wput, rclk, rrst, rget);
-    set full = &out.full;
-    set empty = &out.empty;
-    set dout = &out.dout;
+    inst fifo_out_tap(out, full, empty, dout);
 }
 
 pub entity async_fifo_u16x4_tap(
@@ -338,9 +333,7 @@ pub entity async_fifo_u16x4_tap(
     dout: inv &uint<16>,
 ) {
     let out = inst async_fifo_u16x4(wclk, wrst, din, wput, rclk, rrst, rget);
-    set full = &out.full;
-    set empty = &out.empty;
-    set dout = &out.dout;
+    inst fifo_out_tap(out, full, empty, dout);
 }
 
 pub entity fifo_u32x32768_tap(
@@ -354,7 +347,5 @@ pub entity fifo_u32x32768_tap(
     dout: inv &uint<32>,
 ) {
     let out = inst fifo_u32x32768(clk, rst, din, wput, rget);
-    set full = &out.full;
-    set empty = &out.empty;
-    set dout = &out.dout;
+    inst fifo_out_tap(out, full, empty, dout);
 }

@@ -69,6 +69,18 @@ pub struct FtU16Out {
     ui_dout_empty: bool,
 }
 
+struct port FtU16WirePort {
+    ft_data_out: &uint<16>,
+    ft_be_out: &uint<2>,
+    ft_rd: &bool,
+    ft_wr: &bool,
+    ft_oe: &bool,
+    ui_din_full: &bool,
+    ui_dout: &uint<16>,
+    ui_dout_be: &uint<2>,
+    ui_dout_empty: &bool,
+}
+
 fn bit_time_last(bit_time: uint<15>) -> uint<15> {
     if bit_time == 0 {
         0
@@ -203,8 +215,7 @@ pub entity my_uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     busy: inv &bool,
 ) {
     let out = inst my_uart_tx::<CLK_FREQ, BAUD, DATA_WIDTH>(clk, rst, block, data, new_data);
-    set tx_line = &out.tx;
-    set busy = &out.busy;
+    inst uart_tx_out_tap(out, tx_line, busy);
 }
 
 pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD>(
@@ -216,6 +227,10 @@ pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD>(
     busy: inv &bool,
 ) {
     let out = inst uart_tx::<CLK_FREQ, BAUD>(clk, rst, data, new_data);
+    inst uart_tx_out_tap(out, tx_line, busy);
+}
+
+pub entity uart_tx_out_tap(out: UartTxOut, tx_line: inv &bool, busy: inv &bool) {
     set tx_line = &out.tx;
     set busy = &out.busy;
 }
@@ -387,15 +402,7 @@ pub entity ft_u16(
     ui_din_valid: bool,
     ui_dout_get: bool,
 ) -> FtU16Out {
-    let (ft_data_out, ft_data_out_w): (&uint<16>, inv &uint<16>) = port;
-    let (ft_be_out, ft_be_out_w): (&uint<2>, inv &uint<2>) = port;
-    let (ft_rd, ft_rd_w): (&bool, inv &bool) = port;
-    let (ft_wr, ft_wr_w): (&bool, inv &bool) = port;
-    let (ft_oe, ft_oe_w): (&bool, inv &bool) = port;
-    let (ui_din_full, ui_din_full_w): (&bool, inv &bool) = port;
-    let (ui_dout, ui_dout_w): (&uint<16>, inv &uint<16>) = port;
-    let (ui_dout_be, ui_dout_be_w): (&uint<2>, inv &uint<2>) = port;
-    let (ui_dout_empty, ui_dout_empty_w): (&bool, inv &bool) = port;
+    let (ft, ft_w): (FtU16WirePort, inv FtU16WirePort) = port;
 
     let _ = inst ft_u16_v(
         clk,
@@ -405,32 +412,55 @@ pub entity ft_u16(
         ft_txe,
         ft_data_in,
         ft_be_in,
-        ft_data_out_w,
-        ft_be_out_w,
-        ft_rd_w,
-        ft_wr_w,
-        ft_oe_w,
+        ft_w.ft_data_out,
+        ft_w.ft_be_out,
+        ft_w.ft_rd,
+        ft_w.ft_wr,
+        ft_w.ft_oe,
         ui_din,
         ui_din_be,
         ui_din_valid,
-        ui_din_full_w,
-        ui_dout_w,
-        ui_dout_be_w,
-        ui_dout_empty_w,
+        ft_w.ui_din_full,
+        ft_w.ui_dout,
+        ft_w.ui_dout_be,
+        ft_w.ui_dout_empty,
         ui_dout_get,
     );
 
     FtU16Out$(
-        ft_data_out: *ft_data_out,
-        ft_be_out: *ft_be_out,
-        ft_rd: *ft_rd,
-        ft_wr: *ft_wr,
-        ft_oe: *ft_oe,
-        ui_din_full: *ui_din_full,
-        ui_dout: *ui_dout,
-        ui_dout_be: *ui_dout_be,
-        ui_dout_empty: *ui_dout_empty,
+        ft_data_out: *ft.ft_data_out,
+        ft_be_out: *ft.ft_be_out,
+        ft_rd: *ft.ft_rd,
+        ft_wr: *ft.ft_wr,
+        ft_oe: *ft.ft_oe,
+        ui_din_full: *ft.ui_din_full,
+        ui_dout: *ft.ui_dout,
+        ui_dout_be: *ft.ui_dout_be,
+        ui_dout_empty: *ft.ui_dout_empty,
     )
+}
+
+pub entity ft_u16_out_tap(
+    out: FtU16Out,
+    ft_data_out: inv &uint<16>,
+    ft_be_out: inv &uint<2>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<16>,
+    ui_dout_be: inv &uint<2>,
+    ui_dout_empty: inv &bool,
+) {
+    set ft_data_out = &out.ft_data_out;
+    set ft_be_out = &out.ft_be_out;
+    set ft_rd = &out.ft_rd;
+    set ft_wr = &out.ft_wr;
+    set ft_oe = &out.ft_oe;
+    set ui_din_full = &out.ui_din_full;
+    set ui_dout = &out.ui_dout;
+    set ui_dout_be = &out.ui_dout_be;
+    set ui_dout_empty = &out.ui_dout_empty;
 }
 
 pub entity ft_u16_tap(
@@ -468,15 +498,18 @@ pub entity ft_u16_tap(
         ui_din_valid,
         ui_dout_get,
     );
-    set ft_data_out = &out.ft_data_out;
-    set ft_be_out = &out.ft_be_out;
-    set ft_rd = &out.ft_rd;
-    set ft_wr = &out.ft_wr;
-    set ft_oe = &out.ft_oe;
-    set ui_din_full = &out.ui_din_full;
-    set ui_dout = &out.ui_dout;
-    set ui_dout_be = &out.ui_dout_be;
-    set ui_dout_empty = &out.ui_dout_empty;
+    inst ft_u16_out_tap(
+        out,
+        ft_data_out,
+        ft_be_out,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ui_din_full,
+        ui_dout,
+        ui_dout_be,
+        ui_dout_empty,
+    );
 }
 
 pub entity ft_u16_tx8192(
@@ -492,15 +525,7 @@ pub entity ft_u16_tx8192(
     ui_din_valid: bool,
     ui_dout_get: bool,
 ) -> FtU16Out {
-    let (ft_data_out, ft_data_out_w): (&uint<16>, inv &uint<16>) = port;
-    let (ft_be_out, ft_be_out_w): (&uint<2>, inv &uint<2>) = port;
-    let (ft_rd, ft_rd_w): (&bool, inv &bool) = port;
-    let (ft_wr, ft_wr_w): (&bool, inv &bool) = port;
-    let (ft_oe, ft_oe_w): (&bool, inv &bool) = port;
-    let (ui_din_full, ui_din_full_w): (&bool, inv &bool) = port;
-    let (ui_dout, ui_dout_w): (&uint<16>, inv &uint<16>) = port;
-    let (ui_dout_be, ui_dout_be_w): (&uint<2>, inv &uint<2>) = port;
-    let (ui_dout_empty, ui_dout_empty_w): (&bool, inv &bool) = port;
+    let (ft, ft_w): (FtU16WirePort, inv FtU16WirePort) = port;
 
     let _ = inst ft_u16_v_tx8192(
         clk,
@@ -510,31 +535,31 @@ pub entity ft_u16_tx8192(
         ft_txe,
         ft_data_in,
         ft_be_in,
-        ft_data_out_w,
-        ft_be_out_w,
-        ft_rd_w,
-        ft_wr_w,
-        ft_oe_w,
+        ft_w.ft_data_out,
+        ft_w.ft_be_out,
+        ft_w.ft_rd,
+        ft_w.ft_wr,
+        ft_w.ft_oe,
         ui_din,
         ui_din_be,
         ui_din_valid,
-        ui_din_full_w,
-        ui_dout_w,
-        ui_dout_be_w,
-        ui_dout_empty_w,
+        ft_w.ui_din_full,
+        ft_w.ui_dout,
+        ft_w.ui_dout_be,
+        ft_w.ui_dout_empty,
         ui_dout_get,
     );
 
     FtU16Out$(
-        ft_data_out: *ft_data_out,
-        ft_be_out: *ft_be_out,
-        ft_rd: *ft_rd,
-        ft_wr: *ft_wr,
-        ft_oe: *ft_oe,
-        ui_din_full: *ui_din_full,
-        ui_dout: *ui_dout,
-        ui_dout_be: *ui_dout_be,
-        ui_dout_empty: *ui_dout_empty,
+        ft_data_out: *ft.ft_data_out,
+        ft_be_out: *ft.ft_be_out,
+        ft_rd: *ft.ft_rd,
+        ft_wr: *ft.ft_wr,
+        ft_oe: *ft.ft_oe,
+        ui_din_full: *ft.ui_din_full,
+        ui_dout: *ft.ui_dout,
+        ui_dout_be: *ft.ui_dout_be,
+        ui_dout_empty: *ft.ui_dout_empty,
     )
 }
 
@@ -573,13 +598,16 @@ pub entity ft_u16_tx8192_tap(
         ui_din_valid,
         ui_dout_get,
     );
-    set ft_data_out = &out.ft_data_out;
-    set ft_be_out = &out.ft_be_out;
-    set ft_rd = &out.ft_rd;
-    set ft_wr = &out.ft_wr;
-    set ft_oe = &out.ft_oe;
-    set ui_din_full = &out.ui_din_full;
-    set ui_dout = &out.ui_dout;
-    set ui_dout_be = &out.ui_dout_be;
-    set ui_dout_empty = &out.ui_dout_empty;
+    inst ft_u16_out_tap(
+        out,
+        ft_data_out,
+        ft_be_out,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ui_din_full,
+        ui_dout,
+        ui_dout_be,
+        ui_dout_empty,
+    );
 }
