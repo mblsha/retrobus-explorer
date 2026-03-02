@@ -152,6 +152,201 @@ fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk400: 
     }
 }
 
+fn is_echo_mode(mode: Mode) -> bool {
+    match mode {
+        Mode::Echo => true,
+        _ => false,
+    }
+}
+
+fn cmd_state_is_idle(state: CmdParseState) -> bool {
+    match state {
+        CmdParseState::Idle => true,
+        _ => false,
+    }
+}
+
+fn decode_freq_digit(rx_byte: uint<8>) -> (bool, uint<4>) {
+    if rx_byte >= 0x30 && rx_byte <= 0x35 {
+        (true, trunc(rx_byte - 0x30))
+    } else {
+        (false, 0)
+    }
+}
+
+fn next_cmd_state(
+    state: CmdParseState,
+    rx_ok: bool,
+    rx_byte: uint<8>,
+    rx_upper: uint<8>,
+) -> CmdParseState {
+    if !rx_ok {
+        state
+    } else {
+        match state {
+            CmdParseState::Idle => {
+                if rx_byte == 0x21 {
+                    CmdParseState::Bang()
+                } else {
+                    CmdParseState::Idle()
+                }
+            },
+            CmdParseState::Bang => {
+                if rx_upper == 0x46 {
+                    CmdParseState::Freq()
+                } else {
+                    CmdParseState::Idle()
+                }
+            },
+            CmdParseState::Freq => CmdParseState::Idle(),
+        }
+    }
+}
+
+struct CmdDecode {
+    msg: MsgKind,
+    msg_valid: bool,
+    mode_write: bool,
+    mode_value: Mode,
+    freq_write: bool,
+    freq_value: uint<4>,
+}
+
+fn decode_cmd(
+    state: CmdParseState,
+    rx_ok: bool,
+    rx_upper: uint<8>,
+    rx_digit: (bool, uint<4>),
+) -> CmdDecode {
+    if !rx_ok {
+        CmdDecode$(
+            msg: MsgKind::None(),
+            msg_valid: false,
+            mode_write: false,
+            mode_value: Mode::ClockTester(),
+            freq_write: false,
+            freq_value: 0,
+        )
+    } else {
+        match state {
+            CmdParseState::Bang => {
+                if rx_upper == 0x48 {
+                    CmdDecode$(
+                        msg: MsgKind::Help(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x53 {
+                    CmdDecode$(
+                        msg: MsgKind::Status(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x43 {
+                    CmdDecode$(
+                        msg: MsgKind::Ok(),
+                        msg_valid: true,
+                        mode_write: true,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x45 {
+                    CmdDecode$(
+                        msg: MsgKind::Ok(),
+                        msg_valid: true,
+                        mode_write: true,
+                        mode_value: Mode::Echo(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x46 {
+                    CmdDecode$(
+                        msg: MsgKind::None(),
+                        msg_valid: false,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else {
+                    CmdDecode$(
+                        msg: MsgKind::ErrCmd(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                }
+            },
+            CmdParseState::Freq => {
+                if rx_digit.0 {
+                    CmdDecode$(
+                        msg: MsgKind::Ok(),
+                        msg_valid: true,
+                        mode_write: true,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: true,
+                        freq_value: rx_digit.1,
+                    )
+                } else {
+                    CmdDecode$(
+                        msg: MsgKind::ErrFreq(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                }
+            },
+            _ => CmdDecode$(
+                msg: MsgKind::None(),
+                msg_valid: false,
+                mode_write: false,
+                mode_value: Mode::ClockTester(),
+                freq_write: false,
+                freq_value: 0,
+            ),
+        }
+    }
+}
+
+fn saleae_outputs(
+    mode_is_echo: bool,
+    selected_clk: bool,
+    clk_100_div: bool,
+    clk200_probe: bool,
+    clk400_probe: bool,
+    clk_50_div: bool,
+    usb_rx: bool,
+    usb_tx_line: bool,
+    tx6_line: bool,
+    tx7_line: bool,
+) -> [bool; 8] {
+    if mode_is_echo {
+        [
+            clk_100_div,
+            clk200_probe,
+            clk400_probe,
+            clk_50_div,
+            usb_rx,
+            usb_tx_line,
+            tx6_line,
+            tx7_line,
+        ]
+    } else {
+        [selected_clk, false, false, false, false, false, false, false]
+    }
+}
+
 #[no_mangle(all)]
 entity main(
     clk: clock,
@@ -168,17 +363,6 @@ entity main(
     let clk_fast = unsafe { inst std::conv::bool_to_clock(*clk400_probe) };
     let rx = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
 
-    let ascii_bang: uint<8> = 0x21; // !
-    let ascii_0: uint<8> = 0x30;
-    let ascii_5: uint<8> = 0x35;
-    let ascii_a: uint<8> = 0x61;
-    let ascii_z: uint<8> = 0x7a;
-    let ascii_h: uint<8> = 0x48;
-    let ascii_s: uint<8> = 0x53;
-    let ascii_c: uint<8> = 0x43;
-    let ascii_e: uint<8> = 0x45;
-    let ascii_f: uint<8> = 0x46;
-
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
@@ -191,119 +375,36 @@ entity main(
     let (tx7_fire, tx7_fire_w): (&bool, inv &bool) = port;
 
     let rx_ok = rx.valid && !rx.parity_error;
-    let rx_is_digit = rx_ok && rx.byte >= ascii_0 && rx.byte <= ascii_5;
-    let rx_upper: uint<8> = if rx_ok && rx.byte >= ascii_a && rx.byte <= ascii_z {
+    let rx_digit = decode_freq_digit(rx.byte);
+    let rx_upper: uint<8> = if rx_ok && rx.byte >= 0x61 && rx.byte <= 0x7a {
         trunc(rx.byte - 0x20)
     } else {
         rx.byte
     };
 
     reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
-        if rx_ok {
-            match cmd_state {
-                CmdParseState::Idle => {
-                    if rx.byte == ascii_bang {
-                        CmdParseState::Bang()
-                    } else {
-                        CmdParseState::Idle()
-                    }
-                },
-                CmdParseState::Bang => {
-                    if rx_upper == ascii_f {
-                        CmdParseState::Freq()
-                    } else {
-                        CmdParseState::Idle()
-                    }
-                },
-                CmdParseState::Freq => CmdParseState::Idle(),
-            }
-        } else {
-            cmd_state
-        }
+        next_cmd_state(cmd_state, rx_ok, rx.byte, rx_upper)
     };
+    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_upper, rx_digit);
 
     reg(clk) mode: Mode reset(rst: Mode::ClockTester()) = {
-        if rx_ok {
-            match cmd_state {
-                CmdParseState::Bang => {
-                    if rx_upper == ascii_c {
-                        Mode::ClockTester()
-                    } else if rx_upper == ascii_e {
-                        Mode::Echo()
-                    } else {
-                        mode
-                    }
-                },
-                CmdParseState::Freq => {
-                    if rx_is_digit {
-                        Mode::ClockTester()
-                    } else {
-                        mode
-                    }
-                },
-                _ => mode,
-            }
+        if cmd_decode.mode_write {
+            cmd_decode.mode_value
         } else {
             mode
         }
     };
 
     reg(clk) freq_code: uint<4> reset(rst: 0) = {
-        if rx_ok {
-            match cmd_state {
-                CmdParseState::Freq => {
-                    if rx_is_digit {
-                        trunc(rx.byte - ascii_0)
-                    } else {
-                        freq_code
-                    }
-                },
-                _ => freq_code,
-            }
+        if cmd_decode.freq_write {
+            cmd_decode.freq_value
         } else {
             freq_code
         }
     };
-
-    let cmd_msg: MsgKind = if rx_ok {
-        match cmd_state {
-            CmdParseState::Bang => {
-                if rx_upper == ascii_h {
-                    MsgKind::Help()
-                } else if rx_upper == ascii_s {
-                    MsgKind::Status()
-                } else if rx_upper == ascii_c || rx_upper == ascii_e {
-                    MsgKind::Ok()
-                } else if rx_upper == ascii_f {
-                    MsgKind::None()
-                } else {
-                    MsgKind::ErrCmd()
-                }
-            },
-            CmdParseState::Freq => {
-                if rx_is_digit {
-                    MsgKind::Ok()
-                } else {
-                    MsgKind::ErrFreq()
-                }
-            },
-            _ => MsgKind::None(),
-        }
-    } else {
-        MsgKind::None()
-    };
-    let cmd_msg_valid = if rx_ok {
-        match cmd_state {
-            CmdParseState::Bang => rx_upper != ascii_f,
-            CmdParseState::Freq => true,
-            _ => false,
-        }
-    } else {
-        false
-    };
     reg(clk) cmd_msg_latched: MsgKind reset(rst: MsgKind::None()) = {
-        if cmd_msg_valid {
-            cmd_msg
+        if cmd_decode.msg_valid {
+            cmd_decode.msg
         } else {
             MsgKind::None()
         }
@@ -349,16 +450,10 @@ entity main(
     let fifo6 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fire);
     let fifo7 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fire);
 
-    let mode_is_echo = match mode {
-        Mode::Echo => true,
-        _ => false,
-    };
+    let mode_is_echo = is_echo_mode(mode);
     let mode_is_clock_tester = !mode_is_echo;
-    let cmd_is_idle = match cmd_state {
-        CmdParseState::Idle => true,
-        _ => false,
-    };
-    let rx_is_bang = rx_ok && rx.byte == ascii_bang;
+    let cmd_is_idle = cmd_state_is_idle(cmd_state);
+    let rx_is_bang = rx_ok && rx.byte == 0x21;
     let rx_is_payload = mode_is_echo && cmd_is_idle && rx_ok && !rx_is_bang;
 
     let all_fifo_ready = !fifo6.full && !fifo7.full;
@@ -411,31 +506,22 @@ entity main(
     let selected_clk = clock_from_code(freq_code, clk_div, *clk200_probe, *clk400_probe);
 
     reg(clk) heartbeat: uint<24> reset(rst: 0) = trunc(heartbeat + 1);
-    let cmd_waiting = match cmd_state {
-        CmdParseState::Idle => false,
-        _ => true,
-    };
-
-    let saleae0 = if mode_is_echo { clk_100_div } else { selected_clk };
-    let saleae1 = if mode_is_echo { *clk200_probe } else { false };
-    let saleae2 = if mode_is_echo { *clk400_probe } else { false };
-    let saleae3 = if mode_is_echo { clk_50_div } else { false };
-    let saleae4 = if mode_is_echo { usb_rx } else { false };
-    let saleae5 = if mode_is_echo { *usb_tx_line } else { false };
-    let saleae6 = if mode_is_echo { *tx6_line } else { false };
-    let saleae7 = if mode_is_echo { *tx7_line } else { false };
+    let cmd_waiting = !cmd_state_is_idle(cmd_state);
+    let saleae_lines = saleae_outputs(
+        mode_is_echo,
+        selected_clk,
+        clk_100_div,
+        *clk200_probe,
+        *clk400_probe,
+        clk_50_div,
+        usb_rx,
+        *usb_tx_line,
+        *tx6_line,
+        *tx7_line,
+    );
 
     set usb_tx = &*usb_tx_line;
-    set saleae = &[
-        saleae0,
-        saleae1,
-        saleae2,
-        saleae3,
-        saleae4,
-        saleae5,
-        saleae6,
-        saleae7,
-    ];
+    set saleae = &saleae_lines;
     set led = &[
         mode_is_clock_tester,
         mode_is_echo,
