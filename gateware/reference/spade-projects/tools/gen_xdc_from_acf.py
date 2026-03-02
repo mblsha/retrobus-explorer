@@ -96,8 +96,8 @@ def validate_metadata_usage(acf_files: list[Path], acf_metadata: dict[Path, list
                 errors.append(f"{acf}: missing required @meta key: {slew_meta_key}")
             else:
                 slew_values = [value for key, value in metadata if key == slew_meta_key]
-                if any(value.strip().upper() != "SLOW" for value in slew_values):
-                    errors.append(f"{acf}: {slew_meta_key} must be SLOW")
+                if any(value.strip().upper() != "FAST" for value in slew_values):
+                    errors.append(f"{acf}: {slew_meta_key} must be FAST")
 
     if errors:
         details = "\n".join(f"  - {err}" for err in errors)

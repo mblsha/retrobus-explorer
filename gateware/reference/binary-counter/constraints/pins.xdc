@@ -4,9 +4,9 @@
 #   meta.schema: 1
 #   meta.name: saleae_debug_header
 #   meta.board: alchitry_au1
-#   meta.description: Saleae D0-D7 mapping used by retrobus Spade projects.
+#   meta.description: Saleae D0-D7 mapping used by retrobus Spade projects; use minimum drive and FAST slew to help capture more 100MHz clock pulses on Logic MSO digital probes.
 #   meta.root_property.saleae.DRIVE: 4
-#   meta.root_property.saleae.SLEW: SLOW
+#   meta.root_property.saleae.SLEW: FAST
 
 set_property PACKAGE_PIN N14 [get_ports {clk}]
 set_property IOSTANDARD LVCMOS33 [get_ports {clk}]
@@ -50,21 +50,21 @@ set_property PACKAGE_PIN D4 [get_ports {saleae[7]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {saleae[7]}]
 
 set_property DRIVE 4 [get_ports {saleae[0]}]
-set_property SLEW SLOW [get_ports {saleae[0]}]
+set_property SLEW FAST [get_ports {saleae[0]}]
 set_property DRIVE 4 [get_ports {saleae[1]}]
-set_property SLEW SLOW [get_ports {saleae[1]}]
+set_property SLEW FAST [get_ports {saleae[1]}]
 set_property DRIVE 4 [get_ports {saleae[2]}]
-set_property SLEW SLOW [get_ports {saleae[2]}]
+set_property SLEW FAST [get_ports {saleae[2]}]
 set_property DRIVE 4 [get_ports {saleae[3]}]
-set_property SLEW SLOW [get_ports {saleae[3]}]
+set_property SLEW FAST [get_ports {saleae[3]}]
 set_property DRIVE 4 [get_ports {saleae[4]}]
-set_property SLEW SLOW [get_ports {saleae[4]}]
+set_property SLEW FAST [get_ports {saleae[4]}]
 set_property DRIVE 4 [get_ports {saleae[5]}]
-set_property SLEW SLOW [get_ports {saleae[5]}]
+set_property SLEW FAST [get_ports {saleae[5]}]
 set_property DRIVE 4 [get_ports {saleae[6]}]
-set_property SLEW SLOW [get_ports {saleae[6]}]
+set_property SLEW FAST [get_ports {saleae[6]}]
 set_property DRIVE 4 [get_ports {saleae[7]}]
-set_property SLEW SLOW [get_ports {saleae[7]}]
+set_property SLEW FAST [get_ports {saleae[7]}]
 
 create_clock -name clk -period 10.000 [get_ports {clk}]
 
