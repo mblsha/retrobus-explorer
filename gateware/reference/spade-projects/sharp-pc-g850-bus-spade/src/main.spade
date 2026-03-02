@@ -491,9 +491,13 @@ entity main_core(
 
     let sample_tx_req = sample_is_wait && wait_done && !*tx_busy;
     let stream_drop_tx = bus_event_valid && ft_enabled && *stream_fifo_full;
-    let bus_tx_req: (bool, uint<8>) = if bus_error_tx {
+    let bus_error_tx_now = bus_error_tx && !*tx_busy;
+    let stream_drop_tx_now = stream_drop_tx && !*tx_busy;
+    // Intentional lossy behavior: when USB TX is busy, one-cycle bus error/drop
+    // markers are dropped instead of queued to keep this telemetry path simple.
+    let bus_tx_req: (bool, uint<8>) = if bus_error_tx_now {
         (true, bus_error_char)
-    } else if stream_drop_tx {
+    } else if stream_drop_tx_now {
         (true, bus_event_char)
     } else if sample_tx_req {
         (true, ascii_dot)

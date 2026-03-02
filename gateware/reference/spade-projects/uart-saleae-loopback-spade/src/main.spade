@@ -408,17 +408,15 @@ entity main(
             freq_code
         }
     };
-    reg(clk) cmd_msg_latched: MsgKind reset(rst: MsgKind::None()) = {
-        if cmd_decode.msg_valid {
-            cmd_decode.msg
-        } else {
-            MsgKind::None()
-        }
-    };
-
-    reg(clk) tx_state: (MsgKind, uint<8>) reset(rst: (MsgKind::Ready(), 0)) = {
+    reg(clk) tx_state: (MsgKind, uint<8>, MsgKind) reset(rst: (MsgKind::Ready(), 0, MsgKind::None())) = {
         let cur_msg = tx_state.0;
         let cur_idx = tx_state.1;
+        let pending_msg = tx_state.2;
+        let pending_next = if cmd_decode.msg_valid {
+            cmd_decode.msg
+        } else {
+            pending_msg
+        };
         let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code);
         let cur_none = msg_is_none(cur_msg);
         let sending = !cur_none && cur_byte.0 && !*usb_uart.busy;
@@ -440,10 +438,11 @@ entity main(
             cur_idx
         };
 
-        if msg_is_none(post_msg) && !msg_is_none(cmd_msg_latched) {
-            (cmd_msg_latched, 0)
+        if msg_is_none(post_msg) && !msg_is_none(pending_next) {
+            // Hold decoded command responses until TX is ready to consume them.
+            (pending_next, 0, MsgKind::None())
         } else {
-            (post_msg, post_idx)
+            (post_msg, post_idx, pending_next)
         }
     };
 
