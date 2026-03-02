@@ -44,291 +44,92 @@ fn digit_char(value: uint<4>) -> uint<8> {
     trunc(v + 0x30)
 }
 
-fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> (bool, uint<8>) {
+struct MsgTemplate {
+    len: uint<8>,
+    bytes: [uint<8>; 64],
+}
+
+fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
+    std::conv::concat_arrays(message, [0; 64 - N])
+}
+
+fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
     let m = mode_char(mode);
     let f = digit_char(freq_code);
     match msg {
-        MsgKind::None => (false, 0),
-        MsgKind::Ready => {
-            if idx == 0 {
-                (true, 0x52) // R
-            } else if idx == 1 {
-                (true, 0x42) // B
-            } else if idx == 2 {
-                (true, 0x58) // X
-            } else if idx == 3 {
-                (true, 0x20) // space
-            } else if idx == 4 {
-                (true, 0x52) // R
-            } else if idx == 5 {
-                (true, 0x45) // E
-            } else if idx == 6 {
-                (true, 0x41) // A
-            } else if idx == 7 {
-                (true, 0x44) // D
-            } else if idx == 8 {
-                (true, 0x59) // Y
-            } else if idx == 9 {
-                (true, 0x20) // space
-            } else if idx == 10 {
-                (true, 0x4d) // M
-            } else if idx == 11 {
-                (true, 0x3d) // =
-            } else if idx == 12 {
-                (true, m)
-            } else if idx == 13 {
-                (true, 0x20) // space
-            } else if idx == 14 {
-                (true, 0x46) // F
-            } else if idx == 15 {
-                (true, 0x3d) // =
-            } else if idx == 16 {
-                (true, f)
-            } else if idx == 17 {
-                (true, 0x0d) // CR
-            } else if idx == 18 {
-                (true, 0x0a) // LF
-            } else {
-                (false, 0)
-            }
-        },
-        MsgKind::Help => {
-            if idx == 0 {
-                (true, 0x52) // R
-            } else if idx == 1 {
-                (true, 0x42) // B
-            } else if idx == 2 {
-                (true, 0x58) // X
-            } else if idx == 3 {
-                (true, 0x20) // space
-            } else if idx == 4 {
-                (true, 0x48) // H
-            } else if idx == 5 {
-                (true, 0x45) // E
-            } else if idx == 6 {
-                (true, 0x4c) // L
-            } else if idx == 7 {
-                (true, 0x50) // P
-            } else if idx == 8 {
-                (true, 0x20) // space
-            } else if idx == 9 {
-                (true, 0x21) // !
-            } else if idx == 10 {
-                (true, 0x48) // H
-            } else if idx == 11 {
-                (true, 0x20) // space
-            } else if idx == 12 {
-                (true, 0x21) // !
-            } else if idx == 13 {
-                (true, 0x53) // S
-            } else if idx == 14 {
-                (true, 0x20) // space
-            } else if idx == 15 {
-                (true, 0x21) // !
-            } else if idx == 16 {
-                (true, 0x43) // C
-            } else if idx == 17 {
-                (true, 0x20) // space
-            } else if idx == 18 {
-                (true, 0x21) // !
-            } else if idx == 19 {
-                (true, 0x45) // E
-            } else if idx == 20 {
-                (true, 0x20) // space
-            } else if idx == 21 {
-                (true, 0x21) // !
-            } else if idx == 22 {
-                (true, 0x46) // F
-            } else if idx == 23 {
-                (true, 0x30) // 0
-            } else if idx == 24 {
-                (true, 0x2d) // -
-            } else if idx == 25 {
-                (true, 0x35) // 5
-            } else if idx == 26 {
-                (true, 0x20) // space
-            } else if idx == 27 {
-                (true, 0x4d) // M
-            } else if idx == 28 {
-                (true, 0x3a) // :
-            } else if idx == 29 {
-                (true, 0x43) // C
-            } else if idx == 30 {
-                (true, 0x4c) // L
-            } else if idx == 31 {
-                (true, 0x4f) // O
-            } else if idx == 32 {
-                (true, 0x43) // C
-            } else if idx == 33 {
-                (true, 0x4b) // K
-            } else if idx == 34 {
-                (true, 0x20) // space
-            } else if idx == 35 {
-                (true, 0x45) // E
-            } else if idx == 36 {
-                (true, 0x3a) // :
-            } else if idx == 37 {
-                (true, 0x45) // E
-            } else if idx == 38 {
-                (true, 0x43) // C
-            } else if idx == 39 {
-                (true, 0x48) // H
-            } else if idx == 40 {
-                (true, 0x4f) // O
-            } else if idx == 41 {
-                (true, 0x0d) // CR
-            } else if idx == 42 {
-                (true, 0x0a) // LF
-            } else {
-                (false, 0)
-            }
-        },
-        MsgKind::Status => {
-            if idx == 0 {
-                (true, 0x52) // R
-            } else if idx == 1 {
-                (true, 0x42) // B
-            } else if idx == 2 {
-                (true, 0x58) // X
-            } else if idx == 3 {
-                (true, 0x20) // space
-            } else if idx == 4 {
-                (true, 0x53) // S
-            } else if idx == 5 {
-                (true, 0x54) // T
-            } else if idx == 6 {
-                (true, 0x41) // A
-            } else if idx == 7 {
-                (true, 0x54) // T
-            } else if idx == 8 {
-                (true, 0x55) // U
-            } else if idx == 9 {
-                (true, 0x53) // S
-            } else if idx == 10 {
-                (true, 0x20) // space
-            } else if idx == 11 {
-                (true, 0x4d) // M
-            } else if idx == 12 {
-                (true, 0x3d) // =
-            } else if idx == 13 {
-                (true, m)
-            } else if idx == 14 {
-                (true, 0x20) // space
-            } else if idx == 15 {
-                (true, 0x46) // F
-            } else if idx == 16 {
-                (true, 0x3d) // =
-            } else if idx == 17 {
-                (true, f)
-            } else if idx == 18 {
-                (true, 0x0d) // CR
-            } else if idx == 19 {
-                (true, 0x0a) // LF
-            } else {
-                (false, 0)
-            }
-        },
-        MsgKind::Ok => {
-            if idx == 0 {
-                (true, 0x52) // R
-            } else if idx == 1 {
-                (true, 0x42) // B
-            } else if idx == 2 {
-                (true, 0x58) // X
-            } else if idx == 3 {
-                (true, 0x20) // space
-            } else if idx == 4 {
-                (true, 0x4f) // O
-            } else if idx == 5 {
-                (true, 0x4b) // K
-            } else if idx == 6 {
-                (true, 0x20) // space
-            } else if idx == 7 {
-                (true, 0x4d) // M
-            } else if idx == 8 {
-                (true, 0x3d) // =
-            } else if idx == 9 {
-                (true, m)
-            } else if idx == 10 {
-                (true, 0x20) // space
-            } else if idx == 11 {
-                (true, 0x46) // F
-            } else if idx == 12 {
-                (true, 0x3d) // =
-            } else if idx == 13 {
-                (true, f)
-            } else if idx == 14 {
-                (true, 0x0d) // CR
-            } else if idx == 15 {
-                (true, 0x0a) // LF
-            } else {
-                (false, 0)
-            }
-        },
-        MsgKind::ErrCmd => {
-            if idx == 0 {
-                (true, 0x52) // R
-            } else if idx == 1 {
-                (true, 0x42) // B
-            } else if idx == 2 {
-                (true, 0x58) // X
-            } else if idx == 3 {
-                (true, 0x20) // space
-            } else if idx == 4 {
-                (true, 0x45) // E
-            } else if idx == 5 {
-                (true, 0x52) // R
-            } else if idx == 6 {
-                (true, 0x52) // R
-            } else if idx == 7 {
-                (true, 0x20) // space
-            } else if idx == 8 {
-                (true, 0x43) // C
-            } else if idx == 9 {
-                (true, 0x4d) // M
-            } else if idx == 10 {
-                (true, 0x44) // D
-            } else if idx == 11 {
-                (true, 0x0d) // CR
-            } else if idx == 12 {
-                (true, 0x0a) // LF
-            } else {
-                (false, 0)
-            }
-        },
-        MsgKind::ErrFreq => {
-            if idx == 0 {
-                (true, 0x52) // R
-            } else if idx == 1 {
-                (true, 0x42) // B
-            } else if idx == 2 {
-                (true, 0x58) // X
-            } else if idx == 3 {
-                (true, 0x20) // space
-            } else if idx == 4 {
-                (true, 0x45) // E
-            } else if idx == 5 {
-                (true, 0x52) // R
-            } else if idx == 6 {
-                (true, 0x52) // R
-            } else if idx == 7 {
-                (true, 0x20) // space
-            } else if idx == 8 {
-                (true, 0x46) // F
-            } else if idx == 9 {
-                (true, 0x52) // R
-            } else if idx == 10 {
-                (true, 0x45) // E
-            } else if idx == 11 {
-                (true, 0x51) // Q
-            } else if idx == 12 {
-                (true, 0x0d) // CR
-            } else if idx == 13 {
-                (true, 0x0a) // LF
-            } else {
-                (false, 0)
-            }
-        },
+        MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
+        MsgKind::Ready => MsgTemplate$(
+            len: 19,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x52, 0x45, 0x41, 0x44, 0x59, 0x20, // READY
+                0x4d, 0x3d, m, 0x20, // M=
+                0x46, 0x3d, f, // F=
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::Help => MsgTemplate$(
+            len: 43,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x48, 0x45, 0x4c, 0x50, 0x20, // HELP
+                0x21, 0x48, 0x20, // !H
+                0x21, 0x53, 0x20, // !S
+                0x21, 0x43, 0x20, // !C
+                0x21, 0x45, 0x20, // !E
+                0x21, 0x46, 0x30, 0x2d, 0x35, 0x20, // !F0-5
+                0x4d, 0x3a, 0x43, 0x4c, 0x4f, 0x43, 0x4b, 0x20, // M:CLOCK
+                0x45, 0x3a, 0x45, 0x43, 0x48, 0x4f, // E:ECHO
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::Status => MsgTemplate$(
+            len: 20,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x53, 0x54, 0x41, 0x54, 0x55, 0x53, 0x20, // STATUS
+                0x4d, 0x3d, m, 0x20, // M=
+                0x46, 0x3d, f, // F=
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::Ok => MsgTemplate$(
+            len: 16,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x4f, 0x4b, 0x20, // OK
+                0x4d, 0x3d, m, 0x20, // M=
+                0x46, 0x3d, f, // F=
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::ErrCmd => MsgTemplate$(
+            len: 13,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x45, 0x52, 0x52, 0x20, // ERR
+                0x43, 0x4d, 0x44, // CMD
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::ErrFreq => MsgTemplate$(
+            len: 14,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x45, 0x52, 0x52, 0x20, // ERR
+                0x46, 0x52, 0x45, 0x51, // FREQ
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+    }
+}
+
+fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> (bool, uint<8>) {
+    let msg_tpl = msg_template(msg, mode, freq_code);
+    if idx < msg_tpl.len {
+        (true, msg_tpl.bytes[trunc(idx)])
+    } else {
+        (false, 0)
     }
 }
 
