@@ -220,7 +220,6 @@ struct port UartTxPort {
 struct port FastUartPort {
     line: &bool,
     busy: &bool,
-    fire: &bool,
 }
 
 fn decode_cmd(
@@ -378,6 +377,8 @@ entity main(
     let (usb_uart, usb_uart_w): (UartTxPort, inv UartTxPort) = port;
     let (tx6_fast_uart, tx6_fast_uart_w): (FastUartPort, inv FastUartPort) = port;
     let (tx7_fast_uart, tx7_fast_uart_w): (FastUartPort, inv FastUartPort) = port;
+    let (tx6_fire, tx6_fire_w): (&bool, inv &bool) = port;
+    let (tx7_fire, tx7_fire_w): (&bool, inv &bool) = port;
 
     let rx_ok = rx.valid && !rx.parity_error;
     let rx_digit = decode_freq_digit(rx.byte);
@@ -452,8 +453,8 @@ entity main(
     let tx_msg_none = msg_is_none(tx_msg);
     let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !*usb_uart.busy;
 
-    let fifo6 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fast_uart.fire);
-    let fifo7 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fast_uart.fire);
+    let fifo6 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fire);
+    let fifo7 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fire);
 
     let mode_is_echo = is_echo_mode(mode);
     let mode_is_clock_tester = !mode_is_echo;
@@ -466,8 +467,8 @@ entity main(
     let dropped = rx_is_payload && !can_accept;
     set enqueue_w = &can_accept;
 
-    set tx6_fast_uart_w.fire = &(mode_is_echo && !fifo6.empty && !*tx6_fast_uart.busy);
-    set tx7_fast_uart_w.fire = &(mode_is_echo && !fifo7.empty && !*tx7_fast_uart.busy);
+    set tx6_fire_w = &(mode_is_echo && !fifo6.empty && !*tx6_fast_uart.busy);
+    set tx7_fire_w = &(mode_is_echo && !fifo7.empty && !*tx7_fast_uart.busy);
 
     let tx_new_data = tx_msg_send || can_accept;
     let tx_data = if tx_msg_send {
@@ -491,7 +492,7 @@ entity main(
         clk_fast,
         rst,
         fifo6.dout,
-        *tx6_fast_uart.fire,
+        *tx6_fire,
         tx6_fast_uart_w.line,
         tx6_fast_uart_w.busy,
     );
@@ -499,7 +500,7 @@ entity main(
         clk_fast,
         rst,
         fifo7.dout,
-        *tx7_fast_uart.fire,
+        *tx7_fire,
         tx7_fast_uart_w.line,
         tx7_fast_uart_w.busy,
     );
