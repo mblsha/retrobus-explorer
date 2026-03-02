@@ -319,22 +319,6 @@ fn decode_cmd(
     }
 }
 
-struct port ClockProbePort {
-    clk200: &bool,
-    clk400: &bool,
-}
-
-struct port UartTxPort {
-    line: &bool,
-    busy: &bool,
-}
-
-struct port FastUartPort {
-    line: &bool,
-    busy: &bool,
-    fire: &bool,
-}
-
 fn saleae_outputs(
     mode_is_echo: bool,
     selected_clk: bool,
@@ -373,15 +357,22 @@ entity main(
     saleae: inv &[bool; 8],
 ) {
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
-    let (clk_probe, clk_probe_w): (ClockProbePort, inv ClockProbePort) = port;
-    let _clk_wiz = inst clk_wiz_200_400_tap(clk, clk_probe_w.clk200, clk_probe_w.clk400);
-    let clk_fast = unsafe { inst std::conv::bool_to_clock(*clk_probe.clk400) };
+    let (clk200_probe, clk200_probe_w): (&bool, inv &bool) = port;
+    let (clk400_probe, clk400_probe_w): (&bool, inv &bool) = port;
+    let _clk_wiz = inst clk_wiz_200_400_tap(clk, clk200_probe_w, clk400_probe_w);
+    let clk_fast = unsafe { inst std::conv::bool_to_clock(*clk400_probe) };
     let rx = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
 
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
-    let (usb_tx_ports, usb_tx_ports_w): (UartTxPort, inv UartTxPort) = port;
-    let (tx6_ports, tx6_ports_w): (FastUartPort, inv FastUartPort) = port;
-    let (tx7_ports, tx7_ports_w): (FastUartPort, inv FastUartPort) = port;
+    let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
+    let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
+
+    let (tx6_line, tx6_line_w): (&bool, inv &bool) = port;
+    let (tx7_line, tx7_line_w): (&bool, inv &bool) = port;
+    let (tx6_busy, tx6_busy_w): (&bool, inv &bool) = port;
+    let (tx7_busy, tx7_busy_w): (&bool, inv &bool) = port;
+    let (tx6_fire, tx6_fire_w): (&bool, inv &bool) = port;
+    let (tx7_fire, tx7_fire_w): (&bool, inv &bool) = port;
 
     let rx_ok = rx.valid && !rx.parity_error;
     let rx_digit = decode_freq_digit(rx.byte);
@@ -424,7 +415,7 @@ entity main(
         let cur_idx = tx_state.1;
         let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code);
         let cur_none = msg_is_none(cur_msg);
-        let sending = !cur_none && cur_byte.0 && !*usb_tx_ports.busy;
+        let sending = !cur_none && cur_byte.0 && !*usb_tx_busy;
         let next_idx: uint<8> = trunc(cur_idx + 1);
         let next_valid = msg_byte(cur_msg, next_idx, mode, freq_code).0;
 
@@ -454,10 +445,10 @@ entity main(
     let tx_idx = tx_state.1;
     let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code);
     let tx_msg_none = msg_is_none(tx_msg);
-    let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !*usb_tx_ports.busy;
+    let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !*usb_tx_busy;
 
-    let fifo6 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_ports.fire);
-    let fifo7 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_ports.fire);
+    let fifo6 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fire);
+    let fifo7 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fire);
 
     let mode_is_echo = is_echo_mode(mode);
     let mode_is_clock_tester = !mode_is_echo;
@@ -466,12 +457,12 @@ entity main(
     let rx_is_payload = mode_is_echo && cmd_is_idle && rx_ok && !rx_is_bang;
 
     let all_fifo_ready = !fifo6.full && !fifo7.full;
-    let can_accept = rx_is_payload && tx_msg_none && !*usb_tx_ports.busy && all_fifo_ready;
+    let can_accept = rx_is_payload && tx_msg_none && !*usb_tx_busy && all_fifo_ready;
     let dropped = rx_is_payload && !can_accept;
     set enqueue_w = &can_accept;
 
-    set tx6_ports_w.fire = &(mode_is_echo && !fifo6.empty && !*tx6_ports.busy);
-    set tx7_ports_w.fire = &(mode_is_echo && !fifo7.empty && !*tx7_ports.busy);
+    set tx6_fire_w = &(mode_is_echo && !fifo6.empty && !*tx6_busy);
+    set tx7_fire_w = &(mode_is_echo && !fifo7.empty && !*tx7_busy);
 
     let tx_new_data = tx_msg_send || can_accept;
     let tx_data = if tx_msg_send {
@@ -487,32 +478,32 @@ entity main(
         rst,
         tx_data,
         tx_new_data,
-        usb_tx_ports_w.line,
-        usb_tx_ports_w.busy,
+        usb_tx_line_w,
+        usb_tx_busy_w,
     );
 
     let _tx6 = inst uart_tx_tap::<400_000_000, 100_000_000>(
         clk_fast,
         rst,
         fifo6.dout,
-        *tx6_ports.fire,
-        tx6_ports_w.line,
-        tx6_ports_w.busy,
+        *tx6_fire,
+        tx6_line_w,
+        tx6_busy_w,
     );
     let _tx7 = inst uart_tx_tap::<400_000_000, 200_000_000>(
         clk_fast,
         rst,
         fifo7.dout,
-        *tx7_ports.fire,
-        tx7_ports_w.line,
-        tx7_ports_w.busy,
+        *tx7_fire,
+        tx7_line_w,
+        tx7_busy_w,
     );
 
     reg(clk_fast) clk_div: uint<10> reset(rst: 0) = trunc(clk_div + 1);
     let clk_200_div = clk_div.to_bits()[0];
     let clk_100_div = clk_div.to_bits()[1];
     let clk_50_div = clk_div.to_bits()[2];
-    let selected_clk = clock_from_code(freq_code, clk_div, *clk_probe.clk200, *clk_probe.clk400);
+    let selected_clk = clock_from_code(freq_code, clk_div, *clk200_probe, *clk400_probe);
 
     reg(clk) heartbeat: uint<24> reset(rst: 0) = trunc(heartbeat + 1);
     let cmd_waiting = !cmd_state_is_idle(cmd_state);
@@ -520,23 +511,23 @@ entity main(
         mode_is_echo,
         selected_clk,
         clk_100_div,
-        *clk_probe.clk200,
-        *clk_probe.clk400,
+        *clk200_probe,
+        *clk400_probe,
         clk_50_div,
         usb_rx,
-        *usb_tx_ports.line,
-        *tx6_ports.line,
-        *tx7_ports.line,
+        *usb_tx_line,
+        *tx6_line,
+        *tx7_line,
     );
 
-    set usb_tx = &*usb_tx_ports.line;
+    set usb_tx = &*usb_tx_line;
     set saleae = &saleae_lines;
     set led = &[
         mode_is_clock_tester,
         mode_is_echo,
         cmd_waiting,
         tx_msg_none,
-        *usb_tx_ports.busy,
+        *usb_tx_busy,
         can_accept,
         dropped,
         heartbeat.to_bits()[22],
