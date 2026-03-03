@@ -1,5 +1,30 @@
 use shared_components::ascii::decode_digit;
+use shared_components::ascii::ascii_plus;
+use shared_components::ascii::ascii_minus;
+use shared_components::ascii::ascii_upper_c;
+use shared_components::ascii::ascii_upper_d;
+use shared_components::ascii::ascii_upper_e;
+use shared_components::ascii::ascii_upper_m;
+use shared_components::ascii::ascii_upper_r;
+use shared_components::ascii::ascii_upper_s;
+use shared_components::ascii::ascii_upper_w;
+use shared_components::ascii::ascii_lower_e;
+use shared_components::ascii::ascii_lower_r;
+use shared_components::ascii::ascii_lower_w;
 use shared_components::ascii::to_upper;
+
+pub fn pack_event_word(addr: uint<16>, data: uint<8>, event: uint<8>) -> uint<32> {
+    let addr_wide: uint<32> = zext(addr);
+    let data_wide: uint<32> = zext(data);
+    let event_wide: uint<32> = zext(event);
+    (addr_wide << 16) | (data_wide << 8) | event_wide
+}
+
+pub fn pack_overflow_word(count: uint<24>, event: uint<8>) -> uint<32> {
+    let count_wide: uint<32> = zext(count);
+    let event_wide: uint<32> = zext(event);
+    (count_wide << 8) | event_wide
+}
 
 pub fn wait_shift(level: uint<8>) -> uint<5> {
     let clamped = if level > 9 { 9 } else { level };
@@ -57,17 +82,17 @@ pub fn bus_event_char_from_flags(
 ) -> uint<8> {
     if rd_event_valid {
         if !z80_m1_sync {
-            0x4d // 'M'
+            ascii_upper_m()
         } else if !z80_mreq_sync {
-            0x52 // 'R'
+            ascii_upper_r()
         } else {
-            0x72 // 'r'
+            ascii_lower_r()
         }
     } else if wr_event_valid {
         if !z80_mreq_sync {
-            0x57 // 'W'
+            ascii_upper_w()
         } else {
-            0x77 // 'w'
+            ascii_lower_w()
         }
     } else {
         0
@@ -105,11 +130,11 @@ pub fn decode_bus_events(
 
 pub fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> (bool, uint<8>) {
     if rd_rise {
-        (invalid_bus_state, 0x45) // 'E'
+        (invalid_bus_state, ascii_upper_e())
     } else if wr_rise {
-        (invalid_bus_state, 0x65) // 'e'
+        (invalid_bus_state, ascii_lower_e())
     } else {
-        (false, 0x65)
+        (false, ascii_lower_e())
     }
 }
 
@@ -121,25 +146,25 @@ pub struct FtStreamCmdDecode {
 pub fn decode_ft_stream_cmd(ft_ui_dout_empty: bool, ft_cmd_word: uint<16>) -> FtStreamCmdDecode {
     let cmd_b0: uint<8> = trunc(ft_cmd_word);
     let cmd_b1: uint<8> = trunc(ft_cmd_word >> 8);
-    let has_prefix = !ft_ui_dout_empty && to_upper(cmd_b0) == 0x53; // 'S'
+    let has_prefix = !ft_ui_dout_empty && to_upper(cmd_b0) == ascii_upper_s();
     FtStreamCmdDecode$(
-        enable: has_prefix && cmd_b1 == 0x2b, // '+'
-        disable: has_prefix && cmd_b1 == 0x2d, // '-'
+        enable: has_prefix && cmd_b1 == ascii_plus(),
+        disable: has_prefix && cmd_b1 == ascii_minus(),
     )
 }
 
 pub fn decode_saleae_state_cmd(rx_byte: uint<8>) -> (bool, SaleaeState) {
     let upper = to_upper(rx_byte);
-    if upper == 0x53 {
-        (true, SaleaeState::SyncSignals()) // 'S'
-    } else if upper == 0x45 {
-        (true, SaleaeState::EdgeSignals()) // 'E'
-    } else if upper == 0x44 {
-        (true, SaleaeState::DataSignals()) // 'D'
-    } else if upper == 0x52 {
-        (true, SaleaeState::RawSignals()) // 'R'
-    } else if upper == 0x43 {
-        (true, SaleaeState::Counter()) // 'C'
+    if upper == ascii_upper_s() {
+        (true, SaleaeState::SyncSignals())
+    } else if upper == ascii_upper_e() {
+        (true, SaleaeState::EdgeSignals())
+    } else if upper == ascii_upper_d() {
+        (true, SaleaeState::DataSignals())
+    } else if upper == ascii_upper_r() {
+        (true, SaleaeState::RawSignals())
+    } else if upper == ascii_upper_c() {
+        (true, SaleaeState::Counter())
     } else {
         (false, SaleaeState::DataSignals())
     }
@@ -344,9 +369,9 @@ pub fn run_ft_stream_mux(
         false
     };
     let ft_tx_req = if ft_cmd.enable && !tx_busy {
-        (true, 0x2b) // '+'
+        (true, ascii_plus())
     } else if ft_cmd.disable && !tx_busy {
-        (true, 0x2d) // '-'
+        (true, ascii_minus())
     } else {
         (false, 0)
     };
@@ -434,5 +459,30 @@ pub fn saleae_mux(
             ]
         },
         SaleaeState::Counter => saleae_counter.to_bits(),
+    }
+}
+
+pub fn telemetry_tx_arbiter(
+    highest: (bool, uint<8>),
+    high: (bool, uint<8>),
+    low: (bool, uint<8>),
+) -> (bool, uint<8>) {
+    if highest.0 {
+        highest
+    } else if high.0 {
+        high
+    } else {
+        low
+    }
+}
+
+pub fn telemetry_tx_arbiter2(
+    highest: (bool, uint<8>),
+    low: (bool, uint<8>),
+) -> (bool, uint<8>) {
+    if highest.0 {
+        highest
+    } else {
+        low
     }
 }

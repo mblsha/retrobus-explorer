@@ -1,35 +1,29 @@
+use shared_components::ascii::ascii_dot;
+use shared_components::ascii::ascii_upper_e;
 use shared_components::bridges::BridgePolicy;
-use shared_components::bridges::uart_fifo_bridge;
 use shared_components::bus_debug::FtState;
 use shared_components::bus_debug::SaleaeState;
 use shared_components::bus_debug::SampleState;
 use shared_components::bus_debug::decode_cycle;
+use shared_components::bus_debug::pack_event_word;
+use shared_components::bus_debug::pack_overflow_word;
 use shared_components::bus_debug::parse_usb_cmd;
 use shared_components::bus_debug::run_ft_stream_mux;
 use shared_components::bus_debug::saleae_mux;
 use shared_components::bus_debug::sample_bus_cycle;
+use shared_components::bus_debug::telemetry_tx_arbiter;
+use shared_components::bus_debug::telemetry_tx_arbiter2;
 use shared_components::clocking::clk_wiz_400;
-use shared_components::memory::sync_fifo;
+use shared_components::config::au_bridge_u16x4_100m;
+use shared_components::config::au_bridge_u8x4_100m;
+use shared_components::config::au_ft_tap_u16;
+use shared_components::config::au_stream_fifo_u32;
+use shared_components::config::au_usb_uart_rx;
+use shared_components::config::au_usb_uart_tx8_tap;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_z80_controls;
-use shared_components::serial::ft_tap;
-use shared_components::serial::uart_rx;
-use shared_components::serial::uart_tx_tap;
-
-fn pack_event_word(addr: uint<16>, data: uint<8>, event: uint<8>) -> uint<32> {
-    let addr_wide: uint<32> = zext(addr);
-    let data_wide: uint<32> = zext(data);
-    let event_wide: uint<32> = zext(event);
-    (addr_wide << 16) | (data_wide << 8) | event_wide
-}
-
-fn pack_overflow_word(count: uint<24>, event: uint<8>) -> uint<32> {
-    let count_wide: uint<32> = zext(count);
-    let event_wide: uint<32> = zext(event);
-    (count_wide << 8) | event_wide
-}
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -100,7 +94,7 @@ entity main_core(
     let (stream_fifo_empty, stream_fifo_empty_w): (&bool, inv &bool) = port;
     let (stream_fifo_dout, stream_fifo_dout_w): (&uint<32>, inv &uint<32>) = port;
 
-    let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
+    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
     let cycle_decode = decode_cycle(
         z80_m1_sync,
@@ -284,7 +278,7 @@ entity main_core(
     );
 
     let frame_word = pack_event_word(last_addr, data_sync, bus_sample.bus_event_char);
-    let overflow_word = pack_overflow_word(fifo_full_counter, 0x45); // 'E'
+    let overflow_word = pack_overflow_word(fifo_full_counter, ascii_upper_e());
     let should_emit_overflow =
         !rd_rise && !wr_rise && ft_enabled && !*stream_fifo_full && fifo_full_counter > 0;
     let stream_write_event = bus_sample.bus_event_valid && ft_enabled && !*stream_fifo_full;
@@ -303,15 +297,11 @@ entity main_core(
     let stream_drop_tx_now = stream_drop_tx && !*tx_busy;
     // Intentional lossy behavior: when USB TX is busy, one-cycle bus error/drop
     // markers are dropped instead of queued to keep this telemetry path simple.
-    let bus_tx_req: (bool, uint<8>) = if bus_error_tx_now {
-        (true, bus_sample.bus_error_char)
-    } else if stream_drop_tx_now {
-        (true, bus_sample.bus_event_char)
-    } else if bus_sample.sample_tx_req {
-        (true, 0x2e) // '.'
-    } else {
-        (false, 0)
-    };
+    let bus_tx_req = telemetry_tx_arbiter(
+        (bus_error_tx_now, bus_sample.bus_error_char),
+        (stream_drop_tx_now, bus_sample.bus_event_char),
+        (bus_sample.sample_tx_req, ascii_dot()),
+    );
 
     let ft_mux = run_ft_stream_mux(
         ft_state,
@@ -324,11 +314,7 @@ entity main_core(
         *stream_fifo_empty,
         *stream_fifo_dout,
     );
-    let ft_tx_req: (bool, uint<8>) = if ft_mux.ft_tx_req_valid {
-        (true, ft_mux.ft_tx_req_byte)
-    } else {
-        bus_tx_req
-    };
+    let ft_tx_req = telemetry_tx_arbiter2((ft_mux.ft_tx_req_valid, ft_mux.ft_tx_req_byte), bus_tx_req);
 
     let usb_cmd = parse_usb_cmd(
         rx.valid,
@@ -344,7 +330,7 @@ entity main_core(
     let tx_new_data = usb_cmd.tx_req_valid;
     let tx_data = usb_cmd.tx_req_byte;
 
-    let _tx = inst uart_tx_tap::<100_000_000, 1_000_000, 8>(
+    let _tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
         false,
@@ -354,12 +340,12 @@ entity main_core(
         tx_busy_w,
     );
 
-    let stream_fifo = inst sync_fifo::<32, 32768>(clk, rst, stream_fifo_din, stream_fifo_wput, ft_mux.stream_fifo_rget);
+    let stream_fifo = inst au_stream_fifo_u32(clk, rst, stream_fifo_din, stream_fifo_wput, ft_mux.stream_fifo_rget);
     set stream_fifo_full_w = &stream_fifo.full;
     set stream_fifo_empty_w = &stream_fifo.empty;
     set stream_fifo_dout_w = &stream_fifo.dout;
 
-    let addr_bridge = inst uart_fifo_bridge::<16, 4, 3, 400_000_000, 100_000_000>(
+    let addr_bridge = inst au_bridge_u16x4_100m::<24>(
         clk,
         rst,
         addr_sync,
@@ -369,7 +355,7 @@ entity main_core(
         true,
         BridgePolicy::QueueOnly(),
     );
-    let event_bridge = inst uart_fifo_bridge::<8, 4, 3, 400_000_000, 100_000_000>(
+    let event_bridge = inst au_bridge_u8x4_100m::<24>(
         clk,
         rst,
         bus_sample.bus_event_char,
@@ -380,7 +366,7 @@ entity main_core(
         BridgePolicy::QueueOnly(),
     );
 
-    let _ft = inst ft_tap::<16, 2, 8192, 64, 1, 0>(
+    let _ft = inst au_ft_tap_u16(
         clk,
         rst,
         ft_clk_clock,

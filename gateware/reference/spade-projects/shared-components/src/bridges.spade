@@ -2,7 +2,7 @@ use shared_components::memory::async_fifo;
 use shared_components::serial::UartLineBusyPort;
 use shared_components::serial::uart_tx_tap;
 
-pub struct UartFifoBridgeOut<TData> {
+pub struct UartFifoBridgeOut<TData, #uint DROP_COUNT_W> {
     line: bool,
     busy: bool,
     fifo_full: bool,
@@ -10,7 +10,7 @@ pub struct UartFifoBridgeOut<TData> {
     fifo_dout: TData,
     tx_fire: bool,
     dropped: bool,
-    dropped_count: uint<32>,
+    dropped_count: uint<DROP_COUNT_W>,
 }
 
 pub enum BridgePolicy {
@@ -18,7 +18,7 @@ pub enum BridgePolicy {
     DropWhenBusy,
 }
 
-pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint CLK_FREQ, #uint BAUD>(
+pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint CLK_FREQ, #uint BAUD, #uint DROP_COUNT_W>(
     wclk: clock,
     wrst: bool,
     din: uint<WIDTH>,
@@ -27,7 +27,7 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     rrst: bool,
     send_enable: bool,
     policy: BridgePolicy,
-) -> UartFifoBridgeOut<uint<WIDTH>> {
+) -> UartFifoBridgeOut<uint<WIDTH>, DROP_COUNT_W> {
     let (bridge, bridge_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
 
@@ -41,7 +41,7 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     let fifo_take = tx_fire || drop_fire;
     set fifo_rget_w = &fifo_take;
 
-    reg(rclk) dropped_count: uint<32> reset(rrst: 0) = {
+    reg(rclk) dropped_count: uint<DROP_COUNT_W> reset(rrst: 0) = {
         if drop_fire {
             trunc(dropped_count + 1)
         } else {

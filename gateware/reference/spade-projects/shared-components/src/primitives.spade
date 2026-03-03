@@ -40,6 +40,36 @@ pub entity sync2_bundle<#uint N>(
     inst sync_bundle::<2, N>(clk, input_signals)
 }
 
+pub enum SyncStagePreset {
+    Stages2,
+    Stages4,
+    Stages6,
+}
+
+pub entity sync_delay_safe(
+    clk: clock,
+    input_signal: bool,
+    preset: SyncStagePreset,
+) -> bool {
+    match preset {
+        SyncStagePreset::Stages2 => inst sync_delay::<2>(clk, input_signal),
+        SyncStagePreset::Stages4 => inst sync_delay::<4>(clk, input_signal),
+        SyncStagePreset::Stages6 => inst sync_delay::<6>(clk, input_signal),
+    }
+}
+
+pub entity sync_bundle_safe<#uint N>(
+    clk: clock,
+    input_signals: [bool; N],
+    preset: SyncStagePreset,
+) -> [bool; N] {
+    match preset {
+        SyncStagePreset::Stages2 => inst sync_bundle::<2, N>(clk, input_signals),
+        SyncStagePreset::Stages4 => inst sync_bundle::<4, N>(clk, input_signals),
+        SyncStagePreset::Stages6 => inst sync_bundle::<6, N>(clk, input_signals),
+    }
+}
+
 pub struct Z80ControlSync {
     m1: bool,
     mreq: bool,

@@ -1,0 +1,184 @@
+use shared_components::bridges::BridgePolicy;
+use shared_components::bridges::UartFifoBridgeOut;
+use shared_components::bridges::uart_fifo_bridge;
+use shared_components::memory::FifoOut;
+use shared_components::memory::sync_fifo;
+use shared_components::serial::UartRxOut;
+use shared_components::serial::ft_tap;
+use shared_components::serial::uart_rx;
+use shared_components::serial::uart_tx_tap;
+
+pub fn au_usb_uart_bit_time() -> uint<15> { 100 }
+pub fn au_usb_uart_stop_bits() -> uint<3> { 1 }
+
+pub entity au_usb_uart_rx(
+    clk: clock,
+    rst: bool,
+    rx: bool,
+) -> UartRxOut<uint<8>> {
+    inst uart_rx::<8>(clk, rst, rx, au_usb_uart_bit_time(), false, au_usb_uart_stop_bits())
+}
+
+pub entity au_usb_uart_tx8_tap(
+    clk: clock,
+    rst: bool,
+    block: bool,
+    data: uint<8>,
+    new_data: bool,
+    tx_line: inv &bool,
+    busy: inv &bool,
+) {
+    inst uart_tx_tap::<100_000_000, 1_000_000, 8>(
+        clk,
+        rst,
+        block,
+        data,
+        new_data,
+        tx_line,
+        busy,
+    );
+}
+
+pub entity au_stream_fifo_u32(
+    clk: clock,
+    rst: bool,
+    din: uint<32>,
+    wput: bool,
+    rget: bool,
+) -> FifoOut<uint<32>> {
+    inst sync_fifo::<32, 32768>(clk, rst, din, wput, rget)
+}
+
+pub entity au_bridge_u16x4_100m<#uint DROP_COUNT_W>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<16>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+    policy: BridgePolicy,
+) -> UartFifoBridgeOut<uint<16>, DROP_COUNT_W> {
+    inst uart_fifo_bridge::<16, 4, 3, 400_000_000, 100_000_000, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    )
+}
+
+pub entity au_bridge_u8x4_100m<#uint DROP_COUNT_W>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+    policy: BridgePolicy,
+) -> UartFifoBridgeOut<uint<8>, DROP_COUNT_W> {
+    inst uart_fifo_bridge::<8, 4, 3, 400_000_000, 100_000_000, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    )
+}
+
+pub entity au_bridge_u8x8_100m<#uint DROP_COUNT_W>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+    policy: BridgePolicy,
+) -> UartFifoBridgeOut<uint<8>, DROP_COUNT_W> {
+    inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 100_000_000, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    )
+}
+
+pub entity au_bridge_u8x8_200m<#uint DROP_COUNT_W>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+    policy: BridgePolicy,
+) -> UartFifoBridgeOut<uint<8>, DROP_COUNT_W> {
+    inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 200_000_000, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    )
+}
+
+pub entity au_ft_tap_u16(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<16>,
+    ft_be_in: uint<2>,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+    ft_data_out: inv &uint<16>,
+    ft_be_out: inv &uint<2>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<16>,
+    ui_dout_be: inv &uint<2>,
+    ui_dout_empty: inv &bool,
+) {
+    inst ft_tap::<16, 2, 8192, 64, 1, 0>(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_dout_get,
+        ft_data_out,
+        ft_be_out,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ui_din_full,
+        ui_dout,
+        ui_dout_be,
+        ui_dout_empty,
+    );
+}
