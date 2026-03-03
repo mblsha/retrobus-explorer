@@ -199,7 +199,7 @@ entity tb_fifo(
     dout: inv &uint<8>,
     used: inv &uint<4>,
 ) {
-    let out = inst fifo::<8, 8, _, _>(clk, rst, din, wput, rget);
+    let out = inst fifo::<8, 8>(clk, rst, din, wput, rget);
     set full = &out.0;
     set empty = &out.1;
     set dout = &out.2;

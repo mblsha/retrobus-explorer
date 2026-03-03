@@ -10,6 +10,15 @@ module simple_dual_port_ram #(
     input [$clog2(ENTRIES)-1:0] raddr,
     output reg [WIDTH-1:0] read_data
 );
+    initial begin
+        if (WIDTH <= 0) begin
+            $fatal(1, "simple_dual_port_ram: WIDTH must be > 0 (got %0d)", WIDTH);
+        end
+        if (ENTRIES <= 1) begin
+            $fatal(1, "simple_dual_port_ram: ENTRIES must be >= 2 (got %0d)", ENTRIES);
+        end
+    end
+
     reg [WIDTH-1:0] mem [0:ENTRIES-1];
 
     always @(posedge wclk) begin
@@ -39,6 +48,21 @@ module async_fifo_v #(
     input rget,
     output empty
 );
+    initial begin
+        if (WIDTH <= 0) begin
+            $fatal(1, "async_fifo_v: WIDTH must be > 0 (got %0d)", WIDTH);
+        end
+        if (ENTRIES <= 1) begin
+            $fatal(1, "async_fifo_v: ENTRIES must be >= 2 (got %0d)", ENTRIES);
+        end
+        if ((ENTRIES & (ENTRIES - 1)) != 0) begin
+            $fatal(1, "async_fifo_v: ENTRIES must be power-of-two (got %0d)", ENTRIES);
+        end
+        if (SYNC_STAGES <= 0) begin
+            $fatal(1, "async_fifo_v: SYNC_STAGES must be > 0 (got %0d)", SYNC_STAGES);
+        end
+    end
+
     localparam ADDR_SIZE = $clog2(ENTRIES);
 
     reg [ADDR_SIZE-1:0] waddr;
@@ -137,6 +161,18 @@ module sync_fifo_v #(
     input rget,
     output empty
 );
+    initial begin
+        if (WIDTH <= 0) begin
+            $fatal(1, "sync_fifo_v: WIDTH must be > 0 (got %0d)", WIDTH);
+        end
+        if (ENTRIES <= 1) begin
+            $fatal(1, "sync_fifo_v: ENTRIES must be >= 2 (got %0d)", ENTRIES);
+        end
+        if ((ENTRIES & (ENTRIES - 1)) != 0) begin
+            $fatal(1, "sync_fifo_v: ENTRIES must be power-of-two (got %0d)", ENTRIES);
+        end
+    end
+
     localparam ADDR_SIZE = $clog2(ENTRIES);
 
     reg [ADDR_SIZE-1:0] waddr;

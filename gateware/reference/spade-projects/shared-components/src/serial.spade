@@ -57,6 +57,28 @@ struct port FtWirePort<TData, TBe> {
     ui_dout_empty: &bool,
 }
 
+fn require_positive<#uint N, #uint CHECK>() -> bool
+where CHECK: {uint_bits_to_fit(N - 1)}
+{
+    true
+}
+
+fn require_at_least_two<#uint N, #uint CHECK>() -> bool
+where CHECK: {uint_bits_to_fit(N - 2)}
+{
+    true
+}
+
+fn require_power_of_two<#uint N, #uint FIT_N_MINUS_1, #uint FIT_N, #uint FIT_N_EXPECTED>() -> bool
+where
+    FIT_N_MINUS_1: {uint_bits_to_fit(N - 1)},
+    FIT_N: {uint_bits_to_fit(N)},
+    FIT_N_EXPECTED: {FIT_N_MINUS_1 + 1},
+    FIT_N: {FIT_N_EXPECTED}
+{
+    true
+}
+
 fn bit_time_last(bit_time: uint<15>) -> uint<15> {
     if bit_time == 0 {
         0
@@ -96,6 +118,9 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     data: uint<DATA_WIDTH>,
     new_data: bool,
 ) -> UartTxOut {
+    let _ = require_positive::<BAUD, _>();
+    let _ = require_positive::<DATA_WIDTH, _>();
+
     // Match Lucid:
     // CLK_PER_BIT = (CLK_FREQ + BAUD) / BAUD - 1
     // and transitions when ctr == CLK_PER_BIT - 1.
@@ -202,6 +227,8 @@ pub entity uart_rx<#uint DATA_WIDTH>(
     parity: bool,
     stop_bits: uint<3>,
 ) -> UartRxOut<uint<DATA_WIDTH>> {
+    let _ = require_positive::<DATA_WIDTH, _>();
+
     let last = bit_time_last(bit_time);
     let half = bit_time >> 1;
     let stops_after_first = extra_stop_bits(stop_bits);
@@ -355,6 +382,13 @@ pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER
     ui_din_valid: bool,
     ui_dout_get: bool,
 ) -> FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>> {
+    let _ = require_positive::<DATA_WIDTH, _>();
+    let _ = require_positive::<BE_WIDTH, _>();
+    let _ = require_at_least_two::<TX_BUFFER, _>();
+    let _ = require_at_least_two::<RX_BUFFER, _>();
+    let _ = require_power_of_two::<TX_BUFFER, _, _, _>();
+    let _ = require_power_of_two::<RX_BUFFER, _, _, _>();
+
     let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port;
 
     let _ = inst ft_u16_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
