@@ -1,4 +1,4 @@
-use shared_components::primitives::counter_u128;
+use shared_components::primitives::counter;
 
 #[no_mangle(all)]
 entity main(
@@ -11,7 +11,7 @@ entity main(
     saleae: inv &[bool; 8],
 ) {
     let rst = !rst_n;
-    let counter = inst counter_u128(clk, rst);
+    let counter = inst counter::<128>(clk, rst);
     let led_byte: uint<8> = trunc(counter);
     let ffc_word: uint<48> = trunc(counter);
     let led_bits = led_byte.to_bits();

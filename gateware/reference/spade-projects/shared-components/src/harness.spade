@@ -1,4 +1,4 @@
-use shared_components::primitives::counter_u8;
+use shared_components::primitives::counter;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
@@ -9,9 +9,8 @@ use shared_components::memory::async_fifo;
 use shared_components::serial::ft_u16;
 use shared_components::serial::my_uart_tx;
 use shared_components::serial::uart_rx;
-use shared_components::sharp::count_on_event_u8;
+use shared_components::sharp::count_on_event;
 use shared_components::sharp::g850_rom_byte;
-use shared_components::sharp::g850_stream_counter;
 use shared_components::sharp::g850_wait_hold;
 use shared_components::sharp::gate_byte8;
 
@@ -80,7 +79,7 @@ entity tb_counter_u8(
     rst: bool,
     value_bits: inv &[bool; 8],
 ) {
-    let value = inst counter_u8(clk, rst);
+    let value = inst counter::<8>(clk, rst);
     let bits = value.to_bits();
     set value_bits = &bits;
 }
@@ -92,7 +91,7 @@ entity tb_count_on_event_u8(
     event_in: bool,
     value_bits: inv &[bool; 8],
 ) {
-    let value = inst count_on_event_u8(clk, rst, event_in);
+    let value = inst count_on_event::<8>(clk, rst, event_in);
     let bits = value.to_bits();
     set value_bits = &bits;
 }
@@ -116,7 +115,7 @@ entity tb_g850_stream_counter(
     advance: bool,
     value_bits: inv &[bool; 8],
 ) {
-    let value = inst g850_stream_counter(clk, rst, advance);
+    let value = inst count_on_event::<8>(clk, rst, advance);
     let bits = value.to_bits();
     set value_bits = &bits;
 }
@@ -232,7 +231,7 @@ entity tb_ft_u16(
     ui_dout_be: inv &uint<2>,
     ui_dout_empty: inv &bool,
 ) {
-    let out = inst ft_u16(
+    let out = inst ft_u16::<64, 64, 1, 0>(
         clk,
         rst,
         ft_clk,
