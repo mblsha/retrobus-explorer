@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Script to install Alchitry Labs V2
 # This script downloads, extracts, and verifies the Alchitry Labs V2 installation
@@ -9,7 +9,18 @@ echo "🔧 Installing Alchitry Labs V2..."
 # Get the latest version if not provided
 if [ -z "$ALCHITRY_VERSION" ]; then
     echo "📡 Fetching latest Alchitry Labs version..."
-    LATEST_VERSION=$(curl -s https://api.github.com/repos/alchitry/Alchitry-Labs-V2/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    LATEST_VERSION=$(
+        curl -fsSL -o /dev/null -w '%{url_effective}' \
+            https://github.com/alchitry/Alchitry-Labs-V2/releases/latest \
+        | sed -nE 's#^.*/releases/tag/([^/?#]+).*$#\1#p'
+    )
+    if [ -z "$LATEST_VERSION" ]; then
+        LATEST_VERSION=$(curl -fsSL https://api.github.com/repos/alchitry/Alchitry-Labs-V2/releases/latest | sed -nE 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/p')
+    fi
+    if [ -z "$LATEST_VERSION" ]; then
+        echo "❌ Failed to resolve latest Alchitry Labs release tag"
+        exit 1
+    fi
     export ALCHITRY_VERSION="$LATEST_VERSION"
 fi
 
