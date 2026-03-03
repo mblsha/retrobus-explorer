@@ -478,26 +478,29 @@ entity main(
         0
     };
 
-    let _usb_tx = inst uart_tx_tap::<100_000_000, 1_000_000>(
+    let _usb_tx = inst uart_tx_tap::<100_000_000, 1_000_000, 8>(
         clk,
         rst,
+        false,
         tx_data,
         tx_new_data,
         usb_uart_w.line,
         usb_uart_w.busy,
     );
 
-    let _tx6 = inst uart_tx_tap::<400_000_000, 100_000_000>(
+    let _tx6 = inst uart_tx_tap::<400_000_000, 100_000_000, 8>(
         clk_fast,
         rst,
+        false,
         fifo6.dout,
         *tx6_fire,
         tx6_fast_uart_w.line,
         tx6_fast_uart_w.busy,
     );
-    let _tx7 = inst uart_tx_tap::<400_000_000, 200_000_000>(
+    let _tx7 = inst uart_tx_tap::<400_000_000, 200_000_000, 8>(
         clk_fast,
         rst,
+        false,
         fifo7.dout,
         *tx7_fire,
         tx7_fast_uart_w.line,

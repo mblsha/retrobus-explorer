@@ -1,4 +1,4 @@
-# top = tb_my_uart_tx
+# top = tb_uart_tx
 
 import random
 

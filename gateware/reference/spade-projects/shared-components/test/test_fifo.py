@@ -1,4 +1,4 @@
-# top = tb_fifo_u8
+# top = tb_fifo
 
 import random
 

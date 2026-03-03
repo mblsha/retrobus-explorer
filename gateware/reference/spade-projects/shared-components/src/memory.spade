@@ -24,11 +24,11 @@ extern entity sync_fifo_v<#uint WIDTH, #uint ENTRIES>(
     empty: inv &bool,
 );
 
-fn write_at_u8<#uint N, #uint W>(
-    arr: [uint<8>; N],
+fn write_at<T, #uint N, #uint W>(
+    arr: [T; N],
     idx: uint<W>,
-    val: uint<8>,
-) -> [uint<8>; N]
+    val: T,
+) -> [T; N]
 where W: {uint_bits_to_fit(N - 1)}
 {
     arr.enumerate().map(fn |(i, item)| {
@@ -57,24 +57,24 @@ struct port FifoOutPort<T> {
     dout: &T,
 }
 
-// Synchronous first-word-fall-through FIFO for uint<8> payloads.
+// Synchronous first-word-fall-through FIFO.
 // Matches Alchitry's fifo.luc behavior:
 // - full when next write pointer equals read pointer (usable depth = ENTRIES-1)
 // - empty based on delayed write pointer (first write appears after one extra cycle)
-pub entity fifo_u8<#uint ENTRIES, #uint ADDR_W, #uint COUNT_W>(
+pub entity fifo<#uint WIDTH, #uint ENTRIES, #uint ADDR_W, #uint COUNT_W>(
     clk: clock,
     rst: bool,
-    din: uint<8>,
+    din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> (bool, bool, uint<8>, uint<COUNT_W>)
+) -> (bool, bool, uint<WIDTH>, uint<COUNT_W>)
 where
     ADDR_W: {uint_bits_to_fit(ENTRIES - 1)},
     COUNT_W: {uint_bits_to_fit(ENTRIES)}
 {
     // Packed state to avoid declaration-order dependency issues across interlocked regs.
     reg(clk) state:
-        (uint<ADDR_W>, uint<ADDR_W>, uint<ADDR_W>, uint<COUNT_W>, uint<8>, [uint<8>; ENTRIES])
+        (uint<ADDR_W>, uint<ADDR_W>, uint<ADDR_W>, uint<COUNT_W>, uint<WIDTH>, [uint<WIDTH>; ENTRIES])
         reset(rst: (0, 0, 0, 0, 0, [0; ENTRIES]))
         = {
             let waddr: uint<ADDR_W> = state.0;
@@ -101,7 +101,7 @@ where
             let read_addr = if do_read { ptr_inc(raddr) } else { raddr };
             let next_read_data = storage[read_addr];
             let next_storage = if do_write {
-                write_at_u8::<ENTRIES, ADDR_W>(storage, waddr, din)
+                write_at(storage, waddr, din)
             } else {
                 storage
             };
@@ -120,7 +120,7 @@ where
     let waddr_delay: uint<ADDR_W> = state.1;
     let raddr: uint<ADDR_W> = state.2;
     let used: uint<COUNT_W> = state.3;
-    let read_data: uint<8> = state.4;
+    let read_data: uint<WIDTH> = state.4;
 
     let next_write = ptr_inc(waddr);
     let wrdy = next_write != raddr;
