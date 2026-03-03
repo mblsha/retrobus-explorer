@@ -3,7 +3,6 @@ use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
-use shared_components::primitives::sync2;
 use shared_components::memory::fifo_u8;
 use shared_components::memory::async_fifo;
 use shared_components::serial::ft_u16;
@@ -20,7 +19,7 @@ entity tb_sync2(
     input_signal: bool,
     output_signal: inv &bool,
 ) {
-    let synced = inst sync2(clk, input_signal);
+    let synced = inst sync_delay::<2>(clk, input_signal);
     set output_signal = &synced;
 }
 
