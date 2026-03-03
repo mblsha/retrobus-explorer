@@ -1,0 +1,330 @@
+pub enum Mode {
+    ClockTester,
+    Echo,
+}
+
+pub enum CmdParseState {
+    Idle,
+    Bang,
+    Freq,
+}
+
+pub enum MsgKind {
+    None,
+    Ready,
+    Help,
+    Status,
+    Ok,
+    ErrCmd,
+    ErrFreq,
+}
+
+pub fn msg_is_none(msg: MsgKind) -> bool {
+    match msg {
+        MsgKind::None => true,
+        _ => false,
+    }
+}
+
+pub fn mode_char(mode: Mode) -> uint<8> {
+    match mode {
+        Mode::ClockTester => 0x43, // 'C'
+        Mode::Echo => 0x45, // 'E'
+    }
+}
+
+pub fn digit_char(value: uint<4>) -> uint<8> {
+    let v: uint<8> = zext(value);
+    trunc(v + 0x30)
+}
+
+pub struct MsgTemplate {
+    len: uint<8>,
+    bytes: [uint<8>; 64],
+}
+
+pub fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
+    std::conv::concat_arrays(message, [0; 64 - N])
+}
+
+pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
+    let m = mode_char(mode);
+    let f = digit_char(freq_code);
+    match msg {
+        MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
+        MsgKind::Ready => MsgTemplate$(
+            len: 19,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x52, 0x45, 0x41, 0x44, 0x59, 0x20, // READY
+                0x4d, 0x3d, m, 0x20, // M=
+                0x46, 0x3d, f, // F=
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::Help => MsgTemplate$(
+            len: 43,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x48, 0x45, 0x4c, 0x50, 0x20, // HELP
+                0x21, 0x48, 0x20, // !H
+                0x21, 0x53, 0x20, // !S
+                0x21, 0x43, 0x20, // !C
+                0x21, 0x45, 0x20, // !E
+                0x21, 0x46, 0x30, 0x2d, 0x35, 0x20, // !F0-5
+                0x4d, 0x3a, 0x43, 0x4c, 0x4f, 0x43, 0x4b, 0x20, // M:CLOCK
+                0x45, 0x3a, 0x45, 0x43, 0x48, 0x4f, // E:ECHO
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::Status => MsgTemplate$(
+            len: 20,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x53, 0x54, 0x41, 0x54, 0x55, 0x53, 0x20, // STATUS
+                0x4d, 0x3d, m, 0x20, // M=
+                0x46, 0x3d, f, // F=
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::Ok => MsgTemplate$(
+            len: 16,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x4f, 0x4b, 0x20, // OK
+                0x4d, 0x3d, m, 0x20, // M=
+                0x46, 0x3d, f, // F=
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::ErrCmd => MsgTemplate$(
+            len: 13,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x45, 0x52, 0x52, 0x20, // ERR
+                0x43, 0x4d, 0x44, // CMD
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+        MsgKind::ErrFreq => MsgTemplate$(
+            len: 14,
+            bytes: pad_message([
+                0x52, 0x42, 0x58, 0x20, // RBX
+                0x45, 0x52, 0x52, 0x20, // ERR
+                0x46, 0x52, 0x45, 0x51, // FREQ
+                0x0d, 0x0a, // CR LF
+            ]),
+        ),
+    }
+}
+
+pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> (bool, uint<8>) {
+    let msg_tpl = msg_template(msg, mode, freq_code);
+    if idx < msg_tpl.len {
+        (true, msg_tpl.bytes[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk400: bool) -> bool {
+    let bits = clk_div.to_bits();
+    let sources: [bool; 6] = [
+        bits[4],
+        bits[3],
+        bits[2],
+        bits[1],
+        clk200,
+        clk400,
+    ];
+    let idx_u4: uint<4> = if freq_code > 5 { 0 } else { freq_code };
+    let idx: uint<3> = trunc(idx_u4);
+    sources[idx]
+}
+
+pub fn is_echo_mode(mode: Mode) -> bool {
+    match mode {
+        Mode::Echo => true,
+        _ => false,
+    }
+}
+
+pub fn cmd_state_is_idle(state: CmdParseState) -> bool {
+    match state {
+        CmdParseState::Idle => true,
+        _ => false,
+    }
+}
+
+pub fn next_cmd_state(
+    state: CmdParseState,
+    rx_ok: bool,
+    rx_byte: uint<8>,
+    rx_upper: uint<8>,
+) -> CmdParseState {
+    if !rx_ok {
+        state
+    } else {
+        match state {
+            CmdParseState::Idle => {
+                if rx_byte == 0x21 {
+                    CmdParseState::Bang()
+                } else {
+                    CmdParseState::Idle()
+                }
+            },
+            CmdParseState::Bang => {
+                if rx_upper == 0x46 {
+                    CmdParseState::Freq()
+                } else {
+                    CmdParseState::Idle()
+                }
+            },
+            CmdParseState::Freq => CmdParseState::Idle(),
+        }
+    }
+}
+
+pub struct CmdDecode {
+    msg: MsgKind,
+    msg_valid: bool,
+    mode_write: bool,
+    mode_value: Mode,
+    freq_write: bool,
+    freq_value: uint<4>,
+}
+
+pub fn decode_cmd(
+    state: CmdParseState,
+    rx_ok: bool,
+    rx_upper: uint<8>,
+    rx_digit: (bool, uint<4>),
+) -> CmdDecode {
+    if !rx_ok {
+        CmdDecode$(
+            msg: MsgKind::None(),
+            msg_valid: false,
+            mode_write: false,
+            mode_value: Mode::ClockTester(),
+            freq_write: false,
+            freq_value: 0,
+        )
+    } else {
+        match state {
+            CmdParseState::Bang => {
+                if rx_upper == 0x48 {
+                    CmdDecode$(
+                        msg: MsgKind::Help(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x53 {
+                    CmdDecode$(
+                        msg: MsgKind::Status(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x43 {
+                    CmdDecode$(
+                        msg: MsgKind::Ok(),
+                        msg_valid: true,
+                        mode_write: true,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x45 {
+                    CmdDecode$(
+                        msg: MsgKind::Ok(),
+                        msg_valid: true,
+                        mode_write: true,
+                        mode_value: Mode::Echo(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else if rx_upper == 0x46 {
+                    CmdDecode$(
+                        msg: MsgKind::None(),
+                        msg_valid: false,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                } else {
+                    CmdDecode$(
+                        msg: MsgKind::ErrCmd(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                }
+            },
+            CmdParseState::Freq => {
+                if rx_digit.0 {
+                    CmdDecode$(
+                        msg: MsgKind::Ok(),
+                        msg_valid: true,
+                        mode_write: true,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: true,
+                        freq_value: rx_digit.1,
+                    )
+                } else {
+                    CmdDecode$(
+                        msg: MsgKind::ErrFreq(),
+                        msg_valid: true,
+                        mode_write: false,
+                        mode_value: Mode::ClockTester(),
+                        freq_write: false,
+                        freq_value: 0,
+                    )
+                }
+            },
+            _ => CmdDecode$(
+                msg: MsgKind::None(),
+                msg_valid: false,
+                mode_write: false,
+                mode_value: Mode::ClockTester(),
+                freq_write: false,
+                freq_value: 0,
+            ),
+        }
+    }
+}
+
+pub fn saleae_outputs(
+    mode_is_echo: bool,
+    selected_clk: bool,
+    clk_100_div: bool,
+    clk200_probe: bool,
+    clk400_probe: bool,
+    clk_50_div: bool,
+    usb_rx: bool,
+    usb_tx_line: bool,
+    tx6_line: bool,
+    tx7_line: bool,
+) -> [bool; 8] {
+    if mode_is_echo {
+        [
+            clk_100_div,
+            clk200_probe,
+            clk400_probe,
+            clk_50_div,
+            usb_rx,
+            usb_tx_line,
+            tx6_line,
+            tx7_line,
+        ]
+    } else {
+        [selected_clk, false, false, false, false, false, false, false]
+    }
+}
