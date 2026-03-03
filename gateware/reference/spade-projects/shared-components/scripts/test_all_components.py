@@ -23,9 +23,9 @@ COMPONENTS = [
     "async_fifo_u8",
     "counter_u8",
     "count_on_event_u8",
-    "g850_wait_hold",
-    "g850_stream_counter",
-    "g850_rom_gate",
+    "wait_hold",
+    "stream_counter",
+    "rom_gate",
 ]
 
 

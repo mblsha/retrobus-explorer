@@ -1,6 +1,6 @@
 use shared_components::clocking::clk_wiz_400;
 use shared_components::sharp::count_on_event;
-use shared_components::sharp::g850_rom_byte;
+use shared_components::sharp::banked_rom_byte;
 use shared_components::sharp::gate_byte8;
 
 #[no_mangle(all)]
@@ -43,7 +43,7 @@ entity main(
     let stream_counter = inst count_on_event::<8>(clk_uart, rst, !ft_rxf);
     let c = stream_counter.to_bits();
     let read_enable = !z80_mreq && !z80_rd && addr_cerom2;
-    let rom_byte = inst g850_rom_byte(addr, addr_bnk, stream_counter);
+    let rom_byte = inst banked_rom_byte(addr, addr_bnk, stream_counter);
     let out_byte = inst gate_byte8(read_enable, rom_byte);
 
     let aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1] || z80_wait || z80_m1 || z80_ioreset || z80_int1;

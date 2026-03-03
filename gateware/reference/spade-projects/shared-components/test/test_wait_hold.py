@@ -1,4 +1,4 @@
-# top = tb_g850_wait_hold
+# top = tb_wait_hold
 
 import cocotb
 from cocotb_helpers import start_clock

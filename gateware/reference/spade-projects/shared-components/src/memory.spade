@@ -1,5 +1,5 @@
 #[no_mangle(all)]
-extern entity g850_async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
+extern entity async_fifo_v<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     wclk: clock,
     wrst: bool,
     din: uint<WIDTH>,
@@ -13,13 +13,13 @@ extern entity g850_async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
 );
 
 #[no_mangle(all)]
-extern entity fifo_u32x32768_v(
+extern entity sync_fifo_v<#uint WIDTH, #uint ENTRIES>(
     clk: clock,
     rst: bool,
-    din: uint<32>,
+    din: uint<WIDTH>,
     wput: bool,
     full: inv &bool,
-    dout: inv &uint<32>,
+    dout: inv &uint<WIDTH>,
     rget: bool,
     empty: inv &bool,
 );
@@ -43,13 +43,6 @@ where W: {uint_bits_to_fit(N - 1)}
 fn ptr_inc<#uint W>(ptr: uint<W>) -> uint<W> {
     // ENTRIES is expected to be a power of two, so trunc() wraps correctly.
     trunc(ptr + 1)
-}
-
-pub struct FifoU8x8Out {
-    full: bool,
-    empty: bool,
-    dout: uint<8>,
-    used: uint<4>,
 }
 
 pub struct FifoOut<T> {
@@ -137,22 +130,6 @@ where
     (full, empty, read_data, used)
 }
 
-pub entity fifo_u8x8(
-    clk: clock,
-    rst: bool,
-    din: uint<8>,
-    wput: bool,
-    rget: bool,
-) -> FifoU8x8Out {
-    let (full, empty, dout, used) = inst fifo_u8::<8, _, _>(clk, rst, din, wput, rget);
-    FifoU8x8Out$(
-        full,
-        empty,
-        dout,
-        used,
-    )
-}
-
 pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     wclk: clock,
     wrst: bool,
@@ -163,7 +140,7 @@ pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     rget: bool,
 ) -> FifoOut<uint<WIDTH>> {
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
-    let _ = inst g850_async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(
+    let _ = inst async_fifo_v::<WIDTH, ENTRIES, SYNC_STAGES>(
         wclk,
         wrst,
         din,
@@ -182,15 +159,15 @@ pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     )
 }
 
-pub entity fifo_u32x32768(
+pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
     clk: clock,
     rst: bool,
-    din: uint<32>,
+    din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> FifoOut<uint<32>> {
-    let (fifo, fifo_w): (FifoOutPort<uint<32>>, inv FifoOutPort<uint<32>>) = port;
-    let _ = inst fifo_u32x32768_v(
+) -> FifoOut<uint<WIDTH>> {
+    let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
+    let _ = inst sync_fifo_v::<WIDTH, ENTRIES>(
         clk,
         rst,
         din,
@@ -216,18 +193,4 @@ pub entity fifo_out_tap<T>(
     set full = &out.full;
     set empty = &out.empty;
     set dout = &out.dout;
-}
-
-pub entity fifo_u32x32768_tap(
-    clk: clock,
-    rst: bool,
-    din: uint<32>,
-    wput: bool,
-    rget: bool,
-    full: inv &bool,
-    empty: inv &bool,
-    dout: inv &uint<32>,
-) {
-    let out = inst fifo_u32x32768(clk, rst, din, wput, rget);
-    inst fifo_out_tap(out, full, empty, dout);
 }

@@ -1,7 +1,7 @@
 use shared_components::clocking::clk_wiz_400;
 use shared_components::memory::async_fifo;
 use shared_components::memory::fifo_out_tap;
-use shared_components::memory::fifo_u32x32768_tap;
+use shared_components::memory::sync_fifo;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
@@ -580,16 +580,8 @@ entity main_core(
     );
     let _event_fifo = inst fifo_out_tap(event_fifo, event_fifo_full_w, event_fifo_empty_w, event_fifo_dout_w);
 
-    let _stream_fifo = inst fifo_u32x32768_tap(
-        clk,
-        rst,
-        stream_fifo_din,
-        stream_fifo_wput,
-        stream_fifo_rget,
-        stream_fifo_full_w,
-        stream_fifo_empty_w,
-        stream_fifo_dout_w,
-    );
+    let stream_fifo = inst sync_fifo::<32, 32768>(clk, rst, stream_fifo_din, stream_fifo_wput, stream_fifo_rget);
+    let _stream_fifo = inst fifo_out_tap(stream_fifo, stream_fifo_full_w, stream_fifo_empty_w, stream_fifo_dout_w);
 
     let _ft = inst ft_u16_tap::<8192, 64, 1, 0>(
         clk,

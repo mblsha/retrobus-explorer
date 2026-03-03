@@ -1,4 +1,4 @@
-# top = tb_g850_rom_gate
+# top = tb_rom_gate
 
 import cocotb
 

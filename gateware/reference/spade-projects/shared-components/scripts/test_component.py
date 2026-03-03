@@ -26,9 +26,9 @@ CASES: dict[str, tuple[str, str]] = {
     "async_fifo_u8": ("tb_async_fifo_u8", "test_async_fifo_u8"),
     "counter_u8": ("tb_counter_u8", "test_counter_u8"),
     "count_on_event_u8": ("tb_count_on_event_u8", "test_count_on_event_u8"),
-    "g850_wait_hold": ("tb_g850_wait_hold", "test_g850_wait_hold"),
-    "g850_stream_counter": ("tb_g850_stream_counter", "test_g850_stream_counter"),
-    "g850_rom_gate": ("tb_g850_rom_gate", "test_g850_rom_gate"),
+    "wait_hold": ("tb_wait_hold", "test_wait_hold"),
+    "stream_counter": ("tb_stream_counter", "test_stream_counter"),
+    "rom_gate": ("tb_rom_gate", "test_rom_gate"),
 }
 
 
