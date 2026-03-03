@@ -23,7 +23,7 @@ module simple_dual_port_ram #(
     end
 endmodule
 
-module g850_async_fifo #(
+module async_fifo_v #(
     parameter WIDTH = 8,
     parameter ENTRIES = 4,
     parameter SYNC_STAGES = 3
@@ -124,17 +124,19 @@ module g850_async_fifo #(
     end
 endmodule
 
-module fifo_u32x32768_v(
+module sync_fifo_v #(
+    parameter WIDTH = 32,
+    parameter ENTRIES = 32768
+) (
     input clk,
     input rst,
-    input [31:0] din,
+    input [WIDTH-1:0] din,
     input wput,
     output full,
-    output [31:0] dout,
+    output [WIDTH-1:0] dout,
     input rget,
     output empty
 );
-    localparam ENTRIES = 32768;
     localparam ADDR_SIZE = $clog2(ENTRIES);
 
     reg [ADDR_SIZE-1:0] waddr;
@@ -146,7 +148,7 @@ module fifo_u32x32768_v(
     wire rrdy = raddr != waddr_delay;
 
     reg [ADDR_SIZE-1:0] ram_raddr;
-    wire [31:0] ram_read_data;
+    wire [WIDTH-1:0] ram_read_data;
 
     assign full = !wrdy;
     assign empty = !rrdy;
@@ -160,7 +162,7 @@ module fifo_u32x32768_v(
     end
 
     simple_dual_port_ram #(
-        .WIDTH(32),
+        .WIDTH(WIDTH),
         .ENTRIES(ENTRIES)
     ) ram (
         .wclk(clk),

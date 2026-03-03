@@ -9,7 +9,7 @@ auto = true
 [verilog]
 sources = [
     "../shared-verilog/clk_wiz_0.v",
-    "../shared-components/verilog/g850_fifo_v.v",
+    "../shared-components/verilog/fifo_v.v",
 ]
 
 [tooling]

@@ -1,4 +1,4 @@
-# top = tb_g850_stream_counter
+# top = tb_stream_counter
 
 import cocotb
 from cocotb_helpers import start_clock
