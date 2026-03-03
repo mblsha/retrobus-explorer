@@ -2,6 +2,7 @@ use shared_components::clocking::clk_wiz_400;
 use shared_components::sharp::count_on_event;
 use shared_components::sharp::banked_rom_byte;
 use shared_components::sharp::gate_byte8;
+use shared_components::serial::usb_loopback;
 
 #[no_mangle(all)]
 entity main(
@@ -49,7 +50,7 @@ entity main(
     let aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1] || z80_wait || z80_m1 || z80_ioreset || z80_int1;
 
     set data = &out_byte;
-    set usb_tx = &usb_rx;
+    let _ = inst usb_loopback(usb_rx, usb_tx);
     set ft_rd = &!ft_rxf;
     set ft_wr = &false;
     set ft_oe = &false;

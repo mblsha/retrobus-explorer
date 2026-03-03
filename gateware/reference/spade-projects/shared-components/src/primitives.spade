@@ -11,6 +11,7 @@ pub entity sync_delay<#int STAGES>(
     input_signal: bool,
 ) -> bool {
     // Generic N-stage synchronizer/delay chain.
+    // STAGES must be > 0; use sync2_bundle/sync_z80_controls_n wrappers for known-good values.
     inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
@@ -27,6 +28,7 @@ pub entity sync_bundle<#int STAGES, #uint N>(
     input_signals: [bool; N],
 ) -> [bool; N] {
     // Generic N-stage bundle synchronizer/delay chain.
+    // STAGES must be > 0; sync2_bundle and sync_z80_controls_n document preferred usage.
     inst(STAGES) sync_bundle_pipe::<STAGES, N>(clk, input_signals)
 }
 

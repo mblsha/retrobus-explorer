@@ -1,4 +1,5 @@
 use shared_components::memory::async_fifo;
+use shared_components::serial::UartLineBusyPort;
 use shared_components::serial::uart_tx_tap;
 
 pub struct UartFifoBridgeOut<TData> {
@@ -9,11 +10,12 @@ pub struct UartFifoBridgeOut<TData> {
     fifo_dout: TData,
     tx_fire: bool,
     dropped: bool,
+    dropped_count: uint<32>,
 }
 
-struct port UartFifoBridgePort {
-    line: &bool,
-    busy: &bool,
+pub enum BridgePolicy {
+    QueueOnly,
+    DropWhenBusy,
 }
 
 pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint CLK_FREQ, #uint BAUD>(
@@ -24,18 +26,28 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     rclk: clock,
     rrst: bool,
     send_enable: bool,
-    drop_when_busy: bool,
+    policy: BridgePolicy,
 ) -> UartFifoBridgeOut<uint<WIDTH>> {
-    let (bridge, bridge_w): (UartFifoBridgePort, inv UartFifoBridgePort) = port;
+    let (bridge, bridge_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
 
-    // queue_only = false => drop entries while TX is busy.
-    let queue_only = !drop_when_busy;
+    let drop_when_busy = match policy {
+        BridgePolicy::DropWhenBusy => true,
+        _ => false,
+    };
     let fifo = inst async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(wclk, wrst, din, wput, rclk, rrst, *fifo_rget);
     let tx_fire = send_enable && !fifo.empty && !*bridge.busy;
-    let drop_fire = send_enable && !fifo.empty && *bridge.busy && !queue_only;
+    let drop_fire = send_enable && !fifo.empty && *bridge.busy && drop_when_busy;
     let fifo_take = tx_fire || drop_fire;
     set fifo_rget_w = &fifo_take;
+
+    reg(rclk) dropped_count: uint<32> reset(rrst: 0) = {
+        if drop_fire {
+            trunc(dropped_count + 1)
+        } else {
+            dropped_count
+        }
+    };
 
     let _ = inst uart_tx_tap::<CLK_FREQ, BAUD, WIDTH>(
         rclk,
@@ -55,5 +67,6 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
         fifo_dout: fifo.dout,
         tx_fire: tx_fire,
         dropped: drop_fire,
+        dropped_count: dropped_count,
     )
 }

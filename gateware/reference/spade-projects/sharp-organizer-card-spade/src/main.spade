@@ -2,6 +2,7 @@ use shared_components::clocking::clk_wiz_400;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::sync2_bundle;
 use shared_components::sharp::count_on_event;
+use shared_components::serial::usb_loopback;
 
 #[no_mangle(all)]
 entity main(
@@ -87,7 +88,7 @@ entity main(
         rw_fall,
     ];
 
-    set usb_tx = &usb_rx;
+    let _ = inst usb_loopback(usb_rx, usb_tx);
     set ft_rd = &!ft_rxf;
     set ft_wr = &(!ft_txe && conn_rw_sync);
     set ft_oe = &(conn_oe_sync || conn_eprom_sync || conn_stnby_sync || conn_vbatt_sync || conn_vpp_sync);

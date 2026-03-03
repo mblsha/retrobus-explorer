@@ -1,4 +1,5 @@
 use shared_components::primitives::counter;
+use shared_components::serial::usb_loopback;
 
 #[no_mangle(all)]
 entity main(
@@ -20,5 +21,5 @@ entity main(
     set led = &led_bits;
     set saleae = &led_bits;
     set ffc_data = &ffc_bits;
-    set usb_tx = &usb_rx;
+    let _ = inst usb_loopback(usb_rx, usb_tx);
 }
