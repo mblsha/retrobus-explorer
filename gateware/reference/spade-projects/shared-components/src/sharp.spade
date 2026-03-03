@@ -1,9 +1,9 @@
-pub entity count_on_event_u8(
+pub entity count_on_event<#uint WIDTH>(
     clk: clock,
     rst: bool,
     event: bool,
-) -> uint<8> {
-    reg(clk) value: uint<8> reset(rst: 0) = if event {
+) -> uint<WIDTH> {
+    reg(clk) value: uint<WIDTH> reset(rst: 0) = if event {
         trunc(value + 1)
     } else {
         value
@@ -27,19 +27,6 @@ pub entity g850_wait_hold(
         wait_zero
     };
     wait_counter != 0
-}
-
-pub entity g850_stream_counter(
-    clk: clock,
-    rst: bool,
-    advance: bool,
-) -> uint<8> {
-    reg(clk) value: uint<8> reset(rst: 0) = if advance {
-        trunc(value + 1)
-    } else {
-        value
-    };
-    value
 }
 
 pub entity g850_rom_byte(

@@ -1,7 +1,7 @@
 use shared_components::clocking::clk_wiz_400;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::sync2;
-use shared_components::sharp::count_on_event_u8;
+use shared_components::sharp::count_on_event;
 
 #[no_mangle(all)]
 entity main(
@@ -55,7 +55,7 @@ entity main(
     let conn_vpp_sync = inst sync2(clk, conn_vpp);
 
     let rw_fall = inst falling_edge(clk, conn_rw_sync);
-    let event_counter = inst count_on_event_u8(clk, rst, rw_fall);
+    let event_counter = inst count_on_event::<8>(clk, rst, rw_fall);
     reg(clk_uart) fast_counter: uint<8> reset(rst: 0) = trunc(fast_counter + 1);
 
     let event_bits = event_counter.to_bits();

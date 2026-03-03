@@ -1,3 +1,28 @@
+module simple_dual_port_ram #(
+    parameter WIDTH = 8,
+    parameter ENTRIES = 8
+) (
+    input wclk,
+    input [$clog2(ENTRIES)-1:0] waddr,
+    input [WIDTH-1:0] write_data,
+    input write_enable,
+    input rclk,
+    input [$clog2(ENTRIES)-1:0] raddr,
+    output reg [WIDTH-1:0] read_data
+);
+    reg [WIDTH-1:0] mem [0:ENTRIES-1];
+
+    always @(posedge wclk) begin
+        if (write_enable) begin
+            mem[waddr] <= write_data;
+        end
+    end
+
+    always @(posedge rclk) begin
+        read_data <= mem[raddr];
+    end
+endmodule
+
 module g850_async_fifo #(
     parameter WIDTH = 8,
     parameter ENTRIES = 4,
@@ -97,66 +122,6 @@ module g850_async_fifo #(
             end
         end
     end
-endmodule
-
-module async_fifo_u8x4_v(
-    input wclk,
-    input wrst,
-    input [7:0] din,
-    input wput,
-    output full,
-    input rclk,
-    input rrst,
-    output [7:0] dout,
-    input rget,
-    output empty
-);
-    g850_async_fifo #(
-        .WIDTH(8),
-        .ENTRIES(4),
-        .SYNC_STAGES(3)
-    ) inner (
-        .wclk(wclk),
-        .wrst(wrst),
-        .din(din),
-        .wput(wput),
-        .full(full),
-        .rclk(rclk),
-        .rrst(rrst),
-        .dout(dout),
-        .rget(rget),
-        .empty(empty)
-    );
-endmodule
-
-module async_fifo_u16x4_v(
-    input wclk,
-    input wrst,
-    input [15:0] din,
-    input wput,
-    output full,
-    input rclk,
-    input rrst,
-    output [15:0] dout,
-    input rget,
-    output empty
-);
-    g850_async_fifo #(
-        .WIDTH(16),
-        .ENTRIES(4),
-        .SYNC_STAGES(3)
-    ) inner (
-        .wclk(wclk),
-        .wrst(wrst),
-        .din(din),
-        .wput(wput),
-        .full(full),
-        .rclk(rclk),
-        .rrst(rrst),
-        .dout(dout),
-        .rget(rget),
-        .empty(empty)
-    );
 endmodule
 
 module fifo_u32x32768_v(
