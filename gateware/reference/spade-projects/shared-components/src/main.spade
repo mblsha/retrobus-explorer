@@ -3,4 +3,5 @@ pub mod clocking;
 pub mod sharp;
 pub mod serial;
 pub mod memory;
+pub mod guards;
 pub mod harness;

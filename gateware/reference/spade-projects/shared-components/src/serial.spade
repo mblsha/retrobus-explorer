@@ -1,3 +1,7 @@
+use shared_components::guards::require_at_least_two;
+use shared_components::guards::require_positive;
+use shared_components::guards::require_power_of_two;
+
 pub struct UartTxOut {
     tx: bool,
     busy: bool,
@@ -10,7 +14,7 @@ pub struct UartRxOut<TData> {
 }
 
 #[no_mangle(all)]
-extern entity ft_u16_v<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
+extern entity ft_v<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
     clk: clock,
     rst: bool,
     ft_clk: clock,
@@ -55,28 +59,6 @@ struct port FtWirePort<TData, TBe> {
     ui_dout: &TData,
     ui_dout_be: &TBe,
     ui_dout_empty: &bool,
-}
-
-fn require_positive<#uint N, #uint CHECK>() -> bool
-where CHECK: {uint_bits_to_fit(N - 1)}
-{
-    true
-}
-
-fn require_at_least_two<#uint N, #uint CHECK>() -> bool
-where CHECK: {uint_bits_to_fit(N - 2)}
-{
-    true
-}
-
-fn require_power_of_two<#uint N, #uint FIT_N_MINUS_1, #uint FIT_N, #uint FIT_N_EXPECTED>() -> bool
-where
-    FIT_N_MINUS_1: {uint_bits_to_fit(N - 1)},
-    FIT_N: {uint_bits_to_fit(N)},
-    FIT_N_EXPECTED: {FIT_N_MINUS_1 + 1},
-    FIT_N: {FIT_N_EXPECTED}
-{
-    true
 }
 
 fn bit_time_last(bit_time: uint<15>) -> uint<15> {
@@ -391,7 +373,7 @@ pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER
 
     let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port;
 
-    let _ = inst ft_u16_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
+    let _ = inst ft_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
         clk,
         rst,
         ft_clk,

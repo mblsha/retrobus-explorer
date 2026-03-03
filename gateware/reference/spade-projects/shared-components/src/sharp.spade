@@ -1,3 +1,5 @@
+use shared_components::guards::require_positive;
+
 pub entity count_on_event<#uint WIDTH>(
     clk: clock,
     rst: bool,
@@ -11,15 +13,19 @@ pub entity count_on_event<#uint WIDTH>(
     value
 }
 
-pub entity wait_hold(
+pub entity wait_hold_n<#uint RELOAD, #uint W>(
     clk: clock,
     rst: bool,
     mreq_fall: bool,
     iorq_fall: bool,
-) -> bool {
-    let wait_reload: uint<4> = 3;
-    let wait_zero: uint<4> = 0;
-    reg(clk) wait_counter: uint<4> reset(rst: 0) = if mreq_fall || iorq_fall {
+) -> bool
+where W: {uint_bits_to_fit(RELOAD)}
+{
+    let _ = require_positive::<RELOAD, _>();
+
+    let wait_reload: uint<W> = RELOAD;
+    let wait_zero: uint<W> = 0;
+    reg(clk) wait_counter: uint<W> reset(rst: 0) = if mreq_fall || iorq_fall {
         wait_reload
     } else if wait_counter != 0 {
         trunc(wait_counter - 1)
@@ -27,6 +33,15 @@ pub entity wait_hold(
         wait_zero
     };
     wait_counter != 0
+}
+
+pub entity wait_hold(
+    clk: clock,
+    rst: bool,
+    mreq_fall: bool,
+    iorq_fall: bool,
+) -> bool {
+    inst wait_hold_n::<3, _>(clk, rst, mreq_fall, iorq_fall)
 }
 
 pub entity banked_rom_byte(
@@ -47,10 +62,17 @@ pub entity banked_rom_byte(
     ]
 }
 
+pub entity gate_bits<#uint WIDTH>(
+    enable: bool,
+    value: [bool; WIDTH],
+) -> [bool; WIDTH] {
+    let zero = [false; WIDTH];
+    if enable { value } else { zero }
+}
+
 pub entity gate_byte8(
     enable: bool,
     value: [bool; 8],
 ) -> [bool; 8] {
-    let zero = [false, false, false, false, false, false, false, false];
-    if enable { value } else { zero }
+    inst gate_bits::<8>(enable, value)
 }

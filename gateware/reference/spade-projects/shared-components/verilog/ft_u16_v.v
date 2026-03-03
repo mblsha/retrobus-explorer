@@ -1,6 +1,6 @@
 // Depends on shared async_fifo_v from fifo_v.v.
 
-module ft_u16_v #(
+module ft_v #(
     parameter DATA_WIDTH = 16,
     parameter BE_WIDTH = 2,
     parameter TX_BUFFER = 64,
@@ -155,4 +155,68 @@ module ft_u16_v #(
     always @(posedge ft_clk) begin
         state_q <= state_d;
     end
+endmodule
+
+// Temporary compatibility shim for legacy references to ft_u16_v.
+module ft_u16_v #(
+    parameter DATA_WIDTH = 16,
+    parameter BE_WIDTH = 2,
+    parameter TX_BUFFER = 64,
+    parameter RX_BUFFER = 64,
+    parameter PRIORITY_RX = 1,
+    parameter PREEMPT = 0
+) (
+    input clk,
+    input rst,
+
+    input ft_clk,
+    input ft_rxf,
+    input ft_txe,
+    input [DATA_WIDTH-1:0] ft_data_in,
+    input [BE_WIDTH-1:0] ft_be_in,
+    output [DATA_WIDTH-1:0] ft_data_out,
+    output [BE_WIDTH-1:0] ft_be_out,
+    output ft_rd,
+    output ft_wr,
+    output ft_oe,
+
+    input [DATA_WIDTH-1:0] ui_din,
+    input [BE_WIDTH-1:0] ui_din_be,
+    input ui_din_valid,
+    output ui_din_full,
+
+    output [DATA_WIDTH-1:0] ui_dout,
+    output [BE_WIDTH-1:0] ui_dout_be,
+    output ui_dout_empty,
+    input ui_dout_get
+);
+    ft_v #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .BE_WIDTH(BE_WIDTH),
+        .TX_BUFFER(TX_BUFFER),
+        .RX_BUFFER(RX_BUFFER),
+        .PRIORITY_RX(PRIORITY_RX),
+        .PREEMPT(PREEMPT)
+    ) impl (
+        .clk(clk),
+        .rst(rst),
+        .ft_clk(ft_clk),
+        .ft_rxf(ft_rxf),
+        .ft_txe(ft_txe),
+        .ft_data_in(ft_data_in),
+        .ft_be_in(ft_be_in),
+        .ft_data_out(ft_data_out),
+        .ft_be_out(ft_be_out),
+        .ft_rd(ft_rd),
+        .ft_wr(ft_wr),
+        .ft_oe(ft_oe),
+        .ui_din(ui_din),
+        .ui_din_be(ui_din_be),
+        .ui_din_valid(ui_din_valid),
+        .ui_din_full(ui_din_full),
+        .ui_dout(ui_dout),
+        .ui_dout_be(ui_dout_be),
+        .ui_dout_empty(ui_dout_empty),
+        .ui_dout_get(ui_dout_get)
+    );
 endmodule
