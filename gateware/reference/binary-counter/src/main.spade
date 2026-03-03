@@ -44,7 +44,7 @@ entity main(
 
     let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
     let rx_digit = rx_out.valid && !rx_out.parity_error && is_ascii_digit(rx_out.byte);
-    let tx_out = inst uart_tx::<100_000_000, 1_000_000>(clk, rst, rx_out.byte, rx_digit);
+    let tx_out = inst uart_tx::<100_000_000, 1_000_000, 8>(clk, rst, false, rx_out.byte, rx_digit);
     let accepted_digit = rx_digit && !tx_out.busy;
     let rx_digit_value: uint<4> = trunc(rx_out.byte - 0x30);
 
