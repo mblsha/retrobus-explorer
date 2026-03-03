@@ -24,28 +24,16 @@ fn pack_overflow_word(count: uint<24>, event: uint<8>) -> uint<32> {
     (count_wide << 8) | event_wide
 }
 
+fn wait_shift(level: uint<8>) -> uint<5> {
+    let clamped = if level > 9 { 9 } else { level };
+    trunc(clamped << 1)
+}
+
 fn wait_window(counter: uint<128>, level: uint<8>) -> uint<8> {
-    if level == 0 {
-        trunc(counter)
-    } else if level == 1 {
-        trunc(counter >> 2)
-    } else if level == 2 {
-        trunc(counter >> 4)
-    } else if level == 3 {
-        trunc(counter >> 6)
-    } else if level == 4 {
-        trunc(counter >> 8)
-    } else if level == 5 {
-        trunc(counter >> 10)
-    } else if level == 6 {
-        trunc(counter >> 12)
-    } else if level == 7 {
-        trunc(counter >> 14)
-    } else if level == 8 {
-        trunc(counter >> 16)
-    } else {
-        trunc(counter >> 18)
-    }
+    let shift: uint<5> = wait_shift(level);
+    let shift_wide: uint<128> = zext(shift);
+    let shifted: uint<128> = counter >> shift_wide;
+    trunc(shifted)
 }
 
 enum SampleState {
@@ -180,6 +168,348 @@ fn decode_saleae_state_cmd(rx_byte: uint<8>) -> (bool, SaleaeState) {
     }
 }
 
+struct CycleDecode {
+    bus: BusEventDecode,
+    bus_error: (bool, uint<8>),
+    rx_digit: (bool, uint<4>),
+    saleae_cmd: (bool, SaleaeState),
+    ft_cmd: FtStreamCmdDecode,
+}
+
+fn decode_cycle(
+    z80_m1_sync: bool,
+    z80_mreq_sync: bool,
+    z80_iorq_sync: bool,
+    rd_rise: bool,
+    wr_rise: bool,
+    rx_byte: uint<8>,
+    ft_ui_dout_empty: bool,
+    ft_cmd_word: uint<16>,
+) -> CycleDecode {
+    let bus = decode_bus_events(z80_m1_sync, z80_mreq_sync, z80_iorq_sync, rd_rise, wr_rise);
+    CycleDecode$(
+        bus: bus,
+        bus_error: bus_error_status(rd_rise, wr_rise, bus.invalid_bus_state),
+        rx_digit: decode_digit(rx_byte),
+        saleae_cmd: decode_saleae_state_cmd(rx_byte),
+        ft_cmd: decode_ft_stream_cmd(ft_ui_dout_empty, ft_cmd_word),
+    )
+}
+
+struct BusSamplerOut {
+    sample_is_bus: bool,
+    sample_is_wait: bool,
+    wait_done: bool,
+    bus_start: bool,
+    bus_event_valid: bool,
+    bus_event_char: uint<8>,
+    bus_error_tx: bool,
+    bus_error_char: uint<8>,
+    addr_fifo_wput: bool,
+    event_fifo_wput: bool,
+    sample_tx_req: bool,
+}
+
+fn sample_bus_cycle(
+    sample_state: SampleState,
+    wait_counter: uint<128>,
+    wait_enabled: uint<8>,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    bus_decode: BusEventDecode,
+    bus_error: (bool, uint<8>),
+    tx_busy: bool,
+) -> BusSamplerOut {
+    let sample = sample_flags(sample_state);
+    let sample_is_bus = sample.is_bus;
+    let sample_is_wait = sample.is_wait;
+    let wait_window_bits: uint<8> = wait_window(wait_counter, wait_enabled);
+    let wait_done = wait_window_bits > 1;
+    let bus_start = mreq_fall || iorq_fall;
+    BusSamplerOut$(
+        sample_is_bus: sample_is_bus,
+        sample_is_wait: sample_is_wait,
+        wait_done: wait_done,
+        bus_start: bus_start,
+        bus_event_valid: bus_decode.bus_event_valid,
+        bus_event_char: bus_decode.bus_event_char,
+        bus_error_tx: bus_error.0,
+        bus_error_char: bus_error.1,
+        addr_fifo_wput: bus_start && sample_is_bus,
+        event_fifo_wput: bus_decode.bus_event_valid,
+        sample_tx_req: sample_is_wait && wait_done && !tx_busy,
+    )
+}
+
+entity bus_sampler(
+    sample_state: SampleState,
+    wait_counter: uint<128>,
+    wait_enabled: uint<8>,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    bus_decode: BusEventDecode,
+    bus_error: (bool, uint<8>),
+    tx_busy: bool,
+) -> BusSamplerOut {
+    sample_bus_cycle(sample_state, wait_counter, wait_enabled, mreq_fall, iorq_fall, bus_decode, bus_error, tx_busy)
+}
+
+struct UsbCmdOut {
+    next_wait_enabled: uint<8>,
+    next_saleae_state: SaleaeState,
+    rx_is_digit: bool,
+    rx_is_saleae_cmd: bool,
+    tx_req_valid: bool,
+    tx_req_byte: uint<8>,
+}
+
+fn parse_usb_cmd(
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+    wait_enabled: uint<8>,
+    saleae_state: SaleaeState,
+    rx_digit: (bool, uint<4>),
+    saleae_cmd: (bool, SaleaeState),
+    upstream_req: (bool, uint<8>),
+) -> UsbCmdOut {
+    let next_wait_enabled = if rx_valid && rx_digit.0 {
+        zext(rx_digit.1)
+    } else {
+        wait_enabled
+    };
+
+    let next_saleae_state = if rx_valid && saleae_cmd.0 {
+        saleae_cmd.1
+    } else {
+        saleae_state
+    };
+
+    let rx_is_digit = rx_valid && rx_digit.0;
+    let rx_is_saleae_cmd = rx_valid && saleae_cmd.0;
+    let rx_tx_req = if (rx_is_digit || rx_is_saleae_cmd) && !tx_busy {
+        (true, rx_byte)
+    } else {
+        upstream_req
+    };
+
+    UsbCmdOut$(
+        next_wait_enabled: next_wait_enabled,
+        next_saleae_state: next_saleae_state,
+        rx_is_digit: rx_is_digit,
+        rx_is_saleae_cmd: rx_is_saleae_cmd,
+        tx_req_valid: rx_tx_req.0,
+        tx_req_byte: rx_tx_req.1,
+    )
+}
+
+entity usb_cmd_parser(
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+    wait_enabled: uint<8>,
+    saleae_state: SaleaeState,
+    rx_digit: (bool, uint<4>),
+    saleae_cmd: (bool, SaleaeState),
+    upstream_req: (bool, uint<8>),
+) -> UsbCmdOut {
+    parse_usb_cmd(rx_valid, rx_byte, tx_busy, wait_enabled, saleae_state, rx_digit, saleae_cmd, upstream_req)
+}
+
+struct FtStreamMuxOut {
+    next_ft_enabled: bool,
+    next_ft_state: FtState,
+    next_ft_cur_value: uint<32>,
+    ft_ui_din_valid: bool,
+    ft_ui_din: uint<16>,
+    ft_ui_din_be: uint<2>,
+    ft_ui_dout_get: bool,
+    stream_fifo_rget: bool,
+    ft_tx_req_valid: bool,
+    ft_tx_req_byte: uint<8>,
+}
+
+fn run_ft_stream_mux(
+    ft_state: FtState,
+    ft_enabled: bool,
+    ft_cur_value: uint<32>,
+    ft_cmd: FtStreamCmdDecode,
+    tx_busy: bool,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: uint<32>,
+) -> FtStreamMuxOut {
+    let ft_get_fifo = match ft_state {
+        FtState::GetFifo => true,
+        _ => false,
+    };
+    let ft_stream = match ft_state {
+        FtState::Stream => true,
+        _ => false,
+    };
+    let ft_can_push = !ft_ui_din_full;
+    let next_ft_enabled = if ft_cmd.enable {
+        true
+    } else if ft_cmd.disable {
+        false
+    } else {
+        ft_enabled
+    };
+    let next_ft_state = match ft_state {
+        FtState::GetFifo => {
+            if ft_can_push && !stream_fifo_empty {
+                FtState::Stream()
+            } else {
+                ft_state
+            }
+        },
+        FtState::Stream => {
+            if ft_can_push {
+                FtState::GetFifo()
+            } else {
+                ft_state
+            }
+        },
+    };
+    let next_ft_cur_value = if ft_get_fifo && ft_can_push && !stream_fifo_empty {
+        stream_fifo_dout
+    } else {
+        ft_cur_value
+    };
+    let ft_ui_din_valid = (ft_get_fifo && ft_can_push && !stream_fifo_empty) || (ft_stream && ft_can_push);
+    let ft_ui_din: uint<16> = if ft_get_fifo && ft_can_push && !stream_fifo_empty {
+        trunc(stream_fifo_dout)
+    } else if ft_stream && ft_can_push {
+        trunc(ft_cur_value >> 16)
+    } else {
+        0
+    };
+    let stream_fifo_rget = if ft_get_fifo {
+        ft_can_push && !stream_fifo_empty
+    } else if ft_stream {
+        ft_can_push
+    } else {
+        false
+    };
+    let ft_tx_req = if ft_cmd.enable && !tx_busy {
+        (true, 0x2b) // '+'
+    } else if ft_cmd.disable && !tx_busy {
+        (true, 0x2d) // '-'
+    } else {
+        (false, 0)
+    };
+
+    FtStreamMuxOut$(
+        next_ft_enabled: next_ft_enabled,
+        next_ft_state: next_ft_state,
+        next_ft_cur_value: next_ft_cur_value,
+        ft_ui_din_valid: ft_ui_din_valid,
+        ft_ui_din: ft_ui_din,
+        ft_ui_din_be: if ft_ui_din_valid { 0x3 } else { 0x0 },
+        ft_ui_dout_get: !ft_ui_dout_empty,
+        stream_fifo_rget: stream_fifo_rget,
+        ft_tx_req_valid: ft_tx_req.0,
+        ft_tx_req_byte: ft_tx_req.1,
+    )
+}
+
+entity ft_stream_mux(
+    ft_state: FtState,
+    ft_enabled: bool,
+    ft_cur_value: uint<32>,
+    ft_cmd: FtStreamCmdDecode,
+    tx_busy: bool,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: uint<32>,
+) -> FtStreamMuxOut {
+    run_ft_stream_mux(
+        ft_state,
+        ft_enabled,
+        ft_cur_value,
+        ft_cmd,
+        tx_busy,
+        ft_ui_din_full,
+        ft_ui_dout_empty,
+        stream_fifo_empty,
+        stream_fifo_dout,
+    )
+}
+
+entity saleae_mux(
+    saleae_state: SaleaeState,
+    z80_wr_sync: bool,
+    z80_rd_sync: bool,
+    z80_iorq_sync: bool,
+    z80_mreq_sync: bool,
+    z80_m1_sync: bool,
+    wr_rise: bool,
+    rd_rise: bool,
+    iorq_fall: bool,
+    mreq_fall: bool,
+    z80_wr_raw: bool,
+    z80_rd_raw: bool,
+    z80_iorq_raw: bool,
+    z80_mreq_raw: bool,
+    event_line: bool,
+    addr_line: bool,
+    saleae_counter: uint<8>,
+) -> [bool; 8] {
+    match saleae_state {
+        SaleaeState::DataSignals => {
+            [
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+                z80_m1_sync,
+                false,
+                event_line,
+                addr_line,
+            ]
+        },
+        SaleaeState::SyncSignals => {
+            [
+                wr_rise,
+                rd_rise,
+                mreq_fall,
+                z80_m1_sync,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::EdgeSignals => {
+            [
+                wr_rise,
+                rd_rise,
+                iorq_fall,
+                mreq_fall,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::RawSignals => {
+            [
+                z80_wr_raw,
+                z80_rd_raw,
+                z80_iorq_raw,
+                z80_mreq_raw,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::Counter => saleae_counter.to_bits(),
+    }
+}
+
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -252,6 +582,17 @@ entity main_core(
 
     let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
 
+    let cycle_decode = decode_cycle(
+        z80_m1_sync,
+        z80_mreq_sync,
+        z80_iorq_sync,
+        rd_rise,
+        wr_rise,
+        rx.byte,
+        *ft_ui_dout_empty,
+        *ft_ui_dout,
+    );
+
     reg(clk) state:
         (
             SampleState,
@@ -301,36 +642,35 @@ entity main_core(
             let data_sync_d0: uint<8> = state.12;
             let data_sync: uint<8> = state.13;
 
-            let bus_start = mreq_fall || iorq_fall;
-            let sample = sample_flags(sample_state);
-            let sample_is_bus = sample.is_bus;
-            let sample_is_wait = sample.is_wait;
-
-            let wait_window_bits: uint<8> = wait_window(wait_counter, wait_enabled);
-            let wait_done = wait_window_bits > 1;
-
-            let bus_decode = decode_bus_events(z80_m1_sync, z80_mreq_sync, z80_iorq_sync, rd_rise, wr_rise);
-            let bus_event_valid = bus_decode.bus_event_valid;
-            let bus_event_char = bus_decode.bus_event_char;
+            let bus_sample = sample_bus_cycle(
+                sample_state,
+                wait_counter,
+                wait_enabled,
+                mreq_fall,
+                iorq_fall,
+                cycle_decode.bus,
+                cycle_decode.bus_error,
+                *tx_busy,
+            );
 
             let fifo_was_full = *stream_fifo_full;
             let should_emit_overflow =
                 !rd_rise && !wr_rise && ft_enabled && !fifo_was_full && fifo_full_counter > 0;
 
-            let next_sample_state = if sample_is_bus {
-                if bus_start && wait_enabled > 0 {
+            let next_sample_state = if bus_sample.sample_is_bus {
+                if bus_sample.bus_start && wait_enabled > 0 {
                     SampleState::InsertWait()
                 } else {
                     sample_state
                 }
-            } else if wait_done {
+            } else if bus_sample.wait_done {
                 SampleState::SampleBus()
             } else {
                 sample_state
             };
 
-            let next_wait_counter = if sample_is_bus {
-                if bus_start && wait_enabled > 0 {
+            let next_wait_counter = if bus_sample.sample_is_bus {
+                if bus_sample.bus_start && wait_enabled > 0 {
                     0
                 } else {
                     wait_counter
@@ -339,22 +679,20 @@ entity main_core(
                 trunc(wait_counter + 1)
             };
 
-            let next_last_addr = if sample_is_bus && bus_start {
+            let next_last_addr = if bus_sample.sample_is_bus && bus_sample.bus_start {
                 addr_sync
             } else {
                 last_addr
             };
 
-            let rx_digit = decode_digit(rx.byte);
-            let next_wait_enabled = if rx.valid && rx_digit.0 {
-                zext(rx_digit.1)
+            let next_wait_enabled = if rx.valid && cycle_decode.rx_digit.0 {
+                zext(cycle_decode.rx_digit.1)
             } else {
                 wait_enabled
             };
 
-            let saleae_cmd = decode_saleae_state_cmd(rx.byte);
-            let next_saleae_state = if rx.valid && saleae_cmd.0 {
-                saleae_cmd.1
+            let next_saleae_state = if rx.valid && cycle_decode.saleae_cmd.0 {
+                cycle_decode.saleae_cmd.1
             } else {
                 saleae_state
             };
@@ -364,45 +702,18 @@ entity main_core(
                 _ => saleae_counter,
             };
 
-            let ft_cmd = decode_ft_stream_cmd(*ft_ui_dout_empty, *ft_ui_dout);
-
-            let next_ft_enabled = if ft_cmd.enable {
-                true
-            } else if ft_cmd.disable {
-                false
-            } else {
-                ft_enabled
-            };
-
-            let next_ft_state = match ft_state {
-                FtState::GetFifo => {
-                    if !*ft_ui_din_full && !*stream_fifo_empty {
-                        FtState::Stream()
-                    } else {
-                        ft_state
-                    }
-                },
-                FtState::Stream => {
-                    if !*ft_ui_din_full {
-                        FtState::GetFifo()
-                    } else {
-                        ft_state
-                    }
-                },
-            };
-
-            let next_ft_cur_value = match ft_state {
-                FtState::GetFifo => {
-                    if !*ft_ui_din_full && !*stream_fifo_empty {
-                        *stream_fifo_dout
-                    } else {
-                        ft_cur_value
-                    }
-                },
-                FtState::Stream => ft_cur_value,
-            };
-
-            let next_fifo_full_counter = if bus_event_valid && ft_enabled && fifo_was_full {
+            let ft_next = run_ft_stream_mux(
+                ft_state,
+                ft_enabled,
+                ft_cur_value,
+                cycle_decode.ft_cmd,
+                *tx_busy,
+                *ft_ui_din_full,
+                *ft_ui_dout_empty,
+                *stream_fifo_empty,
+                *stream_fifo_dout,
+            );
+            let next_fifo_full_counter = if cycle_decode.bus.bus_event_valid && ft_enabled && fifo_was_full {
                 trunc(fifo_full_counter + 1)
             } else if should_emit_overflow {
                 0
@@ -417,9 +728,9 @@ entity main_core(
                 next_last_addr,
                 next_saleae_state,
                 next_saleae_counter,
-                next_ft_enabled,
-                next_ft_state,
-                next_ft_cur_value,
+                ft_next.next_ft_enabled,
+                ft_next.next_ft_state,
+                ft_next.next_ft_cur_value,
                 next_fifo_full_counter,
                 addr,
                 addr_sync_d0,
@@ -441,26 +752,23 @@ entity main_core(
     let addr_sync: uint<16> = state.11;
     let data_sync: uint<8> = state.13;
 
-    let sample = sample_flags(sample_state);
-    let sample_is_bus = sample.is_bus;
-    let sample_is_wait = sample.is_wait;
-    let wait_window_bits: uint<8> = wait_window(wait_counter, wait_enabled);
-    let wait_done = wait_window_bits > 1;
-    let bus_start = mreq_fall || iorq_fall;
+    let bus_sample = inst bus_sampler(
+        sample_state,
+        wait_counter,
+        wait_enabled,
+        mreq_fall,
+        iorq_fall,
+        cycle_decode.bus,
+        cycle_decode.bus_error,
+        *tx_busy,
+    );
 
-    let bus_decode = decode_bus_events(z80_m1_sync, z80_mreq_sync, z80_iorq_sync, rd_rise, wr_rise);
-    let bus_event_valid = bus_decode.bus_event_valid;
-    let bus_event_char = bus_decode.bus_event_char;
-    let bus_error = bus_error_status(rd_rise, wr_rise, bus_decode.invalid_bus_state);
-    let bus_error_tx = bus_error.0;
-    let bus_error_char = bus_error.1;
-
-    let frame_word = pack_event_word(last_addr, data_sync, bus_event_char);
+    let frame_word = pack_event_word(last_addr, data_sync, bus_sample.bus_event_char);
     let overflow_word = pack_overflow_word(fifo_full_counter, 0x45); // 'E'
-
-    let stream_write_event = bus_event_valid && ft_enabled && !*stream_fifo_full;
-    let stream_write_overflow =
+    let should_emit_overflow =
         !rd_rise && !wr_rise && ft_enabled && !*stream_fifo_full && fifo_full_counter > 0;
+    let stream_write_event = bus_sample.bus_event_valid && ft_enabled && !*stream_fifo_full;
+    let stream_write_overflow = should_emit_overflow;
     let stream_fifo_wput = stream_write_event || stream_write_overflow;
     let stream_fifo_din: uint<32> = if stream_write_event {
         frame_word
@@ -470,92 +778,51 @@ entity main_core(
         0
     };
 
-    let ft_get_fifo = match ft_state {
-        FtState::GetFifo => true,
-        _ => false,
-    };
-    let ft_stream = match ft_state {
-        FtState::Stream => true,
-        _ => false,
-    };
-    let ft_can_push = !*ft_ui_din_full;
-    let ft_ui_din_valid =
-        (ft_get_fifo && ft_can_push && !*stream_fifo_empty) || (ft_stream && ft_can_push);
-    let ft_ui_din: uint<16> = if ft_get_fifo && ft_can_push && !*stream_fifo_empty {
-        trunc(*stream_fifo_dout)
-    } else if ft_stream && ft_can_push {
-        trunc(ft_cur_value >> 16)
-    } else {
-        0
-    };
-    let ft_ui_din_be: uint<2> = if ft_ui_din_valid { 0x3 } else { 0x0 };
-    let ft_ui_dout_get = !*ft_ui_dout_empty;
-    let stream_fifo_rget = if ft_get_fifo {
-        ft_can_push && !*stream_fifo_empty
-    } else if ft_stream {
-        ft_can_push
-    } else {
-        false
-    };
-
-    let addr_fifo_wput = bus_start && sample_is_bus;
-    let event_fifo_wput = bus_event_valid;
-
-    let addr_bridge = inst uart_fifo_bridge::<16, 4, 3, 400_000_000, 100_000_000>(
-        clk,
-        rst,
-        addr_sync,
-        addr_fifo_wput,
-        clk_uart,
-        rst,
-        true,
-    );
-    let event_bridge = inst uart_fifo_bridge::<8, 4, 3, 400_000_000, 100_000_000>(
-        clk,
-        rst,
-        bus_event_char,
-        event_fifo_wput,
-        clk_uart,
-        rst,
-        true,
-    );
-
-    let sample_tx_req = sample_is_wait && wait_done && !*tx_busy;
-    let stream_drop_tx = bus_event_valid && ft_enabled && *stream_fifo_full;
-    let bus_error_tx_now = bus_error_tx && !*tx_busy;
+    let stream_drop_tx = bus_sample.bus_event_valid && ft_enabled && *stream_fifo_full;
+    let bus_error_tx_now = bus_sample.bus_error_tx && !*tx_busy;
     let stream_drop_tx_now = stream_drop_tx && !*tx_busy;
     // Intentional lossy behavior: when USB TX is busy, one-cycle bus error/drop
     // markers are dropped instead of queued to keep this telemetry path simple.
     let bus_tx_req: (bool, uint<8>) = if bus_error_tx_now {
-        (true, bus_error_char)
+        (true, bus_sample.bus_error_char)
     } else if stream_drop_tx_now {
-        (true, bus_event_char)
-    } else if sample_tx_req {
+        (true, bus_sample.bus_event_char)
+    } else if bus_sample.sample_tx_req {
         (true, 0x2e) // '.'
     } else {
         (false, 0)
     };
 
-    let ft_cmd = decode_ft_stream_cmd(*ft_ui_dout_empty, *ft_ui_dout);
-    let ft_tx_req: (bool, uint<8>) = if ft_cmd.enable && !*tx_busy {
-        (true, 0x2b) // '+'
-    } else if ft_cmd.disable && !*tx_busy {
-        (true, 0x2d) // '-'
+    let ft_mux = inst ft_stream_mux(
+        ft_state,
+        ft_enabled,
+        ft_cur_value,
+        cycle_decode.ft_cmd,
+        *tx_busy,
+        *ft_ui_din_full,
+        *ft_ui_dout_empty,
+        *stream_fifo_empty,
+        *stream_fifo_dout,
+    );
+    let ft_tx_req: (bool, uint<8>) = if ft_mux.ft_tx_req_valid {
+        (true, ft_mux.ft_tx_req_byte)
     } else {
         bus_tx_req
     };
 
-    let rx_digit = decode_digit(rx.byte);
-    let saleae_cmd = decode_saleae_state_cmd(rx.byte);
-    let rx_is_digit = rx.valid && rx_digit.0;
-    let rx_is_saleae_cmd = rx.valid && saleae_cmd.0;
-    let rx_tx_req: (bool, uint<8>) = if (rx_is_digit || rx_is_saleae_cmd) && !*tx_busy {
-        (true, rx.byte)
-    } else {
-        ft_tx_req
-    };
-    let tx_new_data = rx_tx_req.0;
-    let tx_data = rx_tx_req.1;
+    let usb_cmd = inst usb_cmd_parser(
+        rx.valid,
+        rx.byte,
+        *tx_busy,
+        wait_enabled,
+        saleae_state,
+        cycle_decode.rx_digit,
+        cycle_decode.saleae_cmd,
+        ft_tx_req,
+    );
+
+    let tx_new_data = usb_cmd.tx_req_valid;
+    let tx_data = usb_cmd.tx_req_byte;
 
     let _tx = inst uart_tx_tap::<100_000_000, 1_000_000, 8>(
         clk,
@@ -567,10 +834,31 @@ entity main_core(
         tx_busy_w,
     );
 
-    let stream_fifo = inst sync_fifo::<32, 32768>(clk, rst, stream_fifo_din, stream_fifo_wput, stream_fifo_rget);
+    let stream_fifo = inst sync_fifo::<32, 32768>(clk, rst, stream_fifo_din, stream_fifo_wput, ft_mux.stream_fifo_rget);
     set stream_fifo_full_w = &stream_fifo.full;
     set stream_fifo_empty_w = &stream_fifo.empty;
     set stream_fifo_dout_w = &stream_fifo.dout;
+
+    let addr_bridge = inst uart_fifo_bridge::<16, 4, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        addr_sync,
+        bus_sample.addr_fifo_wput,
+        clk_uart,
+        rst,
+        true,
+        false,
+    );
+    let event_bridge = inst uart_fifo_bridge::<8, 4, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        bus_sample.bus_event_char,
+        bus_sample.event_fifo_wput,
+        clk_uart,
+        rst,
+        true,
+        false,
+    );
 
     let _ft = inst ft_tap::<16, 2, 8192, 64, 1, 0>(
         clk,
@@ -580,10 +868,10 @@ entity main_core(
         ft_txe,
         ft_data,
         ft_be,
-        ft_ui_din,
-        ft_ui_din_be,
-        ft_ui_din_valid,
-        ft_ui_dout_get,
+        ft_mux.ft_ui_din,
+        ft_mux.ft_ui_din_be,
+        ft_mux.ft_ui_din_valid,
+        ft_mux.ft_ui_dout_get,
         ft_data_out_w,
         ft_be_out_w,
         ft_rd_sig_w,
@@ -605,64 +893,32 @@ entity main_core(
         ft_enabled,
         *stream_fifo_empty,
         *stream_fifo_full,
-        sample_is_wait,
+        bus_sample.sample_is_wait,
         !ft_txe,
         !ft_rxf,
         !*ft_ui_dout_empty,
         *ft_ui_din_full,
     ];
 
-    let saleae_out = match saleae_state {
-        SaleaeState::DataSignals => {
-            [
-                z80_wr_sync,
-                z80_rd_sync,
-                z80_iorq_sync,
-                z80_mreq_sync,
-                z80_m1_sync,
-                false,
-                event_bridge.line,
-                addr_bridge.line,
-            ]
-        },
-        SaleaeState::SyncSignals => {
-            [
-                wr_rise,
-                rd_rise,
-                mreq_fall,
-                z80_m1_sync,
-                z80_wr_sync,
-                z80_rd_sync,
-                z80_iorq_sync,
-                z80_mreq_sync,
-            ]
-        },
-        SaleaeState::EdgeSignals => {
-            [
-                wr_rise,
-                rd_rise,
-                iorq_fall,
-                mreq_fall,
-                z80_wr_sync,
-                z80_rd_sync,
-                z80_iorq_sync,
-                z80_mreq_sync,
-            ]
-        },
-        SaleaeState::RawSignals => {
-            [
-                z80_wr,
-                z80_rd,
-                z80_iorq,
-                z80_mreq,
-                z80_wr_sync,
-                z80_rd_sync,
-                z80_iorq_sync,
-                z80_mreq_sync,
-            ]
-        },
-        SaleaeState::Counter => saleae_counter.to_bits(),
-    };
+    let saleae_out = inst saleae_mux(
+        saleae_state,
+        z80_wr_sync,
+        z80_rd_sync,
+        z80_iorq_sync,
+        z80_mreq_sync,
+        z80_m1_sync,
+        wr_rise,
+        rd_rise,
+        iorq_fall,
+        mreq_fall,
+        z80_wr,
+        z80_rd,
+        z80_iorq,
+        z80_mreq,
+        event_bridge.line,
+        addr_bridge.line,
+        saleae_counter,
+    );
 
     set ft_data_drive = &*ft_data_out;
     set ft_be_drive = &*ft_be_out;
@@ -670,7 +926,7 @@ entity main_core(
     set ft_rd = &*ft_rd_sig;
     set ft_wr = &*ft_wr_sig;
     set ft_oe = &*ft_oe_sig;
-    set z80_wait = &!sample_is_wait;
+    set z80_wait = &!bus_sample.sample_is_wait;
     set led = &led_out;
     set saleae = &saleae_out;
 }

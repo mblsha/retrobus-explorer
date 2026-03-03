@@ -14,13 +14,28 @@ pub entity sync_delay<#int STAGES>(
     inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
+pipeline(STAGES) sync_bundle_pipe<#int STAGES, #uint N>(
+    clk: clock,
+    input_signals: [bool; N],
+) -> [bool; N] {
+    reg * STAGES;
+    input_signals
+}
+
+pub entity sync_bundle<#int STAGES, #uint N>(
+    clk: clock,
+    input_signals: [bool; N],
+) -> [bool; N] {
+    // Generic N-stage bundle synchronizer/delay chain.
+    inst(STAGES) sync_bundle_pipe::<STAGES, N>(clk, input_signals)
+}
+
 pub entity sync2_bundle<#uint N>(
     clk: clock,
     input_signals: [bool; N],
 ) -> [bool; N] {
-    reg(clk) stage0: [bool; N] = input_signals;
-    reg(clk) stage1: [bool; N] = stage0;
-    stage1
+    // Compatibility wrapper for two-stage bundle sync.
+    inst sync_bundle::<2, N>(clk, input_signals)
 }
 
 pub struct Z80ControlSync {
@@ -31,6 +46,28 @@ pub struct Z80ControlSync {
     wr: bool,
 }
 
+pub entity sync_z80_controls_n<#int M1_STAGES, #int MREQ_STAGES, #int IORQ_STAGES, #int RD_STAGES, #int WR_STAGES>(
+    clk: clock,
+    m1: bool,
+    mreq: bool,
+    iorq: bool,
+    rd: bool,
+    wr: bool,
+) -> Z80ControlSync {
+    let m1_sync = inst sync_delay::<M1_STAGES>(clk, m1);
+    let mreq_sync = inst sync_delay::<MREQ_STAGES>(clk, mreq);
+    let iorq_sync = inst sync_delay::<IORQ_STAGES>(clk, iorq);
+    let rd_sync = inst sync_delay::<RD_STAGES>(clk, rd);
+    let wr_sync = inst sync_delay::<WR_STAGES>(clk, wr);
+    Z80ControlSync$(
+        m1: m1_sync,
+        mreq: mreq_sync,
+        iorq: iorq_sync,
+        rd: rd_sync,
+        wr: wr_sync,
+    )
+}
+
 pub entity sync_z80_controls(
     clk: clock,
     m1: bool,
@@ -39,18 +76,8 @@ pub entity sync_z80_controls(
     rd: bool,
     wr: bool,
 ) -> Z80ControlSync {
-    let m1_sync = inst sync_delay::<6>(clk, m1);
-    let mreq_sync = inst sync_delay::<4>(clk, mreq);
-    let iorq_sync = inst sync_delay::<4>(clk, iorq);
-    let rd_sync = inst sync_delay::<2>(clk, rd);
-    let wr_sync = inst sync_delay::<2>(clk, wr);
-    Z80ControlSync$(
-        m1: m1_sync,
-        mreq: mreq_sync,
-        iorq: iorq_sync,
-        rd: rd_sync,
-        wr: wr_sync,
-    )
+    // Compatibility wrapper for Alchitry-like stage depths.
+    inst sync_z80_controls_n::<6, 4, 4, 2, 2>(clk, m1, mreq, iorq, rd, wr)
 }
 
 pub entity reset_conditioner<#uint STAGES>(

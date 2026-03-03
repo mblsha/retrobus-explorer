@@ -7,6 +7,8 @@ pub struct UartFifoBridgeOut<TData> {
     fifo_full: bool,
     fifo_empty: bool,
     fifo_dout: TData,
+    tx_fire: bool,
+    dropped: bool,
 }
 
 struct port UartFifoBridgePort {
@@ -22,13 +24,18 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     rclk: clock,
     rrst: bool,
     send_enable: bool,
+    drop_when_busy: bool,
 ) -> UartFifoBridgeOut<uint<WIDTH>> {
     let (bridge, bridge_w): (UartFifoBridgePort, inv UartFifoBridgePort) = port;
     let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
 
+    // queue_only = false => drop entries while TX is busy.
+    let queue_only = !drop_when_busy;
     let fifo = inst async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(wclk, wrst, din, wput, rclk, rrst, *fifo_rget);
     let tx_fire = send_enable && !fifo.empty && !*bridge.busy;
-    set fifo_rget_w = &tx_fire;
+    let drop_fire = send_enable && !fifo.empty && *bridge.busy && !queue_only;
+    let fifo_take = tx_fire || drop_fire;
+    set fifo_rget_w = &fifo_take;
 
     let _ = inst uart_tx_tap::<CLK_FREQ, BAUD, WIDTH>(
         rclk,
@@ -46,5 +53,7 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
         fifo_full: fifo.full,
         fifo_empty: fifo.empty,
         fifo_dout: fifo.dout,
+        tx_fire: tx_fire,
+        dropped: drop_fire,
     )
 }
