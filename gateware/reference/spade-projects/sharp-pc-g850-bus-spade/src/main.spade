@@ -161,7 +161,7 @@ entity main_core(
     let (stream_fifo_empty, stream_fifo_empty_w): (&bool, inv &bool) = port;
     let (stream_fifo_dout, stream_fifo_dout_w): (&uint<32>, inv &uint<32>) = port;
 
-    let rx = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
+    let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
 
     reg(clk) state:
         (
