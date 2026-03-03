@@ -126,6 +126,8 @@ module ft_async_fifo #(
 endmodule
 
 module ft_u16_v #(
+    parameter DATA_WIDTH = 16,
+    parameter BE_WIDTH = 2,
     parameter TX_BUFFER = 64,
     parameter RX_BUFFER = 64,
     parameter PRIORITY_RX = 1,
@@ -137,21 +139,21 @@ module ft_u16_v #(
     input ft_clk,
     input ft_rxf,
     input ft_txe,
-    input [15:0] ft_data_in,
-    input [1:0] ft_be_in,
-    output reg [15:0] ft_data_out,
-    output reg [1:0] ft_be_out,
+    input [DATA_WIDTH-1:0] ft_data_in,
+    input [BE_WIDTH-1:0] ft_be_in,
+    output reg [DATA_WIDTH-1:0] ft_data_out,
+    output reg [BE_WIDTH-1:0] ft_be_out,
     output reg ft_rd,
     output reg ft_wr,
     output reg ft_oe,
 
-    input [15:0] ui_din,
-    input [1:0] ui_din_be,
+    input [DATA_WIDTH-1:0] ui_din,
+    input [BE_WIDTH-1:0] ui_din_be,
     input ui_din_valid,
     output ui_din_full,
 
-    output [15:0] ui_dout,
-    output [1:0] ui_dout_be,
+    output [DATA_WIDTH-1:0] ui_dout,
+    output [BE_WIDTH-1:0] ui_dout_be,
     output ui_dout_empty,
     input ui_dout_get
 );
@@ -159,16 +161,17 @@ module ft_u16_v #(
     localparam STATE_BUS_SWITCH = 2'd1;
     localparam STATE_READ = 2'd2;
     localparam STATE_WRITE = 2'd3;
+    localparam FIFO_WIDTH = DATA_WIDTH + BE_WIDTH;
 
     reg [1:0] state_q = STATE_IDLE;
     reg [1:0] state_d;
 
-    wire [17:0] write_fifo_dout;
+    wire [FIFO_WIDTH-1:0] write_fifo_dout;
     wire write_fifo_full;
     wire write_fifo_empty;
     reg write_fifo_rget;
 
-    wire [17:0] read_fifo_dout;
+    wire [FIFO_WIDTH-1:0] read_fifo_dout;
     wire read_fifo_full;
     wire read_fifo_empty;
     reg read_fifo_wput;
@@ -177,12 +180,12 @@ module ft_u16_v #(
     wire can_read = !ft_rxf && !read_fifo_full;
 
     assign ui_din_full = write_fifo_full;
-    assign ui_dout = read_fifo_dout[15:0];
-    assign ui_dout_be = read_fifo_dout[17:16];
+    assign ui_dout = read_fifo_dout[DATA_WIDTH-1:0];
+    assign ui_dout_be = read_fifo_dout[FIFO_WIDTH-1:DATA_WIDTH];
     assign ui_dout_empty = read_fifo_empty;
 
     ft_async_fifo #(
-        .WIDTH(18),
+        .WIDTH(FIFO_WIDTH),
         .ENTRIES(TX_BUFFER),
         .SYNC_STAGES(3)
     ) write_fifo (
@@ -199,7 +202,7 @@ module ft_u16_v #(
     );
 
     ft_async_fifo #(
-        .WIDTH(18),
+        .WIDTH(FIFO_WIDTH),
         .ENTRIES(RX_BUFFER),
         .SYNC_STAGES(3)
     ) read_fifo (
@@ -235,11 +238,11 @@ module ft_u16_v #(
 
         reading_bus = (state_q == STATE_BUS_SWITCH) || (state_q == STATE_READ);
         if (reading_bus) begin
-            ft_data_out = {16{1'bz}};
-            ft_be_out = {2{1'bz}};
+            ft_data_out = {DATA_WIDTH{1'bz}};
+            ft_be_out = {BE_WIDTH{1'bz}};
         end else begin
-            ft_data_out = write_fifo_dout[15:0];
-            ft_be_out = write_fifo_dout[17:16];
+            ft_data_out = write_fifo_dout[DATA_WIDTH-1:0];
+            ft_be_out = write_fifo_dout[FIFO_WIDTH-1:DATA_WIDTH];
         end
 
         state_d = state_q;

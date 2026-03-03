@@ -10,50 +10,50 @@ pub struct UartRxOut {
 }
 
 #[no_mangle(all)]
-extern entity ft_u16_v<#uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
+extern entity ft_u16_v<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
     clk: clock,
     rst: bool,
     ft_clk: clock,
     ft_rxf: bool,
     ft_txe: bool,
-    ft_data_in: uint<16>,
-    ft_be_in: uint<2>,
-    ft_data_out: inv &uint<16>,
-    ft_be_out: inv &uint<2>,
+    ft_data_in: uint<DATA_WIDTH>,
+    ft_be_in: uint<BE_WIDTH>,
+    ft_data_out: inv &uint<DATA_WIDTH>,
+    ft_be_out: inv &uint<BE_WIDTH>,
     ft_rd: inv &bool,
     ft_wr: inv &bool,
     ft_oe: inv &bool,
-    ui_din: uint<16>,
-    ui_din_be: uint<2>,
+    ui_din: uint<DATA_WIDTH>,
+    ui_din_be: uint<BE_WIDTH>,
     ui_din_valid: bool,
     ui_din_full: inv &bool,
-    ui_dout: inv &uint<16>,
-    ui_dout_be: inv &uint<2>,
+    ui_dout: inv &uint<DATA_WIDTH>,
+    ui_dout_be: inv &uint<BE_WIDTH>,
     ui_dout_empty: inv &bool,
     ui_dout_get: bool,
 );
 
-pub struct FtU16Out {
-    ft_data_out: uint<16>,
-    ft_be_out: uint<2>,
+pub struct FtOut<TData, TBe> {
+    ft_data_out: TData,
+    ft_be_out: TBe,
     ft_rd: bool,
     ft_wr: bool,
     ft_oe: bool,
     ui_din_full: bool,
-    ui_dout: uint<16>,
-    ui_dout_be: uint<2>,
+    ui_dout: TData,
+    ui_dout_be: TBe,
     ui_dout_empty: bool,
 }
 
-struct port FtU16WirePort {
-    ft_data_out: &uint<16>,
-    ft_be_out: &uint<2>,
+struct port FtWirePort<TData, TBe> {
+    ft_data_out: &TData,
+    ft_be_out: &TBe,
     ft_rd: &bool,
     ft_wr: &bool,
     ft_oe: &bool,
     ui_din_full: &bool,
-    ui_dout: &uint<16>,
-    ui_dout_be: &uint<2>,
+    ui_dout: &TData,
+    ui_dout_be: &TBe,
     ui_dout_empty: &bool,
 }
 
@@ -365,22 +365,22 @@ pub entity uart_rx(
     )
 }
 
-pub entity ft_u16<#uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
+pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
     clk: clock,
     rst: bool,
     ft_clk: clock,
     ft_rxf: bool,
     ft_txe: bool,
-    ft_data_in: uint<16>,
-    ft_be_in: uint<2>,
-    ui_din: uint<16>,
-    ui_din_be: uint<2>,
+    ft_data_in: uint<DATA_WIDTH>,
+    ft_be_in: uint<BE_WIDTH>,
+    ui_din: uint<DATA_WIDTH>,
+    ui_din_be: uint<BE_WIDTH>,
     ui_din_valid: bool,
     ui_dout_get: bool,
-) -> FtU16Out {
-    let (ft, ft_w): (FtU16WirePort, inv FtU16WirePort) = port;
+) -> FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>> {
+    let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port;
 
-    let _ = inst ft_u16_v::<TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
+    let _ = inst ft_u16_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
         clk,
         rst,
         ft_clk,
@@ -403,7 +403,7 @@ pub entity ft_u16<#uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PRE
         ui_dout_get,
     );
 
-    FtU16Out$(
+    FtOut$(
         ft_data_out: *ft.ft_data_out,
         ft_be_out: *ft.ft_be_out,
         ft_rd: *ft.ft_rd,
@@ -416,16 +416,16 @@ pub entity ft_u16<#uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PRE
     )
 }
 
-pub entity ft_u16_out_tap(
-    out: FtU16Out,
-    ft_data_out: inv &uint<16>,
-    ft_be_out: inv &uint<2>,
+pub entity ft_out_tap<TData, TBe>(
+    out: FtOut<TData, TBe>,
+    ft_data_out: inv &TData,
+    ft_be_out: inv &TBe,
     ft_rd: inv &bool,
     ft_wr: inv &bool,
     ft_oe: inv &bool,
     ui_din_full: inv &bool,
-    ui_dout: inv &uint<16>,
-    ui_dout_be: inv &uint<2>,
+    ui_dout: inv &TData,
+    ui_dout_be: inv &TBe,
     ui_dout_empty: inv &bool,
 ) {
     set ft_data_out = &out.ft_data_out;
@@ -439,29 +439,29 @@ pub entity ft_u16_out_tap(
     set ui_dout_empty = &out.ui_dout_empty;
 }
 
-pub entity ft_u16_tap<#uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
+pub entity ft_tap<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
     clk: clock,
     rst: bool,
     ft_clk: clock,
     ft_rxf: bool,
     ft_txe: bool,
-    ft_data_in: uint<16>,
-    ft_be_in: uint<2>,
-    ui_din: uint<16>,
-    ui_din_be: uint<2>,
+    ft_data_in: uint<DATA_WIDTH>,
+    ft_be_in: uint<BE_WIDTH>,
+    ui_din: uint<DATA_WIDTH>,
+    ui_din_be: uint<BE_WIDTH>,
     ui_din_valid: bool,
     ui_dout_get: bool,
-    ft_data_out: inv &uint<16>,
-    ft_be_out: inv &uint<2>,
+    ft_data_out: inv &uint<DATA_WIDTH>,
+    ft_be_out: inv &uint<BE_WIDTH>,
     ft_rd: inv &bool,
     ft_wr: inv &bool,
     ft_oe: inv &bool,
     ui_din_full: inv &bool,
-    ui_dout: inv &uint<16>,
-    ui_dout_be: inv &uint<2>,
+    ui_dout: inv &uint<DATA_WIDTH>,
+    ui_dout_be: inv &uint<BE_WIDTH>,
     ui_dout_empty: inv &bool,
 ) {
-    let out = inst ft_u16::<TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
+    let out = inst ft::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
         clk,
         rst,
         ft_clk,
@@ -474,7 +474,7 @@ pub entity ft_u16_tap<#uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint
         ui_din_valid,
         ui_dout_get,
     );
-    inst ft_u16_out_tap(
+    inst ft_out_tap(
         out,
         ft_data_out,
         ft_be_out,

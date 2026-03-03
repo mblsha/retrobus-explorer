@@ -21,7 +21,7 @@ CASES: dict[str, tuple[str, str]] = {
     "my_uart_tx": ("tb_my_uart_tx", "test_my_uart_tx"),
     "uart_tx": ("tb_my_uart_tx", "test_my_uart_tx"),
     "uart_rx": ("tb_uart_rx", "test_uart_rx"),
-    "ft_u16": ("tb_ft_u16", "test_ft_u16"),
+    "ft": ("tb_ft", "test_ft_u16"),
     "fifo_u8": ("tb_fifo_u8", "test_fifo_u8"),
     "async_fifo_u8": ("tb_async_fifo_u8", "test_async_fifo_u8"),
     "counter_u8": ("tb_counter_u8", "test_counter_u8"),

@@ -5,7 +5,7 @@ use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::memory::fifo_u8;
 use shared_components::memory::async_fifo;
-use shared_components::serial::ft_u16;
+use shared_components::serial::ft;
 use shared_components::serial::my_uart_tx;
 use shared_components::serial::uart_rx;
 use shared_components::sharp::count_on_event;
@@ -208,7 +208,7 @@ entity tb_async_fifo_u8(
 }
 
 #[no_mangle(all)]
-entity tb_ft_u16(
+entity tb_ft(
     clk: clock,
     rst: bool,
     ft_clk: clock,
@@ -230,7 +230,7 @@ entity tb_ft_u16(
     ui_dout_be: inv &uint<2>,
     ui_dout_empty: inv &bool,
 ) {
-    let out = inst ft_u16::<64, 64, 1, 0>(
+    let out = inst ft::<16, 2, 64, 64, 1, 0>(
         clk,
         rst,
         ft_clk,

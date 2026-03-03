@@ -1,4 +1,4 @@
-# top = tb_ft_u16
+# top = tb_ft
 
 import cocotb
 from cocotb.clock import Clock
