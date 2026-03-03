@@ -6,7 +6,7 @@ use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
-use shared_components::serial::ft_u16_tap;
+use shared_components::serial::ft_tap;
 use shared_components::serial::my_uart_tx_tap;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx_tap;
@@ -581,7 +581,7 @@ entity main_core(
     let stream_fifo = inst sync_fifo::<32, 32768>(clk, rst, stream_fifo_din, stream_fifo_wput, stream_fifo_rget);
     let _stream_fifo = inst fifo_out_tap(stream_fifo, stream_fifo_full_w, stream_fifo_empty_w, stream_fifo_dout_w);
 
-    let _ft = inst ft_u16_tap::<8192, 64, 1, 0>(
+    let _ft = inst ft_tap::<16, 2, 8192, 64, 1, 0>(
         clk,
         rst,
         ft_clk_clock,
