@@ -5,9 +5,7 @@ use shared_components::memory::sync_fifo;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
-use shared_components::primitives::sync2;
-use shared_components::primitives::sync4;
-use shared_components::primitives::sync6;
+use shared_components::primitives::sync_delay;
 use shared_components::serial::ft_u16_tap;
 use shared_components::serial::my_uart_tx_tap;
 use shared_components::serial::uart_rx;
@@ -126,11 +124,11 @@ entity main_core(
     let clk_uart = inst clk_wiz_400(clk);
     let ft_clk_clock = unsafe { inst std::conv::bool_to_clock(ft_clk) };
 
-    let z80_m1_sync = inst sync6(clk, z80_m1);
-    let z80_mreq_sync = inst sync4(clk, z80_mreq);
-    let z80_iorq_sync = inst sync4(clk, z80_iorq);
-    let z80_rd_sync = inst sync2(clk, z80_rd);
-    let z80_wr_sync = inst sync2(clk, z80_wr);
+    let z80_m1_sync = inst sync_delay::<6>(clk, z80_m1);
+    let z80_mreq_sync = inst sync_delay::<4>(clk, z80_mreq);
+    let z80_iorq_sync = inst sync_delay::<4>(clk, z80_iorq);
+    let z80_rd_sync = inst sync_delay::<2>(clk, z80_rd);
+    let z80_wr_sync = inst sync_delay::<2>(clk, z80_wr);
 
     let mreq_fall = inst falling_edge(clk, z80_mreq_sync);
     let iorq_fall = inst falling_edge(clk, z80_iorq_sync);

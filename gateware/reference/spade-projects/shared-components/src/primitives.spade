@@ -14,29 +14,6 @@ pub entity sync_delay<#int STAGES>(
     inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
-pub entity sync2(
-    clk: clock,
-    input_signal: bool,
-) -> bool {
-    // Equivalent to Alchitry `pipeline` with `#DEPTH(2)`: a 2-FF synchronizer
-    // used for metastability hardening of asynchronous inputs.
-    inst sync_delay::<2>(clk, input_signal)
-}
-
-pub entity sync4(
-    clk: clock,
-    input_signal: bool,
-) -> bool {
-    inst sync_delay::<4>(clk, input_signal)
-}
-
-pub entity sync6(
-    clk: clock,
-    input_signal: bool,
-) -> bool {
-    inst sync_delay::<6>(clk, input_signal)
-}
-
 pub entity reset_conditioner<#uint STAGES>(
     clk: clock,
     in_reset: bool,
