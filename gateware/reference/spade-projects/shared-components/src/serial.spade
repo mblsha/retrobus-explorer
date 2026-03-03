@@ -13,6 +13,18 @@ pub struct UartRxOut<TData> {
     byte: TData,
 }
 
+pub struct port UartLineBusyPort {
+    line: &bool,
+    busy: &bool,
+}
+
+pub entity usb_loopback(
+    usb_rx: bool,
+    usb_tx: inv &bool,
+) {
+    set usb_tx = &usb_rx;
+}
+
 #[no_mangle(all)]
 extern entity ft_v<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
     clk: clock,

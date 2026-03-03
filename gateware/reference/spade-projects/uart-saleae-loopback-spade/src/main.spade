@@ -1,26 +1,15 @@
-use shared_components::ascii::decode_digit_max;
-use shared_components::ascii::to_upper;
+use shared_components::bridges::BridgePolicy;
 use shared_components::bridges::uart_fifo_bridge;
 use shared_components::clocking::clk_wiz_200_400;
 use shared_components::primitives::reset_conditioner;
 use shared_components::protocol::simple_cmd_uart::clock_from_code;
 use shared_components::protocol::simple_cmd_uart::cmd_state_is_idle;
-use shared_components::protocol::simple_cmd_uart::decode_cmd;
 use shared_components::protocol::simple_cmd_uart::is_echo_mode;
-use shared_components::protocol::simple_cmd_uart::msg_byte;
-use shared_components::protocol::simple_cmd_uart::msg_is_none;
-use shared_components::protocol::simple_cmd_uart::next_cmd_state;
 use shared_components::protocol::simple_cmd_uart::saleae_outputs;
-use shared_components::protocol::simple_cmd_uart::CmdParseState;
-use shared_components::protocol::simple_cmd_uart::Mode;
-use shared_components::protocol::simple_cmd_uart::MsgKind;
+use shared_components::protocol::simple_cmd_uart::simple_cmd_uart_core;
+use shared_components::serial::UartLineBusyPort;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx_tap;
-
-struct port UartTxPort {
-    line: &bool,
-    busy: &bool,
-}
 
 #[no_mangle(all)]
 entity main(
@@ -39,77 +28,18 @@ entity main(
     let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
 
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
-    let (usb_uart, usb_uart_w): (UartTxPort, inv UartTxPort) = port;
+    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
 
-    let rx_ok = rx.valid && !rx.parity_error;
-    let rx_digit = decode_digit_max(rx.byte, 5);
-    let rx_upper: uint<8> = to_upper(rx.byte);
+    let cmd_core = inst simple_cmd_uart_core(
+        clk,
+        rst,
+        rx.valid,
+        rx.parity_error,
+        rx.byte,
+        *usb_uart.busy,
+    );
 
-    reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
-        next_cmd_state(cmd_state, rx_ok, rx.byte, rx_upper)
-    };
-    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_upper, rx_digit);
-
-    reg(clk) mode: Mode reset(rst: Mode::ClockTester()) = {
-        if cmd_decode.mode_write {
-            cmd_decode.mode_value
-        } else {
-            mode
-        }
-    };
-
-    reg(clk) freq_code: uint<4> reset(rst: 0) = {
-        if cmd_decode.freq_write {
-            cmd_decode.freq_value
-        } else {
-            freq_code
-        }
-    };
-    reg(clk) tx_state: (MsgKind, uint<8>, MsgKind) reset(rst: (MsgKind::Ready(), 0, MsgKind::None())) = {
-        let cur_msg = tx_state.0;
-        let cur_idx = tx_state.1;
-        let pending_msg = tx_state.2;
-        let pending_next = if cmd_decode.msg_valid {
-            cmd_decode.msg
-        } else {
-            pending_msg
-        };
-        let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code);
-        let cur_none = msg_is_none(cur_msg);
-        let sending = !cur_none && cur_byte.0 && !*usb_uart.busy;
-        let next_idx: uint<8> = trunc(cur_idx + 1);
-        let next_valid = msg_byte(cur_msg, next_idx, mode, freq_code).0;
-
-        let post_msg: MsgKind = if sending && !next_valid {
-            MsgKind::None()
-        } else {
-            cur_msg
-        };
-        let post_idx: uint<8> = if sending {
-            if next_valid {
-                next_idx
-            } else {
-                0
-            }
-        } else {
-            cur_idx
-        };
-
-        if msg_is_none(post_msg) && !msg_is_none(pending_next) {
-            // Hold decoded command responses until TX is ready to consume them.
-            (pending_next, 0, MsgKind::None())
-        } else {
-            (post_msg, post_idx, pending_next)
-        }
-    };
-
-    let tx_msg = tx_state.0;
-    let tx_idx = tx_state.1;
-    let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code);
-    let tx_msg_none = msg_is_none(tx_msg);
-    let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !*usb_uart.busy;
-
-    let mode_is_echo = is_echo_mode(mode);
+    let mode_is_echo = is_echo_mode(cmd_core.mode);
     let mode_is_clock_tester = !mode_is_echo;
 
     let tx6_bridge = inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 100_000_000>(
@@ -120,7 +50,7 @@ entity main(
         clk_fast,
         rst,
         mode_is_echo,
-        false,
+        BridgePolicy::QueueOnly(),
     );
     let tx7_bridge = inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 200_000_000>(
         clk,
@@ -130,21 +60,19 @@ entity main(
         clk_fast,
         rst,
         mode_is_echo,
-        false,
+        BridgePolicy::QueueOnly(),
     );
 
-    let cmd_is_idle = cmd_state_is_idle(cmd_state);
-    let rx_is_bang = rx_ok && rx.byte == 0x21;
-    let rx_is_payload = mode_is_echo && cmd_is_idle && rx_ok && !rx_is_bang;
+    let rx_is_payload = cmd_core.payload_rx;
 
     let all_fifo_ready = !tx6_bridge.fifo_full && !tx7_bridge.fifo_full;
-    let can_accept = rx_is_payload && tx_msg_none && !*usb_uart.busy && all_fifo_ready;
+    let can_accept = rx_is_payload && cmd_core.tx_msg_none && !*usb_uart.busy && all_fifo_ready;
     let dropped = rx_is_payload && !can_accept;
     set enqueue_w = &can_accept;
 
-    let tx_new_data = tx_msg_send || can_accept;
-    let tx_data = if tx_msg_send {
-        tx_msg_byte.1
+    let tx_new_data = cmd_core.tx_req_valid || can_accept;
+    let tx_data = if cmd_core.tx_req_valid {
+        cmd_core.tx_req_byte
     } else if can_accept {
         rx.byte
     } else {
@@ -165,10 +93,10 @@ entity main(
     let clk_200_div = clk_div.to_bits()[0];
     let clk_100_div = clk_div.to_bits()[1];
     let clk_50_div = clk_div.to_bits()[2];
-    let selected_clk = clock_from_code(freq_code, clk_div, clk200_probe, clk400_probe);
+    let selected_clk = clock_from_code(cmd_core.freq_code, clk_div, clk200_probe, clk400_probe);
 
     reg(clk) heartbeat: uint<24> reset(rst: 0) = trunc(heartbeat + 1);
-    let cmd_waiting = !cmd_state_is_idle(cmd_state);
+    let cmd_waiting = !cmd_state_is_idle(cmd_core.cmd_state);
     let saleae_lines = saleae_outputs(
         mode_is_echo,
         selected_clk,
@@ -188,7 +116,7 @@ entity main(
         mode_is_clock_tester,
         mode_is_echo,
         cmd_waiting,
-        tx_msg_none,
+        cmd_core.tx_msg_none,
         *usb_uart.busy,
         can_accept,
         dropped,
