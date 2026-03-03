@@ -1,0 +1,50 @@
+use shared_components::memory::async_fifo;
+use shared_components::serial::uart_tx_tap;
+
+pub struct UartFifoBridgeOut<TData> {
+    line: bool,
+    busy: bool,
+    fifo_full: bool,
+    fifo_empty: bool,
+    fifo_dout: TData,
+}
+
+struct port UartFifoBridgePort {
+    line: &bool,
+    busy: &bool,
+}
+
+pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint CLK_FREQ, #uint BAUD>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<WIDTH>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+) -> UartFifoBridgeOut<uint<WIDTH>> {
+    let (bridge, bridge_w): (UartFifoBridgePort, inv UartFifoBridgePort) = port;
+    let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
+
+    let fifo = inst async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(wclk, wrst, din, wput, rclk, rrst, *fifo_rget);
+    let tx_fire = send_enable && !fifo.empty && !*bridge.busy;
+    set fifo_rget_w = &tx_fire;
+
+    let _ = inst uart_tx_tap::<CLK_FREQ, BAUD, WIDTH>(
+        rclk,
+        rrst,
+        false,
+        fifo.dout,
+        tx_fire,
+        bridge_w.line,
+        bridge_w.busy,
+    );
+
+    UartFifoBridgeOut$(
+        line: *bridge.line,
+        busy: *bridge.busy,
+        fifo_full: fifo.full,
+        fifo_empty: fifo.empty,
+        fifo_dout: fifo.dout,
+    )
+}

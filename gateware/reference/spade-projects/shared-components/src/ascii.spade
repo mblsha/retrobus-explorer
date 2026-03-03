@@ -1,0 +1,32 @@
+pub fn to_upper(byte: uint<8>) -> uint<8> {
+    if byte >= 0x61 && byte <= 0x7a {
+        trunc(byte - 0x20)
+    } else {
+        byte
+    }
+}
+
+pub fn is_digit(byte: uint<8>) -> bool {
+    byte >= 0x30 && byte <= 0x39
+}
+
+pub fn digit_value(byte: uint<8>) -> uint<4> {
+    trunc(byte - 0x30)
+}
+
+pub fn decode_digit(byte: uint<8>) -> (bool, uint<4>) {
+    if is_digit(byte) {
+        (true, digit_value(byte))
+    } else {
+        (false, 0)
+    }
+}
+
+pub fn decode_digit_max(byte: uint<8>, max_value: uint<4>) -> (bool, uint<4>) {
+    let decoded = decode_digit(byte);
+    if decoded.0 && decoded.1 <= max_value {
+        decoded
+    } else {
+        (false, 0)
+    }
+}

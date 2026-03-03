@@ -1,5 +1,7 @@
+use shared_components::ascii::decode_digit_max;
+use shared_components::ascii::to_upper;
+use shared_components::bridges::uart_fifo_bridge;
 use shared_components::clocking::clk_wiz_200_400;
-use shared_components::memory::async_fifo;
 use shared_components::primitives::reset_conditioner;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx_tap;
@@ -166,14 +168,6 @@ fn cmd_state_is_idle(state: CmdParseState) -> bool {
     }
 }
 
-fn decode_freq_digit(rx_byte: uint<8>) -> (bool, uint<4>) {
-    if rx_byte >= 0x30 && rx_byte <= 0x35 {
-        (true, trunc(rx_byte - 0x30))
-    } else {
-        (false, 0)
-    }
-}
-
 fn next_cmd_state(
     state: CmdParseState,
     rx_ok: bool,
@@ -213,11 +207,6 @@ struct CmdDecode {
 }
 
 struct port UartTxPort {
-    line: &bool,
-    busy: &bool,
-}
-
-struct port FastUartPort {
     line: &bool,
     busy: &bool,
 }
@@ -375,18 +364,10 @@ entity main(
 
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
     let (usb_uart, usb_uart_w): (UartTxPort, inv UartTxPort) = port;
-    let (tx6_fast_uart, tx6_fast_uart_w): (FastUartPort, inv FastUartPort) = port;
-    let (tx7_fast_uart, tx7_fast_uart_w): (FastUartPort, inv FastUartPort) = port;
-    let (tx6_fire, tx6_fire_w): (&bool, inv &bool) = port;
-    let (tx7_fire, tx7_fire_w): (&bool, inv &bool) = port;
 
     let rx_ok = rx.valid && !rx.parity_error;
-    let rx_digit = decode_freq_digit(rx.byte);
-    let rx_upper: uint<8> = if rx_ok && rx.byte >= 0x61 && rx.byte <= 0x7a {
-        trunc(rx.byte - 0x20)
-    } else {
-        rx.byte
-    };
+    let rx_digit = decode_digit_max(rx.byte, 5);
+    let rx_upper: uint<8> = to_upper(rx.byte);
 
     reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
         next_cmd_state(cmd_state, rx_ok, rx.byte, rx_upper)
@@ -452,22 +433,36 @@ entity main(
     let tx_msg_none = msg_is_none(tx_msg);
     let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !*usb_uart.busy;
 
-    let fifo6 = inst async_fifo::<8, 8, 3>(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fire);
-    let fifo7 = inst async_fifo::<8, 8, 3>(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fire);
-
     let mode_is_echo = is_echo_mode(mode);
     let mode_is_clock_tester = !mode_is_echo;
+
+    let tx6_bridge = inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        rx.byte,
+        *enqueue,
+        clk_fast,
+        rst,
+        mode_is_echo,
+    );
+    let tx7_bridge = inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 200_000_000>(
+        clk,
+        rst,
+        rx.byte,
+        *enqueue,
+        clk_fast,
+        rst,
+        mode_is_echo,
+    );
+
     let cmd_is_idle = cmd_state_is_idle(cmd_state);
     let rx_is_bang = rx_ok && rx.byte == 0x21;
     let rx_is_payload = mode_is_echo && cmd_is_idle && rx_ok && !rx_is_bang;
 
-    let all_fifo_ready = !fifo6.full && !fifo7.full;
+    let all_fifo_ready = !tx6_bridge.fifo_full && !tx7_bridge.fifo_full;
     let can_accept = rx_is_payload && tx_msg_none && !*usb_uart.busy && all_fifo_ready;
     let dropped = rx_is_payload && !can_accept;
     set enqueue_w = &can_accept;
-
-    set tx6_fire_w = &(mode_is_echo && !fifo6.empty && !*tx6_fast_uart.busy);
-    set tx7_fire_w = &(mode_is_echo && !fifo7.empty && !*tx7_fast_uart.busy);
 
     let tx_new_data = tx_msg_send || can_accept;
     let tx_data = if tx_msg_send {
@@ -488,25 +483,6 @@ entity main(
         usb_uart_w.busy,
     );
 
-    let _tx6 = inst uart_tx_tap::<400_000_000, 100_000_000, 8>(
-        clk_fast,
-        rst,
-        false,
-        fifo6.dout,
-        *tx6_fire,
-        tx6_fast_uart_w.line,
-        tx6_fast_uart_w.busy,
-    );
-    let _tx7 = inst uart_tx_tap::<400_000_000, 200_000_000, 8>(
-        clk_fast,
-        rst,
-        false,
-        fifo7.dout,
-        *tx7_fire,
-        tx7_fast_uart_w.line,
-        tx7_fast_uart_w.busy,
-    );
-
     reg(clk_fast) clk_div: uint<10> reset(rst: 0) = trunc(clk_div + 1);
     let clk_200_div = clk_div.to_bits()[0];
     let clk_100_div = clk_div.to_bits()[1];
@@ -524,8 +500,8 @@ entity main(
         clk_50_div,
         usb_rx,
         *usb_uart.line,
-        *tx6_fast_uart.line,
-        *tx7_fast_uart.line,
+        tx6_bridge.line,
+        tx7_bridge.line,
     );
 
     set usb_tx = &*usb_uart.line;
