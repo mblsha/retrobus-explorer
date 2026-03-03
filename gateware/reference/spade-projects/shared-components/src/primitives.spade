@@ -14,6 +14,45 @@ pub entity sync_delay<#int STAGES>(
     inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
+pub entity sync2_bundle<#uint N>(
+    clk: clock,
+    input_signals: [bool; N],
+) -> [bool; N] {
+    reg(clk) stage0: [bool; N] = input_signals;
+    reg(clk) stage1: [bool; N] = stage0;
+    stage1
+}
+
+pub struct Z80ControlSync {
+    m1: bool,
+    mreq: bool,
+    iorq: bool,
+    rd: bool,
+    wr: bool,
+}
+
+pub entity sync_z80_controls(
+    clk: clock,
+    m1: bool,
+    mreq: bool,
+    iorq: bool,
+    rd: bool,
+    wr: bool,
+) -> Z80ControlSync {
+    let m1_sync = inst sync_delay::<6>(clk, m1);
+    let mreq_sync = inst sync_delay::<4>(clk, mreq);
+    let iorq_sync = inst sync_delay::<4>(clk, iorq);
+    let rd_sync = inst sync_delay::<2>(clk, rd);
+    let wr_sync = inst sync_delay::<2>(clk, wr);
+    Z80ControlSync$(
+        m1: m1_sync,
+        mreq: mreq_sync,
+        iorq: iorq_sync,
+        rd: rd_sync,
+        wr: wr_sync,
+    )
+}
+
 pub entity reset_conditioner<#uint STAGES>(
     clk: clock,
     in_reset: bool,
