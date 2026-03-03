@@ -1,5 +1,5 @@
 use shared_components::clocking::clk_wiz_200_400_tap;
-use shared_components::memory::async_fifo_u8x8;
+use shared_components::memory::async_fifo;
 use shared_components::primitives::reset_conditioner;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx_tap;
@@ -452,8 +452,8 @@ entity main(
     let tx_msg_none = msg_is_none(tx_msg);
     let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !*usb_uart.busy;
 
-    let fifo6 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fire);
-    let fifo7 = inst async_fifo_u8x8(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fire);
+    let fifo6 = inst async_fifo::<8, 8, 3>(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx6_fire);
+    let fifo7 = inst async_fifo::<8, 8, 3>(clk, rst, rx.byte, *enqueue, clk_fast, rst, *tx7_fire);
 
     let mode_is_echo = is_echo_mode(mode);
     let mode_is_clock_tester = !mode_is_echo;

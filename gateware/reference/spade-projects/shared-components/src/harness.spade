@@ -5,7 +5,7 @@ use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::primitives::sync2;
 use shared_components::memory::fifo_u8x8;
-use shared_components::memory::async_fifo_u8x8;
+use shared_components::memory::async_fifo;
 use shared_components::serial::ft_u16;
 use shared_components::serial::my_uart_tx;
 use shared_components::serial::uart_rx;
@@ -203,7 +203,7 @@ entity tb_async_fifo_u8(
     empty: inv &bool,
     dout: inv &uint<8>,
 ) {
-    let out = inst async_fifo_u8x8(wclk, wrst, din, wput, rclk, rrst, rget);
+    let out = inst async_fifo::<8, 8, 3>(wclk, wrst, din, wput, rclk, rrst, rget);
     set full = &out.full;
     set empty = &out.empty;
     set dout = &out.dout;
