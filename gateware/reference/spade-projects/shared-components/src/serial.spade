@@ -82,14 +82,14 @@ fn extra_stop_bits(stop_bits: uint<3>) -> uint<3> {
     }
 }
 
-enum MyUartTxState {
+enum UartTxState {
     Idle,
     StartBit,
     Data,
     StopBit,
 }
 
-pub entity my_uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
+pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
     block: bool,
@@ -102,10 +102,10 @@ pub entity my_uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     let clk_per_bit = ((CLK_FREQ + BAUD) `std::ops::comb_div` BAUD) - 1;
     let ctr_last = clk_per_bit - 1;
 
-    reg(clk) regs: (MyUartTxState, uint<32>, uint<32>, uint<DATA_WIDTH>, bool, bool)
-        reset(rst: (MyUartTxState::Idle(), 0, 0, 0, false, false))
+    reg(clk) regs: (UartTxState, uint<32>, uint<32>, uint<DATA_WIDTH>, bool, bool)
+        reset(rst: (UartTxState::Idle(), 0, 0, 0, false, false))
         = {
-            let state: MyUartTxState = regs.0;
+            let state: UartTxState = regs.0;
             let ctr: uint<32> = regs.1;
             let bit_ctr: uint<32> = regs.2;
             let saved_data: uint<DATA_WIDTH> = regs.3;
@@ -115,53 +115,53 @@ pub entity my_uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
             let block_flag_next = block;
 
             match state {
-                MyUartTxState::Idle => {
+                UartTxState::Idle => {
                     if !block_flag {
                         if new_data {
                             // Accept a new payload and move to start bit.
-                            (MyUartTxState::StartBit(), 0, 0, data, true, block_flag_next)
+                            (UartTxState::StartBit(), 0, 0, data, true, block_flag_next)
                         } else {
-                            (MyUartTxState::Idle(), 0, 0, saved_data, true, block_flag_next)
+                            (UartTxState::Idle(), 0, 0, saved_data, true, block_flag_next)
                         }
                     } else {
-                        (MyUartTxState::Idle(), ctr, bit_ctr, saved_data, true, block_flag_next)
+                        (UartTxState::Idle(), ctr, bit_ctr, saved_data, true, block_flag_next)
                     }
                 },
-                MyUartTxState::StartBit => {
+                UartTxState::StartBit => {
                     if ctr == ctr_last {
-                        (MyUartTxState::Data(), 0, bit_ctr, saved_data, false, block_flag_next)
+                        (UartTxState::Data(), 0, bit_ctr, saved_data, false, block_flag_next)
                     } else {
-                        (MyUartTxState::StartBit(), ctr_inc, bit_ctr, saved_data, false, block_flag_next)
+                        (UartTxState::StartBit(), ctr_inc, bit_ctr, saved_data, false, block_flag_next)
                     }
                 },
-                MyUartTxState::Data => {
+                UartTxState::Data => {
                     let tx_bit = saved_data.to_bits()[trunc(bit_ctr)];
                     if ctr == ctr_last {
                         let bit_ctr_inc: uint<32> = trunc(bit_ctr + 1);
                         if bit_ctr == DATA_WIDTH - 1 {
-                            (MyUartTxState::StopBit(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
+                            (UartTxState::StopBit(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
                         } else {
-                            (MyUartTxState::Data(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
+                            (UartTxState::Data(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
                         }
                     } else {
-                        (MyUartTxState::Data(), ctr_inc, bit_ctr, saved_data, tx_bit, block_flag_next)
+                        (UartTxState::Data(), ctr_inc, bit_ctr, saved_data, tx_bit, block_flag_next)
                     }
                 },
-                MyUartTxState::StopBit => {
+                UartTxState::StopBit => {
                     if ctr == ctr_last {
-                        (MyUartTxState::Idle(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
+                        (UartTxState::Idle(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
                     } else {
-                        (MyUartTxState::StopBit(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
+                        (UartTxState::StopBit(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
                     }
                 },
             }
         };
 
-    let state: MyUartTxState = regs.0;
+    let state: UartTxState = regs.0;
     let tx_reg: bool = regs.4;
     let block_flag: bool = regs.5;
     let busy = match state {
-        MyUartTxState::Idle => block_flag,
+        UartTxState::Idle => block_flag,
         _ => true,
     };
 
@@ -171,17 +171,7 @@ pub entity my_uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     )
 }
 
-pub entity uart_tx<#uint CLK_FREQ, #uint BAUD>(
-    clk: clock,
-    rst: bool,
-    data: uint<8>,
-    new_data: bool,
-) -> UartTxOut {
-    // Convenience wrapper for fixed 8-bit TX without external block control.
-    inst my_uart_tx::<CLK_FREQ, BAUD, 8>(clk, rst, false, data, new_data)
-}
-
-pub entity my_uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
+pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
     block: bool,
@@ -190,23 +180,7 @@ pub entity my_uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     tx_line: inv &bool,
     busy: inv &bool,
 ) {
-    let out = inst my_uart_tx::<CLK_FREQ, BAUD, DATA_WIDTH>(clk, rst, block, data, new_data);
-    inst uart_tx_out_tap(out, tx_line, busy);
-}
-
-pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD>(
-    clk: clock,
-    rst: bool,
-    data: uint<8>,
-    new_data: bool,
-    tx_line: inv &bool,
-    busy: inv &bool,
-) {
-    let out = inst uart_tx::<CLK_FREQ, BAUD>(clk, rst, data, new_data);
-    inst uart_tx_out_tap(out, tx_line, busy);
-}
-
-pub entity uart_tx_out_tap(out: UartTxOut, tx_line: inv &bool, busy: inv &bool) {
+    let out = inst uart_tx::<CLK_FREQ, BAUD, DATA_WIDTH>(clk, rst, block, data, new_data);
     set tx_line = &out.tx;
     set busy = &out.busy;
 }

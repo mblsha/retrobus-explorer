@@ -7,7 +7,6 @@ use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::serial::ft_tap;
-use shared_components::serial::my_uart_tx_tap;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx_tap;
 
@@ -527,16 +526,17 @@ entity main_core(
     let tx_new_data = rx_tx_req.0;
     let tx_data = rx_tx_req.1;
 
-    let _tx = inst uart_tx_tap::<100_000_000, 1_000_000>(
+    let _tx = inst uart_tx_tap::<100_000_000, 1_000_000, 8>(
         clk,
         rst,
+        false,
         tx_data,
         tx_new_data,
         tx_line_w,
         tx_busy_w,
     );
 
-    let _tx_addr = inst my_uart_tx_tap::<400_000_000, 100_000_000, 16>(
+    let _tx_addr = inst uart_tx_tap::<400_000_000, 100_000_000, 16>(
         clk_uart,
         rst,
         false,
@@ -546,7 +546,7 @@ entity main_core(
         tx_addr_busy_w,
     );
 
-    let _tx_event = inst my_uart_tx_tap::<400_000_000, 100_000_000, 8>(
+    let _tx_event = inst uart_tx_tap::<400_000_000, 100_000_000, 8>(
         clk_uart,
         rst,
         false,
