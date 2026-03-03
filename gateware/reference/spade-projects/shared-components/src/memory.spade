@@ -40,6 +40,28 @@ where W: {uint_bits_to_fit(N - 1)}
     })
 }
 
+fn require_positive<#uint N, #uint CHECK>() -> bool
+where CHECK: {uint_bits_to_fit(N - 1)}
+{
+    true
+}
+
+fn require_at_least_two<#uint N, #uint CHECK>() -> bool
+where CHECK: {uint_bits_to_fit(N - 2)}
+{
+    true
+}
+
+fn require_power_of_two<#uint N, #uint FIT_N_MINUS_1, #uint FIT_N, #uint FIT_N_EXPECTED>() -> bool
+where
+    FIT_N_MINUS_1: {uint_bits_to_fit(N - 1)},
+    FIT_N: {uint_bits_to_fit(N)},
+    FIT_N_EXPECTED: {FIT_N_MINUS_1 + 1},
+    FIT_N: {FIT_N_EXPECTED}
+{
+    true
+}
+
 fn ptr_inc<#uint W>(ptr: uint<W>) -> uint<W> {
     // ENTRIES is expected to be a power of two, so trunc() wraps correctly.
     trunc(ptr + 1)
@@ -61,7 +83,7 @@ struct port FifoOutPort<T> {
 // Matches Alchitry's fifo.luc behavior:
 // - full when next write pointer equals read pointer (usable depth = ENTRIES-1)
 // - empty based on delayed write pointer (first write appears after one extra cycle)
-pub entity fifo<#uint WIDTH, #uint ENTRIES, #uint ADDR_W, #uint COUNT_W>(
+entity fifo_impl<#uint WIDTH, #uint ENTRIES, #uint ADDR_W, #uint COUNT_W>(
     clk: clock,
     rst: bool,
     din: uint<WIDTH>,
@@ -72,6 +94,10 @@ where
     ADDR_W: {uint_bits_to_fit(ENTRIES - 1)},
     COUNT_W: {uint_bits_to_fit(ENTRIES)}
 {
+    let _ = require_positive::<WIDTH, _>();
+    let _ = require_at_least_two::<ENTRIES, _>();
+    let _ = require_power_of_two::<ENTRIES, _, _, _>();
+
     // Packed state to avoid declaration-order dependency issues across interlocked regs.
     reg(clk) state:
         (uint<ADDR_W>, uint<ADDR_W>, uint<ADDR_W>, uint<COUNT_W>, uint<WIDTH>, [uint<WIDTH>; ENTRIES])
@@ -81,7 +107,7 @@ where
             let waddr_delay: uint<ADDR_W> = state.1;
             let raddr: uint<ADDR_W> = state.2;
             let used: uint<COUNT_W> = state.3;
-            let storage: [uint<8>; ENTRIES] = state.5;
+            let storage: [uint<WIDTH>; ENTRIES] = state.5;
 
             let next_write = ptr_inc(waddr);
             let wrdy = next_write != raddr;
@@ -130,6 +156,16 @@ where
     (full, empty, read_data, used)
 }
 
+pub entity fifo<#uint WIDTH, #uint ENTRIES>(
+    clk: clock,
+    rst: bool,
+    din: uint<WIDTH>,
+    wput: bool,
+    rget: bool,
+) -> (bool, bool, uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>) {
+    inst fifo_impl::<WIDTH, ENTRIES, _, _>(clk, rst, din, wput, rget)
+}
+
 pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     wclk: clock,
     wrst: bool,
@@ -139,6 +175,11 @@ pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     rrst: bool,
     rget: bool,
 ) -> FifoOut<uint<WIDTH>> {
+    let _ = require_positive::<WIDTH, _>();
+    let _ = require_at_least_two::<ENTRIES, _>();
+    let _ = require_power_of_two::<ENTRIES, _, _, _>();
+    let _ = require_positive::<SYNC_STAGES, _>();
+
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
     let _ = inst async_fifo_v::<WIDTH, ENTRIES, SYNC_STAGES>(
         wclk,
@@ -166,6 +207,10 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
     wput: bool,
     rget: bool,
 ) -> FifoOut<uint<WIDTH>> {
+    let _ = require_positive::<WIDTH, _>();
+    let _ = require_at_least_two::<ENTRIES, _>();
+    let _ = require_power_of_two::<ENTRIES, _, _, _>();
+
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
     let _ = inst sync_fifo_v::<WIDTH, ENTRIES>(
         clk,
