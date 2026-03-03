@@ -3,10 +3,10 @@ pub struct UartTxOut {
     busy: bool,
 }
 
-pub struct UartRxOut {
+pub struct UartRxOut<TData> {
     valid: bool,
     parity_error: bool,
-    byte: uint<8>,
+    byte: TData,
 }
 
 #[no_mangle(all)]
@@ -185,26 +185,27 @@ pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     set busy = &out.busy;
 }
 
-enum RxState {
+enum RxState<#uint DATA_WIDTH> {
     Idle,
     WaitHalf{time: uint<15>},
-    WaitData{time: uint<15>, bit_idx: uint<4>, data: uint<8>, odd_parity: bool},
-    WaitParity{time: uint<15>, data: uint<8>, odd_parity: bool},
+    WaitData{time: uint<15>, bit_idx: uint<16>, data: uint<DATA_WIDTH>, odd_parity: bool},
+    WaitParity{time: uint<15>, data: uint<DATA_WIDTH>, odd_parity: bool},
     WaitExtraStop{time: uint<15>, count: uint<3>},
     WaitHigh,
 }
 
-pub entity uart_rx(
+pub entity uart_rx<#uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
     rx: bool,
     bit_time: uint<15>,
     parity: bool,
     stop_bits: uint<3>,
-) -> UartRxOut {
+) -> UartRxOut<uint<DATA_WIDTH>> {
     let last = bit_time_last(bit_time);
     let half = bit_time >> 1;
     let stops_after_first = extra_stop_bits(stop_bits);
+    let last_bit_idx: uint<16> = DATA_WIDTH - 1;
 
     // Alchitry compatibility: use a 3-stage synchronizer and sample from
     // the oldest stage for start/bit detection.
@@ -213,7 +214,7 @@ pub entity uart_rx(
     reg(clk) rx_d2: bool reset(rst: true) = rx_d1;
     let rx_sync = rx_d2;
 
-    reg(clk) state: RxState reset(rst: RxState::Idle()) = {
+    reg(clk) state: RxState<DATA_WIDTH> reset(rst: RxState::Idle()) = {
         match state {
             RxState::Idle => {
                 if !rx_sync {
@@ -230,11 +231,12 @@ pub entity uart_rx(
                 }
             },
             RxState::WaitData$(time, bit_idx, data, odd_parity) => {
-                let incoming: uint<8> = if rx_sync { 0x80 } else { 0x00 };
+                let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
+                let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
                 let next_data = trunc((data >> 1) | incoming);
                 let next_odd = odd_parity ^^ rx_sync;
                 if time == last {
-                    if bit_idx == 7 {
+                    if bit_idx == last_bit_idx {
                         if parity {
                             RxState::WaitParity(0, next_data, next_odd)
                         } else {
@@ -285,17 +287,18 @@ pub entity uart_rx(
 
     reg(clk) out_valid: bool reset(rst: false) = {
         match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) => !parity && time == last && bit_idx == 7,
+            RxState::WaitData$(time, bit_idx, data, odd_parity) => !parity && time == last && bit_idx == last_bit_idx,
             RxState::WaitParity$(time, data, odd_parity) => time == last,
             _ => false,
         }
     };
 
-    reg(clk) out_byte: uint<8> reset(rst: 0) = {
+    reg(clk) out_byte: uint<DATA_WIDTH> reset(rst: 0) = {
         match state {
             RxState::WaitData$(time, bit_idx, data, odd_parity) => {
-                if !parity && time == last && bit_idx == 7 {
-                    let incoming: uint<8> = if rx_sync { 0x80 } else { 0x00 };
+                if !parity && time == last && bit_idx == last_bit_idx {
+                    let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
+                    let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
                     trunc((data >> 1) | incoming)
                 } else {
                     out_byte
@@ -315,7 +318,7 @@ pub entity uart_rx(
     reg(clk) out_parity_error: bool reset(rst: false) = {
         match state {
             RxState::WaitData$(time, bit_idx, data, odd_parity) => {
-                if !parity && time == last && bit_idx == 7 {
+                if !parity && time == last && bit_idx == last_bit_idx {
                     false
                 } else {
                     out_parity_error

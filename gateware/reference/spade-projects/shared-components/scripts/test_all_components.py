@@ -18,6 +18,7 @@ COMPONENTS = [
     "sync2",
     "uart_tx",
     "uart_rx",
+    "uart_rx_u16",
     "ft",
     "fifo",
     "async_fifo_u8",

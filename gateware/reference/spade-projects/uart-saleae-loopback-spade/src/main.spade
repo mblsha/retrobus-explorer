@@ -371,7 +371,7 @@ entity main(
     let clk200_probe = clk_wiz.clk_out200;
     let clk400_probe = clk_wiz.clk_out400;
     let clk_fast = unsafe { inst std::conv::bool_to_clock(clk400_probe) };
-    let rx = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
+    let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
 
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
     let (usb_uart, usb_uart_w): (UartTxPort, inv UartTxPort) = port;

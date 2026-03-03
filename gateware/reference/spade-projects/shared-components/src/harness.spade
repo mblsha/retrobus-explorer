@@ -163,10 +163,28 @@ entity tb_uart_rx(
     rx_parity_error: inv &bool,
     rx_byte: inv &uint<8>,
 ) {
-    let rx_out = inst uart_rx(clk, rst, rx_line, bit_time, parity, stop_bits);
+    let rx_out = inst uart_rx::<8>(clk, rst, rx_line, bit_time, parity, stop_bits);
     set rx_valid = &rx_out.valid;
     set rx_parity_error = &rx_out.parity_error;
     set rx_byte = &rx_out.byte;
+}
+
+#[no_mangle(all)]
+entity tb_uart_rx_u16(
+    clk: clock,
+    rst: bool,
+    rx_line: bool,
+    bit_time: uint<15>,
+    parity: bool,
+    stop_bits: uint<3>,
+    rx_valid: inv &bool,
+    rx_parity_error: inv &bool,
+    rx_word: inv &uint<16>,
+) {
+    let rx_out = inst uart_rx::<16>(clk, rst, rx_line, bit_time, parity, stop_bits);
+    set rx_valid = &rx_out.valid;
+    set rx_parity_error = &rx_out.parity_error;
+    set rx_word = &rx_out.byte;
 }
 
 #[no_mangle(all)]
