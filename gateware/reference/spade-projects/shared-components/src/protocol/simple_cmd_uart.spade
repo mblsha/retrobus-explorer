@@ -1,3 +1,30 @@
+use shared_components::ascii::ascii_bang;
+use shared_components::ascii::ascii_colon;
+use shared_components::ascii::ascii_cr;
+use shared_components::ascii::ascii_eq;
+use shared_components::ascii::ascii_lf;
+use shared_components::ascii::ascii_minus;
+use shared_components::ascii::ascii_space;
+use shared_components::ascii::ascii_upper_a;
+use shared_components::ascii::ascii_upper_b;
+use shared_components::ascii::ascii_upper_c;
+use shared_components::ascii::ascii_upper_d;
+use shared_components::ascii::ascii_upper_e;
+use shared_components::ascii::ascii_upper_f;
+use shared_components::ascii::ascii_upper_h;
+use shared_components::ascii::ascii_upper_k;
+use shared_components::ascii::ascii_upper_l;
+use shared_components::ascii::ascii_upper_m;
+use shared_components::ascii::ascii_upper_o;
+use shared_components::ascii::ascii_upper_p;
+use shared_components::ascii::ascii_upper_q;
+use shared_components::ascii::ascii_upper_r;
+use shared_components::ascii::ascii_upper_s;
+use shared_components::ascii::ascii_upper_t;
+use shared_components::ascii::ascii_upper_u;
+use shared_components::ascii::ascii_upper_x;
+use shared_components::ascii::ascii_upper_y;
+use shared_components::ascii::ascii_zero;
 use shared_components::ascii::decode_digit_max;
 use shared_components::ascii::to_upper;
 
@@ -22,6 +49,10 @@ pub enum MsgKind {
     ErrFreq,
 }
 
+pub enum MsgProfile {
+    RbxDefault,
+}
+
 pub fn msg_is_none(msg: MsgKind) -> bool {
     match msg {
         MsgKind::None => true,
@@ -31,14 +62,14 @@ pub fn msg_is_none(msg: MsgKind) -> bool {
 
 pub fn mode_char(mode: Mode) -> uint<8> {
     match mode {
-        Mode::ClockTester => 0x43, // 'C'
-        Mode::Echo => 0x45, // 'E'
+        Mode::ClockTester => ascii_upper_c(),
+        Mode::Echo => ascii_upper_e(),
     }
 }
 
 pub fn digit_char(value: uint<4>) -> uint<8> {
     let v: uint<8> = zext(value);
-    trunc(v + 0x30)
+    trunc(v + ascii_zero())
 }
 
 pub struct MsgTemplate {
@@ -50,79 +81,110 @@ pub fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
     std::conv::concat_arrays(message, [0; 64 - N])
 }
 
-pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
+pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>, profile: MsgProfile) -> MsgTemplate {
     let m = mode_char(mode);
     let f = digit_char(freq_code);
-    match msg {
-        MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
-        MsgKind::Ready => MsgTemplate$(
-            len: 19,
-            bytes: pad_message([
-                0x52, 0x42, 0x58, 0x20, // RBX
-                0x52, 0x45, 0x41, 0x44, 0x59, 0x20, // READY
-                0x4d, 0x3d, m, 0x20, // M=
-                0x46, 0x3d, f, // F=
-                0x0d, 0x0a, // CR LF
-            ]),
-        ),
-        MsgKind::Help => MsgTemplate$(
-            len: 43,
-            bytes: pad_message([
-                0x52, 0x42, 0x58, 0x20, // RBX
-                0x48, 0x45, 0x4c, 0x50, 0x20, // HELP
-                0x21, 0x48, 0x20, // !H
-                0x21, 0x53, 0x20, // !S
-                0x21, 0x43, 0x20, // !C
-                0x21, 0x45, 0x20, // !E
-                0x21, 0x46, 0x30, 0x2d, 0x35, 0x20, // !F0-5
-                0x4d, 0x3a, 0x43, 0x4c, 0x4f, 0x43, 0x4b, 0x20, // M:CLOCK
-                0x45, 0x3a, 0x45, 0x43, 0x48, 0x4f, // E:ECHO
-                0x0d, 0x0a, // CR LF
-            ]),
-        ),
-        MsgKind::Status => MsgTemplate$(
-            len: 20,
-            bytes: pad_message([
-                0x52, 0x42, 0x58, 0x20, // RBX
-                0x53, 0x54, 0x41, 0x54, 0x55, 0x53, 0x20, // STATUS
-                0x4d, 0x3d, m, 0x20, // M=
-                0x46, 0x3d, f, // F=
-                0x0d, 0x0a, // CR LF
-            ]),
-        ),
-        MsgKind::Ok => MsgTemplate$(
-            len: 16,
-            bytes: pad_message([
-                0x52, 0x42, 0x58, 0x20, // RBX
-                0x4f, 0x4b, 0x20, // OK
-                0x4d, 0x3d, m, 0x20, // M=
-                0x46, 0x3d, f, // F=
-                0x0d, 0x0a, // CR LF
-            ]),
-        ),
-        MsgKind::ErrCmd => MsgTemplate$(
-            len: 13,
-            bytes: pad_message([
-                0x52, 0x42, 0x58, 0x20, // RBX
-                0x45, 0x52, 0x52, 0x20, // ERR
-                0x43, 0x4d, 0x44, // CMD
-                0x0d, 0x0a, // CR LF
-            ]),
-        ),
-        MsgKind::ErrFreq => MsgTemplate$(
-            len: 14,
-            bytes: pad_message([
-                0x52, 0x42, 0x58, 0x20, // RBX
-                0x45, 0x52, 0x52, 0x20, // ERR
-                0x46, 0x52, 0x45, 0x51, // FREQ
-                0x0d, 0x0a, // CR LF
-            ]),
-        ),
+    let A = ascii_upper_a();
+    let B = ascii_upper_b();
+    let C = ascii_upper_c();
+    let D = ascii_upper_d();
+    let E = ascii_upper_e();
+    let F = ascii_upper_f();
+    let H = ascii_upper_h();
+    let K = ascii_upper_k();
+    let L = ascii_upper_l();
+    let M = ascii_upper_m();
+    let O = ascii_upper_o();
+    let P = ascii_upper_p();
+    let Q = ascii_upper_q();
+    let R = ascii_upper_r();
+    let S = ascii_upper_s();
+    let T = ascii_upper_t();
+    let U = ascii_upper_u();
+    let X = ascii_upper_x();
+    let Y = ascii_upper_y();
+    let SP = ascii_space();
+    let EQ = ascii_eq();
+    let COLON = ascii_colon();
+    let BANG = ascii_bang();
+    let DASH = ascii_minus();
+    let CR = ascii_cr();
+    let LF = ascii_lf();
+    let ZERO = ascii_zero();
+    let FIVE: uint<8> = trunc(ZERO + 5);
+
+    match profile {
+        MsgProfile::RbxDefault => match msg {
+            MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
+            MsgKind::Ready => MsgTemplate$(
+                len: 19,
+                bytes: pad_message([
+                    R, B, X, SP,
+                    R, E, A, D, Y, SP,
+                    M, EQ, m, SP,
+                    F, EQ, f,
+                    CR, LF,
+                ]),
+            ),
+            MsgKind::Help => MsgTemplate$(
+                len: 43,
+                bytes: pad_message([
+                    R, B, X, SP,
+                    H, E, L, P, SP,
+                    BANG, H, SP,
+                    BANG, S, SP,
+                    BANG, C, SP,
+                    BANG, E, SP,
+                    BANG, F, ZERO, DASH, FIVE, SP,
+                    M, COLON, C, L, O, C, K, SP,
+                    E, COLON, E, C, H, O,
+                    CR, LF,
+                ]),
+            ),
+            MsgKind::Status => MsgTemplate$(
+                len: 20,
+                bytes: pad_message([
+                    R, B, X, SP,
+                    S, T, A, T, U, S, SP,
+                    M, EQ, m, SP,
+                    F, EQ, f,
+                    CR, LF,
+                ]),
+            ),
+            MsgKind::Ok => MsgTemplate$(
+                len: 16,
+                bytes: pad_message([
+                    R, B, X, SP,
+                    O, K, SP,
+                    M, EQ, m, SP,
+                    F, EQ, f,
+                    CR, LF,
+                ]),
+            ),
+            MsgKind::ErrCmd => MsgTemplate$(
+                len: 13,
+                bytes: pad_message([
+                    R, B, X, SP,
+                    E, R, R, SP,
+                    C, M, D,
+                    CR, LF,
+                ]),
+            ),
+            MsgKind::ErrFreq => MsgTemplate$(
+                len: 14,
+                bytes: pad_message([
+                    R, B, X, SP,
+                    E, R, R, SP,
+                    F, R, E, Q,
+                    CR, LF,
+                ]),
+            ),
+        },
     }
 }
 
-pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> (bool, uint<8>) {
-    let msg_tpl = msg_template(msg, mode, freq_code);
+pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>, profile: MsgProfile) -> (bool, uint<8>) {
+    let msg_tpl = msg_template(msg, mode, freq_code, profile);
     if idx < msg_tpl.len {
         (true, msg_tpl.bytes[trunc(idx)])
     } else {
@@ -170,14 +232,14 @@ pub fn next_cmd_state(
     } else {
         match state {
             CmdParseState::Idle => {
-                if rx_byte == 0x21 {
+                if rx_byte == ascii_bang() {
                     CmdParseState::Bang()
                 } else {
                     CmdParseState::Idle()
                 }
             },
             CmdParseState::Bang => {
-                if rx_upper == 0x46 {
+                if rx_upper == ascii_upper_f() {
                     CmdParseState::Freq()
                 } else {
                     CmdParseState::Idle()
@@ -215,7 +277,7 @@ pub fn decode_cmd(
     } else {
         match state {
             CmdParseState::Bang => {
-                if rx_upper == 0x48 {
+                if rx_upper == ascii_upper_h() {
                     CmdDecode$(
                         msg: MsgKind::Help(),
                         msg_valid: true,
@@ -224,7 +286,7 @@ pub fn decode_cmd(
                         freq_write: false,
                         freq_value: 0,
                     )
-                } else if rx_upper == 0x53 {
+                } else if rx_upper == ascii_upper_s() {
                     CmdDecode$(
                         msg: MsgKind::Status(),
                         msg_valid: true,
@@ -233,7 +295,7 @@ pub fn decode_cmd(
                         freq_write: false,
                         freq_value: 0,
                     )
-                } else if rx_upper == 0x43 {
+                } else if rx_upper == ascii_upper_c() {
                     CmdDecode$(
                         msg: MsgKind::Ok(),
                         msg_valid: true,
@@ -242,7 +304,7 @@ pub fn decode_cmd(
                         freq_write: false,
                         freq_value: 0,
                     )
-                } else if rx_upper == 0x45 {
+                } else if rx_upper == ascii_upper_e() {
                     CmdDecode$(
                         msg: MsgKind::Ok(),
                         msg_valid: true,
@@ -251,7 +313,7 @@ pub fn decode_cmd(
                         freq_write: false,
                         freq_value: 0,
                     )
-                } else if rx_upper == 0x46 {
+                } else if rx_upper == ascii_upper_f() {
                     CmdDecode$(
                         msg: MsgKind::None(),
                         msg_valid: false,
@@ -321,6 +383,7 @@ pub entity simple_cmd_uart_core(
     rx_parity_error: bool,
     rx_byte: uint<8>,
     tx_busy: bool,
+    profile: MsgProfile,
 ) -> SimpleCmdUartOut {
     let rx_ok = rx_valid && !rx_parity_error;
     let rx_digit = decode_digit_max(rx_byte, 5);
@@ -356,11 +419,11 @@ pub entity simple_cmd_uart_core(
         } else {
             pending_msg
         };
-        let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code);
+        let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code, profile);
         let cur_none = msg_is_none(cur_msg);
         let sending = !cur_none && cur_byte.0 && !tx_busy;
         let next_idx: uint<8> = trunc(cur_idx + 1);
-        let next_valid = msg_byte(cur_msg, next_idx, mode, freq_code).0;
+        let next_valid = msg_byte(cur_msg, next_idx, mode, freq_code, profile).0;
 
         let post_msg: MsgKind = if sending && !next_valid {
             MsgKind::None()
@@ -386,11 +449,11 @@ pub entity simple_cmd_uart_core(
 
     let tx_msg = tx_state.0;
     let tx_idx = tx_state.1;
-    let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code);
+    let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code, profile);
     let tx_msg_none = msg_is_none(tx_msg);
     let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !tx_busy;
 
-    let rx_is_bang = rx_ok && rx_byte == 0x21;
+    let rx_is_bang = rx_ok && rx_byte == ascii_bang();
     let payload_rx = is_echo_mode(mode) && cmd_state_is_idle(cmd_state) && rx_ok && !rx_is_bang;
 
     SimpleCmdUartOut$(
