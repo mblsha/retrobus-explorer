@@ -1,129 +1,4 @@
-module ft_simple_dual_port_ram #(
-    parameter WIDTH = 8,
-    parameter ENTRIES = 8
-) (
-    input wclk,
-    input [$clog2(ENTRIES)-1:0] waddr,
-    input [WIDTH-1:0] write_data,
-    input write_enable,
-    input rclk,
-    input [$clog2(ENTRIES)-1:0] raddr,
-    output reg [WIDTH-1:0] read_data
-);
-    reg [WIDTH-1:0] mem [0:ENTRIES-1];
-
-    always @(posedge wclk) begin
-        if (write_enable) begin
-            mem[waddr] <= write_data;
-        end
-    end
-
-    always @(posedge rclk) begin
-        read_data <= mem[raddr];
-    end
-endmodule
-
-module ft_async_fifo #(
-    parameter WIDTH = 8,
-    parameter ENTRIES = 8,
-    parameter SYNC_STAGES = 3
-) (
-    input wclk,
-    input wrst,
-    input [WIDTH-1:0] din,
-    input wput,
-    output full,
-    input rclk,
-    input rrst,
-    output [WIDTH-1:0] dout,
-    input rget,
-    output empty
-);
-    localparam ADDR_SIZE = $clog2(ENTRIES);
-
-    reg [ADDR_SIZE-1:0] waddr;
-    reg [ADDR_SIZE-1:0] gwsync;
-    reg [ADDR_SIZE-1:0] wsync [0:SYNC_STAGES-1];
-
-    reg [ADDR_SIZE-1:0] raddr;
-    reg [ADDR_SIZE-1:0] grsync;
-    reg [ADDR_SIZE-1:0] rsync [0:SYNC_STAGES-1];
-
-    wire [ADDR_SIZE-1:0] wnext = waddr + 1'b1;
-    wire [ADDR_SIZE-1:0] waddr_gray = waddr ^ (waddr >> 1);
-    wire [ADDR_SIZE-1:0] wnext_gray = wnext ^ (wnext >> 1);
-    wire [ADDR_SIZE-1:0] raddr_gray = raddr ^ (raddr >> 1);
-
-    wire wrdy = wnext_gray != wsync[SYNC_STAGES-1];
-    wire rrdy = raddr_gray != rsync[SYNC_STAGES-1];
-
-    reg [ADDR_SIZE-1:0] ram_raddr;
-    wire [WIDTH-1:0] ram_read_data;
-
-    assign full = !wrdy;
-    assign empty = !rrdy;
-    assign dout = ram_read_data;
-
-    always @* begin
-        ram_raddr = raddr;
-        if (rget && rrdy) begin
-            ram_raddr = raddr + 1'b1;
-        end
-    end
-
-    ft_simple_dual_port_ram #(
-        .WIDTH(WIDTH),
-        .ENTRIES(ENTRIES)
-    ) ram (
-        .wclk(wclk),
-        .waddr(waddr),
-        .write_data(din),
-        .write_enable(wput && wrdy),
-        .rclk(rclk),
-        .raddr(ram_raddr),
-        .read_data(ram_read_data)
-    );
-
-    integer wi;
-    always @(posedge wclk) begin
-        if (wrst) begin
-            waddr <= '0;
-            gwsync <= '0;
-            for (wi = 0; wi < SYNC_STAGES; wi = wi + 1) begin
-                wsync[wi] <= '0;
-            end
-        end else begin
-            gwsync <= waddr_gray;
-            wsync[0] <= grsync;
-            for (wi = 1; wi < SYNC_STAGES; wi = wi + 1) begin
-                wsync[wi] <= wsync[wi-1];
-            end
-            if (wput && wrdy) begin
-                waddr <= waddr + 1'b1;
-            end
-        end
-    end
-
-    integer ri;
-    always @(posedge rclk) begin
-        if (rrst) begin
-            raddr <= '0;
-            grsync <= '0;
-            for (ri = 0; ri < SYNC_STAGES; ri = ri + 1) begin
-                rsync[ri] <= '0;
-            end
-        end else begin
-            grsync <= raddr_gray;
-            rsync[0] <= gwsync;
-            for (ri = 1; ri < SYNC_STAGES; ri = ri + 1) begin
-                rsync[ri] <= rsync[ri-1];
-            end
-            if (rget && rrdy) begin
-                raddr <= raddr + 1'b1;
-            end
-        end
-    end
-endmodule
+// Depends on shared async_fifo_v from fifo_v.v.
 
 module ft_u16_v #(
     parameter DATA_WIDTH = 16,
@@ -184,7 +59,7 @@ module ft_u16_v #(
     assign ui_dout_be = read_fifo_dout[FIFO_WIDTH-1:DATA_WIDTH];
     assign ui_dout_empty = read_fifo_empty;
 
-    ft_async_fifo #(
+    async_fifo_v #(
         .WIDTH(FIFO_WIDTH),
         .ENTRIES(TX_BUFFER),
         .SYNC_STAGES(3)
@@ -201,7 +76,7 @@ module ft_u16_v #(
         .empty(write_fifo_empty)
     );
 
-    ft_async_fifo #(
+    async_fifo_v #(
         .WIDTH(FIFO_WIDTH),
         .ENTRIES(RX_BUFFER),
         .SYNC_STAGES(3)
