@@ -1,6 +1,6 @@
 use shared_components::clocking::clk_wiz_400;
-use shared_components::memory::async_fifo_u16x4_tap;
-use shared_components::memory::async_fifo_u8x4_tap;
+use shared_components::memory::async_fifo;
+use shared_components::memory::fifo_out_tap;
 use shared_components::memory::fifo_u32x32768_tap;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
@@ -558,7 +558,7 @@ entity main_core(
         tx_event_busy_w,
     );
 
-    let _addr_fifo = inst async_fifo_u16x4_tap(
+    let addr_fifo = inst async_fifo::<16, 4, 3>(
         clk,
         rst,
         addr_sync,
@@ -566,12 +566,10 @@ entity main_core(
         clk_uart,
         rst,
         addr_fifo_rget,
-        addr_fifo_full_w,
-        addr_fifo_empty_w,
-        addr_fifo_dout_w,
     );
+    let _addr_fifo = inst fifo_out_tap(addr_fifo, addr_fifo_full_w, addr_fifo_empty_w, addr_fifo_dout_w);
 
-    let _event_fifo = inst async_fifo_u8x4_tap(
+    let event_fifo = inst async_fifo::<8, 4, 3>(
         clk,
         rst,
         bus_event_char,
@@ -579,10 +577,8 @@ entity main_core(
         clk_uart,
         rst,
         event_fifo_rget,
-        event_fifo_full_w,
-        event_fifo_empty_w,
-        event_fifo_dout_w,
     );
+    let _event_fifo = inst fifo_out_tap(event_fifo, event_fifo_full_w, event_fifo_empty_w, event_fifo_dout_w);
 
     let _stream_fifo = inst fifo_u32x32768_tap(
         clk,
