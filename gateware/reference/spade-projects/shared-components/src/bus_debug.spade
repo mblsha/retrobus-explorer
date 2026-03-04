@@ -390,6 +390,64 @@ pub fn run_ft_stream_mux(
     )
 }
 
+pub struct CoreStepOut {
+    sample: BusSamplerOut,
+    ft_mux: FtStreamMuxOut,
+    should_emit_overflow: bool,
+}
+
+pub fn core_step(
+    sample_state: SampleState,
+    wait_counter: uint<128>,
+    wait_enabled: uint<8>,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    bus_decode: BusEventDecode,
+    bus_error: (bool, uint<8>),
+    tx_busy: bool,
+    ft_state: FtState,
+    ft_enabled: bool,
+    ft_cur_value: uint<32>,
+    ft_cmd: FtStreamCmdDecode,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: uint<32>,
+    rd_rise: bool,
+    wr_rise: bool,
+    stream_fifo_full: bool,
+    fifo_full_counter: uint<24>,
+) -> CoreStepOut {
+    let sample = sample_bus_cycle(
+        sample_state,
+        wait_counter,
+        wait_enabled,
+        mreq_fall,
+        iorq_fall,
+        bus_decode,
+        bus_error,
+        tx_busy,
+    );
+    let ft_mux = run_ft_stream_mux(
+        ft_state,
+        ft_enabled,
+        ft_cur_value,
+        ft_cmd,
+        tx_busy,
+        ft_ui_din_full,
+        ft_ui_dout_empty,
+        stream_fifo_empty,
+        stream_fifo_dout,
+    );
+    let should_emit_overflow =
+        !rd_rise && !wr_rise && ft_enabled && !stream_fifo_full && fifo_full_counter > 0;
+    CoreStepOut$(
+        sample: sample,
+        ft_mux: ft_mux,
+        should_emit_overflow: should_emit_overflow,
+    )
+}
+
 pub fn saleae_mux(
     saleae_state: SaleaeState,
     z80_wr_sync: bool,

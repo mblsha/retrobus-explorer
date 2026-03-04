@@ -13,6 +13,44 @@ use shared_components::sharp::banked_rom_byte;
 use shared_components::sharp::wait_hold;
 use shared_components::sharp::gate_byte8;
 
+entity tb_counter_bits<#uint WIDTH>(
+    clk: clock,
+    rst: bool,
+    value_bits: inv &[bool; WIDTH],
+) {
+    let value = inst counter::<WIDTH>(clk, rst);
+    let bits = value.to_bits();
+    set value_bits = &bits;
+}
+
+entity tb_count_on_event_bits<#uint WIDTH>(
+    clk: clock,
+    rst: bool,
+    event_in: bool,
+    value_bits: inv &[bool; WIDTH],
+) {
+    let value = inst count_on_event::<WIDTH>(clk, rst, event_in);
+    let bits = value.to_bits();
+    set value_bits = &bits;
+}
+
+entity tb_uart_rx_bits<#uint WIDTH>(
+    clk: clock,
+    rst: bool,
+    rx_line: bool,
+    bit_time: uint<15>,
+    parity: bool,
+    stop_bits: uint<3>,
+    rx_valid: inv &bool,
+    rx_parity_error: inv &bool,
+    rx_word: inv &uint<WIDTH>,
+) {
+    let rx_out = inst uart_rx::<WIDTH>(clk, rst, rx_line, bit_time, parity, stop_bits);
+    set rx_valid = &rx_out.valid;
+    set rx_parity_error = &rx_out.parity_error;
+    set rx_word = &rx_out.byte;
+}
+
 #[no_mangle(all)]
 entity tb_sync2(
     clk: clock,
@@ -78,9 +116,7 @@ entity tb_counter_u8(
     rst: bool,
     value_bits: inv &[bool; 8],
 ) {
-    let value = inst counter::<8>(clk, rst);
-    let bits = value.to_bits();
-    set value_bits = &bits;
+    inst tb_counter_bits::<8>(clk, rst, value_bits);
 }
 
 #[no_mangle(all)]
@@ -90,9 +126,7 @@ entity tb_count_on_event_u8(
     event_in: bool,
     value_bits: inv &[bool; 8],
 ) {
-    let value = inst count_on_event::<8>(clk, rst, event_in);
-    let bits = value.to_bits();
-    set value_bits = &bits;
+    inst tb_count_on_event_bits::<8>(clk, rst, event_in, value_bits);
 }
 
 #[no_mangle(all)]
@@ -114,9 +148,7 @@ entity tb_stream_counter(
     advance: bool,
     value_bits: inv &[bool; 8],
 ) {
-    let value = inst count_on_event::<8>(clk, rst, advance);
-    let bits = value.to_bits();
-    set value_bits = &bits;
+    inst tb_count_on_event_bits::<8>(clk, rst, advance, value_bits);
 }
 
 #[no_mangle(all)]
@@ -163,10 +195,17 @@ entity tb_uart_rx(
     rx_parity_error: inv &bool,
     rx_byte: inv &uint<8>,
 ) {
-    let rx_out = inst uart_rx::<8>(clk, rst, rx_line, bit_time, parity, stop_bits);
-    set rx_valid = &rx_out.valid;
-    set rx_parity_error = &rx_out.parity_error;
-    set rx_byte = &rx_out.byte;
+    inst tb_uart_rx_bits::<8>(
+        clk,
+        rst,
+        rx_line,
+        bit_time,
+        parity,
+        stop_bits,
+        rx_valid,
+        rx_parity_error,
+        rx_byte,
+    );
 }
 
 #[no_mangle(all)]
@@ -181,10 +220,17 @@ entity tb_uart_rx_u16(
     rx_parity_error: inv &bool,
     rx_word: inv &uint<16>,
 ) {
-    let rx_out = inst uart_rx::<16>(clk, rst, rx_line, bit_time, parity, stop_bits);
-    set rx_valid = &rx_out.valid;
-    set rx_parity_error = &rx_out.parity_error;
-    set rx_word = &rx_out.byte;
+    inst tb_uart_rx_bits::<16>(
+        clk,
+        rst,
+        rx_line,
+        bit_time,
+        parity,
+        stop_bits,
+        rx_valid,
+        rx_parity_error,
+        rx_word,
+    );
 }
 
 #[no_mangle(all)]

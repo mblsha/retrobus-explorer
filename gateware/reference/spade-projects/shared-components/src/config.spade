@@ -49,83 +49,18 @@ pub entity au_stream_fifo_u32(
     inst sync_fifo::<32, 32768>(clk, rst, din, wput, rget)
 }
 
-pub entity au_bridge_u16x4_100m<#uint DROP_COUNT_W>(
+pub entity au_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD, #uint DROP_COUNT_W>(
     wclk: clock,
     wrst: bool,
-    din: uint<16>,
+    din: uint<WIDTH>,
     wput: bool,
     rclk: clock,
     rrst: bool,
     send_enable: bool,
     policy: BridgePolicy,
-) -> UartFifoBridgeOut<uint<16>, DROP_COUNT_W> {
-    inst uart_fifo_bridge::<16, 4, 3, 400_000_000, 100_000_000, DROP_COUNT_W>(
-        wclk,
-        wrst,
-        din,
-        wput,
-        rclk,
-        rrst,
-        send_enable,
-        policy,
-    )
-}
-
-pub entity au_bridge_u8x4_100m<#uint DROP_COUNT_W>(
-    wclk: clock,
-    wrst: bool,
-    din: uint<8>,
-    wput: bool,
-    rclk: clock,
-    rrst: bool,
-    send_enable: bool,
-    policy: BridgePolicy,
-) -> UartFifoBridgeOut<uint<8>, DROP_COUNT_W> {
-    inst uart_fifo_bridge::<8, 4, 3, 400_000_000, 100_000_000, DROP_COUNT_W>(
-        wclk,
-        wrst,
-        din,
-        wput,
-        rclk,
-        rrst,
-        send_enable,
-        policy,
-    )
-}
-
-pub entity au_bridge_u8x8_100m<#uint DROP_COUNT_W>(
-    wclk: clock,
-    wrst: bool,
-    din: uint<8>,
-    wput: bool,
-    rclk: clock,
-    rrst: bool,
-    send_enable: bool,
-    policy: BridgePolicy,
-) -> UartFifoBridgeOut<uint<8>, DROP_COUNT_W> {
-    inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 100_000_000, DROP_COUNT_W>(
-        wclk,
-        wrst,
-        din,
-        wput,
-        rclk,
-        rrst,
-        send_enable,
-        policy,
-    )
-}
-
-pub entity au_bridge_u8x8_200m<#uint DROP_COUNT_W>(
-    wclk: clock,
-    wrst: bool,
-    din: uint<8>,
-    wput: bool,
-    rclk: clock,
-    rrst: bool,
-    send_enable: bool,
-    policy: BridgePolicy,
-) -> UartFifoBridgeOut<uint<8>, DROP_COUNT_W> {
-    inst uart_fifo_bridge::<8, 8, 3, 400_000_000, 200_000_000, DROP_COUNT_W>(
+) -> UartFifoBridgeOut<uint<WIDTH>, DROP_COUNT_W> {
+    // Alchitry Au preset bridge wrapper: fixed 400 MHz TX-domain clock.
+    inst uart_fifo_bridge::<WIDTH, ENTRIES, 3, 400_000_000, BAUD, DROP_COUNT_W>(
         wclk,
         wrst,
         din,

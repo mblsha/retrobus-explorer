@@ -51,6 +51,7 @@ pub enum MsgKind {
 
 pub enum MsgProfile {
     RbxDefault,
+    RbxCompat,
 }
 
 pub fn msg_is_none(msg: MsgKind) -> bool {
@@ -81,7 +82,7 @@ pub fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
     std::conv::concat_arrays(message, [0; 64 - N])
 }
 
-pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>, profile: MsgProfile) -> MsgTemplate {
+pub fn msg_template_rbx(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
     let m = mode_char(mode);
     let f = digit_char(freq_code);
     let A = ascii_upper_a();
@@ -113,73 +114,78 @@ pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>, profile: MsgPr
     let ZERO = ascii_zero();
     let FIVE: uint<8> = trunc(ZERO + 5);
 
+    match msg {
+        MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
+        MsgKind::Ready => MsgTemplate$(
+            len: 19,
+            bytes: pad_message([
+                R, B, X, SP,
+                R, E, A, D, Y, SP,
+                M, EQ, m, SP,
+                F, EQ, f,
+                CR, LF,
+            ]),
+        ),
+        MsgKind::Help => MsgTemplate$(
+            len: 43,
+            bytes: pad_message([
+                R, B, X, SP,
+                H, E, L, P, SP,
+                BANG, H, SP,
+                BANG, S, SP,
+                BANG, C, SP,
+                BANG, E, SP,
+                BANG, F, ZERO, DASH, FIVE, SP,
+                M, COLON, C, L, O, C, K, SP,
+                E, COLON, E, C, H, O,
+                CR, LF,
+            ]),
+        ),
+        MsgKind::Status => MsgTemplate$(
+            len: 20,
+            bytes: pad_message([
+                R, B, X, SP,
+                S, T, A, T, U, S, SP,
+                M, EQ, m, SP,
+                F, EQ, f,
+                CR, LF,
+            ]),
+        ),
+        MsgKind::Ok => MsgTemplate$(
+            len: 16,
+            bytes: pad_message([
+                R, B, X, SP,
+                O, K, SP,
+                M, EQ, m, SP,
+                F, EQ, f,
+                CR, LF,
+            ]),
+        ),
+        MsgKind::ErrCmd => MsgTemplate$(
+            len: 13,
+            bytes: pad_message([
+                R, B, X, SP,
+                E, R, R, SP,
+                C, M, D,
+                CR, LF,
+            ]),
+        ),
+        MsgKind::ErrFreq => MsgTemplate$(
+            len: 14,
+            bytes: pad_message([
+                R, B, X, SP,
+                E, R, R, SP,
+                F, R, E, Q,
+                CR, LF,
+            ]),
+        ),
+    }
+}
+
+pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>, profile: MsgProfile) -> MsgTemplate {
     match profile {
-        MsgProfile::RbxDefault => match msg {
-            MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
-            MsgKind::Ready => MsgTemplate$(
-                len: 19,
-                bytes: pad_message([
-                    R, B, X, SP,
-                    R, E, A, D, Y, SP,
-                    M, EQ, m, SP,
-                    F, EQ, f,
-                    CR, LF,
-                ]),
-            ),
-            MsgKind::Help => MsgTemplate$(
-                len: 43,
-                bytes: pad_message([
-                    R, B, X, SP,
-                    H, E, L, P, SP,
-                    BANG, H, SP,
-                    BANG, S, SP,
-                    BANG, C, SP,
-                    BANG, E, SP,
-                    BANG, F, ZERO, DASH, FIVE, SP,
-                    M, COLON, C, L, O, C, K, SP,
-                    E, COLON, E, C, H, O,
-                    CR, LF,
-                ]),
-            ),
-            MsgKind::Status => MsgTemplate$(
-                len: 20,
-                bytes: pad_message([
-                    R, B, X, SP,
-                    S, T, A, T, U, S, SP,
-                    M, EQ, m, SP,
-                    F, EQ, f,
-                    CR, LF,
-                ]),
-            ),
-            MsgKind::Ok => MsgTemplate$(
-                len: 16,
-                bytes: pad_message([
-                    R, B, X, SP,
-                    O, K, SP,
-                    M, EQ, m, SP,
-                    F, EQ, f,
-                    CR, LF,
-                ]),
-            ),
-            MsgKind::ErrCmd => MsgTemplate$(
-                len: 13,
-                bytes: pad_message([
-                    R, B, X, SP,
-                    E, R, R, SP,
-                    C, M, D,
-                    CR, LF,
-                ]),
-            ),
-            MsgKind::ErrFreq => MsgTemplate$(
-                len: 14,
-                bytes: pad_message([
-                    R, B, X, SP,
-                    E, R, R, SP,
-                    F, R, E, Q,
-                    CR, LF,
-                ]),
-            ),
-        },
+        MsgProfile::RbxDefault => msg_template_rbx(msg, mode, freq_code),
+        MsgProfile::RbxCompat => msg_template_rbx(msg, mode, freq_code),
     }
 }
 
@@ -259,109 +265,83 @@ pub struct CmdDecode {
     freq_value: uint<4>,
 }
 
+pub fn cmd_decode_base(
+    msg: MsgKind,
+    msg_valid: bool,
+    mode_write: bool,
+    mode_value: Mode,
+    freq_write: bool,
+    freq_value: uint<4>,
+) -> CmdDecode {
+    CmdDecode$(
+        msg: msg,
+        msg_valid: msg_valid,
+        mode_write: mode_write,
+        mode_value: mode_value,
+        freq_write: freq_write,
+        freq_value: freq_value,
+    )
+}
+
+pub fn cmd_decode_none() -> CmdDecode {
+    cmd_decode_base(MsgKind::None(), false, false, Mode::ClockTester(), false, 0)
+}
+
+pub fn cmd_decode_msg(msg: MsgKind) -> CmdDecode {
+    cmd_decode_base(msg, true, false, Mode::ClockTester(), false, 0)
+}
+
+pub fn cmd_decode_set_mode(mode: Mode) -> CmdDecode {
+    cmd_decode_base(MsgKind::Ok(), true, true, mode, false, 0)
+}
+
+pub fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
+    cmd_decode_base(MsgKind::Ok(), true, true, Mode::ClockTester(), true, freq)
+}
+
+pub fn decode_bang_cmd_rbx(rx_upper: uint<8>) -> CmdDecode {
+    if rx_upper == ascii_upper_h() {
+        cmd_decode_msg(MsgKind::Help())
+    } else if rx_upper == ascii_upper_s() {
+        cmd_decode_msg(MsgKind::Status())
+    } else if rx_upper == ascii_upper_c() {
+        cmd_decode_set_mode(Mode::ClockTester())
+    } else if rx_upper == ascii_upper_e() {
+        cmd_decode_set_mode(Mode::Echo())
+    } else if rx_upper == ascii_upper_f() {
+        cmd_decode_none()
+    } else {
+        cmd_decode_msg(MsgKind::ErrCmd())
+    }
+}
+
+pub fn decode_bang_cmd(profile: MsgProfile, rx_upper: uint<8>) -> CmdDecode {
+    match profile {
+        MsgProfile::RbxDefault => decode_bang_cmd_rbx(rx_upper),
+        MsgProfile::RbxCompat => decode_bang_cmd_rbx(rx_upper),
+    }
+}
+
 pub fn decode_cmd(
     state: CmdParseState,
     rx_ok: bool,
     rx_upper: uint<8>,
     rx_digit: (bool, uint<4>),
+    profile: MsgProfile,
 ) -> CmdDecode {
     if !rx_ok {
-        CmdDecode$(
-            msg: MsgKind::None(),
-            msg_valid: false,
-            mode_write: false,
-            mode_value: Mode::ClockTester(),
-            freq_write: false,
-            freq_value: 0,
-        )
+        cmd_decode_none()
     } else {
         match state {
-            CmdParseState::Bang => {
-                if rx_upper == ascii_upper_h() {
-                    CmdDecode$(
-                        msg: MsgKind::Help(),
-                        msg_valid: true,
-                        mode_write: false,
-                        mode_value: Mode::ClockTester(),
-                        freq_write: false,
-                        freq_value: 0,
-                    )
-                } else if rx_upper == ascii_upper_s() {
-                    CmdDecode$(
-                        msg: MsgKind::Status(),
-                        msg_valid: true,
-                        mode_write: false,
-                        mode_value: Mode::ClockTester(),
-                        freq_write: false,
-                        freq_value: 0,
-                    )
-                } else if rx_upper == ascii_upper_c() {
-                    CmdDecode$(
-                        msg: MsgKind::Ok(),
-                        msg_valid: true,
-                        mode_write: true,
-                        mode_value: Mode::ClockTester(),
-                        freq_write: false,
-                        freq_value: 0,
-                    )
-                } else if rx_upper == ascii_upper_e() {
-                    CmdDecode$(
-                        msg: MsgKind::Ok(),
-                        msg_valid: true,
-                        mode_write: true,
-                        mode_value: Mode::Echo(),
-                        freq_write: false,
-                        freq_value: 0,
-                    )
-                } else if rx_upper == ascii_upper_f() {
-                    CmdDecode$(
-                        msg: MsgKind::None(),
-                        msg_valid: false,
-                        mode_write: false,
-                        mode_value: Mode::ClockTester(),
-                        freq_write: false,
-                        freq_value: 0,
-                    )
-                } else {
-                    CmdDecode$(
-                        msg: MsgKind::ErrCmd(),
-                        msg_valid: true,
-                        mode_write: false,
-                        mode_value: Mode::ClockTester(),
-                        freq_write: false,
-                        freq_value: 0,
-                    )
-                }
-            },
+            CmdParseState::Bang => decode_bang_cmd(profile, rx_upper),
             CmdParseState::Freq => {
                 if rx_digit.0 {
-                    CmdDecode$(
-                        msg: MsgKind::Ok(),
-                        msg_valid: true,
-                        mode_write: true,
-                        mode_value: Mode::ClockTester(),
-                        freq_write: true,
-                        freq_value: rx_digit.1,
-                    )
+                    cmd_decode_set_freq(rx_digit.1)
                 } else {
-                    CmdDecode$(
-                        msg: MsgKind::ErrFreq(),
-                        msg_valid: true,
-                        mode_write: false,
-                        mode_value: Mode::ClockTester(),
-                        freq_write: false,
-                        freq_value: 0,
-                    )
+                    cmd_decode_msg(MsgKind::ErrFreq())
                 }
             },
-            _ => CmdDecode$(
-                msg: MsgKind::None(),
-                msg_valid: false,
-                mode_write: false,
-                mode_value: Mode::ClockTester(),
-                freq_write: false,
-                freq_value: 0,
-            ),
+            _ => cmd_decode_none(),
         }
     }
 }
@@ -392,7 +372,7 @@ pub entity simple_cmd_uart_core(
     reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
         next_cmd_state(cmd_state, rx_ok, rx_byte, rx_upper)
     };
-    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_upper, rx_digit);
+    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_upper, rx_digit, profile);
 
     reg(clk) mode: Mode reset(rst: Mode::ClockTester()) = {
         if cmd_decode.mode_write {
