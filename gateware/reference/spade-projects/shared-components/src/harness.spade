@@ -5,7 +5,9 @@ use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_delay;
 use shared_components::memory::fifo;
 use shared_components::memory::async_fifo;
+use shared_components::memory::fifo_out_tap;
 use shared_components::serial::ft;
+use shared_components::serial::ft_out_tap;
 use shared_components::serial::uart_tx;
 use shared_components::serial::uart_rx;
 use shared_components::sharp::count_on_event;
@@ -266,9 +268,7 @@ entity tb_async_fifo_u8(
     dout: inv &uint<8>,
 ) {
     let out = inst async_fifo::<8, 8, 3>(wclk, wrst, din, wput, rclk, rrst, rget);
-    set full = &out.full;
-    set empty = &out.empty;
-    set dout = &out.dout;
+    inst fifo_out_tap(out, full, empty, dout);
 }
 
 #[no_mangle(all)]
@@ -307,13 +307,16 @@ entity tb_ft(
         ui_din_valid,
         ui_dout_get,
     );
-    set ft_data_out = &out.ft_data_out;
-    set ft_be_out = &out.ft_be_out;
-    set ft_rd = &out.ft_rd;
-    set ft_wr = &out.ft_wr;
-    set ft_oe = &out.ft_oe;
-    set ui_din_full = &out.ui_din_full;
-    set ui_dout = &out.ui_dout;
-    set ui_dout_be = &out.ui_dout_be;
-    set ui_dout_empty = &out.ui_dout_empty;
+    inst ft_out_tap(
+        out,
+        ft_data_out,
+        ft_be_out,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ui_din_full,
+        ui_dout,
+        ui_dout_be,
+        ui_dout_empty,
+    );
 }

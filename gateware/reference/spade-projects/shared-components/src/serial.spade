@@ -25,6 +25,15 @@ pub entity usb_loopback(
     set usb_tx = &usb_rx;
 }
 
+pub fn ft_aux_activity(
+    ft_clk: bool,
+    ft_txe: bool,
+    ft_data: [bool; 16],
+    ft_be: [bool; 2],
+) -> bool {
+    ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1]
+}
+
 #[no_mangle(all)]
 extern entity ft_v<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
     clk: clock,

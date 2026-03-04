@@ -2,6 +2,7 @@ use shared_components::clocking::clk_wiz_400;
 use shared_components::primitives::falling_edge;
 use shared_components::primitives::sync2_bundle;
 use shared_components::sharp::count_on_event;
+use shared_components::serial::ft_aux_activity;
 use shared_components::serial::usb_loopback;
 
 #[no_mangle(all)]
@@ -64,7 +65,7 @@ entity main(
 
     let event_bits = event_counter.to_bits();
     let fast_bits = fast_counter.to_bits();
-    let aux = ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1];
+    let aux = ft_aux_activity(ft_clk, ft_txe, ft_data, ft_be);
 
     set led = &[
         event_bits[0],
