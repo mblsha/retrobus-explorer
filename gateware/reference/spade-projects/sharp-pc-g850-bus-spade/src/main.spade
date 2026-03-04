@@ -1,14 +1,17 @@
 use shared_components::ascii::ascii_dot;
 use shared_components::ascii::ascii_upper_e;
 use shared_components::bridges::BridgePolicy;
+use shared_components::bus_debug::CycleDecode;
+use shared_components::bus_debug::CoreStepInputs;
 use shared_components::bus_debug::FtState;
 use shared_components::bus_debug::SaleaeState;
 use shared_components::bus_debug::SampleState;
+use shared_components::bus_debug::UsbCmdInputs;
+use shared_components::bus_debug::core_step;
 use shared_components::bus_debug::decode_cycle;
-use shared_components::bus_debug::core_step_from_cycle;
 use shared_components::bus_debug::pack_event_word;
 use shared_components::bus_debug::pack_overflow_word;
-use shared_components::bus_debug::parse_usb_cmd_cycle;
+use shared_components::bus_debug::parse_usb_cmd;
 use shared_components::bus_debug::saleae_mux;
 use shared_components::bus_debug::telemetry_tx_arbiter;
 use shared_components::bus_debug::telemetry_tx_arbiter2;
@@ -22,6 +25,80 @@ use shared_components::primitives::falling_edge;
 use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_z80_controls;
+
+struct MainState {
+    sample_state: SampleState,
+    wait_enabled: uint<8>,
+    wait_counter: uint<128>,
+    last_addr: uint<16>,
+    saleae_state: SaleaeState,
+    saleae_counter: uint<8>,
+    ft_enabled: bool,
+    ft_state: FtState,
+    ft_cur_value: uint<32>,
+    fifo_full_counter: uint<24>,
+    addr_sync_d0: uint<16>,
+    addr_sync: uint<16>,
+    data_sync_d0: uint<8>,
+    data_sync: uint<8>,
+}
+
+fn mk_step_inputs(
+    state: MainState,
+    cycle_decode: CycleDecode,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    tx_busy: bool,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: uint<32>,
+    rd_rise: bool,
+    wr_rise: bool,
+    stream_fifo_full: bool,
+) -> CoreStepInputs {
+    CoreStepInputs$(
+        sample_state: state.sample_state,
+        wait_counter: state.wait_counter,
+        wait_enabled: state.wait_enabled,
+        mreq_fall: mreq_fall,
+        iorq_fall: iorq_fall,
+        cycle_decode: cycle_decode,
+        tx_busy: tx_busy,
+        ft_state: state.ft_state,
+        ft_enabled: state.ft_enabled,
+        ft_cur_value: state.ft_cur_value,
+        ft_ui_din_full: ft_ui_din_full,
+        ft_ui_dout_empty: ft_ui_dout_empty,
+        stream_fifo_empty: stream_fifo_empty,
+        stream_fifo_dout: stream_fifo_dout,
+        rd_rise: rd_rise,
+        wr_rise: wr_rise,
+        stream_fifo_full: stream_fifo_full,
+        fifo_full_counter: state.fifo_full_counter,
+    )
+}
+
+fn mk_usb_inputs(
+    wait_enabled: uint<8>,
+    saleae_state: SaleaeState,
+    cycle_decode: CycleDecode,
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+    upstream_req: (bool, uint<8>),
+) -> UsbCmdInputs {
+    UsbCmdInputs$(
+        rx_valid: rx_valid,
+        rx_byte: rx_byte,
+        tx_busy: tx_busy,
+        wait_enabled: wait_enabled,
+        saleae_state: saleae_state,
+        cycle_decode: cycle_decode,
+        upstream_req: upstream_req,
+    )
+}
+
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -105,66 +182,44 @@ entity main_core(
         *ft_ui_dout,
     );
 
-    reg(clk) state:
-        (
-            SampleState,
-            uint<8>,
-            uint<128>,
-            uint<16>,
-            SaleaeState,
-            uint<8>,
-            bool,
-            FtState,
-            uint<32>,
-            uint<24>,
-            uint<16>,
-            uint<16>,
-            uint<8>,
-            uint<8>
-        )
-        reset(rst: (
-            SampleState::SampleBus(),
-            0,
-            0,
-            0,
-            SaleaeState::DataSignals(),
-            0,
-            false,
-            FtState::GetFifo(),
-            0,
-            0,
-            0,
-            0,
-            0,
-            0
+    reg(clk) state: MainState
+        reset(rst: MainState$(
+            sample_state: SampleState::SampleBus(),
+            wait_enabled: 0,
+            wait_counter: 0,
+            last_addr: 0,
+            saleae_state: SaleaeState::DataSignals(),
+            saleae_counter: 0,
+            ft_enabled: false,
+            ft_state: FtState::GetFifo(),
+            ft_cur_value: 0,
+            fifo_full_counter: 0,
+            addr_sync_d0: 0,
+            addr_sync: 0,
+            data_sync_d0: 0,
+            data_sync: 0,
         ))
         = {
-            let sample_state: SampleState = state.0;
-            let wait_enabled: uint<8> = state.1;
-            let wait_counter: uint<128> = state.2;
-            let last_addr: uint<16> = state.3;
-            let saleae_state: SaleaeState = state.4;
-            let saleae_counter: uint<8> = state.5;
-            let ft_enabled: bool = state.6;
-            let ft_state: FtState = state.7;
-            let ft_cur_value: uint<32> = state.8;
-            let fifo_full_counter: uint<24> = state.9;
-            let addr_sync_d0: uint<16> = state.10;
-            let addr_sync: uint<16> = state.11;
-            let data_sync_d0: uint<8> = state.12;
-            let data_sync: uint<8> = state.13;
+            let sample_state = state.sample_state;
+            let wait_enabled = state.wait_enabled;
+            let wait_counter = state.wait_counter;
+            let last_addr = state.last_addr;
+            let saleae_state = state.saleae_state;
+            let saleae_counter = state.saleae_counter;
+            let ft_enabled = state.ft_enabled;
+            let ft_state = state.ft_state;
+            let ft_cur_value = state.ft_cur_value;
+            let fifo_full_counter = state.fifo_full_counter;
+            let addr_sync_d0 = state.addr_sync_d0;
+            let addr_sync = state.addr_sync;
+            let data_sync_d0 = state.data_sync_d0;
 
-            let step = core_step_from_cycle(
-                sample_state,
-                wait_counter,
-                wait_enabled,
+            let step_inputs = mk_step_inputs(
+                state,
+                cycle_decode,
                 mreq_fall,
                 iorq_fall,
-                cycle_decode,
                 *tx_busy,
-                ft_state,
-                ft_enabled,
-                ft_cur_value,
                 *ft_ui_din_full,
                 *ft_ui_dout_empty,
                 *stream_fifo_empty,
@@ -172,19 +227,20 @@ entity main_core(
                 rd_rise,
                 wr_rise,
                 *stream_fifo_full,
-                fifo_full_counter,
             );
+            let step = core_step(step_inputs);
             let bus_sample = step.sample;
 
-            let usb_cmd_state = parse_usb_cmd_cycle(
-                rx.valid,
-                rx.byte,
-                *tx_busy,
+            let usb_cmd_inputs = mk_usb_inputs(
                 wait_enabled,
                 saleae_state,
                 cycle_decode,
+                rx.valid,
+                rx.byte,
+                *tx_busy,
                 (false, 0),
             );
+            let usb_cmd_state = parse_usb_cmd(usb_cmd_inputs);
 
             let next_sample_state = if bus_sample.sample_is_bus {
                 if bus_sample.bus_start && wait_enabled > 0 {
@@ -230,48 +286,43 @@ entity main_core(
                 fifo_full_counter
             };
 
-            (
-                next_sample_state,
-                next_wait_enabled,
-                next_wait_counter,
-                next_last_addr,
-                next_saleae_state,
-                next_saleae_counter,
-                step.ft_mux.next_ft_enabled,
-                step.ft_mux.next_ft_state,
-                step.ft_mux.next_ft_cur_value,
-                next_fifo_full_counter,
-                addr,
-                addr_sync_d0,
-                data,
-                data_sync_d0,
+            MainState$(
+                sample_state: next_sample_state,
+                wait_enabled: next_wait_enabled,
+                wait_counter: next_wait_counter,
+                last_addr: next_last_addr,
+                saleae_state: next_saleae_state,
+                saleae_counter: next_saleae_counter,
+                ft_enabled: step.ft_mux.next_ft_enabled,
+                ft_state: step.ft_mux.next_ft_state,
+                ft_cur_value: step.ft_mux.next_ft_cur_value,
+                fifo_full_counter: next_fifo_full_counter,
+                addr_sync_d0: addr,
+                addr_sync: addr_sync_d0,
+                data_sync_d0: data,
+                data_sync: data_sync_d0,
             )
         };
 
-    let sample_state: SampleState = state.0;
-    let wait_enabled: uint<8> = state.1;
-    let wait_counter: uint<128> = state.2;
-    let last_addr: uint<16> = state.3;
-    let saleae_state: SaleaeState = state.4;
-    let saleae_counter: uint<8> = state.5;
-    let ft_enabled: bool = state.6;
-    let ft_state: FtState = state.7;
-    let ft_cur_value: uint<32> = state.8;
-    let fifo_full_counter: uint<24> = state.9;
-    let addr_sync: uint<16> = state.11;
-    let data_sync: uint<8> = state.13;
+    let sample_state = state.sample_state;
+    let wait_enabled = state.wait_enabled;
+    let wait_counter = state.wait_counter;
+    let last_addr = state.last_addr;
+    let saleae_state = state.saleae_state;
+    let saleae_counter = state.saleae_counter;
+    let ft_enabled = state.ft_enabled;
+    let ft_state = state.ft_state;
+    let ft_cur_value = state.ft_cur_value;
+    let fifo_full_counter = state.fifo_full_counter;
+    let addr_sync = state.addr_sync;
+    let data_sync = state.data_sync;
 
-    let step = core_step_from_cycle(
-        sample_state,
-        wait_counter,
-        wait_enabled,
+    let step_inputs = mk_step_inputs(
+        state,
+        cycle_decode,
         mreq_fall,
         iorq_fall,
-        cycle_decode,
         *tx_busy,
-        ft_state,
-        ft_enabled,
-        ft_cur_value,
         *ft_ui_din_full,
         *ft_ui_dout_empty,
         *stream_fifo_empty,
@@ -279,8 +330,8 @@ entity main_core(
         rd_rise,
         wr_rise,
         *stream_fifo_full,
-        fifo_full_counter,
     );
+    let step = core_step(step_inputs);
     let bus_sample = step.sample;
     let ft_mux = step.ft_mux;
 
@@ -311,15 +362,16 @@ entity main_core(
 
     let ft_tx_req = telemetry_tx_arbiter2((ft_mux.ft_tx_req_valid, ft_mux.ft_tx_req_byte), bus_tx_req);
 
-    let usb_cmd = parse_usb_cmd_cycle(
-        rx.valid,
-        rx.byte,
-        *tx_busy,
+    let usb_cmd_inputs = mk_usb_inputs(
         wait_enabled,
         saleae_state,
         cycle_decode,
+        rx.valid,
+        rx.byte,
+        *tx_busy,
         ft_tx_req,
     );
+    let usb_cmd = parse_usb_cmd(usb_cmd_inputs);
 
     let tx_new_data = usb_cmd.tx_req_valid;
     let tx_data = usb_cmd.tx_req_byte;

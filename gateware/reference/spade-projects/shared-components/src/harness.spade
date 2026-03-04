@@ -248,10 +248,10 @@ entity tb_fifo(
     used: inv &uint<4>,
 ) {
     let out = inst fifo::<8, 8>(clk, rst, din, wput, rget);
-    set full = &out.0;
-    set empty = &out.1;
-    set dout = &out.2;
-    set used = &out.3;
+    set full = &out.full;
+    set empty = &out.empty;
+    set dout = &out.dout;
+    set used = &out.used;
 }
 
 #[no_mangle(all)]
