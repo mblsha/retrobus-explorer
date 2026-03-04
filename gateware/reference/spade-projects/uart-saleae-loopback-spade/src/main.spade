@@ -7,7 +7,6 @@ use shared_components::primitives::reset_conditioner;
 use shared_components::protocol::simple_cmd_uart::clock_from_code;
 use shared_components::protocol::simple_cmd_uart::cmd_state_is_idle;
 use shared_components::protocol::simple_cmd_uart::is_echo_mode;
-use shared_components::protocol::simple_cmd_uart::MsgProfile;
 use shared_components::protocol::simple_cmd_uart::saleae_outputs;
 use shared_components::protocol::simple_cmd_uart::simple_cmd_uart_core;
 use shared_components::serial::UartLineBusyPort;
@@ -38,7 +37,6 @@ entity main(
         rx.parity_error,
         rx.byte,
         *usb_uart.busy,
-        MsgProfile::RbxDefault(),
     );
 
     let mode_is_echo = is_echo_mode(cmd_core.mode);

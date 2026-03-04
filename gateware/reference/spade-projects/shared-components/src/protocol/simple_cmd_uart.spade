@@ -49,11 +49,6 @@ pub enum MsgKind {
     ErrFreq,
 }
 
-pub enum MsgProfile {
-    RbxDefault,
-    RbxCompat,
-}
-
 pub fn msg_is_none(msg: MsgKind) -> bool {
     match msg {
         MsgKind::None => true,
@@ -182,15 +177,12 @@ pub fn msg_template_rbx(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemp
     }
 }
 
-pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>, profile: MsgProfile) -> MsgTemplate {
-    match profile {
-        MsgProfile::RbxDefault => msg_template_rbx(msg, mode, freq_code),
-        MsgProfile::RbxCompat => msg_template_rbx(msg, mode, freq_code),
-    }
+pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
+    msg_template_rbx(msg, mode, freq_code)
 }
 
-pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>, profile: MsgProfile) -> (bool, uint<8>) {
-    let msg_tpl = msg_template(msg, mode, freq_code, profile);
+pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> (bool, uint<8>) {
+    let msg_tpl = msg_template(msg, mode, freq_code);
     if idx < msg_tpl.len {
         (true, msg_tpl.bytes[trunc(idx)])
     } else {
@@ -315,11 +307,8 @@ pub fn decode_bang_cmd_rbx(rx_upper: uint<8>) -> CmdDecode {
     }
 }
 
-pub fn decode_bang_cmd(profile: MsgProfile, rx_upper: uint<8>) -> CmdDecode {
-    match profile {
-        MsgProfile::RbxDefault => decode_bang_cmd_rbx(rx_upper),
-        MsgProfile::RbxCompat => decode_bang_cmd_rbx(rx_upper),
-    }
+pub fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
+    decode_bang_cmd_rbx(rx_upper)
 }
 
 pub fn decode_cmd(
@@ -327,13 +316,12 @@ pub fn decode_cmd(
     rx_ok: bool,
     rx_upper: uint<8>,
     rx_digit: (bool, uint<4>),
-    profile: MsgProfile,
 ) -> CmdDecode {
     if !rx_ok {
         cmd_decode_none()
     } else {
         match state {
-            CmdParseState::Bang => decode_bang_cmd(profile, rx_upper),
+            CmdParseState::Bang => decode_bang_cmd(rx_upper),
             CmdParseState::Freq => {
                 if rx_digit.0 {
                     cmd_decode_set_freq(rx_digit.1)
@@ -363,7 +351,6 @@ pub entity simple_cmd_uart_core(
     rx_parity_error: bool,
     rx_byte: uint<8>,
     tx_busy: bool,
-    profile: MsgProfile,
 ) -> SimpleCmdUartOut {
     let rx_ok = rx_valid && !rx_parity_error;
     let rx_digit = decode_digit_max(rx_byte, 5);
@@ -372,7 +359,7 @@ pub entity simple_cmd_uart_core(
     reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
         next_cmd_state(cmd_state, rx_ok, rx_byte, rx_upper)
     };
-    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_upper, rx_digit, profile);
+    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_upper, rx_digit);
 
     reg(clk) mode: Mode reset(rst: Mode::ClockTester()) = {
         if cmd_decode.mode_write {
@@ -399,11 +386,11 @@ pub entity simple_cmd_uart_core(
         } else {
             pending_msg
         };
-        let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code, profile);
+        let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code);
         let cur_none = msg_is_none(cur_msg);
         let sending = !cur_none && cur_byte.0 && !tx_busy;
         let next_idx: uint<8> = trunc(cur_idx + 1);
-        let next_valid = msg_byte(cur_msg, next_idx, mode, freq_code, profile).0;
+        let next_valid = msg_byte(cur_msg, next_idx, mode, freq_code).0;
 
         let post_msg: MsgKind = if sending && !next_valid {
             MsgKind::None()
@@ -429,7 +416,7 @@ pub entity simple_cmd_uart_core(
 
     let tx_msg = tx_state.0;
     let tx_idx = tx_state.1;
-    let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code, profile);
+    let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code);
     let tx_msg_none = msg_is_none(tx_msg);
     let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !tx_busy;
 

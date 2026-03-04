@@ -448,6 +448,71 @@ pub fn core_step(
     )
 }
 
+pub fn core_step_from_cycle(
+    sample_state: SampleState,
+    wait_counter: uint<128>,
+    wait_enabled: uint<8>,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    cycle_decode: CycleDecode,
+    tx_busy: bool,
+    ft_state: FtState,
+    ft_enabled: bool,
+    ft_cur_value: uint<32>,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: uint<32>,
+    rd_rise: bool,
+    wr_rise: bool,
+    stream_fifo_full: bool,
+    fifo_full_counter: uint<24>,
+) -> CoreStepOut {
+    core_step(
+        sample_state,
+        wait_counter,
+        wait_enabled,
+        mreq_fall,
+        iorq_fall,
+        cycle_decode.bus,
+        cycle_decode.bus_error,
+        tx_busy,
+        ft_state,
+        ft_enabled,
+        ft_cur_value,
+        cycle_decode.ft_cmd,
+        ft_ui_din_full,
+        ft_ui_dout_empty,
+        stream_fifo_empty,
+        stream_fifo_dout,
+        rd_rise,
+        wr_rise,
+        stream_fifo_full,
+        fifo_full_counter,
+    )
+}
+
+pub fn parse_usb_cmd_cycle(
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+    wait_enabled: uint<8>,
+    saleae_state: SaleaeState,
+    cycle_decode: CycleDecode,
+    upstream_req: (bool, uint<8>),
+) -> UsbCmdOut {
+    parse_usb_cmd(
+        rx_valid,
+        rx_byte,
+        tx_busy,
+        wait_enabled,
+        saleae_state,
+        cycle_decode.rx_digit,
+        cycle_decode.saleae_cmd,
+        upstream_req,
+    )
+}
+
 pub fn saleae_mux(
     saleae_state: SaleaeState,
     z80_wr_sync: bool,

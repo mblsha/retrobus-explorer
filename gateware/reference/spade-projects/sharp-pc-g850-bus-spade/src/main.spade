@@ -5,10 +5,10 @@ use shared_components::bus_debug::FtState;
 use shared_components::bus_debug::SaleaeState;
 use shared_components::bus_debug::SampleState;
 use shared_components::bus_debug::decode_cycle;
-use shared_components::bus_debug::core_step;
+use shared_components::bus_debug::core_step_from_cycle;
 use shared_components::bus_debug::pack_event_word;
 use shared_components::bus_debug::pack_overflow_word;
-use shared_components::bus_debug::parse_usb_cmd;
+use shared_components::bus_debug::parse_usb_cmd_cycle;
 use shared_components::bus_debug::saleae_mux;
 use shared_components::bus_debug::telemetry_tx_arbiter;
 use shared_components::bus_debug::telemetry_tx_arbiter2;
@@ -154,19 +154,17 @@ entity main_core(
             let data_sync_d0: uint<8> = state.12;
             let data_sync: uint<8> = state.13;
 
-            let step = core_step(
+            let step = core_step_from_cycle(
                 sample_state,
                 wait_counter,
                 wait_enabled,
                 mreq_fall,
                 iorq_fall,
-                cycle_decode.bus,
-                cycle_decode.bus_error,
+                cycle_decode,
                 *tx_busy,
                 ft_state,
                 ft_enabled,
                 ft_cur_value,
-                cycle_decode.ft_cmd,
                 *ft_ui_din_full,
                 *ft_ui_dout_empty,
                 *stream_fifo_empty,
@@ -178,14 +176,13 @@ entity main_core(
             );
             let bus_sample = step.sample;
 
-            let usb_cmd_state = parse_usb_cmd(
+            let usb_cmd_state = parse_usb_cmd_cycle(
                 rx.valid,
                 rx.byte,
                 *tx_busy,
                 wait_enabled,
                 saleae_state,
-                cycle_decode.rx_digit,
-                cycle_decode.saleae_cmd,
+                cycle_decode,
                 (false, 0),
             );
 
@@ -264,19 +261,17 @@ entity main_core(
     let addr_sync: uint<16> = state.11;
     let data_sync: uint<8> = state.13;
 
-    let step = core_step(
+    let step = core_step_from_cycle(
         sample_state,
         wait_counter,
         wait_enabled,
         mreq_fall,
         iorq_fall,
-        cycle_decode.bus,
-        cycle_decode.bus_error,
+        cycle_decode,
         *tx_busy,
         ft_state,
         ft_enabled,
         ft_cur_value,
-        cycle_decode.ft_cmd,
         *ft_ui_din_full,
         *ft_ui_dout_empty,
         *stream_fifo_empty,
@@ -316,14 +311,13 @@ entity main_core(
 
     let ft_tx_req = telemetry_tx_arbiter2((ft_mux.ft_tx_req_valid, ft_mux.ft_tx_req_byte), bus_tx_req);
 
-    let usb_cmd = parse_usb_cmd(
+    let usb_cmd = parse_usb_cmd_cycle(
         rx.valid,
         rx.byte,
         *tx_busy,
         wait_enabled,
         saleae_state,
-        cycle_decode.rx_digit,
-        cycle_decode.saleae_cmd,
+        cycle_decode,
         ft_tx_req,
     );
 
