@@ -5,17 +5,15 @@ use shared_components::bus_debug::FtState;
 use shared_components::bus_debug::SaleaeState;
 use shared_components::bus_debug::SampleState;
 use shared_components::bus_debug::decode_cycle;
+use shared_components::bus_debug::core_step;
 use shared_components::bus_debug::pack_event_word;
 use shared_components::bus_debug::pack_overflow_word;
 use shared_components::bus_debug::parse_usb_cmd;
-use shared_components::bus_debug::run_ft_stream_mux;
 use shared_components::bus_debug::saleae_mux;
-use shared_components::bus_debug::sample_bus_cycle;
 use shared_components::bus_debug::telemetry_tx_arbiter;
 use shared_components::bus_debug::telemetry_tx_arbiter2;
 use shared_components::clocking::clk_wiz_400;
-use shared_components::config::au_bridge_u16x4_100m;
-use shared_components::config::au_bridge_u8x4_100m;
+use shared_components::config::au_bridge;
 use shared_components::config::au_ft_tap_u16;
 use shared_components::config::au_stream_fifo_u32;
 use shared_components::config::au_usb_uart_rx;
@@ -156,7 +154,7 @@ entity main_core(
             let data_sync_d0: uint<8> = state.12;
             let data_sync: uint<8> = state.13;
 
-            let bus_sample = sample_bus_cycle(
+            let step = core_step(
                 sample_state,
                 wait_counter,
                 wait_enabled,
@@ -165,11 +163,31 @@ entity main_core(
                 cycle_decode.bus,
                 cycle_decode.bus_error,
                 *tx_busy,
+                ft_state,
+                ft_enabled,
+                ft_cur_value,
+                cycle_decode.ft_cmd,
+                *ft_ui_din_full,
+                *ft_ui_dout_empty,
+                *stream_fifo_empty,
+                *stream_fifo_dout,
+                rd_rise,
+                wr_rise,
+                *stream_fifo_full,
+                fifo_full_counter,
             );
+            let bus_sample = step.sample;
 
-            let fifo_was_full = *stream_fifo_full;
-            let should_emit_overflow =
-                !rd_rise && !wr_rise && ft_enabled && !fifo_was_full && fifo_full_counter > 0;
+            let usb_cmd_state = parse_usb_cmd(
+                rx.valid,
+                rx.byte,
+                *tx_busy,
+                wait_enabled,
+                saleae_state,
+                cycle_decode.rx_digit,
+                cycle_decode.saleae_cmd,
+                (false, 0),
+            );
 
             let next_sample_state = if bus_sample.sample_is_bus {
                 if bus_sample.bus_start && wait_enabled > 0 {
@@ -199,37 +217,17 @@ entity main_core(
                 last_addr
             };
 
-            let next_wait_enabled = if rx.valid && cycle_decode.rx_digit.0 {
-                zext(cycle_decode.rx_digit.1)
-            } else {
-                wait_enabled
-            };
-
-            let next_saleae_state = if rx.valid && cycle_decode.saleae_cmd.0 {
-                cycle_decode.saleae_cmd.1
-            } else {
-                saleae_state
-            };
+            let next_wait_enabled = usb_cmd_state.next_wait_enabled;
+            let next_saleae_state = usb_cmd_state.next_saleae_state;
 
             let next_saleae_counter = match saleae_state {
                 SaleaeState::Counter => trunc(saleae_counter + 1),
                 _ => saleae_counter,
             };
 
-            let ft_next = run_ft_stream_mux(
-                ft_state,
-                ft_enabled,
-                ft_cur_value,
-                cycle_decode.ft_cmd,
-                *tx_busy,
-                *ft_ui_din_full,
-                *ft_ui_dout_empty,
-                *stream_fifo_empty,
-                *stream_fifo_dout,
-            );
-            let next_fifo_full_counter = if cycle_decode.bus.bus_event_valid && ft_enabled && fifo_was_full {
+            let next_fifo_full_counter = if cycle_decode.bus.bus_event_valid && ft_enabled && *stream_fifo_full {
                 trunc(fifo_full_counter + 1)
-            } else if should_emit_overflow {
+            } else if step.should_emit_overflow {
                 0
             } else {
                 fifo_full_counter
@@ -242,9 +240,9 @@ entity main_core(
                 next_last_addr,
                 next_saleae_state,
                 next_saleae_counter,
-                ft_next.next_ft_enabled,
-                ft_next.next_ft_state,
-                ft_next.next_ft_cur_value,
+                step.ft_mux.next_ft_enabled,
+                step.ft_mux.next_ft_state,
+                step.ft_mux.next_ft_cur_value,
                 next_fifo_full_counter,
                 addr,
                 addr_sync_d0,
@@ -266,7 +264,7 @@ entity main_core(
     let addr_sync: uint<16> = state.11;
     let data_sync: uint<8> = state.13;
 
-    let bus_sample = sample_bus_cycle(
+    let step = core_step(
         sample_state,
         wait_counter,
         wait_enabled,
@@ -275,12 +273,25 @@ entity main_core(
         cycle_decode.bus,
         cycle_decode.bus_error,
         *tx_busy,
+        ft_state,
+        ft_enabled,
+        ft_cur_value,
+        cycle_decode.ft_cmd,
+        *ft_ui_din_full,
+        *ft_ui_dout_empty,
+        *stream_fifo_empty,
+        *stream_fifo_dout,
+        rd_rise,
+        wr_rise,
+        *stream_fifo_full,
+        fifo_full_counter,
     );
+    let bus_sample = step.sample;
+    let ft_mux = step.ft_mux;
 
     let frame_word = pack_event_word(last_addr, data_sync, bus_sample.bus_event_char);
     let overflow_word = pack_overflow_word(fifo_full_counter, ascii_upper_e());
-    let should_emit_overflow =
-        !rd_rise && !wr_rise && ft_enabled && !*stream_fifo_full && fifo_full_counter > 0;
+    let should_emit_overflow = step.should_emit_overflow;
     let stream_write_event = bus_sample.bus_event_valid && ft_enabled && !*stream_fifo_full;
     let stream_write_overflow = should_emit_overflow;
     let stream_fifo_wput = stream_write_event || stream_write_overflow;
@@ -303,17 +314,6 @@ entity main_core(
         (bus_sample.sample_tx_req, ascii_dot()),
     );
 
-    let ft_mux = run_ft_stream_mux(
-        ft_state,
-        ft_enabled,
-        ft_cur_value,
-        cycle_decode.ft_cmd,
-        *tx_busy,
-        *ft_ui_din_full,
-        *ft_ui_dout_empty,
-        *stream_fifo_empty,
-        *stream_fifo_dout,
-    );
     let ft_tx_req = telemetry_tx_arbiter2((ft_mux.ft_tx_req_valid, ft_mux.ft_tx_req_byte), bus_tx_req);
 
     let usb_cmd = parse_usb_cmd(
@@ -345,7 +345,7 @@ entity main_core(
     set stream_fifo_empty_w = &stream_fifo.empty;
     set stream_fifo_dout_w = &stream_fifo.dout;
 
-    let addr_bridge = inst au_bridge_u16x4_100m::<24>(
+    let addr_bridge = inst au_bridge::<16, 4, 100_000_000, 24>(
         clk,
         rst,
         addr_sync,
@@ -355,7 +355,7 @@ entity main_core(
         true,
         BridgePolicy::QueueOnly(),
     );
-    let event_bridge = inst au_bridge_u8x4_100m::<24>(
+    let event_bridge = inst au_bridge::<8, 4, 100_000_000, 24>(
         clk,
         rst,
         bus_sample.bus_event_char,

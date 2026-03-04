@@ -1,7 +1,6 @@
 use shared_components::bridges::BridgePolicy;
 use shared_components::clocking::clk_wiz_200_400;
-use shared_components::config::au_bridge_u8x8_100m;
-use shared_components::config::au_bridge_u8x8_200m;
+use shared_components::config::au_bridge;
 use shared_components::config::au_usb_uart_rx;
 use shared_components::config::au_usb_uart_tx8_tap;
 use shared_components::primitives::reset_conditioner;
@@ -12,8 +11,6 @@ use shared_components::protocol::simple_cmd_uart::MsgProfile;
 use shared_components::protocol::simple_cmd_uart::saleae_outputs;
 use shared_components::protocol::simple_cmd_uart::simple_cmd_uart_core;
 use shared_components::serial::UartLineBusyPort;
-use shared_components::serial::uart_rx;
-use shared_components::serial::uart_tx_tap;
 
 #[no_mangle(all)]
 entity main(
@@ -47,7 +44,7 @@ entity main(
     let mode_is_echo = is_echo_mode(cmd_core.mode);
     let mode_is_clock_tester = !mode_is_echo;
 
-    let tx6_bridge = inst au_bridge_u8x8_100m::<24>(
+    let tx6_bridge = inst au_bridge::<8, 8, 100_000_000, 24>(
         clk,
         rst,
         rx.byte,
@@ -57,7 +54,7 @@ entity main(
         mode_is_echo,
         BridgePolicy::QueueOnly(),
     );
-    let tx7_bridge = inst au_bridge_u8x8_200m::<24>(
+    let tx7_bridge = inst au_bridge::<8, 8, 200_000_000, 24>(
         clk,
         rst,
         rx.byte,

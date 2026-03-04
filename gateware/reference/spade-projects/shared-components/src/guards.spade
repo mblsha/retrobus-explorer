@@ -4,6 +4,12 @@ where CHECK: {uint_bits_to_fit(N - 1)}
     true
 }
 
+pub fn require_positive_int<#int N, #uint CHECK>() -> bool
+where CHECK: {uint_bits_to_fit(N - 1)}
+{
+    true
+}
+
 pub fn require_at_least_two<#uint N, #uint CHECK>() -> bool
 where CHECK: {uint_bits_to_fit(N - 2)}
 {
