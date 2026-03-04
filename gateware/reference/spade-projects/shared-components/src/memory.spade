@@ -55,6 +55,22 @@ pub struct FifoOut<T> {
     dout: T,
 }
 
+pub struct FifoUsedOut<TData, TUsed> {
+    full: bool,
+    empty: bool,
+    dout: TData,
+    used: TUsed,
+}
+
+struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
+    waddr: uint<ADDR_W>,
+    waddr_delay: uint<ADDR_W>,
+    raddr: uint<ADDR_W>,
+    used: uint<COUNT_W>,
+    read_data: uint<WIDTH>,
+    storage: [uint<WIDTH>; ENTRIES],
+}
+
 struct port FifoOutPort<T> {
     full: &bool,
     empty: &bool,
@@ -71,7 +87,7 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES, #uint ADDR_W, #uint COUNT_W>(
     din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> (bool, bool, uint<WIDTH>, uint<COUNT_W>)
+) -> FifoUsedOut<uint<WIDTH>, uint<COUNT_W>>
 where
     ADDR_W: {uint_bits_to_fit(ENTRIES - 1)},
     COUNT_W: {uint_bits_to_fit(ENTRIES)}
@@ -81,15 +97,21 @@ where
     let _ = require_power_of_two::<ENTRIES, _, _, _>();
 
     // Packed state to avoid declaration-order dependency issues across interlocked regs.
-    reg(clk) state:
-        (uint<ADDR_W>, uint<ADDR_W>, uint<ADDR_W>, uint<COUNT_W>, uint<WIDTH>, [uint<WIDTH>; ENTRIES])
-        reset(rst: (0, 0, 0, 0, 0, [0; ENTRIES]))
+    reg(clk) state: FifoImplState<ADDR_W, COUNT_W, WIDTH, ENTRIES>
+        reset(rst: FifoImplState$(
+            waddr: 0,
+            waddr_delay: 0,
+            raddr: 0,
+            used: 0,
+            read_data: 0,
+            storage: [0; ENTRIES],
+        ))
         = {
-            let waddr: uint<ADDR_W> = state.0;
-            let waddr_delay: uint<ADDR_W> = state.1;
-            let raddr: uint<ADDR_W> = state.2;
-            let used: uint<COUNT_W> = state.3;
-            let storage: [uint<WIDTH>; ENTRIES] = state.5;
+            let waddr: uint<ADDR_W> = state.waddr;
+            let waddr_delay: uint<ADDR_W> = state.waddr_delay;
+            let raddr: uint<ADDR_W> = state.raddr;
+            let used: uint<COUNT_W> = state.used;
+            let storage: [uint<WIDTH>; ENTRIES] = state.storage;
 
             let next_write = ptr_inc(waddr);
             let wrdy = next_write != raddr;
@@ -114,28 +136,33 @@ where
                 storage
             };
 
-            (
-                next_waddr,
-                waddr,
-                next_raddr,
-                next_used,
-                next_read_data,
-                next_storage,
+            FifoImplState$(
+                waddr: next_waddr,
+                waddr_delay: waddr,
+                raddr: next_raddr,
+                used: next_used,
+                read_data: next_read_data,
+                storage: next_storage,
             )
         };
 
-    let waddr: uint<ADDR_W> = state.0;
-    let waddr_delay: uint<ADDR_W> = state.1;
-    let raddr: uint<ADDR_W> = state.2;
-    let used: uint<COUNT_W> = state.3;
-    let read_data: uint<WIDTH> = state.4;
+    let waddr: uint<ADDR_W> = state.waddr;
+    let waddr_delay: uint<ADDR_W> = state.waddr_delay;
+    let raddr: uint<ADDR_W> = state.raddr;
+    let used: uint<COUNT_W> = state.used;
+    let read_data: uint<WIDTH> = state.read_data;
 
     let next_write = ptr_inc(waddr);
     let wrdy = next_write != raddr;
     let rrdy = raddr != waddr_delay;
     let full = !wrdy;
     let empty = !rrdy;
-    (full, empty, read_data, used)
+    FifoUsedOut$(
+        full: full,
+        empty: empty,
+        dout: read_data,
+        used: used,
+    )
 }
 
 pub entity fifo<#uint WIDTH, #uint ENTRIES>(
@@ -144,7 +171,7 @@ pub entity fifo<#uint WIDTH, #uint ENTRIES>(
     din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> (bool, bool, uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>) {
+) -> FifoUsedOut<uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>> {
     inst fifo_impl::<WIDTH, ENTRIES, _, _>(clk, rst, din, wput, rget)
 }
 

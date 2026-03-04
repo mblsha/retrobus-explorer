@@ -1,6 +1,6 @@
 use shared_components::bridges::BridgePolicy;
 use shared_components::clocking::clk_wiz_200_400;
-use shared_components::config::au_bridge;
+use shared_components::config::au_dual_bridge_u8x8_100_200;
 use shared_components::config::au_usb_uart_rx;
 use shared_components::config::au_usb_uart_tx8_tap;
 use shared_components::primitives::reset_conditioner;
@@ -42,7 +42,7 @@ entity main(
     let mode_is_echo = is_echo_mode(cmd_core.mode);
     let mode_is_clock_tester = !mode_is_echo;
 
-    let tx6_bridge = inst au_bridge::<8, 8, 100_000_000, 24>(
+    let dual_bridge = inst au_dual_bridge_u8x8_100_200::<24>(
         clk,
         rst,
         rx.byte,
@@ -52,16 +52,8 @@ entity main(
         mode_is_echo,
         BridgePolicy::QueueOnly(),
     );
-    let tx7_bridge = inst au_bridge::<8, 8, 200_000_000, 24>(
-        clk,
-        rst,
-        rx.byte,
-        *enqueue,
-        clk_fast,
-        rst,
-        mode_is_echo,
-        BridgePolicy::QueueOnly(),
-    );
+    let tx6_bridge = dual_bridge.tx100;
+    let tx7_bridge = dual_bridge.tx200;
 
     let rx_is_payload = cmd_core.payload_rx;
 

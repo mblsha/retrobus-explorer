@@ -77,7 +77,7 @@ pub fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
     std::conv::concat_arrays(message, [0; 64 - N])
 }
 
-pub fn msg_template_rbx(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
+pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
     let m = mode_char(mode);
     let f = digit_char(freq_code);
     let A = ascii_upper_a();
@@ -175,10 +175,6 @@ pub fn msg_template_rbx(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemp
             ]),
         ),
     }
-}
-
-pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
-    msg_template_rbx(msg, mode, freq_code)
 }
 
 pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> (bool, uint<8>) {
@@ -291,7 +287,7 @@ pub fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
     cmd_decode_base(MsgKind::Ok(), true, true, Mode::ClockTester(), true, freq)
 }
 
-pub fn decode_bang_cmd_rbx(rx_upper: uint<8>) -> CmdDecode {
+pub fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
     if rx_upper == ascii_upper_h() {
         cmd_decode_msg(MsgKind::Help())
     } else if rx_upper == ascii_upper_s() {
@@ -305,10 +301,6 @@ pub fn decode_bang_cmd_rbx(rx_upper: uint<8>) -> CmdDecode {
     } else {
         cmd_decode_msg(MsgKind::ErrCmd())
     }
-}
-
-pub fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
-    decode_bang_cmd_rbx(rx_upper)
 }
 
 pub fn decode_cmd(
@@ -344,6 +336,12 @@ pub struct SimpleCmdUartOut {
     payload_rx: bool,
 }
 
+struct TxState {
+    cur_msg: MsgKind,
+    cur_idx: uint<8>,
+    pending_msg: MsgKind,
+}
+
 pub entity simple_cmd_uart_core(
     clk: clock,
     rst: bool,
@@ -377,10 +375,12 @@ pub entity simple_cmd_uart_core(
         }
     };
 
-    reg(clk) tx_state: (MsgKind, uint<8>, MsgKind) reset(rst: (MsgKind::Ready(), 0, MsgKind::None())) = {
-        let cur_msg = tx_state.0;
-        let cur_idx = tx_state.1;
-        let pending_msg = tx_state.2;
+    reg(clk) tx_state: TxState
+        reset(rst: TxState$(cur_msg: MsgKind::Ready(), cur_idx: 0, pending_msg: MsgKind::None()))
+        = {
+        let cur_msg = tx_state.cur_msg;
+        let cur_idx = tx_state.cur_idx;
+        let pending_msg = tx_state.pending_msg;
         let pending_next = if cmd_decode.msg_valid {
             cmd_decode.msg
         } else {
@@ -408,14 +408,14 @@ pub entity simple_cmd_uart_core(
         };
 
         if msg_is_none(post_msg) && !msg_is_none(pending_next) {
-            (pending_next, 0, MsgKind::None())
+            TxState$(cur_msg: pending_next, cur_idx: 0, pending_msg: MsgKind::None())
         } else {
-            (post_msg, post_idx, pending_next)
+            TxState$(cur_msg: post_msg, cur_idx: post_idx, pending_msg: pending_next)
         }
     };
 
-    let tx_msg = tx_state.0;
-    let tx_idx = tx_state.1;
+    let tx_msg = tx_state.cur_msg;
+    let tx_idx = tx_state.cur_idx;
     let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code);
     let tx_msg_none = msg_is_none(tx_msg);
     let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !tx_busy;
