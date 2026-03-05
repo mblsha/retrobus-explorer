@@ -1,9 +1,36 @@
 use shared_components::ascii::ascii_dot;
+use shared_components::ascii::ascii_eq;
+use shared_components::ascii::ascii_cr;
+use shared_components::ascii::ascii_colon;
+use shared_components::ascii::ascii_lf;
+use shared_components::ascii::ascii_minus;
+use shared_components::ascii::ascii_space;
+use shared_components::ascii::ascii_upper_a;
+use shared_components::ascii::ascii_upper_c;
+use shared_components::ascii::ascii_upper_d;
 use shared_components::ascii::ascii_upper_e;
+use shared_components::ascii::ascii_upper_f;
+use shared_components::ascii::ascii_upper_h;
+use shared_components::ascii::ascii_upper_k;
+use shared_components::ascii::ascii_upper_l;
+use shared_components::ascii::ascii_upper_m;
+use shared_components::ascii::ascii_upper_o;
+use shared_components::ascii::ascii_upper_p;
+use shared_components::ascii::ascii_upper_q;
+use shared_components::ascii::ascii_upper_r;
+use shared_components::ascii::ascii_upper_s;
+use shared_components::ascii::ascii_upper_t;
+use shared_components::ascii::ascii_upper_u;
+use shared_components::ascii::ascii_upper_w;
+use shared_components::ascii::ascii_upper_x;
+use shared_components::ascii::ascii_upper_y;
+use shared_components::ascii::ascii_zero;
+use shared_components::ascii::to_upper;
 use shared_components::bridges::BridgePolicy;
 use shared_components::bus_debug::CycleDecode;
 use shared_components::bus_debug::CoreStepInputs;
 use shared_components::bus_debug::FtState;
+use shared_components::bus_debug::FtStreamCmdDecode;
 use shared_components::bus_debug::SaleaeState;
 use shared_components::bus_debug::SampleState;
 use shared_components::bus_debug::UsbCmdInputs;
@@ -26,6 +53,517 @@ use shared_components::primitives::reset_conditioner;
 use shared_components::primitives::rising_edge;
 use shared_components::primitives::sync_z80_controls;
 
+enum ConsoleMsg {
+    None,
+    Ok,
+    Err,
+    Help,
+    Status,
+    PinMap,
+}
+
+fn console_msg_is_none(msg: ConsoleMsg) -> bool {
+    match msg {
+        ConsoleMsg::None => true,
+        _ => false,
+    }
+}
+
+fn mode_char(mode: SaleaeState) -> uint<8> {
+    match mode {
+        SaleaeState::DataSignals => ascii_upper_d(),
+        SaleaeState::SyncSignals => ascii_upper_s(),
+        SaleaeState::EdgeSignals => ascii_upper_e(),
+        SaleaeState::RawSignals => ascii_upper_r(),
+        SaleaeState::Counter => ascii_upper_c(),
+    }
+}
+
+fn mode_char_lower(mode: SaleaeState) -> uint<8> {
+    match mode {
+        SaleaeState::DataSignals => 0x64,
+        SaleaeState::SyncSignals => 0x73,
+        SaleaeState::EdgeSignals => 0x65,
+        SaleaeState::RawSignals => 0x72,
+        SaleaeState::Counter => 0x63,
+    }
+}
+
+fn bool_char(v: bool) -> uint<8> {
+    if v {
+        trunc(ascii_zero() + 1)
+    } else {
+        ascii_zero()
+    }
+}
+
+fn wait_char(wait_enabled: uint<8>) -> uint<8> {
+    let d = if wait_enabled > 9 { 9 } else { wait_enabled };
+    trunc(ascii_zero() + d)
+}
+
+fn console_msg_byte(
+    msg: ConsoleMsg,
+    idx: uint<16>,
+    wait_enabled: uint<8>,
+    saleae_state: SaleaeState,
+    ft_enabled: bool,
+    ft_remote_allowed: bool,
+    ft_armed: bool,
+) -> (bool, uint<8>) {
+    let slash: uint<8> = 0x2f;
+    match msg {
+        ConsoleMsg::None => (false, 0),
+        ConsoleMsg::Ok => {
+            if idx == 0 {
+                (true, 0x6f)
+            } else if idx == 1 {
+                (true, 0x6b)
+            } else if idx == 2 {
+                (true, ascii_cr())
+            } else if idx == 3 {
+                (true, ascii_lf())
+            } else {
+                (false, 0)
+            }
+        },
+        ConsoleMsg::Err => {
+            if idx == 0 {
+                (true, 0x65)
+            } else if idx == 1 {
+                (true, 0x72)
+            } else if idx == 2 {
+                (true, 0x72)
+            } else if idx == 3 {
+                (true, ascii_cr())
+            } else if idx == 4 {
+                (true, ascii_lf())
+            } else {
+                (false, 0)
+            }
+        },
+        ConsoleMsg::Help => help_msg_byte(idx),
+        ConsoleMsg::PinMap => saleae_map_msg_byte(idx, saleae_state),
+        ConsoleMsg::Status => {
+            if idx == 0 {
+                (true, 0x73)
+            } else if idx == 1 {
+                (true, 0x74)
+            } else if idx == 2 {
+                (true, 0x61)
+            } else if idx == 3 {
+                (true, 0x74)
+            } else if idx == 4 {
+                (true, ascii_space())
+            } else if idx == 5 {
+                (true, 0x66)
+            } else if idx == 6 {
+                (true, ascii_eq())
+            } else if idx == 7 {
+                (true, bool_char(ft_enabled))
+            } else if idx == 8 {
+                (true, ascii_space())
+            } else if idx == 9 {
+                (true, 0x72)
+            } else if idx == 10 {
+                (true, ascii_eq())
+            } else if idx == 11 {
+                (true, bool_char(ft_remote_allowed))
+            } else if idx == 12 {
+                (true, ascii_space())
+            } else if idx == 13 {
+                (true, 0x61)
+            } else if idx == 14 {
+                (true, ascii_eq())
+            } else if idx == 15 {
+                (true, bool_char(ft_armed))
+            } else if idx == 16 {
+                (true, ascii_space())
+            } else if idx == 17 {
+                (true, 0x77)
+            } else if idx == 18 {
+                (true, ascii_eq())
+            } else if idx == 19 {
+                (true, wait_char(wait_enabled))
+            } else if idx == 20 {
+                (true, ascii_space())
+            } else if idx == 21 {
+                (true, 0x6d)
+            } else if idx == 22 {
+                (true, ascii_eq())
+            } else if idx == 23 {
+                (true, mode_char_lower(saleae_state))
+            } else if idx == 24 {
+                (true, ascii_cr())
+            } else if idx == 25 {
+                (true, ascii_lf())
+            } else {
+                (false, 0)
+            }
+        },
+    }
+}
+
+fn help_line0(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 7] = [
+        0x48, 0x65, 0x6c, 0x70, 0x3a, 0x0d, 0x0a,
+    ];
+    if idx < 7 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line1(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 16] = [
+        0x20, 0x68, 0x20, 0x3a, 0x20, 0x73, 0x68, 0x6f, 0x77, 0x20, 0x68, 0x65, 0x6c, 0x70,
+        0x0d, 0x0a,
+    ];
+    if idx < 16 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line2(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 30] = [
+        0x20, 0x71, 0x20, 0x3a, 0x20, 0x73, 0x68, 0x6f, 0x77, 0x20, 0x73, 0x74, 0x61, 0x74,
+        0x75, 0x73, 0x20, 0x28, 0x66, 0x2c, 0x72, 0x2c, 0x61, 0x2c, 0x77, 0x2c, 0x6d, 0x29,
+        0x0d, 0x0a,
+    ];
+    if idx < 30 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line3(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 31] = [
+        0x20, 0x6c, 0x20, 0x3a, 0x20, 0x73, 0x68, 0x6f, 0x77, 0x20, 0x73, 0x61, 0x6c, 0x65,
+        0x61, 0x65, 0x20, 0x6d, 0x61, 0x70, 0x20, 0x2b, 0x20, 0x6c, 0x65, 0x67, 0x65, 0x6e,
+        0x64, 0x0d, 0x0a,
+    ];
+    if idx < 31 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line4(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 33] = [
+        0x20, 0x64, 0x2f, 0x73, 0x2f, 0x65, 0x2f, 0x72, 0x2f, 0x63, 0x20, 0x3a, 0x20, 0x73,
+        0x65, 0x6c, 0x65, 0x63, 0x74, 0x20, 0x73, 0x61, 0x6c, 0x65, 0x61, 0x65, 0x20, 0x6d,
+        0x6f, 0x64, 0x65, 0x0d, 0x0a,
+    ];
+    if idx < 33 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line5(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 41] = [
+        0x20, 0x20, 0x20, 0x64, 0x3d, 0x64, 0x61, 0x74, 0x61, 0x20, 0x73, 0x3d, 0x73, 0x79,
+        0x6e, 0x63, 0x20, 0x65, 0x3d, 0x65, 0x64, 0x67, 0x65, 0x20, 0x72, 0x3d, 0x72, 0x61,
+        0x77, 0x20, 0x63, 0x3d, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x72, 0x0d, 0x0a,
+    ];
+    if idx < 41 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line6(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 37] = [
+        0x20, 0x30, 0x2e, 0x2e, 0x39, 0x20, 0x3a, 0x20, 0x73, 0x65, 0x74, 0x20, 0x77, 0x61,
+        0x69, 0x74, 0x20, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x20, 0x28, 0x30, 0x3d, 0x6d, 0x69,
+        0x6e, 0x20, 0x77, 0x61, 0x69, 0x74, 0x29, 0x0d, 0x0a,
+    ];
+    if idx < 37 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line7(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 31] = [
+        0x20, 0x61, 0x2f, 0x6b, 0x20, 0x3a, 0x20, 0x61, 0x72, 0x6d, 0x20, 0x6f, 0x72, 0x20,
+        0x6c, 0x6f, 0x63, 0x6b, 0x20, 0x46, 0x54, 0x20, 0x63, 0x6f, 0x6e, 0x74, 0x72, 0x6f,
+        0x6c, 0x0d, 0x0a,
+    ];
+    if idx < 31 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line8(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 33] = [
+        0x20, 0x70, 0x2f, 0x6f, 0x20, 0x3a, 0x20, 0x61, 0x6c, 0x6c, 0x6f, 0x77, 0x20, 0x6f,
+        0x72, 0x20, 0x62, 0x6c, 0x6f, 0x63, 0x6b, 0x20, 0x46, 0x54, 0x20, 0x72, 0x65, 0x6d,
+        0x6f, 0x74, 0x65, 0x0d, 0x0a,
+    ];
+    if idx < 33 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line9(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 31] = [
+        0x20, 0x66, 0x2f, 0x78, 0x20, 0x3a, 0x20, 0x66, 0x6f, 0x72, 0x63, 0x65, 0x20, 0x46,
+        0x54, 0x20, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d, 0x20, 0x6f, 0x6e, 0x2f, 0x6f, 0x66,
+        0x66, 0x0d, 0x0a,
+    ];
+    if idx < 31 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line10(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 65] = [
+        0x20, 0x6c, 0x65, 0x67, 0x65, 0x6e, 0x64, 0x20, 0x63, 0x68, 0x61, 0x72, 0x5f, 0x75,
+        0x61, 0x72, 0x74, 0x3a, 0x20, 0x4d, 0x3d, 0x6f, 0x70, 0x5f, 0x66, 0x65, 0x74, 0x63,
+        0x68, 0x20, 0x52, 0x3d, 0x6d, 0x65, 0x6d, 0x5f, 0x72, 0x64, 0x20, 0x72, 0x3d, 0x69,
+        0x6f, 0x5f, 0x72, 0x64, 0x20, 0x57, 0x3d, 0x6d, 0x65, 0x6d, 0x5f, 0x77, 0x72, 0x20,
+        0x77, 0x3d, 0x69, 0x6f, 0x5f, 0x77, 0x72, 0x0d, 0x0a,
+    ];
+    if idx < 65 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_line11(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 38] = [
+        0x20, 0x6e, 0x6f, 0x74, 0x65, 0x3a, 0x20, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64,
+        0x73, 0x20, 0x61, 0x72, 0x65, 0x20, 0x63, 0x61, 0x73, 0x65, 0x2d, 0x69, 0x6e, 0x73,
+        0x65, 0x6e, 0x73, 0x69, 0x74, 0x69, 0x76, 0x65, 0x0d, 0x0a,
+    ];
+    if idx < 38 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn help_msg_byte(idx: uint<16>) -> (bool, uint<8>) {
+    if idx < 7 {
+        help_line0(idx)
+    } else if idx < 23 {
+        help_line1(trunc(idx - 7))
+    } else if idx < 53 {
+        help_line2(trunc(idx - 23))
+    } else if idx < 84 {
+        help_line3(trunc(idx - 53))
+    } else if idx < 117 {
+        help_line4(trunc(idx - 84))
+    } else if idx < 158 {
+        help_line5(trunc(idx - 117))
+    } else if idx < 195 {
+        help_line6(trunc(idx - 158))
+    } else if idx < 226 {
+        help_line7(trunc(idx - 195))
+    } else if idx < 259 {
+        help_line8(trunc(idx - 226))
+    } else if idx < 290 {
+        help_line9(trunc(idx - 259))
+    } else if idx < 355 {
+        help_line10(trunc(idx - 290))
+    } else if idx < 393 {
+        help_line11(trunc(idx - 355))
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line0(idx: uint<16>, saleae_state: SaleaeState) -> (bool, uint<8>) {
+    let text: [uint<8>; 12] = [
+        0x6d, 0x61, 0x70, 0x20, 0x6d, 0x6f, 0x64, 0x65, 0x3d, 0x00, 0x0d, 0x0a,
+    ];
+    if idx == 9 {
+        (true, mode_char_lower(saleae_state))
+    } else if idx < 12 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line1(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 52] = [
+        0x64, 0x3a, 0x20, 0x64, 0x30, 0x3d, 0x77, 0x72, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20,
+        0x64, 0x31, 0x3d, 0x72, 0x64, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x64, 0x32, 0x3d,
+        0x69, 0x6f, 0x72, 0x71, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x64, 0x33, 0x3d, 0x6d,
+        0x72, 0x65, 0x71, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x0d, 0x0a,
+    ];
+    if idx < 52 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line2(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 54] = [
+        0x20, 0x20, 0x20, 0x64, 0x34, 0x3d, 0x6d, 0x31, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20,
+        0x64, 0x35, 0x3d, 0x64, 0x61, 0x74, 0x61, 0x5f, 0x75, 0x61, 0x72, 0x74, 0x20, 0x64,
+        0x36, 0x3d, 0x63, 0x68, 0x61, 0x72, 0x5f, 0x75, 0x61, 0x72, 0x74, 0x20, 0x64, 0x37,
+        0x3d, 0x61, 0x64, 0x64, 0x72, 0x5f, 0x75, 0x61, 0x72, 0x74, 0x0d, 0x0a,
+    ];
+    if idx < 54 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line3(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 98] = [
+        0x73, 0x3a, 0x20, 0x64, 0x30, 0x3d, 0x77, 0x72, 0x5f, 0x72, 0x61, 0x77, 0x6e, 0x20,
+        0x64, 0x31, 0x3d, 0x72, 0x64, 0x5f, 0x72, 0x61, 0x77, 0x6e, 0x20, 0x64, 0x32, 0x3d,
+        0x6d, 0x72, 0x65, 0x71, 0x5f, 0x66, 0x61, 0x6c, 0x6c, 0x20, 0x64, 0x33, 0x3d, 0x6d,
+        0x31, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x64, 0x34, 0x3d, 0x77, 0x72, 0x5f, 0x73,
+        0x79, 0x6e, 0x63, 0x20, 0x64, 0x35, 0x3d, 0x72, 0x64, 0x5f, 0x73, 0x79, 0x6e, 0x63,
+        0x20, 0x64, 0x36, 0x3d, 0x69, 0x6f, 0x72, 0x71, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20,
+        0x64, 0x37, 0x3d, 0x6d, 0x72, 0x65, 0x71, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x0d, 0x0a,
+    ];
+    if idx < 98 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line4(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 100] = [
+        0x65, 0x3a, 0x20, 0x64, 0x30, 0x3d, 0x77, 0x72, 0x5f, 0x72, 0x61, 0x77, 0x6e, 0x20,
+        0x64, 0x31, 0x3d, 0x72, 0x64, 0x5f, 0x72, 0x61, 0x77, 0x6e, 0x20, 0x64, 0x32, 0x3d,
+        0x69, 0x6f, 0x72, 0x71, 0x5f, 0x66, 0x61, 0x6c, 0x6c, 0x20, 0x64, 0x33, 0x3d, 0x6d,
+        0x72, 0x65, 0x71, 0x5f, 0x66, 0x61, 0x6c, 0x6c, 0x20, 0x64, 0x34, 0x3d, 0x77, 0x72,
+        0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x64, 0x35, 0x3d, 0x72, 0x64, 0x5f, 0x73, 0x79,
+        0x6e, 0x63, 0x20, 0x64, 0x36, 0x3d, 0x69, 0x6f, 0x72, 0x71, 0x5f, 0x73, 0x79, 0x6e,
+        0x63, 0x20, 0x64, 0x37, 0x3d, 0x6d, 0x72, 0x65, 0x71, 0x5f, 0x73, 0x79, 0x6e, 0x63,
+        0x0d, 0x0a,
+    ];
+    if idx < 100 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line5(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 96] = [
+        0x72, 0x3a, 0x20, 0x64, 0x30, 0x3d, 0x77, 0x72, 0x5f, 0x72, 0x61, 0x77, 0x20, 0x64,
+        0x31, 0x3d, 0x72, 0x64, 0x5f, 0x72, 0x61, 0x77, 0x20, 0x64, 0x32, 0x3d, 0x69, 0x6f,
+        0x72, 0x71, 0x5f, 0x72, 0x61, 0x77, 0x20, 0x64, 0x33, 0x3d, 0x6d, 0x72, 0x65, 0x71,
+        0x5f, 0x72, 0x61, 0x77, 0x20, 0x64, 0x34, 0x3d, 0x77, 0x72, 0x5f, 0x73, 0x79, 0x6e,
+        0x63, 0x20, 0x64, 0x35, 0x3d, 0x72, 0x64, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x64,
+        0x36, 0x3d, 0x69, 0x6f, 0x72, 0x71, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x64, 0x37,
+        0x3d, 0x6d, 0x72, 0x65, 0x71, 0x5f, 0x73, 0x79, 0x6e, 0x63, 0x0d, 0x0a,
+    ];
+    if idx < 96 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line6(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 21] = [
+        0x63, 0x3a, 0x20, 0x64, 0x30, 0x2e, 0x2e, 0x64, 0x37, 0x3d, 0x63, 0x74, 0x72, 0x5b,
+        0x30, 0x2e, 0x2e, 0x37, 0x5d, 0x0d, 0x0a,
+    ];
+    if idx < 21 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line7(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 43] = [
+        0x6c, 0x65, 0x67, 0x65, 0x6e, 0x64, 0x3a, 0x20, 0x75, 0x3d, 0x75, 0x61, 0x72, 0x74,
+        0x20, 0x73, 0x3d, 0x73, 0x79, 0x6e, 0x63, 0x20, 0x5e, 0x3d, 0x66, 0x61, 0x6c, 0x6c,
+        0x20, 0x6e, 0x3d, 0x61, 0x63, 0x74, 0x69, 0x76, 0x65, 0x5f, 0x6c, 0x6f, 0x77, 0x0d,
+        0x0a,
+    ];
+    if idx < 43 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_line8(idx: uint<16>) -> (bool, uint<8>) {
+    let text: [uint<8>; 64] = [
+        0x6c, 0x65, 0x67, 0x65, 0x6e, 0x64, 0x20, 0x63, 0x68, 0x61, 0x72, 0x5f, 0x75, 0x61,
+        0x72, 0x74, 0x3a, 0x20, 0x4d, 0x3d, 0x6f, 0x70, 0x5f, 0x66, 0x65, 0x74, 0x63, 0x68,
+        0x20, 0x52, 0x3d, 0x6d, 0x65, 0x6d, 0x5f, 0x72, 0x64, 0x20, 0x72, 0x3d, 0x69, 0x6f,
+        0x5f, 0x72, 0x64, 0x20, 0x57, 0x3d, 0x6d, 0x65, 0x6d, 0x5f, 0x77, 0x72, 0x20, 0x77,
+        0x3d, 0x69, 0x6f, 0x5f, 0x77, 0x72, 0x0d, 0x0a,
+    ];
+    if idx < 64 {
+        (true, text[trunc(idx)])
+    } else {
+        (false, 0)
+    }
+}
+
+fn saleae_map_msg_byte(idx: uint<16>, saleae_state: SaleaeState) -> (bool, uint<8>) {
+    if idx < 12 {
+        saleae_map_line0(idx, saleae_state)
+    } else if idx < 64 {
+        saleae_map_line1(trunc(idx - 12))
+    } else if idx < 118 {
+        saleae_map_line2(trunc(idx - 64))
+    } else if idx < 216 {
+        saleae_map_line3(trunc(idx - 118))
+    } else if idx < 316 {
+        saleae_map_line4(trunc(idx - 216))
+    } else if idx < 412 {
+        saleae_map_line5(trunc(idx - 316))
+    } else if idx < 433 {
+        saleae_map_line6(trunc(idx - 412))
+    } else if idx < 476 {
+        saleae_map_line7(trunc(idx - 433))
+    } else if idx < 540 {
+        saleae_map_line8(trunc(idx - 476))
+    } else {
+        (false, 0)
+    }
+}
+
+fn gate_cycle_decode_ft(cycle_decode: CycleDecode, allow_ft_remote: bool) -> CycleDecode {
+    if allow_ft_remote {
+        cycle_decode
+    } else {
+        CycleDecode$(
+            bus: cycle_decode.bus,
+            bus_error: cycle_decode.bus_error,
+            rx_digit: cycle_decode.rx_digit,
+            saleae_cmd: cycle_decode.saleae_cmd,
+            ft_cmd: FtStreamCmdDecode$(
+                enable: false,
+                disable: false,
+            ),
+        )
+    }
+}
+
 struct MainState {
     sample_state: SampleState,
     wait_enabled: uint<8>,
@@ -41,6 +579,11 @@ struct MainState {
     addr_sync: uint<16>,
     data_sync_d0: uint<8>,
     data_sync: uint<8>,
+    ft_remote_allowed: bool,
+    ft_armed: bool,
+    console_msg: ConsoleMsg,
+    console_idx: uint<16>,
+    console_pending: ConsoleMsg,
 }
 
 fn mk_step_inputs(
@@ -198,6 +741,11 @@ entity main_core(
             addr_sync: 0,
             data_sync_d0: 0,
             data_sync: 0,
+            ft_remote_allowed: false,
+            ft_armed: false,
+            console_msg: ConsoleMsg::None(),
+            console_idx: 0,
+            console_pending: ConsoleMsg::None(),
         ))
         = {
             let sample_state = state.sample_state;
@@ -213,10 +761,17 @@ entity main_core(
             let addr_sync_d0 = state.addr_sync_d0;
             let addr_sync = state.addr_sync;
             let data_sync_d0 = state.data_sync_d0;
+            let ft_remote_allowed = state.ft_remote_allowed;
+            let ft_armed = state.ft_armed;
+            let console_msg = state.console_msg;
+            let console_idx = state.console_idx;
+            let console_pending = state.console_pending;
+
+            let cycle_decode_for_step = gate_cycle_decode_ft(cycle_decode, ft_remote_allowed);
 
             let step_inputs = mk_step_inputs(
                 state,
-                cycle_decode,
+                cycle_decode_for_step,
                 mreq_fall,
                 iorq_fall,
                 *tx_busy,
@@ -286,6 +841,150 @@ entity main_core(
                 fifo_full_counter
             };
 
+            let rx_upper = to_upper(rx.byte);
+            let cmd_arm = rx.valid && rx_upper == ascii_upper_a();
+            let cmd_lock = rx.valid && rx_upper == ascii_upper_k();
+            let cmd_remote_on = rx.valid && rx_upper == ascii_upper_p();
+            let cmd_remote_off = rx.valid && rx_upper == ascii_upper_o();
+            let cmd_ft_on = rx.valid && rx_upper == ascii_upper_f();
+            let cmd_ft_off = rx.valid && rx_upper == ascii_upper_x();
+            let cmd_help = rx.valid && rx_upper == ascii_upper_h();
+            let cmd_status = rx.valid && rx_upper == ascii_upper_q();
+            let cmd_pin_map = rx.valid && rx_upper == ascii_upper_l();
+
+            let cmd_remote_on_ok = cmd_remote_on && ft_armed;
+            let cmd_ft_on_ok = cmd_ft_on && ft_armed;
+            let cmd_fail = (cmd_remote_on && !ft_armed) || (cmd_ft_on && !ft_armed);
+            let cmd_known =
+                cycle_decode.rx_digit.0 ||
+                cycle_decode.saleae_cmd.0 ||
+                cmd_arm || cmd_lock || cmd_remote_on || cmd_remote_off || cmd_ft_on || cmd_ft_off ||
+                cmd_help || cmd_status || cmd_pin_map;
+            let cmd_unknown = rx.valid && !cmd_known;
+
+            let next_ft_armed = if cmd_lock {
+                false
+            } else if cmd_arm {
+                true
+            } else {
+                ft_armed
+            };
+
+            let next_ft_remote_allowed = if cmd_lock {
+                false
+            } else if cmd_remote_off {
+                false
+            } else if cmd_remote_on_ok {
+                true
+            } else {
+                ft_remote_allowed
+            };
+
+            let next_ft_enabled = if cmd_lock {
+                false
+            } else if cmd_ft_off {
+                false
+            } else if cmd_ft_on_ok {
+                true
+            } else {
+                step.ft_mux.next_ft_enabled
+            };
+
+            let cmd_msg = if cmd_help {
+                ConsoleMsg::Help()
+            } else if cmd_status {
+                ConsoleMsg::Status()
+            } else if cmd_pin_map {
+                ConsoleMsg::PinMap()
+            } else if cmd_unknown {
+                ConsoleMsg::Help()
+            } else if cmd_fail {
+                ConsoleMsg::Err()
+            } else if cmd_arm || cmd_lock || cmd_remote_on_ok || cmd_remote_off || cmd_ft_on_ok || cmd_ft_off {
+                ConsoleMsg::Ok()
+            } else {
+                ConsoleMsg::None()
+            };
+
+            let cur_console_byte = console_msg_byte(
+                console_msg,
+                console_idx,
+                wait_enabled,
+                saleae_state,
+                ft_enabled,
+                ft_remote_allowed,
+                ft_armed,
+            );
+            let cur_console_sent = cur_console_byte.0 && !*tx_busy;
+            let cur_next_idx: uint<16> = trunc(console_idx + 1);
+            let cur_next_valid = console_msg_byte(
+                console_msg,
+                cur_next_idx,
+                wait_enabled,
+                saleae_state,
+                ft_enabled,
+                ft_remote_allowed,
+                ft_armed,
+            ).0;
+            let post_console_msg = if cur_console_sent && !cur_next_valid {
+                ConsoleMsg::None()
+            } else {
+                console_msg
+            };
+            let post_console_idx: uint<16> = if cur_console_sent {
+                if cur_next_valid {
+                    cur_next_idx
+                } else {
+                    0
+                }
+            } else {
+                console_idx
+            };
+            let post_console_pending = if cur_console_sent && !cur_next_valid && !console_msg_is_none(console_pending) {
+                ConsoleMsg::None()
+            } else {
+                console_pending
+            };
+
+            let drained_console_msg = if cur_console_sent && !cur_next_valid && !console_msg_is_none(console_pending) {
+                console_pending
+            } else {
+                post_console_msg
+            };
+            let drained_console_idx: uint<16> = if cur_console_sent && !cur_next_valid && !console_msg_is_none(console_pending) {
+                0
+            } else {
+                post_console_idx
+            };
+
+            let next_console_msg = if !console_msg_is_none(cmd_msg) {
+                if console_msg_is_none(drained_console_msg) {
+                    cmd_msg
+                } else {
+                    drained_console_msg
+                }
+            } else {
+                drained_console_msg
+            };
+            let next_console_idx: uint<16> = if !console_msg_is_none(cmd_msg) {
+                if console_msg_is_none(drained_console_msg) {
+                    0
+                } else {
+                    drained_console_idx
+                }
+            } else {
+                drained_console_idx
+            };
+            let next_console_pending = if !console_msg_is_none(cmd_msg) {
+                if console_msg_is_none(drained_console_msg) {
+                    post_console_pending
+                } else {
+                    cmd_msg
+                }
+            } else {
+                post_console_pending
+            };
+
             MainState$(
                 sample_state: next_sample_state,
                 wait_enabled: next_wait_enabled,
@@ -293,7 +992,7 @@ entity main_core(
                 last_addr: next_last_addr,
                 saleae_state: next_saleae_state,
                 saleae_counter: next_saleae_counter,
-                ft_enabled: step.ft_mux.next_ft_enabled,
+                ft_enabled: next_ft_enabled,
                 ft_state: step.ft_mux.next_ft_state,
                 ft_cur_value: step.ft_mux.next_ft_cur_value,
                 fifo_full_counter: next_fifo_full_counter,
@@ -301,6 +1000,11 @@ entity main_core(
                 addr_sync: addr_sync_d0,
                 data_sync_d0: data,
                 data_sync: data_sync_d0,
+                ft_remote_allowed: next_ft_remote_allowed,
+                ft_armed: next_ft_armed,
+                console_msg: next_console_msg,
+                console_idx: next_console_idx,
+                console_pending: next_console_pending,
             )
         };
 
@@ -316,10 +1020,16 @@ entity main_core(
     let fifo_full_counter = state.fifo_full_counter;
     let addr_sync = state.addr_sync;
     let data_sync = state.data_sync;
+    let ft_remote_allowed = state.ft_remote_allowed;
+    let ft_armed = state.ft_armed;
+    let console_msg = state.console_msg;
+    let console_idx = state.console_idx;
+
+    let cycle_decode_for_step = gate_cycle_decode_ft(cycle_decode, ft_remote_allowed);
 
     let step_inputs = mk_step_inputs(
         state,
-        cycle_decode,
+        cycle_decode_for_step,
         mreq_fall,
         iorq_fall,
         *tx_busy,
@@ -361,6 +1071,25 @@ entity main_core(
     );
 
     let ft_tx_req = telemetry_tx_arbiter2((ft_mux.ft_tx_req_valid, ft_mux.ft_tx_req_byte), bus_tx_req);
+    let console_byte = console_msg_byte(
+        console_msg,
+        console_idx,
+        wait_enabled,
+        saleae_state,
+        ft_enabled,
+        ft_remote_allowed,
+        ft_armed,
+    );
+    let console_tx_req = if console_byte.0 && !*tx_busy {
+        (true, console_byte.1)
+    } else {
+        (false, 0)
+    };
+    let uart_upstream_req = if console_tx_req.0 {
+        console_tx_req
+    } else {
+        ft_tx_req
+    };
 
     let usb_cmd_inputs = mk_usb_inputs(
         wait_enabled,
@@ -369,7 +1098,7 @@ entity main_core(
         rx.valid,
         rx.byte,
         *tx_busy,
-        ft_tx_req,
+        uart_upstream_req,
     );
     let usb_cmd = parse_usb_cmd(usb_cmd_inputs);
 
@@ -411,6 +1140,16 @@ entity main_core(
         true,
         BridgePolicy::QueueOnly(),
     );
+    let data_bridge = inst au_bridge::<8, 4, 100_000_000, 24>(
+        clk,
+        rst,
+        data_sync,
+        bus_sample.event_fifo_wput,
+        clk_uart,
+        rst,
+        true,
+        BridgePolicy::QueueOnly(),
+    );
 
     let _ft = inst au_ft_tap_u16(
         clk,
@@ -443,8 +1182,8 @@ entity main_core(
 
     let led_out = [
         ft_enabled,
-        *stream_fifo_empty,
-        *stream_fifo_full,
+        ft_remote_allowed,
+        ft_armed,
         bus_sample.sample_is_wait,
         !ft_txe,
         !ft_rxf,
@@ -467,6 +1206,7 @@ entity main_core(
         z80_rd,
         z80_iorq,
         z80_mreq,
+        data_bridge.line,
         event_bridge.line,
         addr_bridge.line,
         saleae_counter,

@@ -96,20 +96,18 @@ def run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     subprocess.run(cmd, cwd=cwd, env=env, check=True)
 
 
-def build_source_bundle(project: Path, main_source: Path, extra_sources: list[Path]) -> Path:
-    if not extra_sources:
-        return main_source
-
-    bundle = project / "build" / "spade_bundle.sv"
-    bundle.parent.mkdir(parents=True, exist_ok=True)
-    with bundle.open("w") as out:
-        out.write(main_source.read_text())
-        out.write("\n")
-        for src in extra_sources:
-            out.write(f"\n// ----- BEGIN INCLUDED VERILOG: {src} -----\n")
-            out.write(src.read_text())
-            out.write(f"\n// ----- END INCLUDED VERILOG: {src} -----\n")
-    return bundle
+def ordered_sources(main_source: Path, extra_sources: list[Path]) -> list[Path]:
+    # Keep external Verilog first, then generated Spade source last.
+    # This avoids default_nettype bleed-through into legacy Verilog modules.
+    ordered = [*extra_sources, main_source]
+    seen: set[Path] = set()
+    deduped: list[Path] = []
+    for src in ordered:
+        resolved = src.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            deduped.append(resolved)
+    return deduped
 
 
 def main() -> int:
@@ -144,7 +142,7 @@ def main() -> int:
 
     run(["swim", "build"], cwd=project)
     main_source = (project / args.source).resolve()
-    bundled_source = build_source_bundle(project, main_source, resolve_verilog_sources(project))
+    sources = ordered_sources(main_source, resolve_verilog_sources(project))
 
     cmd = [
         resolve_cli(args.cli),
@@ -154,8 +152,6 @@ def main() -> int:
         top,
         "--part",
         part,
-        "--source",
-        str(bundled_source),
         "--xdc",
         str((project / args.xdc).resolve()),
         "--output-dir",
@@ -163,6 +159,8 @@ def main() -> int:
         "--out-zip",
         str(out_zip),
     ]
+    for src in sources:
+        cmd.extend(["--source", str(src)])
     if not args.no_stream_events:
         cmd.append("--stream-events")
     if args.server:
