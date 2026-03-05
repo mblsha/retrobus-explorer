@@ -468,6 +468,7 @@ pub fn saleae_mux(
     z80_rd_raw: bool,
     z80_iorq_raw: bool,
     z80_mreq_raw: bool,
+    data_line: bool,
     event_line: bool,
     addr_line: bool,
     saleae_counter: uint<8>,
@@ -480,7 +481,7 @@ pub fn saleae_mux(
                 z80_iorq_sync,
                 z80_mreq_sync,
                 z80_m1_sync,
-                false,
+                data_line,
                 event_line,
                 addr_line,
             ]
