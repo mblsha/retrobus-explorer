@@ -142,6 +142,56 @@ fn mk_console_ctx(
     )
 }
 
+struct ConsoleCmdDecode {
+    arm: bool,
+    lock: bool,
+    remote_on: bool,
+    remote_off: bool,
+    ft_on: bool,
+    ft_off: bool,
+    help: bool,
+    status: bool,
+    pin_map: bool,
+}
+
+fn default_console_cmd_decode() -> ConsoleCmdDecode {
+    ConsoleCmdDecode$(
+        arm: false,
+        lock: false,
+        remote_on: false,
+        remote_off: false,
+        ft_on: false,
+        ft_off: false,
+        help: false,
+        status: false,
+        pin_map: false,
+    )
+}
+
+entity decode_console_cmd(
+    clk: clock,
+    rx_valid: bool,
+    rx_byte: uint<8>,
+) -> Option<ConsoleCmdDecode> {
+    let maybe_rx_byte = if rx_valid { Some(rx_byte) } else { None };
+
+    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
+        let _ = clk;
+        let upper = to_upper(byte);
+        ConsoleCmdDecode$(
+            arm: upper == b'A',
+            lock: upper == b'K',
+            remote_on: upper == b'P',
+            remote_off: upper == b'O',
+            ft_on: upper == b'F',
+            ft_off: upper == b'X',
+            help: upper == b'H',
+            status: upper == b'Q',
+            pin_map: upper == b'L',
+        )
+    })
+}
+
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -341,16 +391,17 @@ entity main_core(
                 fifo_full_counter
             };
 
-            let rx_upper = to_upper(rx.byte);
-            let cmd_arm = rx.valid && rx_upper == b'A';
-            let cmd_lock = rx.valid && rx_upper == b'K';
-            let cmd_remote_on = rx.valid && rx_upper == b'P';
-            let cmd_remote_off = rx.valid && rx_upper == b'O';
-            let cmd_ft_on = rx.valid && rx_upper == b'F';
-            let cmd_ft_off = rx.valid && rx_upper == b'X';
-            let cmd_help = rx.valid && rx_upper == b'H';
-            let cmd_status = rx.valid && rx_upper == b'Q';
-            let cmd_pin_map = rx.valid && rx_upper == b'L';
+            let console_cmd = inst decode_console_cmd(clk, rx.valid, rx.byte)
+                .unwrap_or(default_console_cmd_decode());
+            let cmd_arm = console_cmd.arm;
+            let cmd_lock = console_cmd.lock;
+            let cmd_remote_on = console_cmd.remote_on;
+            let cmd_remote_off = console_cmd.remote_off;
+            let cmd_ft_on = console_cmd.ft_on;
+            let cmd_ft_off = console_cmd.ft_off;
+            let cmd_help = console_cmd.help;
+            let cmd_status = console_cmd.status;
+            let cmd_pin_map = console_cmd.pin_map;
 
             let cmd_remote_on_ok = cmd_remote_on && ft_armed;
             let cmd_ft_on_ok = cmd_ft_on && ft_armed;

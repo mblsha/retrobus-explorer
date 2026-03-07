@@ -44,6 +44,39 @@ pub struct MsgTemplate {
     bytes: [uint<8>; 64],
 }
 
+pub struct RxByteDecode {
+    byte: uint<8>,
+    upper: uint<8>,
+    digit: DigitDecode,
+}
+
+fn default_rx_byte_decode() -> RxByteDecode {
+    RxByteDecode$(
+        byte: 0,
+        upper: 0,
+        digit: DigitDecode$(valid: false, value: 0),
+    )
+}
+
+entity decode_rx_byte(
+    clk: clock,
+    rx_valid: bool,
+    rx_parity_error: bool,
+    rx_byte: uint<8>,
+) -> Option<RxByteDecode> {
+    let max_freq_code: uint<4> = 5;
+    let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
+
+    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
+        let _ = clk;
+        RxByteDecode$(
+            byte: byte,
+            upper: to_upper(byte),
+            digit: decode_digit_max(byte, max_freq_code),
+        )
+    })
+}
+
 pub fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
     std::conv::concat_arrays(message, [0; 64 - N])
 }
@@ -262,14 +295,14 @@ pub entity simple_cmd_uart_core(
     rx_byte: uint<8>,
     tx_busy: bool,
 ) -> SimpleCmdUartOut {
-    let rx_ok = rx_valid && !rx_parity_error;
-    let rx_digit = decode_digit_max(rx_byte, 5);
-    let rx_upper: uint<8> = to_upper(rx_byte);
+    let rx_decoded = inst decode_rx_byte(clk, rx_valid, rx_parity_error, rx_byte);
+    let rx_ok = rx_decoded.is_some();
+    let rx_decode = rx_decoded.unwrap_or(default_rx_byte_decode());
 
     reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
-        next_cmd_state(cmd_state, rx_ok, rx_byte, rx_upper)
+        next_cmd_state(cmd_state, rx_ok, rx_decode.byte, rx_decode.upper)
     };
-    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_upper, rx_digit);
+    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_decode.upper, rx_decode.digit);
 
     reg(clk) mode: Mode reset(rst: Mode::ClockTester()) = {
         if cmd_decode.mode_write {
@@ -296,7 +329,7 @@ pub entity simple_cmd_uart_core(
     let tx_stream = tx_stream_step(tx_state, mode, freq_code, tx_busy, false, MsgKind::None());
     let tx_msg_none = tx_stream.msg_none;
 
-    let rx_is_bang = rx_ok && rx_byte == b'!';
+    let rx_is_bang = rx_ok && rx_decode.byte == b'!';
     let payload_rx = is_echo_mode(mode) && cmd_state_is_idle(cmd_state) && rx_ok && !rx_is_bang;
 
     SimpleCmdUartOut$(
