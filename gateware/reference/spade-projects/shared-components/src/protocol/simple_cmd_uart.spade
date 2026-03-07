@@ -4,7 +4,7 @@ use shared_components::ascii::to_upper;
 use shared_components::message_stream::ByteMsgStreamOut;
 use shared_components::message_stream::ByteMsgStreamState;
 use shared_components::message_stream::TxReq8;
-use shared_components::message_stream::byte_msg_stream_step;
+use shared_components::message_stream::byte_msg_stream_step_with;
 
 pub enum Mode {
     ClockTester,
@@ -25,13 +25,6 @@ pub enum MsgKind {
     Ok,
     ErrCmd,
     ErrFreq,
-}
-
-pub fn msg_is_none(msg: MsgKind) -> bool {
-    match msg {
-        MsgKind::None => true,
-        _ => false,
-    }
 }
 
 pub fn mode_char(mode: Mode) -> uint<8> {
@@ -245,20 +238,19 @@ fn tx_stream_step(
     next_msg_valid: bool,
     next_msg: MsgKind,
 ) -> ByteMsgStreamOut<MsgKind, 8> {
-    let cur_byte = msg_byte(tx_state.cur_msg, tx_state.cur_idx, mode, freq_code);
-    let next_idx: uint<8> = trunc(tx_state.cur_idx + 1);
-    let next_byte = msg_byte(tx_state.cur_msg, next_idx, mode, freq_code);
-    byte_msg_stream_step(
+    byte_msg_stream_step_with(
         tx_state,
         MsgKind::None(),
-        msg_is_none(tx_state.cur_msg),
-        msg_is_none(tx_state.pending_msg),
-        cur_byte,
-        next_byte,
+        fn |msg| {
+            match msg {
+                MsgKind::None => true,
+                _ => false,
+            }
+        },
+        fn |msg, idx| { msg_byte(msg, idx, mode, freq_code) },
         tx_busy,
         next_msg_valid,
         next_msg,
-        msg_is_none(next_msg),
     )
 }
 

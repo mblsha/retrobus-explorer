@@ -116,3 +116,37 @@ pub fn byte_msg_stream_step<TMsg, #uint IDX_W>(
         msg_none: final_msg_none,
     )
 }
+
+pub fn byte_msg_stream_step_with<TMsg, #uint IDX_W, FNone, FRender>(
+    state: ByteMsgStreamState<TMsg, IDX_W>,
+    none_msg: TMsg,
+    is_none: FNone,
+    render_byte: FRender,
+    block_tx: bool,
+    next_msg_valid: bool,
+    next_msg: TMsg,
+) -> ByteMsgStreamOut<TMsg, IDX_W>
+where
+    FNone: Fn(TMsg) -> bool,
+    FRender: Fn(TMsg, uint<IDX_W>) -> TxReq8,
+{
+    let cur_msg_is_none = is_none.call((state.cur_msg,));
+    let pending_msg_is_none = is_none.call((state.pending_msg,));
+    let cur_byte = render_byte.call((state.cur_msg, state.cur_idx));
+    let next_idx: uint<IDX_W> = trunc(state.cur_idx + 1);
+    let next_byte = render_byte.call((state.cur_msg, next_idx));
+    let next_msg_is_none = is_none.call((next_msg,));
+
+    byte_msg_stream_step(
+        state,
+        none_msg,
+        cur_msg_is_none,
+        pending_msg_is_none,
+        cur_byte,
+        next_byte,
+        block_tx,
+        next_msg_valid,
+        next_msg,
+        next_msg_is_none,
+    )
+}
