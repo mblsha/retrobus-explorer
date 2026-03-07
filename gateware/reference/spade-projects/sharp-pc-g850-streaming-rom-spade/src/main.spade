@@ -1,9 +1,8 @@
-use shared_components::clocking::clk_wiz_400;
-use shared_components::sharp::count_on_event;
-use shared_components::sharp::banked_rom_byte;
-use shared_components::sharp::gate_byte8;
-use shared_components::serial::ft_aux_activity;
-use shared_components::serial::usb_loopback;
+use shared_components::{
+    clocking::clk_wiz_400,
+    sharp::{banked_rom_byte, count_on_event, gate_byte8},
+    serial::{ft_aux_activity, usb_loopback},
+};
 
 #[no_mangle(all)]
 entity main(
@@ -41,7 +40,7 @@ entity main(
     addr_cerom2: bool,
 ) {
     let rst = !rst_n;
-    let clk_uart = inst clk_wiz_400(clk);
+    let clk_uart = unsafe { inst clk_wiz_400(clk) };
     let stream_counter = inst count_on_event::<8>(clk_uart, rst, !ft_rxf);
     let c = stream_counter.to_bits();
     let read_enable = !z80_mreq && !z80_rd && addr_cerom2;

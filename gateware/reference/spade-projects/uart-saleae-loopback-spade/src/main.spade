@@ -1,14 +1,11 @@
-use shared_components::bridges::BridgePolicy;
-use shared_components::clocking::clk_wiz_200_400;
-use shared_components::clocking::sampled_bool_clock;
-use shared_components::config::au_dual_bridge_u8x8_100_200;
-use shared_components::config::au_usb_uart_rx;
-use shared_components::config::au_usb_uart_tx8_tap;
-use shared_components::primitives::reset_conditioner;
-use shared_components::protocol::simple_cmd_uart::clock_from_code;
-use shared_components::protocol::simple_cmd_uart::saleae_outputs;
-use shared_components::protocol::simple_cmd_uart::simple_cmd_uart_core;
-use shared_components::serial::UartLineBusyPort;
+use shared_components::{
+    bridges::BridgePolicy,
+    clocking::{clk_wiz_200_400, sampled_bool_clock},
+    config::{au_dual_bridge_u8x8_100_200, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    primitives::reset_conditioner,
+    protocol::simple_cmd_uart::{clock_from_code, saleae_outputs, simple_cmd_uart_core},
+    serial::UartLineBusyPort,
+};
 
 #[no_mangle(all)]
 entity main(

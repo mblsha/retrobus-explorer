@@ -1,12 +1,8 @@
-use shared_components::bridges::BridgePolicy;
-use shared_components::bridges::UartFifoBridgeOut;
-use shared_components::bridges::uart_fifo_bridge;
-use shared_components::memory::FifoOut;
-use shared_components::memory::sync_fifo;
-use shared_components::serial::UartRxOut;
-use shared_components::serial::ft_tap;
-use shared_components::serial::uart_rx;
-use shared_components::serial::uart_tx_tap;
+use super::{
+    bridges::{BridgePolicy, UartFifoBridgeOut, uart_fifo_bridge},
+    memory::{FifoOut, sync_fifo},
+    serial::{UartRxOut, ft_tap, uart_rx, uart_tx_tap},
+};
 
 fn au_usb_uart_bit_time() -> uint<15> { 100 }
 fn au_usb_uart_stop_bits() -> uint<3> { 1 }

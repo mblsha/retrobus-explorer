@@ -1,6 +1,4 @@
-use shared_components::ascii::DigitDecode;
-use shared_components::message_stream::TxReq8;
-use shared_components::message_stream::tx_req_none;
+use super::{ascii::DigitDecode, message_stream::{TxReq8, tx_req_none}};
 
 pub fn pack_event_word(addr: uint<16>, data: uint<8>, event: uint<8>) -> uint<32> {
     let addr_wide: uint<32> = zext(addr);

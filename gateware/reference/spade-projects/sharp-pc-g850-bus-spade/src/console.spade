@@ -1,8 +1,7 @@
-use shared_components::bus_debug::SaleaeState;
-use shared_components::message_stream::ByteMsgStreamOut;
-use shared_components::message_stream::ByteMsgStreamState;
-use shared_components::message_stream::TxReq8;
-use shared_components::message_stream::tx_req_none;
+use shared_components::{
+    bus_debug::SaleaeState,
+    message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none},
+};
 
 pub(lib) enum ConsoleMsg {
     None,

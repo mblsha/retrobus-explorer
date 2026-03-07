@@ -1,5 +1,4 @@
-use shared_components::primitives::counter;
-use shared_components::serial::usb_loopback;
+use shared_components::{primitives::counter, serial::usb_loopback};
 
 #[no_mangle(all)]
 entity main(
