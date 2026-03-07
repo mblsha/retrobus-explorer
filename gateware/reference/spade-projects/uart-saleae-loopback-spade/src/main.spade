@@ -52,8 +52,8 @@ entity main(
         mode_is_echo,
         BridgePolicy::QueueOnly(),
     );
-    let tx6_bridge = dual_bridge.tx100;
-    let tx7_bridge = dual_bridge.tx200;
+    let tx6_bridge = dual_bridge.tx_a;
+    let tx7_bridge = dual_bridge.tx_b;
 
     let rx_is_payload = cmd_core.payload_rx;
 
@@ -62,9 +62,9 @@ entity main(
     let dropped = rx_is_payload && !can_accept;
     set enqueue_w = &can_accept;
 
-    let tx_new_data = cmd_core.tx_req_valid || can_accept;
-    let tx_data = if cmd_core.tx_req_valid {
-        cmd_core.tx_req_byte
+    let tx_new_data = cmd_core.tx_req.valid || can_accept;
+    let tx_data = if cmd_core.tx_req.valid {
+        cmd_core.tx_req.byte
     } else if can_accept {
         rx.byte
     } else {

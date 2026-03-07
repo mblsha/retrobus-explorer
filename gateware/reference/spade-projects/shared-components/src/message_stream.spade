@@ -1,0 +1,118 @@
+pub struct TxReq8 {
+    valid: bool,
+    byte: uint<8>,
+}
+
+pub fn tx_req_none() -> TxReq8 {
+    TxReq8$(valid: false, byte: 0)
+}
+
+pub fn tx_req_arbiter(highest: TxReq8, high: TxReq8, low: TxReq8) -> TxReq8 {
+    if highest.valid {
+        highest
+    } else if high.valid {
+        high
+    } else {
+        low
+    }
+}
+
+pub struct ByteMsgStreamState<TMsg, #uint IDX_W> {
+    cur_msg: TMsg,
+    cur_idx: uint<IDX_W>,
+    pending_msg: TMsg,
+}
+
+pub struct ByteMsgStreamOut<TMsg, #uint IDX_W> {
+    state: ByteMsgStreamState<TMsg, IDX_W>,
+    tx_req: TxReq8,
+    msg_none: bool,
+}
+
+pub fn byte_msg_stream_step<TMsg, #uint IDX_W>(
+    state: ByteMsgStreamState<TMsg, IDX_W>,
+    none_msg: TMsg,
+    cur_msg_is_none: bool,
+    pending_msg_is_none: bool,
+    cur_byte: TxReq8,
+    next_byte: TxReq8,
+    block_tx: bool,
+    next_msg_valid: bool,
+    next_msg: TMsg,
+    next_msg_is_none: bool,
+) -> ByteMsgStreamOut<TMsg, IDX_W> {
+    let tx_req = if !cur_msg_is_none && cur_byte.valid && !block_tx {
+        cur_byte
+    } else {
+        tx_req_none()
+    };
+    let sent = tx_req.valid;
+    let next_idx: uint<IDX_W> = trunc(state.cur_idx + 1);
+    let drained = sent && !next_byte.valid;
+    let post_cur_msg = if drained {
+        none_msg
+    } else {
+        state.cur_msg
+    };
+    let post_cur_idx: uint<IDX_W> = if sent {
+        if next_byte.valid {
+            next_idx
+        } else {
+            0
+        }
+    } else {
+        state.cur_idx
+    };
+    let post_msg_none = cur_msg_is_none || drained;
+    let load_pending = post_msg_none && !pending_msg_is_none;
+    let loaded_cur_msg = if load_pending {
+        state.pending_msg
+    } else {
+        post_cur_msg
+    };
+    let loaded_cur_idx: uint<IDX_W> = if load_pending {
+        0
+    } else {
+        post_cur_idx
+    };
+    let loaded_msg_none = if load_pending {
+        false
+    } else {
+        post_msg_none
+    };
+    let loaded_pending_msg = if load_pending {
+        none_msg
+    } else {
+        state.pending_msg
+    };
+    let enqueue_new = next_msg_valid && !next_msg_is_none;
+    let final_cur_msg = if enqueue_new && loaded_msg_none {
+        next_msg
+    } else {
+        loaded_cur_msg
+    };
+    let final_cur_idx: uint<IDX_W> = if enqueue_new && loaded_msg_none {
+        0
+    } else {
+        loaded_cur_idx
+    };
+    let final_pending_msg = if enqueue_new && !loaded_msg_none {
+        next_msg
+    } else {
+        loaded_pending_msg
+    };
+    let final_msg_none = if enqueue_new && loaded_msg_none {
+        false
+    } else {
+        loaded_msg_none
+    };
+    ByteMsgStreamOut$(
+        state: ByteMsgStreamState$(
+            cur_msg: final_cur_msg,
+            cur_idx: final_cur_idx,
+            pending_msg: final_pending_msg,
+        ),
+        tx_req: tx_req,
+        msg_none: final_msg_none,
+    )
+}

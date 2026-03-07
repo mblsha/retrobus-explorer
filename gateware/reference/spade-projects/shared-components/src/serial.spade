@@ -114,6 +114,15 @@ enum UartTxState {
     StopBit,
 }
 
+struct UartTxRegs<#uint DATA_WIDTH> {
+    state: UartTxState,
+    ctr: uint<32>,
+    bit_ctr: uint<32>,
+    saved_data: uint<DATA_WIDTH>,
+    tx_reg: bool,
+    block_flag: bool,
+}
+
 pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
@@ -130,14 +139,14 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     let clk_per_bit = ((CLK_FREQ + BAUD) `std::ops::comb_div` BAUD) - 1;
     let ctr_last = clk_per_bit - 1;
 
-    reg(clk) regs: (UartTxState, uint<32>, uint<32>, uint<DATA_WIDTH>, bool, bool)
-        reset(rst: (UartTxState::Idle(), 0, 0, 0, false, false))
+    reg(clk) regs: UartTxRegs<DATA_WIDTH>
+        reset(rst: UartTxRegs$(state: UartTxState::Idle(), ctr: 0, bit_ctr: 0, saved_data: 0, tx_reg: false, block_flag: false))
         = {
-            let state: UartTxState = regs.0;
-            let ctr: uint<32> = regs.1;
-            let bit_ctr: uint<32> = regs.2;
-            let saved_data: uint<DATA_WIDTH> = regs.3;
-            let block_flag: bool = regs.5;
+            let state = regs.state;
+            let ctr = regs.ctr;
+            let bit_ctr = regs.bit_ctr;
+            let saved_data = regs.saved_data;
+            let block_flag = regs.block_flag;
 
             let ctr_inc: uint<32> = trunc(ctr + 1);
             let block_flag_next = block;
@@ -147,19 +156,54 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
                     if !block_flag {
                         if new_data {
                             // Accept a new payload and move to start bit.
-                            (UartTxState::StartBit(), 0, 0, data, true, block_flag_next)
+                            UartTxRegs$(
+                                state: UartTxState::StartBit(),
+                                ctr: 0,
+                                bit_ctr: 0,
+                                saved_data: data,
+                                tx_reg: true,
+                                block_flag: block_flag_next,
+                            )
                         } else {
-                            (UartTxState::Idle(), 0, 0, saved_data, true, block_flag_next)
+                            UartTxRegs$(
+                                state: UartTxState::Idle(),
+                                ctr: 0,
+                                bit_ctr: 0,
+                                saved_data: saved_data,
+                                tx_reg: true,
+                                block_flag: block_flag_next,
+                            )
                         }
                     } else {
-                        (UartTxState::Idle(), ctr, bit_ctr, saved_data, true, block_flag_next)
+                        UartTxRegs$(
+                            state: UartTxState::Idle(),
+                            ctr: ctr,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: true,
+                            block_flag: block_flag_next,
+                        )
                     }
                 },
                 UartTxState::StartBit => {
                     if ctr == ctr_last {
-                        (UartTxState::Data(), 0, bit_ctr, saved_data, false, block_flag_next)
+                        UartTxRegs$(
+                            state: UartTxState::Data(),
+                            ctr: 0,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: false,
+                            block_flag: block_flag_next,
+                        )
                     } else {
-                        (UartTxState::StartBit(), ctr_inc, bit_ctr, saved_data, false, block_flag_next)
+                        UartTxRegs$(
+                            state: UartTxState::StartBit(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: false,
+                            block_flag: block_flag_next,
+                        )
                     }
                 },
                 UartTxState::Data => {
@@ -167,27 +211,62 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
                     if ctr == ctr_last {
                         let bit_ctr_inc: uint<32> = trunc(bit_ctr + 1);
                         if bit_ctr == DATA_WIDTH - 1 {
-                            (UartTxState::StopBit(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
+                            UartTxRegs$(
+                                state: UartTxState::StopBit(),
+                                ctr: 0,
+                                bit_ctr: bit_ctr_inc,
+                                saved_data: saved_data,
+                                tx_reg: tx_bit,
+                                block_flag: block_flag_next,
+                            )
                         } else {
-                            (UartTxState::Data(), 0, bit_ctr_inc, saved_data, tx_bit, block_flag_next)
+                            UartTxRegs$(
+                                state: UartTxState::Data(),
+                                ctr: 0,
+                                bit_ctr: bit_ctr_inc,
+                                saved_data: saved_data,
+                                tx_reg: tx_bit,
+                                block_flag: block_flag_next,
+                            )
                         }
                     } else {
-                        (UartTxState::Data(), ctr_inc, bit_ctr, saved_data, tx_bit, block_flag_next)
+                        UartTxRegs$(
+                            state: UartTxState::Data(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: tx_bit,
+                            block_flag: block_flag_next,
+                        )
                     }
                 },
                 UartTxState::StopBit => {
                     if ctr == ctr_last {
-                        (UartTxState::Idle(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
+                        UartTxRegs$(
+                            state: UartTxState::Idle(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: true,
+                            block_flag: block_flag_next,
+                        )
                     } else {
-                        (UartTxState::StopBit(), ctr_inc, bit_ctr, saved_data, true, block_flag_next)
+                        UartTxRegs$(
+                            state: UartTxState::StopBit(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: true,
+                            block_flag: block_flag_next,
+                        )
                     }
                 },
             }
         };
 
-    let state: UartTxState = regs.0;
-    let tx_reg: bool = regs.4;
-    let block_flag: bool = regs.5;
+    let state = regs.state;
+    let tx_reg = regs.tx_reg;
+    let block_flag = regs.block_flag;
     let busy = match state {
         UartTxState::Idle => block_flag,
         _ => true,
