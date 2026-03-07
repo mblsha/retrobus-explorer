@@ -165,21 +165,9 @@ fn next_cmd_state(
         state
     } else {
         match state {
-            CmdParseState::Idle => {
-                if rx_byte == b'!' {
-                    CmdParseState::Bang()
-                } else {
-                    CmdParseState::Idle()
-                }
-            },
-            CmdParseState::Bang => {
-                if rx_upper == b'F' {
-                    CmdParseState::Freq()
-                } else {
-                    CmdParseState::Idle()
-                }
-            },
-            CmdParseState::Freq => CmdParseState::Idle(),
+            CmdParseState::Idle if rx_byte == b'!' => CmdParseState::Bang(),
+            CmdParseState::Bang if rx_upper == b'F' => CmdParseState::Freq(),
+            _ => CmdParseState::Idle(),
         }
     }
 }
@@ -254,13 +242,8 @@ fn decode_cmd(
     } else {
         match state {
             CmdParseState::Bang => decode_bang_cmd(rx_upper),
-            CmdParseState::Freq => {
-                if rx_digit.valid {
-                    cmd_decode_set_freq(rx_digit.value)
-                } else {
-                    cmd_decode_msg(MsgKind::ErrFreq())
-                }
-            },
+            CmdParseState::Freq if rx_digit.valid => cmd_decode_set_freq(rx_digit.value),
+            CmdParseState::Freq => cmd_decode_msg(MsgKind::ErrFreq()),
             _ => cmd_decode_none(),
         }
     }

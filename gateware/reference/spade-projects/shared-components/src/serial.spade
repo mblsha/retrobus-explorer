@@ -398,29 +398,31 @@ pub entity uart_rx<#uint DATA_WIDTH>(
 
     reg(clk) out_valid: bool reset(rst: false) = {
         match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) => !parity && time == last && bit_idx == last_bit_idx,
-            RxState::WaitParity$(time, data, odd_parity) => time == last,
+            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
+                let _ = data;
+                let _ = odd_parity;
+                true
+            },
+            RxState::WaitParity$(time, data, odd_parity) if time == last => {
+                let _ = data;
+                let _ = odd_parity;
+                true
+            },
             _ => false,
         }
     };
 
     reg(clk) out_byte: uint<DATA_WIDTH> reset(rst: 0) = {
         match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) => {
-                if !parity && time == last && bit_idx == last_bit_idx {
-                    let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
-                    let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
-                    trunc((data >> 1) | incoming)
-                } else {
-                    out_byte
-                }
+            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
+                let _ = odd_parity;
+                let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
+                let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
+                trunc((data >> 1) | incoming)
             },
-            RxState::WaitParity$(time, data, odd_parity) => {
-                if time == last {
-                    data
-                } else {
-                    out_byte
-                }
+            RxState::WaitParity$(time, data, odd_parity) if time == last => {
+                let _ = odd_parity;
+                data
             },
             _ => out_byte,
         }
@@ -428,19 +430,14 @@ pub entity uart_rx<#uint DATA_WIDTH>(
 
     reg(clk) out_parity_error: bool reset(rst: false) = {
         match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) => {
-                if !parity && time == last && bit_idx == last_bit_idx {
-                    false
-                } else {
-                    out_parity_error
-                }
+            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
+                let _ = data;
+                let _ = odd_parity;
+                false
             },
-            RxState::WaitParity$(time, data, odd_parity) => {
-                if time == last {
-                    odd_parity ^^ rx_sync
-                } else {
-                    out_parity_error
-                }
+            RxState::WaitParity$(time, data, odd_parity) if time == last => {
+                let _ = data;
+                odd_parity ^^ rx_sync
             },
             _ => out_parity_error,
         }
