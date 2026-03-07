@@ -1,30 +1,3 @@
-use shared_components::ascii::ascii_bang;
-use shared_components::ascii::ascii_colon;
-use shared_components::ascii::ascii_cr;
-use shared_components::ascii::ascii_eq;
-use shared_components::ascii::ascii_lf;
-use shared_components::ascii::ascii_minus;
-use shared_components::ascii::ascii_space;
-use shared_components::ascii::ascii_upper_a;
-use shared_components::ascii::ascii_upper_b;
-use shared_components::ascii::ascii_upper_c;
-use shared_components::ascii::ascii_upper_d;
-use shared_components::ascii::ascii_upper_e;
-use shared_components::ascii::ascii_upper_f;
-use shared_components::ascii::ascii_upper_h;
-use shared_components::ascii::ascii_upper_k;
-use shared_components::ascii::ascii_upper_l;
-use shared_components::ascii::ascii_upper_m;
-use shared_components::ascii::ascii_upper_o;
-use shared_components::ascii::ascii_upper_p;
-use shared_components::ascii::ascii_upper_q;
-use shared_components::ascii::ascii_upper_r;
-use shared_components::ascii::ascii_upper_s;
-use shared_components::ascii::ascii_upper_t;
-use shared_components::ascii::ascii_upper_u;
-use shared_components::ascii::ascii_upper_x;
-use shared_components::ascii::ascii_upper_y;
-use shared_components::ascii::ascii_zero;
 use shared_components::ascii::DigitDecode;
 use shared_components::ascii::decode_digit_max;
 use shared_components::ascii::to_upper;
@@ -63,14 +36,14 @@ pub fn msg_is_none(msg: MsgKind) -> bool {
 
 pub fn mode_char(mode: Mode) -> uint<8> {
     match mode {
-        Mode::ClockTester => ascii_upper_c(),
-        Mode::Echo => ascii_upper_e(),
+        Mode::ClockTester => b'C',
+        Mode::Echo => b'E',
     }
 }
 
 pub fn digit_char(value: uint<4>) -> uint<8> {
     let v: uint<8> = zext(value);
-    trunc(v + ascii_zero())
+    trunc(v + b'0')
 }
 
 pub struct MsgTemplate {
@@ -82,103 +55,27 @@ pub fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
     std::conv::concat_arrays(message, [0; 64 - N])
 }
 
+pub fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate {
+    let len: uint<8> = N;
+    MsgTemplate$(len: len, bytes: pad_message(message))
+}
+
+fn mode_freq_suffix(mode: uint<8>, freq: uint<8>) -> [uint<8>; 10] {
+    [b' ', b'M', b'=', mode, b' ', b'F', b'=', freq, b'\r', b'\n']
+}
+
 pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
     let m = mode_char(mode);
     let f = digit_char(freq_code);
-    let A = ascii_upper_a();
-    let B = ascii_upper_b();
-    let C = ascii_upper_c();
-    let D = ascii_upper_d();
-    let E = ascii_upper_e();
-    let F = ascii_upper_f();
-    let H = ascii_upper_h();
-    let K = ascii_upper_k();
-    let L = ascii_upper_l();
-    let M = ascii_upper_m();
-    let O = ascii_upper_o();
-    let P = ascii_upper_p();
-    let Q = ascii_upper_q();
-    let R = ascii_upper_r();
-    let S = ascii_upper_s();
-    let T = ascii_upper_t();
-    let U = ascii_upper_u();
-    let X = ascii_upper_x();
-    let Y = ascii_upper_y();
-    let SP = ascii_space();
-    let EQ = ascii_eq();
-    let COLON = ascii_colon();
-    let BANG = ascii_bang();
-    let DASH = ascii_minus();
-    let CR = ascii_cr();
-    let LF = ascii_lf();
-    let ZERO = ascii_zero();
-    let FIVE: uint<8> = trunc(ZERO + 5);
 
     match msg {
         MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
-        MsgKind::Ready => MsgTemplate$(
-            len: 19,
-            bytes: pad_message([
-                R, B, X, SP,
-                R, E, A, D, Y, SP,
-                M, EQ, m, SP,
-                F, EQ, f,
-                CR, LF,
-            ]),
-        ),
-        MsgKind::Help => MsgTemplate$(
-            len: 43,
-            bytes: pad_message([
-                R, B, X, SP,
-                H, E, L, P, SP,
-                BANG, H, SP,
-                BANG, S, SP,
-                BANG, C, SP,
-                BANG, E, SP,
-                BANG, F, ZERO, DASH, FIVE, SP,
-                M, COLON, C, L, O, C, K, SP,
-                E, COLON, E, C, H, O,
-                CR, LF,
-            ]),
-        ),
-        MsgKind::Status => MsgTemplate$(
-            len: 20,
-            bytes: pad_message([
-                R, B, X, SP,
-                S, T, A, T, U, S, SP,
-                M, EQ, m, SP,
-                F, EQ, f,
-                CR, LF,
-            ]),
-        ),
-        MsgKind::Ok => MsgTemplate$(
-            len: 16,
-            bytes: pad_message([
-                R, B, X, SP,
-                O, K, SP,
-                M, EQ, m, SP,
-                F, EQ, f,
-                CR, LF,
-            ]),
-        ),
-        MsgKind::ErrCmd => MsgTemplate$(
-            len: 13,
-            bytes: pad_message([
-                R, B, X, SP,
-                E, R, R, SP,
-                C, M, D,
-                CR, LF,
-            ]),
-        ),
-        MsgKind::ErrFreq => MsgTemplate$(
-            len: 14,
-            bytes: pad_message([
-                R, B, X, SP,
-                E, R, R, SP,
-                F, R, E, Q,
-                CR, LF,
-            ]),
-        ),
+        MsgKind::Ready => msg_template_bytes(std::conv::concat_arrays(b"RBX READY", mode_freq_suffix(m, f))),
+        MsgKind::Help => msg_template_bytes(b"RBX HELP !H !S !C !E !F0-5 M:CLOCK E:ECHO\r\n"),
+        MsgKind::Status => msg_template_bytes(std::conv::concat_arrays(b"RBX STATUS", mode_freq_suffix(m, f))),
+        MsgKind::Ok => msg_template_bytes(std::conv::concat_arrays(b"RBX OK", mode_freq_suffix(m, f))),
+        MsgKind::ErrCmd => msg_template_bytes(b"RBX ERR CMD\r\n"),
+        MsgKind::ErrFreq => msg_template_bytes(b"RBX ERR FREQ\r\n"),
     }
 }
 
@@ -231,14 +128,14 @@ pub fn next_cmd_state(
     } else {
         match state {
             CmdParseState::Idle => {
-                if rx_byte == ascii_bang() {
+                if rx_byte == b'!' {
                     CmdParseState::Bang()
                 } else {
                     CmdParseState::Idle()
                 }
             },
             CmdParseState::Bang => {
-                if rx_upper == ascii_upper_f() {
+                if rx_upper == b'F' {
                     CmdParseState::Freq()
                 } else {
                     CmdParseState::Idle()
@@ -293,15 +190,15 @@ pub fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
 }
 
 pub fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
-    if rx_upper == ascii_upper_h() {
+    if rx_upper == b'H' {
         cmd_decode_msg(MsgKind::Help())
-    } else if rx_upper == ascii_upper_s() {
+    } else if rx_upper == b'S' {
         cmd_decode_msg(MsgKind::Status())
-    } else if rx_upper == ascii_upper_c() {
+    } else if rx_upper == b'C' {
         cmd_decode_set_mode(Mode::ClockTester())
-    } else if rx_upper == ascii_upper_e() {
+    } else if rx_upper == b'E' {
         cmd_decode_set_mode(Mode::Echo())
-    } else if rx_upper == ascii_upper_f() {
+    } else if rx_upper == b'F' {
         cmd_decode_none()
     } else {
         cmd_decode_msg(MsgKind::ErrCmd())
@@ -407,7 +304,7 @@ pub entity simple_cmd_uart_core(
     let tx_stream = tx_stream_step(tx_state, mode, freq_code, tx_busy, false, MsgKind::None());
     let tx_msg_none = tx_stream.msg_none;
 
-    let rx_is_bang = rx_ok && rx_byte == ascii_bang();
+    let rx_is_bang = rx_ok && rx_byte == b'!';
     let payload_rx = is_echo_mode(mode) && cmd_state_is_idle(cmd_state) && rx_ok && !rx_is_bang;
 
     SimpleCmdUartOut$(

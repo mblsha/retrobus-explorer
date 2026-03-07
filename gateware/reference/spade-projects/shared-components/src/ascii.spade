@@ -1,56 +1,18 @@
-pub fn ascii_space() -> uint<8> { 0x20 }
-pub fn ascii_bang() -> uint<8> { 0x21 }
-pub fn ascii_plus() -> uint<8> { 0x2b }
-pub fn ascii_minus() -> uint<8> { 0x2d }
-pub fn ascii_dot() -> uint<8> { 0x2e }
-pub fn ascii_zero() -> uint<8> { 0x30 }
-pub fn ascii_nine() -> uint<8> { 0x39 }
-pub fn ascii_eq() -> uint<8> { 0x3d }
-pub fn ascii_colon() -> uint<8> { 0x3a }
-pub fn ascii_upper_a() -> uint<8> { 0x41 }
-pub fn ascii_upper_b() -> uint<8> { 0x42 }
-pub fn ascii_upper_c() -> uint<8> { 0x43 }
-pub fn ascii_upper_d() -> uint<8> { 0x44 }
-pub fn ascii_upper_e() -> uint<8> { 0x45 }
-pub fn ascii_upper_f() -> uint<8> { 0x46 }
-pub fn ascii_upper_h() -> uint<8> { 0x48 }
-pub fn ascii_upper_k() -> uint<8> { 0x4b }
-pub fn ascii_upper_l() -> uint<8> { 0x4c }
-pub fn ascii_upper_m() -> uint<8> { 0x4d }
-pub fn ascii_upper_o() -> uint<8> { 0x4f }
-pub fn ascii_upper_p() -> uint<8> { 0x50 }
-pub fn ascii_upper_q() -> uint<8> { 0x51 }
-pub fn ascii_upper_r() -> uint<8> { 0x52 }
-pub fn ascii_upper_s() -> uint<8> { 0x53 }
-pub fn ascii_upper_t() -> uint<8> { 0x54 }
-pub fn ascii_upper_u() -> uint<8> { 0x55 }
-pub fn ascii_upper_w() -> uint<8> { 0x57 }
-pub fn ascii_upper_x() -> uint<8> { 0x58 }
-pub fn ascii_upper_y() -> uint<8> { 0x59 }
-pub fn ascii_upper_z() -> uint<8> { 0x5a }
-pub fn ascii_lower_a() -> uint<8> { 0x61 }
-pub fn ascii_lower_e() -> uint<8> { 0x65 }
-pub fn ascii_lower_r() -> uint<8> { 0x72 }
-pub fn ascii_lower_w() -> uint<8> { 0x77 }
-pub fn ascii_lower_z() -> uint<8> { 0x7a }
-pub fn ascii_case_delta() -> uint<8> { 0x20 }
-pub fn ascii_cr() -> uint<8> { 0x0d }
-pub fn ascii_lf() -> uint<8> { 0x0a }
-
 pub fn to_upper(byte: uint<8>) -> uint<8> {
-    if byte >= ascii_lower_a() && byte <= ascii_lower_z() {
-        trunc(byte - ascii_case_delta())
+    let case_delta: uint<8> = trunc(b'a' - b'A');
+    if byte >= b'a' && byte <= b'z' {
+        trunc(byte - case_delta)
     } else {
         byte
     }
 }
 
 pub fn is_digit(byte: uint<8>) -> bool {
-    byte >= ascii_zero() && byte <= ascii_nine()
+    byte >= b'0' && byte <= b'9'
 }
 
 pub fn digit_value(byte: uint<8>) -> uint<4> {
-    trunc(byte - ascii_zero())
+    trunc(byte - b'0')
 }
 
 pub struct DigitDecode {

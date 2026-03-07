@@ -1,18 +1,5 @@
 use shared_components::ascii::decode_digit;
 use shared_components::ascii::DigitDecode;
-use shared_components::ascii::ascii_dot;
-use shared_components::ascii::ascii_plus;
-use shared_components::ascii::ascii_minus;
-use shared_components::ascii::ascii_upper_c;
-use shared_components::ascii::ascii_upper_d;
-use shared_components::ascii::ascii_upper_e;
-use shared_components::ascii::ascii_upper_m;
-use shared_components::ascii::ascii_upper_r;
-use shared_components::ascii::ascii_upper_s;
-use shared_components::ascii::ascii_upper_w;
-use shared_components::ascii::ascii_lower_e;
-use shared_components::ascii::ascii_lower_r;
-use shared_components::ascii::ascii_lower_w;
 use shared_components::ascii::to_upper;
 use shared_components::message_stream::TxReq8;
 use shared_components::message_stream::tx_req_none;
@@ -86,17 +73,17 @@ pub fn bus_event_char_from_flags(
 ) -> uint<8> {
     if rd_event_valid {
         if !z80_m1_sync {
-            ascii_upper_m()
+            b'M'
         } else if !z80_mreq_sync {
-            ascii_upper_r()
+            b'R'
         } else {
-            ascii_lower_r()
+            b'r'
         }
     } else if wr_event_valid {
         if !z80_mreq_sync {
-            ascii_upper_w()
+            b'W'
         } else {
-            ascii_lower_w()
+            b'w'
         }
     } else {
         0
@@ -139,11 +126,11 @@ pub struct BusError {
 
 pub fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> BusError {
     if rd_rise {
-        BusError$(valid: invalid_bus_state, ch: ascii_upper_e())
+        BusError$(valid: invalid_bus_state, ch: b'E')
     } else if wr_rise {
-        BusError$(valid: invalid_bus_state, ch: ascii_lower_e())
+        BusError$(valid: invalid_bus_state, ch: b'e')
     } else {
-        BusError$(valid: false, ch: ascii_lower_e())
+        BusError$(valid: false, ch: b'e')
     }
 }
 
@@ -155,10 +142,10 @@ pub struct FtStreamCmdDecode {
 pub fn decode_ft_stream_cmd(ft_ui_dout_empty: bool, ft_cmd_word: uint<16>) -> FtStreamCmdDecode {
     let cmd_b0: uint<8> = trunc(ft_cmd_word);
     let cmd_b1: uint<8> = trunc(ft_cmd_word >> 8);
-    let has_prefix = !ft_ui_dout_empty && to_upper(cmd_b0) == ascii_upper_s();
+    let has_prefix = !ft_ui_dout_empty && to_upper(cmd_b0) == b'S';
     FtStreamCmdDecode$(
-        enable: has_prefix && cmd_b1 == ascii_plus(),
-        disable: has_prefix && cmd_b1 == ascii_minus(),
+        enable: has_prefix && cmd_b1 == b'+',
+        disable: has_prefix && cmd_b1 == b'-',
     )
 }
 
@@ -169,15 +156,15 @@ pub struct SaleaeCmdDecode {
 
 pub fn decode_saleae_state_cmd(rx_byte: uint<8>) -> SaleaeCmdDecode {
     let upper = to_upper(rx_byte);
-    if upper == ascii_upper_s() {
+    if upper == b'S' {
         SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals())
-    } else if upper == ascii_upper_e() {
+    } else if upper == b'E' {
         SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals())
-    } else if upper == ascii_upper_d() {
+    } else if upper == b'D' {
         SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals())
-    } else if upper == ascii_upper_r() {
+    } else if upper == b'R' {
         SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals())
-    } else if upper == ascii_upper_c() {
+    } else if upper == b'C' {
         SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter())
     } else {
         SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals())
@@ -252,7 +239,7 @@ pub fn sample_bus_cycle(
         addr_fifo_wput: bus_start && sample_is_bus,
         event_fifo_wput: bus_decode.bus_event_valid,
         sample_tx_req: if sample_is_wait && wait_done && !tx_busy {
-            TxReq8$(valid: true, byte: ascii_dot())
+            TxReq8$(valid: true, byte: b'.')
         } else {
             tx_req_none()
         },
@@ -383,9 +370,9 @@ pub fn run_ft_stream_mux(
         false
     };
     let ft_tx_req = if ft_cmd.enable && !tx_busy {
-        TxReq8$(valid: true, byte: ascii_plus())
+        TxReq8$(valid: true, byte: b'+')
     } else if ft_cmd.disable && !tx_busy {
-        TxReq8$(valid: true, byte: ascii_minus())
+        TxReq8$(valid: true, byte: b'-')
     } else {
         tx_req_none()
     };
