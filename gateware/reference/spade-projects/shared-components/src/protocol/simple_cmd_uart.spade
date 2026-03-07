@@ -1,7 +1,7 @@
-use shared_components::ascii::DigitDecode;
-use shared_components::message_stream::ByteMsgStreamOut;
-use shared_components::message_stream::ByteMsgStreamState;
-use shared_components::message_stream::TxReq8;
+use super::super::{
+    ascii::DigitDecode,
+    message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8},
+};
 
 pub enum Mode {
     ClockTester,

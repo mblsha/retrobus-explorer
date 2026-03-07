@@ -1,4 +1,4 @@
-use shared_components::guards::require_positive_int;
+use super::guards::require_positive_int;
 
 pipeline(STAGES) sync_delay_pipe<#int STAGES>(
     clk: clock,

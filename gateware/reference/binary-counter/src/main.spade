@@ -1,7 +1,4 @@
-use shared_components::ascii::DigitDecode;
-use shared_components::primitives::reset_conditioner;
-use shared_components::serial::uart_rx;
-use shared_components::serial::uart_tx;
+use shared_components::{ascii::DigitDecode, primitives::reset_conditioner, serial::{uart_rx, uart_tx}};
 
 fn default_digit_decode() -> DigitDecode {
     DigitDecode$(valid: false, value: 0)

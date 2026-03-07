@@ -1,18 +1,9 @@
-use shared_components::primitives::counter;
-use shared_components::primitives::falling_edge;
-use shared_components::primitives::reset_conditioner;
-use shared_components::primitives::rising_edge;
-use shared_components::primitives::sync_delay;
-use shared_components::memory::fifo;
-use shared_components::memory::async_fifo;
-use shared_components::serial::ft;
-use shared_components::serial::ft_out_tap;
-use shared_components::serial::uart_tx;
-use shared_components::serial::uart_rx;
-use shared_components::sharp::count_on_event;
-use shared_components::sharp::banked_rom_byte;
-use shared_components::sharp::wait_hold;
-use shared_components::sharp::gate_byte8;
+use super::{
+    memory::{async_fifo, fifo},
+    primitives::{counter, falling_edge, reset_conditioner, rising_edge, sync_delay},
+    serial::{ft, ft_out_tap, uart_rx, uart_tx},
+    sharp::{banked_rom_byte, count_on_event, gate_byte8, wait_hold},
+};
 
 entity tb_counter_bits<#uint WIDTH>(
     clk: clock,

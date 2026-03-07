@@ -1,6 +1,4 @@
-use shared_components::guards::require_at_least_two;
-use shared_components::guards::require_positive;
-use shared_components::guards::require_power_of_two;
+use super::guards::{require_at_least_two, require_positive, require_power_of_two};
 
 #[no_mangle(all)]
 extern entity async_fifo_v<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(

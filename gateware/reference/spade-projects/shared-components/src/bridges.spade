@@ -1,6 +1,4 @@
-use shared_components::memory::async_fifo;
-use shared_components::serial::UartLineBusyPort;
-use shared_components::serial::uart_tx_tap;
+use super::{memory::async_fifo, serial::{UartLineBusyPort, uart_tx_tap}};
 
 pub struct UartFifoBridgeOut<TData, #uint DROP_COUNT_W> {
     line: bool,

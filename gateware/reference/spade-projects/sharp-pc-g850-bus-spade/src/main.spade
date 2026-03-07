@@ -1,35 +1,26 @@
 mod console;
 
-use shared_components::bridges::BridgePolicy;
-use shared_components::bus_debug::CycleDecode;
-use shared_components::bus_debug::CoreStepInputs;
-use shared_components::bus_debug::FtState;
-use shared_components::bus_debug::FtStreamCmdDecode;
-use shared_components::bus_debug::SaleaeState;
-use shared_components::bus_debug::SampleState;
-use shared_components::bus_debug::UsbCmdInputs;
-use shared_components::bus_debug::decode_cycle;
-use shared_components::bus_debug::pack_event_word;
-use shared_components::bus_debug::pack_overflow_word;
-use shared_components::bus_debug::saleae_mux;
-use shared_components::clocking::clk_wiz_400;
-use shared_components::clocking::sampled_bool_clock;
-use shared_components::config::au_bridge;
-use shared_components::config::au_ft_tap_u16;
-use shared_components::config::au_stream_fifo_u32;
-use shared_components::config::au_usb_uart_rx;
-use shared_components::config::au_usb_uart_tx8_tap;
-use shared_components::message_stream::ByteMsgStreamState;
-use shared_components::message_stream::TxReq8;
-use shared_components::message_stream::tx_req_arbiter;
-use shared_components::message_stream::tx_req_none;
-use shared_components::primitives::falling_edge;
-use shared_components::primitives::reset_conditioner;
-use shared_components::primitives::rising_edge;
-use shared_components::primitives::sync_z80_controls;
-use console::ConsoleMsg;
-use console::ConsoleMsgContext;
-use console::console_stream_step;
+use shared_components::{
+    bridges::BridgePolicy,
+    bus_debug::{
+        CycleDecode,
+        CoreStepInputs,
+        FtState,
+        FtStreamCmdDecode,
+        SaleaeState,
+        SampleState,
+        UsbCmdInputs,
+        decode_cycle,
+        pack_event_word,
+        pack_overflow_word,
+        saleae_mux,
+    },
+    clocking::{clk_wiz_400, sampled_bool_clock},
+    config::{au_bridge, au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    message_stream::{ByteMsgStreamState, TxReq8, tx_req_arbiter, tx_req_none},
+    primitives::{falling_edge, reset_conditioner, rising_edge, sync_z80_controls},
+};
+use self::console::{ConsoleMsg, ConsoleMsgContext, console_stream_step};
 
 impl CycleDecode {
     fn gate_ft(self, allow_ft_remote: bool) -> CycleDecode {
