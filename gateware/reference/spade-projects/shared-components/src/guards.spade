@@ -1,27 +1,20 @@
-pub fn require_positive<#uint N, #uint CHECK>() -> bool
-where CHECK: {uint_bits_to_fit(N - 1)}
-{
+pub fn require_positive<#uint N>() -> bool {
+    let _check: uint<{uint_bits_to_fit(N - 1)}> = 0;
     true
 }
 
-pub fn require_positive_int<#int N, #uint CHECK>() -> bool
-where CHECK: {uint_bits_to_fit(N - 1)}
-{
+pub fn require_positive_int<#int N>() -> bool {
+    let _check: uint<{uint_bits_to_fit(N - 1)}> = 0;
     true
 }
 
-pub fn require_at_least_two<#uint N, #uint CHECK>() -> bool
-where CHECK: {uint_bits_to_fit(N - 2)}
-{
+pub fn require_at_least_two<#uint N>() -> bool {
+    let _check: uint<{uint_bits_to_fit(N - 2)}> = 0;
     true
 }
 
-pub fn require_power_of_two<#uint N, #uint FIT_N_MINUS_1, #uint FIT_N, #uint FIT_N_EXPECTED>() -> bool
-where
-    FIT_N_MINUS_1: {uint_bits_to_fit(N - 1)},
-    FIT_N: {uint_bits_to_fit(N)},
-    FIT_N_EXPECTED: {FIT_N_MINUS_1 + 1},
-    FIT_N: {FIT_N_EXPECTED}
-{
+pub fn require_power_of_two<#uint N>() -> bool {
+    let fit_n: uint<{uint_bits_to_fit(N)}> = 0;
+    let _fit_n_expected: uint<{uint_bits_to_fit(N - 1) + 1}> = fit_n;
     true
 }

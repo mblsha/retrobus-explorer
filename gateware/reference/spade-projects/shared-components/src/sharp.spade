@@ -19,7 +19,7 @@ pub entity wait_hold_n<#uint RELOAD>(
     mreq_fall: bool,
     iorq_fall: bool,
 ) -> bool {
-    let _ = require_positive::<RELOAD, _>();
+    let _ = require_positive::<RELOAD>();
 
     let wait_reload: uint<{uint_bits_to_fit(RELOAD)}> = RELOAD;
     let wait_zero: uint<{uint_bits_to_fit(RELOAD)}> = 0;

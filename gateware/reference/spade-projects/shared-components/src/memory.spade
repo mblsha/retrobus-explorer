@@ -82,9 +82,9 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
     wput: bool,
     rget: bool,
 ) -> FifoUsedOut<uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>> {
-    let _ = require_positive::<WIDTH, _>();
-    let _ = require_at_least_two::<ENTRIES, _>();
-    let _ = require_power_of_two::<ENTRIES, _, _, _>();
+    let _ = require_positive::<WIDTH>();
+    let _ = require_at_least_two::<ENTRIES>();
+    let _ = require_power_of_two::<ENTRIES>();
 
     // Packed state to avoid declaration-order dependency issues across interlocked regs.
     reg(clk) state: FifoImplState<{uint_bits_to_fit(ENTRIES - 1)}, {uint_bits_to_fit(ENTRIES)}, WIDTH, ENTRIES>
@@ -174,10 +174,10 @@ pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     rrst: bool,
     rget: bool,
 ) -> FifoOut<uint<WIDTH>> {
-    let _ = require_positive::<WIDTH, _>();
-    let _ = require_at_least_two::<ENTRIES, _>();
-    let _ = require_power_of_two::<ENTRIES, _, _, _>();
-    let _ = require_positive::<SYNC_STAGES, _>();
+    let _ = require_positive::<WIDTH>();
+    let _ = require_at_least_two::<ENTRIES>();
+    let _ = require_power_of_two::<ENTRIES>();
+    let _ = require_positive::<SYNC_STAGES>();
 
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
     let _ = inst async_fifo_v::<WIDTH, ENTRIES, SYNC_STAGES>(
@@ -206,9 +206,9 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
     wput: bool,
     rget: bool,
 ) -> FifoOut<uint<WIDTH>> {
-    let _ = require_positive::<WIDTH, _>();
-    let _ = require_at_least_two::<ENTRIES, _>();
-    let _ = require_power_of_two::<ENTRIES, _, _, _>();
+    let _ = require_positive::<WIDTH>();
+    let _ = require_at_least_two::<ENTRIES>();
+    let _ = require_power_of_two::<ENTRIES>();
 
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
     let _ = inst sync_fifo_v::<WIDTH, ENTRIES>(
