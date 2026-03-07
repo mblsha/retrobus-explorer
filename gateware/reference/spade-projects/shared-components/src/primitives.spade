@@ -144,6 +144,6 @@ pub entity counter<#uint WIDTH>(
     clk: clock,
     rst: bool,
 ) -> uint<WIDTH> {
-    reg(clk) value: uint<WIDTH> reset(rst: 0) = trunc(value + 1);
+    reg(clk) value: uint<WIDTH> reset(rst: 0) = value +. 1;
     value
 }

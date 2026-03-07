@@ -4,8 +4,8 @@ entity led_counter(
     rst: bool,
     max: uint<28>,
 ) -> uint<8> {
-    reg(clk) counter: uint<28> reset(rst: 0) = if counter == max {0} else {trunc(counter + 1)};
-    reg(clk) led: uint<8> reset(rst: 0) = if counter == 0 {trunc(led + 1)} else {led};
+    reg(clk) counter: uint<28> reset(rst: 0) = if counter == max {0} else {counter +. 1};
+    reg(clk) led: uint<8> reset(rst: 0) = if counter == 0 {led +. 1} else {led};
 
     led
 }

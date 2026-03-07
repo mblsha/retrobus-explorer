@@ -43,7 +43,7 @@ pub(lib) struct ConsoleMsgContext {
 impl ConsoleMsgContext {
     fn wait_char(self) -> uint<8> {
         let d = if self.wait_enabled > 9 { 9 } else { self.wait_enabled };
-        trunc(b'0' + d)
+        b'0' +. d
     }
 
     fn status_byte(self, idx: uint<16>) -> TxReq8 {
