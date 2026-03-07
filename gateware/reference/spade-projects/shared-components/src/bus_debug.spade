@@ -319,14 +319,8 @@ fn run_ft_stream_mux(
     stream_fifo_empty: bool,
     stream_fifo_dout: uint<32>,
 ) -> FtStreamMuxOut {
-    let ft_get_fifo = match ft_state {
-        FtState::GetFifo => true,
-        _ => false,
-    };
-    let ft_stream = match ft_state {
-        FtState::Stream => true,
-        _ => false,
-    };
+    let ft_get_fifo = if let FtState::GetFifo = ft_state { true } else { false };
+    let ft_stream = if let FtState::Stream = ft_state { true } else { false };
     let ft_can_push = !ft_ui_din_full;
     let next_ft_enabled = if ft_cmd.enable {
         true

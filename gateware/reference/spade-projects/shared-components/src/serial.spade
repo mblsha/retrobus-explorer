@@ -269,10 +269,7 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     let state = regs.state;
     let tx_reg = regs.tx_reg;
     let block_flag = regs.block_flag;
-    let busy = match state {
-        UartTxState::Idle => block_flag,
-        _ => true,
-    };
+    let busy = if let UartTxState::Idle = state { block_flag } else { true };
 
     UartTxOut$(
         tx: tx_reg,
