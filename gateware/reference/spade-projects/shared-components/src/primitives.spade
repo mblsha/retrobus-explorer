@@ -12,7 +12,7 @@ pub entity sync_delay<#int STAGES>(
     clk: clock,
     input_signal: bool,
 ) -> bool {
-    let _ = require_positive_int::<STAGES, _>();
+    let _ = require_positive_int::<STAGES>();
     inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
@@ -28,7 +28,7 @@ pub entity sync_bundle<#int STAGES, #uint N>(
     clk: clock,
     input_signals: [bool; N],
 ) -> [bool; N] {
-    let _ = require_positive_int::<STAGES, _>();
+    let _ = require_positive_int::<STAGES>();
     inst(STAGES) sync_bundle_pipe::<STAGES, N>(clk, input_signals)
 }
 

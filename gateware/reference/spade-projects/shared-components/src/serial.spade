@@ -132,8 +132,8 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     data: uint<DATA_WIDTH>,
     new_data: bool,
 ) -> UartTxOut {
-    let _ = require_positive::<BAUD, _>();
-    let _ = require_positive::<DATA_WIDTH, _>();
+    let _ = require_positive::<BAUD>();
+    let _ = require_positive::<DATA_WIDTH>();
 
     // Match Lucid:
     // CLK_PER_BIT = (CLK_FREQ + BAUD) / BAUD - 1
@@ -311,7 +311,7 @@ pub entity uart_rx<#uint DATA_WIDTH>(
     parity: bool,
     stop_bits: uint<3>,
 ) -> UartRxOut<uint<DATA_WIDTH>> {
-    let _ = require_positive::<DATA_WIDTH, _>();
+    let _ = require_positive::<DATA_WIDTH>();
 
     let last = bit_time.bit_time_last();
     let half = bit_time >> 1;
@@ -463,12 +463,12 @@ pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER
     ui_din_valid: bool,
     ui_dout_get: bool,
 ) -> FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>> {
-    let _ = require_positive::<DATA_WIDTH, _>();
-    let _ = require_positive::<BE_WIDTH, _>();
-    let _ = require_at_least_two::<TX_BUFFER, _>();
-    let _ = require_at_least_two::<RX_BUFFER, _>();
-    let _ = require_power_of_two::<TX_BUFFER, _, _, _>();
-    let _ = require_power_of_two::<RX_BUFFER, _, _, _>();
+    let _ = require_positive::<DATA_WIDTH>();
+    let _ = require_positive::<BE_WIDTH>();
+    let _ = require_at_least_two::<TX_BUFFER>();
+    let _ = require_at_least_two::<RX_BUFFER>();
+    let _ = require_power_of_two::<TX_BUFFER>();
+    let _ = require_power_of_two::<RX_BUFFER>();
 
     let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port;
 
