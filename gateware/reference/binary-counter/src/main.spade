@@ -3,10 +3,6 @@ use shared_components::primitives::reset_conditioner;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx;
 
-fn is_ascii_digit(byte: uint<8>) -> bool {
-    byte >= b'0' && byte <= b'9'
-}
-
 fn default_digit_decode() -> DigitDecode {
     DigitDecode$(valid: false, value: 0)
 }
@@ -21,7 +17,7 @@ entity decode_rx_digit(
 
     maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
         let _ = clk;
-        let digit_valid = is_ascii_digit(byte);
+        let digit_valid = byte.is_digit();
         DigitDecode$(
             valid: digit_valid,
             value: if digit_valid { trunc(byte - b'0') } else { 0 },

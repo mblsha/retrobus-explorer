@@ -42,16 +42,6 @@ impl<T, #uint N> [T; N] {
     }
 }
 
-fn write_at<T, #uint N, #uint W>(
-    arr: [T; N],
-    idx: uint<W>,
-    val: T,
-) -> [T; N]
-where W: {uint_bits_to_fit(N - 1)}
-{
-    arr.write_at(idx, val)
-}
-
 fn ptr_inc<#uint W>(ptr: uint<W>) -> uint<W> {
     // ENTRIES is expected to be a power of two, so trunc() wraps correctly.
     trunc(ptr + 1)
@@ -255,13 +245,4 @@ impl<T> FifoOut<T> {
         set empty = &empty_value;
         set dout = &dout_value;
     }
-}
-
-pub entity fifo_out_tap<T>(
-    out: FifoOut<T>,
-    full: inv &bool,
-    empty: inv &bool,
-    dout: inv &T,
-) {
-    out.inst tap(full, empty, dout);
 }

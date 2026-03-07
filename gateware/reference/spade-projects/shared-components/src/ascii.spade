@@ -38,23 +38,3 @@ impl uint<8> {
         }
     }
 }
-
-pub fn to_upper(byte: uint<8>) -> uint<8> {
-    byte.to_upper()
-}
-
-pub fn is_digit(byte: uint<8>) -> bool {
-    byte.is_digit()
-}
-
-pub fn digit_value(byte: uint<8>) -> uint<4> {
-    byte.digit_value()
-}
-
-pub fn decode_digit(byte: uint<8>) -> DigitDecode {
-    byte.decode_digit()
-}
-
-pub fn decode_digit_max(byte: uint<8>, max_value: uint<4>) -> DigitDecode {
-    byte.decode_digit_max(max_value)
-}

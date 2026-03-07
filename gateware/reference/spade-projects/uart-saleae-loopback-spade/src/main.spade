@@ -5,8 +5,6 @@ use shared_components::config::au_usb_uart_rx;
 use shared_components::config::au_usb_uart_tx8_tap;
 use shared_components::primitives::reset_conditioner;
 use shared_components::protocol::simple_cmd_uart::clock_from_code;
-use shared_components::protocol::simple_cmd_uart::cmd_state_is_idle;
-use shared_components::protocol::simple_cmd_uart::is_echo_mode;
 use shared_components::protocol::simple_cmd_uart::saleae_outputs;
 use shared_components::protocol::simple_cmd_uart::simple_cmd_uart_core;
 use shared_components::serial::UartLineBusyPort;
@@ -39,7 +37,7 @@ entity main(
         *usb_uart.busy,
     );
 
-    let mode_is_echo = is_echo_mode(cmd_core.mode);
+    let mode_is_echo = cmd_core.mode.is_echo();
     let mode_is_clock_tester = !mode_is_echo;
 
     let dual_bridge = inst au_dual_bridge_u8x8_100_200::<24>(
@@ -88,7 +86,7 @@ entity main(
     let selected_clk = clock_from_code(cmd_core.freq_code, clk_div, clk200_probe, clk400_probe);
 
     reg(clk) heartbeat: uint<24> reset(rst: 0) = trunc(heartbeat + 1);
-    let cmd_waiting = !cmd_state_is_idle(cmd_core.cmd_state);
+    let cmd_waiting = !cmd_core.cmd_state.is_idle();
     let saleae_lines = saleae_outputs(
         mode_is_echo,
         selected_clk,

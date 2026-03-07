@@ -82,28 +82,32 @@ struct port FtWirePort<TData, TBe> {
     ui_dout_empty: &bool,
 }
 
-fn bit_time_last(bit_time: uint<15>) -> uint<15> {
-    if bit_time == 0 {
-        0
-    } else {
-        trunc(bit_time - 1)
+impl uint<15> {
+    fn bit_time_last(self) -> uint<15> {
+        if self == 0 {
+            0
+        } else {
+            trunc(self - 1)
+        }
     }
 }
 
-fn normalized_stop_bits(stop_bits: uint<3>) -> uint<3> {
-    if stop_bits == 0 {
-        1
-    } else {
-        stop_bits
+impl uint<3> {
+    fn normalized_stop_bits(self) -> uint<3> {
+        if self == 0 {
+            1
+        } else {
+            self
+        }
     }
-}
 
-fn extra_stop_bits(stop_bits: uint<3>) -> uint<3> {
-    let normalized = normalized_stop_bits(stop_bits);
-    if normalized > 1 {
-        trunc(normalized - 1)
-    } else {
-        0
+    fn extra_stop_bits(self) -> uint<3> {
+        let normalized = self.normalized_stop_bits();
+        if normalized > 1 {
+            trunc(normalized - 1)
+        } else {
+            0
+        }
     }
 }
 
@@ -311,9 +315,9 @@ pub entity uart_rx<#uint DATA_WIDTH>(
 ) -> UartRxOut<uint<DATA_WIDTH>> {
     let _ = require_positive::<DATA_WIDTH, _>();
 
-    let last = bit_time_last(bit_time);
+    let last = bit_time.bit_time_last();
     let half = bit_time >> 1;
-    let stops_after_first = extra_stop_bits(stop_bits);
+    let stops_after_first = stop_bits.extra_stop_bits();
     let last_bit_idx: uint<16> = DATA_WIDTH - 1;
 
     // Alchitry compatibility: use a 3-stage synchronizer and sample from
