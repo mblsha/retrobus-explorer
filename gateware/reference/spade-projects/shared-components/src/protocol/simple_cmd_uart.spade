@@ -8,50 +8,27 @@ pub enum Mode {
     Echo,
 }
 
-pub enum CmdParseState {
-    Idle,
-    Bang,
-    Freq,
-}
-
-pub enum MsgKind {
-    None,
-    Ready,
-    Help,
-    Status,
-    Ok,
-    ErrCmd,
-    ErrFreq,
-}
-
-impl MsgKind {
-    pub fn is_none(self) -> bool {
+impl Mode {
+    pub fn is_echo(self) -> bool {
         match self {
-            Self::None => true,
+            Self::Echo => true,
             _ => false,
         }
     }
-
-    pub fn byte(self, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
-        let msg_tpl = msg_template(self, mode, freq_code);
-        if idx < msg_tpl.len {
-            TxReq8$(valid: true, byte: msg_tpl.bytes[trunc(idx)])
-        } else {
-            TxReq8$(valid: false, byte: 0)
+    
+    pub fn char(self) -> uint<8> {
+        match self {
+            Self::ClockTester => b'C',
+            Self::Echo => b'E',
         }
     }
 }
 
-pub fn mode_char(mode: Mode) -> uint<8> {
-    match mode {
-        Mode::ClockTester => b'C',
-        Mode::Echo => b'E',
+impl uint<4> {
+    pub fn digit_char(self) -> uint<8> {
+        let v: uint<8> = zext(self);
+        trunc(v + b'0')
     }
-}
-
-pub fn digit_char(value: uint<4>) -> uint<8> {
-    let v: uint<8> = zext(value);
-    trunc(v + b'0')
 }
 
 pub struct MsgTemplate {
@@ -105,23 +82,62 @@ fn mode_freq_suffix(mode: uint<8>, freq: uint<8>) -> [uint<8>; 10] {
     [b' ', b'M', b'=', mode, b' ', b'F', b'=', freq, b'\r', b'\n']
 }
 
-pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
-    let m = mode_char(mode);
-    let f = digit_char(freq_code);
+pub enum CmdParseState {
+    Idle,
+    Bang,
+    Freq,
+}
 
-    match msg {
-        MsgKind::None => MsgTemplate$(len: 0, bytes: [0; 64]),
-        MsgKind::Ready => msg_template_bytes(std::conv::concat_arrays(b"RBX READY", mode_freq_suffix(m, f))),
-        MsgKind::Help => msg_template_bytes(b"RBX HELP !H !S !C !E !F0-5 M:CLOCK E:ECHO\r\n"),
-        MsgKind::Status => msg_template_bytes(std::conv::concat_arrays(b"RBX STATUS", mode_freq_suffix(m, f))),
-        MsgKind::Ok => msg_template_bytes(std::conv::concat_arrays(b"RBX OK", mode_freq_suffix(m, f))),
-        MsgKind::ErrCmd => msg_template_bytes(b"RBX ERR CMD\r\n"),
-        MsgKind::ErrFreq => msg_template_bytes(b"RBX ERR FREQ\r\n"),
+impl CmdParseState {
+    pub fn is_idle(self) -> bool {
+        match self {
+            Self::Idle => true,
+            _ => false,
+        }
     }
 }
 
-pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
-    msg.byte(idx, mode, freq_code)
+pub enum MsgKind {
+    None,
+    Ready,
+    Help,
+    Status,
+    Ok,
+    ErrCmd,
+    ErrFreq,
+}
+
+impl MsgKind {
+    pub fn is_none(self) -> bool {
+        match self {
+            Self::None => true,
+            _ => false,
+        }
+    }
+
+    pub fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
+        let m = mode.char();
+        let f = freq_code.digit_char();
+
+        match self {
+            Self::None => MsgTemplate$(len: 0, bytes: [0; 64]),
+            Self::Ready => msg_template_bytes(std::conv::concat_arrays(b"RBX READY", mode_freq_suffix(m, f))),
+            Self::Help => msg_template_bytes(b"RBX HELP !H !S !C !E !F0-5 M:CLOCK E:ECHO\r\n"),
+            Self::Status => msg_template_bytes(std::conv::concat_arrays(b"RBX STATUS", mode_freq_suffix(m, f))),
+            Self::Ok => msg_template_bytes(std::conv::concat_arrays(b"RBX OK", mode_freq_suffix(m, f))),
+            Self::ErrCmd => msg_template_bytes(b"RBX ERR CMD\r\n"),
+            Self::ErrFreq => msg_template_bytes(b"RBX ERR FREQ\r\n"),
+        }
+    }
+
+    pub fn byte(self, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
+        let msg_tpl = self.template(mode, freq_code);
+        if idx < msg_tpl.len {
+            TxReq8$(valid: true, byte: msg_tpl.bytes[trunc(idx)])
+        } else {
+            TxReq8$(valid: false, byte: 0)
+        }
+    }
 }
 
 pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk400: bool) -> bool {
@@ -137,20 +153,6 @@ pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk4
     let idx_u4: uint<4> = if freq_code > 5 { 0 } else { freq_code };
     let idx: uint<3> = trunc(idx_u4);
     sources[idx]
-}
-
-pub fn is_echo_mode(mode: Mode) -> bool {
-    match mode {
-        Mode::Echo => true,
-        _ => false,
-    }
-}
-
-pub fn cmd_state_is_idle(state: CmdParseState) -> bool {
-    match state {
-        CmdParseState::Idle => true,
-        _ => false,
-    }
 }
 
 pub fn next_cmd_state(
@@ -334,7 +336,7 @@ pub entity simple_cmd_uart_core(
     let tx_msg_none = tx_stream.msg_none;
 
     let rx_is_bang = rx_ok && rx_decode.byte == b'!';
-    let payload_rx = is_echo_mode(mode) && cmd_state_is_idle(cmd_state) && rx_ok && !rx_is_bang;
+    let payload_rx = mode.is_echo() && cmd_state.is_idle() && rx_ok && !rx_is_bang;
 
     SimpleCmdUartOut$(
         mode: mode,

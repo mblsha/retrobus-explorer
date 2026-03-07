@@ -27,8 +27,8 @@ impl ConsoleMsg {
             Self::Ok => text_byte(b"ok\r\n", idx),
             Self::Err => text_byte(b"err\r\n", idx),
             Self::Help => help_msg_byte(idx),
-            Self::Status => status_msg_byte(idx, ctx),
-            Self::PinMap => saleae_map_msg_byte(idx, ctx.saleae_state),
+            Self::Status => ctx.status_byte(idx),
+            Self::PinMap => ctx.saleae_state.map_byte(idx),
         }
     }
 }
@@ -41,26 +41,76 @@ pub struct ConsoleMsgContext {
     ft_armed: bool,
 }
 
+impl ConsoleMsgContext {
+    fn wait_char(self) -> uint<8> {
+        let d = if self.wait_enabled > 9 { 9 } else { self.wait_enabled };
+        trunc(b'0' + d)
+    }
+
+    fn status_byte(self, idx: uint<16>) -> TxReq8 {
+        let msg = [
+            b's', b't', b'a', b't', b' ', b'f', b'=',
+            bool_char(self.ft_enabled),
+            b' ', b'r', b'=',
+            bool_char(self.ft_remote_allowed),
+            b' ', b'a', b'=',
+            bool_char(self.ft_armed),
+            b' ', b'w', b'=',
+            self.wait_char(),
+            b' ', b'm', b'=',
+            self.saleae_state.lower_char(),
+            b'\r', b'\n',
+        ];
+        text_byte(msg, idx)
+    }
+}
+
+impl SaleaeState {
+    fn lower_char(self) -> uint<8> {
+        match self {
+            Self::DataSignals => b'd',
+            Self::SyncSignals => b's',
+            Self::EdgeSignals => b'e',
+            Self::RawSignals => b'r',
+            Self::Counter => b'c',
+        }
+    }
+
+    fn map_byte(self, idx: uint<16>) -> TxReq8 {
+        let header = std::conv::concat_arrays(
+            std::conv::concat_arrays(b"map mode=", [self.lower_char()]),
+            b"\r\n",
+        );
+        let data_lines = std::conv::concat_arrays(
+            std::conv::concat_arrays(
+                b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n",
+                b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n",
+            ),
+            std::conv::concat_arrays(
+                b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
+                b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
+            ),
+        );
+        let legend_lines = std::conv::concat_arrays(
+            std::conv::concat_arrays(
+                b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
+                b"c: d0..d7=ctr[0..7]\r\n",
+            ),
+            std::conv::concat_arrays(
+                b"legend: u=uart s=sync ^=fall n=active_low\r\n",
+                b"legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
+            ),
+        );
+        let msg = std::conv::concat_arrays(std::conv::concat_arrays(header, data_lines), legend_lines);
+        text_byte(msg, idx)
+    }
+}
+
 fn bool_char(v: bool) -> uint<8> {
     if v {
         b'1'
     } else {
         b'0'
-    }
-}
-
-fn wait_char(wait_enabled: uint<8>) -> uint<8> {
-    let d = if wait_enabled > 9 { 9 } else { wait_enabled };
-    trunc(b'0' + d)
-}
-
-fn mode_char_lower(mode: SaleaeState) -> uint<8> {
-    match mode {
-        SaleaeState::DataSignals => b'd',
-        SaleaeState::SyncSignals => b's',
-        SaleaeState::EdgeSignals => b'e',
-        SaleaeState::RawSignals => b'r',
-        SaleaeState::Counter => b'c',
     }
 }
 
@@ -70,23 +120,6 @@ fn text_byte<#uint N>(text: [uint<8>; N], idx: uint<16>) -> TxReq8 {
     } else {
         tx_req_none()
     }
-}
-
-fn status_msg_byte(idx: uint<16>, ctx: ConsoleMsgContext) -> TxReq8 {
-    let msg = [
-        b's', b't', b'a', b't', b' ', b'f', b'=',
-        bool_char(ctx.ft_enabled),
-        b' ', b'r', b'=',
-        bool_char(ctx.ft_remote_allowed),
-        b' ', b'a', b'=',
-        bool_char(ctx.ft_armed),
-        b' ', b'w', b'=',
-        wait_char(ctx.wait_enabled),
-        b' ', b'm', b'=',
-        mode_char_lower(ctx.saleae_state),
-        b'\r', b'\n',
-    ];
-    text_byte(msg, idx)
 }
 
 fn help_msg_byte(idx: uint<16>) -> TxReq8 {
@@ -119,39 +152,6 @@ fn help_msg_byte(idx: uint<16>) -> TxReq8 {
     );
     let msg = std::conv::concat_arrays(std::conv::concat_arrays(intro, mode_lines), control_lines);
     text_byte(msg, idx)
-}
-
-fn saleae_map_msg_byte(idx: uint<16>, saleae_state: SaleaeState) -> TxReq8 {
-    let header = std::conv::concat_arrays(
-        std::conv::concat_arrays(b"map mode=", [mode_char_lower(saleae_state)]),
-        b"\r\n",
-    );
-    let data_lines = std::conv::concat_arrays(
-        std::conv::concat_arrays(
-            b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n",
-            b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n",
-        ),
-        std::conv::concat_arrays(
-            b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
-            b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
-        ),
-    );
-    let legend_lines = std::conv::concat_arrays(
-        std::conv::concat_arrays(
-            b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
-            b"c: d0..d7=ctr[0..7]\r\n",
-        ),
-        std::conv::concat_arrays(
-            b"legend: u=uart s=sync ^=fall n=active_low\r\n",
-            b"legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
-        ),
-    );
-    let msg = std::conv::concat_arrays(std::conv::concat_arrays(header, data_lines), legend_lines);
-    text_byte(msg, idx)
-}
-
-pub fn console_msg_byte(msg: ConsoleMsg, idx: uint<16>, ctx: ConsoleMsgContext) -> TxReq8 {
-    msg.byte(idx, ctx)
 }
 
 pub fn console_stream_step(

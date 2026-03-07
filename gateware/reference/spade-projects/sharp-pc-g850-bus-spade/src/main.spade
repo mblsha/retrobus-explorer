@@ -30,19 +30,41 @@ use console::ConsoleMsg;
 use console::ConsoleMsgContext;
 use console::console_stream_step;
 
-fn gate_cycle_decode_ft(cycle_decode: CycleDecode, allow_ft_remote: bool) -> CycleDecode {
-    if allow_ft_remote {
-        cycle_decode
-    } else {
-        CycleDecode$(
-            bus: cycle_decode.bus,
-            bus_error: cycle_decode.bus_error,
-            rx_digit: cycle_decode.rx_digit,
-            saleae_cmd: cycle_decode.saleae_cmd,
-            ft_cmd: FtStreamCmdDecode$(
-                enable: false,
-                disable: false,
-            ),
+impl CycleDecode {
+    fn gate_ft(self, allow_ft_remote: bool) -> CycleDecode {
+        if allow_ft_remote {
+            self
+        } else {
+            CycleDecode$(
+                bus: self.bus,
+                bus_error: self.bus_error,
+                rx_digit: self.rx_digit,
+                saleae_cmd: self.saleae_cmd,
+                ft_cmd: FtStreamCmdDecode$(
+                    enable: false,
+                    disable: false,
+                ),
+            )
+        }
+    }
+
+    fn usb_inputs(
+        self,
+        wait_enabled: uint<8>,
+        saleae_state: SaleaeState,
+        rx_valid: bool,
+        rx_byte: uint<8>,
+        tx_busy: bool,
+        upstream_req: TxReq8,
+    ) -> UsbCmdInputs {
+        UsbCmdInputs$(
+            rx_valid: rx_valid,
+            rx_byte: rx_byte,
+            tx_busy: tx_busy,
+            wait_enabled: wait_enabled,
+            saleae_state: saleae_state,
+            cycle_decode: self,
+            upstream_req: upstream_req,
         )
     }
 }
@@ -67,76 +89,52 @@ struct MainState {
     console_stream: ByteMsgStreamState<ConsoleMsg, 16>,
 }
 
-fn mk_step_inputs(
-    state: MainState,
-    cycle_decode: CycleDecode,
-    mreq_fall: bool,
-    iorq_fall: bool,
-    tx_busy: bool,
-    ft_ui_din_full: bool,
-    ft_ui_dout_empty: bool,
-    stream_fifo_empty: bool,
-    stream_fifo_dout: uint<32>,
-    rd_rise: bool,
-    wr_rise: bool,
-    stream_fifo_full: bool,
-) -> CoreStepInputs {
-    CoreStepInputs$(
-        sample_state: state.sample_state,
-        wait_counter: state.wait_counter,
-        wait_enabled: state.wait_enabled,
-        mreq_fall: mreq_fall,
-        iorq_fall: iorq_fall,
-        cycle_decode: cycle_decode,
-        tx_busy: tx_busy,
-        ft_state: state.ft_state,
-        ft_enabled: state.ft_enabled,
-        ft_cur_value: state.ft_cur_value,
-        ft_ui_din_full: ft_ui_din_full,
-        ft_ui_dout_empty: ft_ui_dout_empty,
-        stream_fifo_empty: stream_fifo_empty,
-        stream_fifo_dout: stream_fifo_dout,
-        rd_rise: rd_rise,
-        wr_rise: wr_rise,
-        stream_fifo_full: stream_fifo_full,
-        fifo_full_counter: state.fifo_full_counter,
-    )
-}
+impl MainState {
+    fn step_inputs(
+        self,
+        cycle_decode: CycleDecode,
+        mreq_fall: bool,
+        iorq_fall: bool,
+        tx_busy: bool,
+        ft_ui_din_full: bool,
+        ft_ui_dout_empty: bool,
+        stream_fifo_empty: bool,
+        stream_fifo_dout: uint<32>,
+        rd_rise: bool,
+        wr_rise: bool,
+        stream_fifo_full: bool,
+    ) -> CoreStepInputs {
+        CoreStepInputs$(
+            sample_state: self.sample_state,
+            wait_counter: self.wait_counter,
+            wait_enabled: self.wait_enabled,
+            mreq_fall: mreq_fall,
+            iorq_fall: iorq_fall,
+            cycle_decode: cycle_decode,
+            tx_busy: tx_busy,
+            ft_state: self.ft_state,
+            ft_enabled: self.ft_enabled,
+            ft_cur_value: self.ft_cur_value,
+            ft_ui_din_full: ft_ui_din_full,
+            ft_ui_dout_empty: ft_ui_dout_empty,
+            stream_fifo_empty: stream_fifo_empty,
+            stream_fifo_dout: stream_fifo_dout,
+            rd_rise: rd_rise,
+            wr_rise: wr_rise,
+            stream_fifo_full: stream_fifo_full,
+            fifo_full_counter: self.fifo_full_counter,
+        )
+    }
 
-fn mk_usb_inputs(
-    wait_enabled: uint<8>,
-    saleae_state: SaleaeState,
-    cycle_decode: CycleDecode,
-    rx_valid: bool,
-    rx_byte: uint<8>,
-    tx_busy: bool,
-    upstream_req: TxReq8,
-) -> UsbCmdInputs {
-    UsbCmdInputs$(
-        rx_valid: rx_valid,
-        rx_byte: rx_byte,
-        tx_busy: tx_busy,
-        wait_enabled: wait_enabled,
-        saleae_state: saleae_state,
-        cycle_decode: cycle_decode,
-        upstream_req: upstream_req,
-    )
-}
-
-fn mk_console_ctx(
-    wait_enabled: uint<8>,
-    saleae_state: SaleaeState,
-    ft_enabled: bool,
-    ft_remote_allowed: bool,
-    ft_armed: bool,
-) -> ConsoleMsgContext {
-    ConsoleMsgContext$(
-        wait_enabled: wait_enabled,
-        saleae_state: saleae_state,
-        ft_enabled: ft_enabled,
-        ft_remote_allowed: ft_remote_allowed,
-        ft_armed: ft_armed,
-    )
+    fn console_ctx(self) -> ConsoleMsgContext {
+        ConsoleMsgContext$(
+            wait_enabled: self.wait_enabled,
+            saleae_state: self.saleae_state,
+            ft_enabled: self.ft_enabled,
+            ft_remote_allowed: self.ft_remote_allowed,
+            ft_armed: self.ft_armed,
+        )
+    }
 }
 
 struct ConsoleCmdDecode {
@@ -314,10 +312,9 @@ entity main_core(
             let ft_armed = state.ft_armed;
             let console_stream = state.console_stream;
 
-            let cycle_decode_for_step = gate_cycle_decode_ft(cycle_decode, ft_remote_allowed);
+            let cycle_decode_for_step = cycle_decode.gate_ft(ft_remote_allowed);
 
-            let step_inputs = mk_step_inputs(
-                state,
+            let step_inputs = state.step_inputs(
                 cycle_decode_for_step,
                 mreq_fall,
                 iorq_fall,
@@ -333,10 +330,9 @@ entity main_core(
             let step = step_inputs.run();
             let bus_sample = step.sample;
 
-            let usb_cmd_inputs = mk_usb_inputs(
+            let usb_cmd_inputs = cycle_decode.usb_inputs(
                 wait_enabled,
                 saleae_state,
-                cycle_decode,
                 rx.valid,
                 rx.byte,
                 *tx_busy,
@@ -456,13 +452,7 @@ entity main_core(
             } else {
                 ConsoleMsg::None()
             };
-            let console_ctx = mk_console_ctx(
-                wait_enabled,
-                saleae_state,
-                ft_enabled,
-                ft_remote_allowed,
-                ft_armed,
-            );
+            let console_ctx = state.console_ctx();
             let next_console_stream = console_stream_step(
                 console_stream,
                 console_ctx,
@@ -508,10 +498,9 @@ entity main_core(
     let ft_armed = state.ft_armed;
     let console_stream_state = state.console_stream;
 
-    let cycle_decode_for_step = gate_cycle_decode_ft(cycle_decode, ft_remote_allowed);
+    let cycle_decode_for_step = cycle_decode.gate_ft(ft_remote_allowed);
 
-    let step_inputs = mk_step_inputs(
-        state,
+    let step_inputs = state.step_inputs(
         cycle_decode_for_step,
         mreq_fall,
         iorq_fall,
@@ -565,13 +554,7 @@ entity main_core(
         rx.valid &&
         (cycle_decode.rx_digit.valid || cycle_decode.saleae_cmd.valid) &&
         !*tx_busy;
-    let console_ctx = mk_console_ctx(
-        wait_enabled,
-        saleae_state,
-        ft_enabled,
-        ft_remote_allowed,
-        ft_armed,
-    );
+    let console_ctx = state.console_ctx();
     let console_stream = console_stream_step(
         console_stream_state,
         console_ctx,
@@ -581,10 +564,9 @@ entity main_core(
     );
     let uart_upstream_req = tx_req_arbiter(console_stream.tx_req, ft_tx_req, tx_req_none());
 
-    let usb_cmd_inputs = mk_usb_inputs(
+    let usb_cmd_inputs = cycle_decode.usb_inputs(
         wait_enabled,
         saleae_state,
-        cycle_decode,
         rx.valid,
         rx.byte,
         *tx_busy,

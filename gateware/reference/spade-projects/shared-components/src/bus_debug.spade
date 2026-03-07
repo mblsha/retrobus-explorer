@@ -15,16 +15,20 @@ pub fn pack_overflow_word(count: uint<24>, event: uint<8>) -> uint<32> {
     (count_wide << 8) | event_wide
 }
 
-pub fn wait_shift(level: uint<8>) -> uint<5> {
-    let clamped = if level > 9 { 9 } else { level };
-    trunc(clamped << 1)
+impl uint<8> {
+    pub fn wait_shift(self) -> uint<5> {
+        let clamped = if self > 9 { 9 } else { self };
+        trunc(clamped << 1)
+    }
 }
 
-pub fn wait_window(counter: uint<128>, level: uint<8>) -> uint<8> {
-    let shift: uint<5> = wait_shift(level);
-    let shift_wide: uint<128> = zext(shift);
-    let shifted: uint<128> = counter >> shift_wide;
-    trunc(shifted)
+impl uint<128> {
+    pub fn wait_window(self, level: uint<8>) -> uint<8> {
+        let shift: uint<5> = level.wait_shift();
+        let shift_wide: uint<128> = zext(shift);
+        let shifted: uint<128> = self >> shift_wide;
+        trunc(shifted)
+    }
 }
 
 pub enum SampleState {
@@ -50,17 +54,19 @@ pub struct SampleFlags {
     is_wait: bool,
 }
 
-pub fn sample_flags(sample_state: SampleState) -> SampleFlags {
-    SampleFlags$(
-        is_bus: match sample_state {
-            SampleState::SampleBus => true,
-            _ => false,
-        },
-        is_wait: match sample_state {
-            SampleState::InsertWait => true,
-            _ => false,
-        },
-    )
+impl SampleState {
+    pub fn flags(self) -> SampleFlags {
+        SampleFlags$(
+            is_bus: match self {
+                Self::SampleBus => true,
+                _ => false,
+            },
+            is_wait: match self {
+                Self::InsertWait => true,
+                _ => false,
+            },
+        )
+    }
 }
 
 pub fn bus_event_char_from_flags(
@@ -137,14 +143,16 @@ pub struct FtStreamCmdDecode {
     disable: bool,
 }
 
-pub fn decode_ft_stream_cmd(ft_ui_dout_empty: bool, ft_cmd_word: uint<16>) -> FtStreamCmdDecode {
-    let cmd_b0: uint<8> = trunc(ft_cmd_word);
-    let cmd_b1: uint<8> = trunc(ft_cmd_word >> 8);
-    let has_prefix = !ft_ui_dout_empty && cmd_b0.to_upper() == b'S';
-    FtStreamCmdDecode$(
-        enable: has_prefix && cmd_b1 == b'+',
-        disable: has_prefix && cmd_b1 == b'-',
-    )
+impl uint<16> {
+    pub fn decode_ft_stream(self, ft_ui_dout_empty: bool) -> FtStreamCmdDecode {
+        let cmd_b0: uint<8> = trunc(self);
+        let cmd_b1: uint<8> = trunc(self >> 8);
+        let has_prefix = !ft_ui_dout_empty && cmd_b0.to_upper() == b'S';
+        FtStreamCmdDecode$(
+            enable: has_prefix && cmd_b1 == b'+',
+            disable: has_prefix && cmd_b1 == b'-',
+        )
+    }
 }
 
 pub struct SaleaeCmdDecode {
@@ -152,20 +160,22 @@ pub struct SaleaeCmdDecode {
     state: SaleaeState,
 }
 
-pub fn decode_saleae_state_cmd(rx_byte: uint<8>) -> SaleaeCmdDecode {
-    let upper = rx_byte.to_upper();
-    if upper == b'S' {
-        SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals())
-    } else if upper == b'E' {
-        SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals())
-    } else if upper == b'D' {
-        SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals())
-    } else if upper == b'R' {
-        SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals())
-    } else if upper == b'C' {
-        SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter())
-    } else {
-        SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals())
+impl uint<8> {
+    pub fn decode_saleae_state(self) -> SaleaeCmdDecode {
+        let upper = self.to_upper();
+        if upper == b'S' {
+            SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals())
+        } else if upper == b'E' {
+            SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals())
+        } else if upper == b'D' {
+            SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals())
+        } else if upper == b'R' {
+            SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals())
+        } else if upper == b'C' {
+            SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter())
+        } else {
+            SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals())
+        }
     }
 }
 
@@ -192,8 +202,8 @@ pub fn decode_cycle(
         bus: bus,
         bus_error: bus_error_status(rd_rise, wr_rise, bus.invalid_bus_state),
         rx_digit: rx_byte.decode_digit(),
-        saleae_cmd: decode_saleae_state_cmd(rx_byte),
-        ft_cmd: decode_ft_stream_cmd(ft_ui_dout_empty, ft_cmd_word),
+        saleae_cmd: rx_byte.decode_saleae_state(),
+        ft_cmd: ft_cmd_word.decode_ft_stream(ft_ui_dout_empty),
     )
 }
 
@@ -220,10 +230,10 @@ pub fn sample_bus_cycle(
     bus_error: BusError,
     tx_busy: bool,
 ) -> BusSamplerOut {
-    let sample = sample_flags(sample_state);
+    let sample = sample_state.flags();
     let sample_is_bus = sample.is_bus;
     let sample_is_wait = sample.is_wait;
-    let wait_window_bits: uint<8> = wait_window(wait_counter, wait_enabled);
+    let wait_window_bits: uint<8> = wait_counter.wait_window(wait_enabled);
     let wait_done = wait_window_bits > 1;
     let bus_start = mreq_fall || iorq_fall;
     BusSamplerOut$(
@@ -292,10 +302,6 @@ impl UsbCmdInputs {
             tx_req: rx_tx_req,
         )
     }
-}
-
-pub fn parse_usb_cmd(inputs: UsbCmdInputs) -> UsbCmdOut {
-    inputs.parse()
 }
 
 pub struct FtStreamMuxOut {
@@ -456,10 +462,6 @@ impl CoreStepInputs {
             should_emit_overflow: should_emit_overflow,
         )
     }
-}
-
-pub fn core_step(inputs: CoreStepInputs) -> CoreStepOut {
-    inputs.run()
 }
 
 pub fn saleae_mux(
