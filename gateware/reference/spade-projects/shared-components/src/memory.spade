@@ -183,6 +183,7 @@ pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     let _ = require_positive::<SYNC_STAGES>();
 
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
+    #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst async_fifo_v::<WIDTH, ENTRIES, SYNC_STAGES>(
         wclk,
         wrst,
@@ -214,6 +215,7 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
     let _ = require_power_of_two::<ENTRIES>();
 
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port;
+    #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst sync_fifo_v::<WIDTH, ENTRIES>(
         clk,
         rst,

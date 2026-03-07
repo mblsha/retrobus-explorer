@@ -153,6 +153,7 @@ pub entity au_ft_tap_u16(
     ui_dout_be: inv &FtBe,
     ui_dout_empty: inv &bool,
 ) {
+    #[verilog_attrs(keep_hierarchy = "yes")]
     inst ft_tap::<16, 2, 8192, 64, 1, 0>(
         clk,
         rst,

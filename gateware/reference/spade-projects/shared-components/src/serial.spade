@@ -474,6 +474,7 @@ pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER
 
     let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port;
 
+    #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst ft_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
         clk,
         rst,
@@ -555,6 +556,7 @@ pub entity ft_tap<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BU
     ui_dout_be: inv &uint<BE_WIDTH>,
     ui_dout_empty: inv &bool,
 ) {
+    #[verilog_attrs(keep_hierarchy = "yes")]
     let out = inst ft::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
         clk,
         rst,
