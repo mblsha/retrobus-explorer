@@ -72,9 +72,9 @@ pub entity au_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD, #uint DROP_COUNT_W>
     )
 }
 
-pub struct AuDualBridgeU8x8Out<#uint DROP_COUNT_W> {
-    tx100: UartFifoBridgeOut<uint<8>, DROP_COUNT_W>,
-    tx200: UartFifoBridgeOut<uint<8>, DROP_COUNT_W>,
+pub struct AuDualBridgeOut<TData, #uint DROP_COUNT_W> {
+    tx_a: UartFifoBridgeOut<TData, DROP_COUNT_W>,
+    tx_b: UartFifoBridgeOut<TData, DROP_COUNT_W>,
 }
 
 pub entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B, #uint DROP_COUNT_W>(
@@ -86,10 +86,7 @@ pub entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B
     rrst: bool,
     send_enable: bool,
     policy: BridgePolicy,
-) -> (
-    UartFifoBridgeOut<uint<WIDTH>, DROP_COUNT_W>,
-    UartFifoBridgeOut<uint<WIDTH>, DROP_COUNT_W>
-) {
+) -> AuDualBridgeOut<uint<WIDTH>, DROP_COUNT_W> {
     let tx_a = inst au_bridge::<WIDTH, ENTRIES, BAUD_A, DROP_COUNT_W>(
         wclk,
         wrst,
@@ -110,7 +107,10 @@ pub entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B
         send_enable,
         policy,
     );
-    (tx_a, tx_b)
+    AuDualBridgeOut$(
+        tx_a: tx_a,
+        tx_b: tx_b,
+    )
 }
 
 pub entity au_dual_bridge_u8x8_100_200<#uint DROP_COUNT_W>(
@@ -122,8 +122,8 @@ pub entity au_dual_bridge_u8x8_100_200<#uint DROP_COUNT_W>(
     rrst: bool,
     send_enable: bool,
     policy: BridgePolicy,
-) -> AuDualBridgeU8x8Out<DROP_COUNT_W> {
-    let dual = inst au_dual_bridge::<8, 8, 100_000_000, 200_000_000, DROP_COUNT_W>(
+) -> AuDualBridgeOut<uint<8>, DROP_COUNT_W> {
+    inst au_dual_bridge::<8, 8, 100_000_000, 200_000_000, DROP_COUNT_W>(
         wclk,
         wrst,
         din,
@@ -132,10 +132,6 @@ pub entity au_dual_bridge_u8x8_100_200<#uint DROP_COUNT_W>(
         rrst,
         send_enable,
         policy,
-    );
-    AuDualBridgeU8x8Out$(
-        tx100: dual.0,
-        tx200: dual.1,
     )
 }
 

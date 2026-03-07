@@ -25,8 +25,13 @@ use shared_components::ascii::ascii_upper_u;
 use shared_components::ascii::ascii_upper_x;
 use shared_components::ascii::ascii_upper_y;
 use shared_components::ascii::ascii_zero;
+use shared_components::ascii::DigitDecode;
 use shared_components::ascii::decode_digit_max;
 use shared_components::ascii::to_upper;
+use shared_components::message_stream::ByteMsgStreamOut;
+use shared_components::message_stream::ByteMsgStreamState;
+use shared_components::message_stream::TxReq8;
+use shared_components::message_stream::byte_msg_stream_step;
 
 pub enum Mode {
     ClockTester,
@@ -177,12 +182,12 @@ pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate
     }
 }
 
-pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> (bool, uint<8>) {
+pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
     let msg_tpl = msg_template(msg, mode, freq_code);
     if idx < msg_tpl.len {
-        (true, msg_tpl.bytes[trunc(idx)])
+        TxReq8$(valid: true, byte: msg_tpl.bytes[trunc(idx)])
     } else {
-        (false, 0)
+        TxReq8$(valid: false, byte: 0)
     }
 }
 
@@ -307,7 +312,7 @@ pub fn decode_cmd(
     state: CmdParseState,
     rx_ok: bool,
     rx_upper: uint<8>,
-    rx_digit: (bool, uint<4>),
+    rx_digit: DigitDecode,
 ) -> CmdDecode {
     if !rx_ok {
         cmd_decode_none()
@@ -315,8 +320,8 @@ pub fn decode_cmd(
         match state {
             CmdParseState::Bang => decode_bang_cmd(rx_upper),
             CmdParseState::Freq => {
-                if rx_digit.0 {
-                    cmd_decode_set_freq(rx_digit.1)
+                if rx_digit.valid {
+                    cmd_decode_set_freq(rx_digit.value)
                 } else {
                     cmd_decode_msg(MsgKind::ErrFreq())
                 }
@@ -331,15 +336,33 @@ pub struct SimpleCmdUartOut {
     freq_code: uint<4>,
     cmd_state: CmdParseState,
     tx_msg_none: bool,
-    tx_req_valid: bool,
-    tx_req_byte: uint<8>,
+    tx_req: TxReq8,
     payload_rx: bool,
 }
 
-struct TxState {
-    cur_msg: MsgKind,
-    cur_idx: uint<8>,
-    pending_msg: MsgKind,
+fn tx_stream_step(
+    tx_state: ByteMsgStreamState<MsgKind, 8>,
+    mode: Mode,
+    freq_code: uint<4>,
+    tx_busy: bool,
+    next_msg_valid: bool,
+    next_msg: MsgKind,
+) -> ByteMsgStreamOut<MsgKind, 8> {
+    let cur_byte = msg_byte(tx_state.cur_msg, tx_state.cur_idx, mode, freq_code);
+    let next_idx: uint<8> = trunc(tx_state.cur_idx + 1);
+    let next_byte = msg_byte(tx_state.cur_msg, next_idx, mode, freq_code);
+    byte_msg_stream_step(
+        tx_state,
+        MsgKind::None(),
+        msg_is_none(tx_state.cur_msg),
+        msg_is_none(tx_state.pending_msg),
+        cur_byte,
+        next_byte,
+        tx_busy,
+        next_msg_valid,
+        next_msg,
+        msg_is_none(next_msg),
+    )
 }
 
 pub entity simple_cmd_uart_core(
@@ -375,50 +398,14 @@ pub entity simple_cmd_uart_core(
         }
     };
 
-    reg(clk) tx_state: TxState
-        reset(rst: TxState$(cur_msg: MsgKind::Ready(), cur_idx: 0, pending_msg: MsgKind::None()))
+    reg(clk) tx_state: ByteMsgStreamState<MsgKind, 8>
+        reset(rst: ByteMsgStreamState$(cur_msg: MsgKind::Ready(), cur_idx: 0, pending_msg: MsgKind::None()))
         = {
-        let cur_msg = tx_state.cur_msg;
-        let cur_idx = tx_state.cur_idx;
-        let pending_msg = tx_state.pending_msg;
-        let pending_next = if cmd_decode.msg_valid {
-            cmd_decode.msg
-        } else {
-            pending_msg
-        };
-        let cur_byte = msg_byte(cur_msg, cur_idx, mode, freq_code);
-        let cur_none = msg_is_none(cur_msg);
-        let sending = !cur_none && cur_byte.0 && !tx_busy;
-        let next_idx: uint<8> = trunc(cur_idx + 1);
-        let next_valid = msg_byte(cur_msg, next_idx, mode, freq_code).0;
-
-        let post_msg: MsgKind = if sending && !next_valid {
-            MsgKind::None()
-        } else {
-            cur_msg
-        };
-        let post_idx: uint<8> = if sending {
-            if next_valid {
-                next_idx
-            } else {
-                0
-            }
-        } else {
-            cur_idx
-        };
-
-        if msg_is_none(post_msg) && !msg_is_none(pending_next) {
-            TxState$(cur_msg: pending_next, cur_idx: 0, pending_msg: MsgKind::None())
-        } else {
-            TxState$(cur_msg: post_msg, cur_idx: post_idx, pending_msg: pending_next)
-        }
+        tx_stream_step(tx_state, mode, freq_code, tx_busy, cmd_decode.msg_valid, cmd_decode.msg).state
     };
 
-    let tx_msg = tx_state.cur_msg;
-    let tx_idx = tx_state.cur_idx;
-    let tx_msg_byte = msg_byte(tx_msg, tx_idx, mode, freq_code);
-    let tx_msg_none = msg_is_none(tx_msg);
-    let tx_msg_send = !tx_msg_none && tx_msg_byte.0 && !tx_busy;
+    let tx_stream = tx_stream_step(tx_state, mode, freq_code, tx_busy, false, MsgKind::None());
+    let tx_msg_none = tx_stream.msg_none;
 
     let rx_is_bang = rx_ok && rx_byte == ascii_bang();
     let payload_rx = is_echo_mode(mode) && cmd_state_is_idle(cmd_state) && rx_ok && !rx_is_bang;
@@ -428,8 +415,7 @@ pub entity simple_cmd_uart_core(
         freq_code: freq_code,
         cmd_state: cmd_state,
         tx_msg_none: tx_msg_none,
-        tx_req_valid: tx_msg_send,
-        tx_req_byte: tx_msg_byte.1,
+        tx_req: tx_stream.tx_req,
         payload_rx: payload_rx,
     )
 }

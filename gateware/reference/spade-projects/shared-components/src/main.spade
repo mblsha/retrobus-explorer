@@ -4,6 +4,7 @@ pub mod sharp;
 pub mod serial;
 pub mod memory;
 pub mod ascii;
+pub mod message_stream;
 pub mod bridges;
 pub mod protocol;
 pub mod guards;

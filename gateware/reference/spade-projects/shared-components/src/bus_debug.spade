@@ -1,4 +1,6 @@
 use shared_components::ascii::decode_digit;
+use shared_components::ascii::DigitDecode;
+use shared_components::ascii::ascii_dot;
 use shared_components::ascii::ascii_plus;
 use shared_components::ascii::ascii_minus;
 use shared_components::ascii::ascii_upper_c;
@@ -12,6 +14,8 @@ use shared_components::ascii::ascii_lower_e;
 use shared_components::ascii::ascii_lower_r;
 use shared_components::ascii::ascii_lower_w;
 use shared_components::ascii::to_upper;
+use shared_components::message_stream::TxReq8;
+use shared_components::message_stream::tx_req_none;
 
 pub fn pack_event_word(addr: uint<16>, data: uint<8>, event: uint<8>) -> uint<32> {
     let addr_wide: uint<32> = zext(addr);
@@ -128,13 +132,18 @@ pub fn decode_bus_events(
     )
 }
 
-pub fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> (bool, uint<8>) {
+pub struct BusError {
+    valid: bool,
+    ch: uint<8>,
+}
+
+pub fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> BusError {
     if rd_rise {
-        (invalid_bus_state, ascii_upper_e())
+        BusError$(valid: invalid_bus_state, ch: ascii_upper_e())
     } else if wr_rise {
-        (invalid_bus_state, ascii_lower_e())
+        BusError$(valid: invalid_bus_state, ch: ascii_lower_e())
     } else {
-        (false, ascii_lower_e())
+        BusError$(valid: false, ch: ascii_lower_e())
     }
 }
 
@@ -153,28 +162,33 @@ pub fn decode_ft_stream_cmd(ft_ui_dout_empty: bool, ft_cmd_word: uint<16>) -> Ft
     )
 }
 
-pub fn decode_saleae_state_cmd(rx_byte: uint<8>) -> (bool, SaleaeState) {
+pub struct SaleaeCmdDecode {
+    valid: bool,
+    state: SaleaeState,
+}
+
+pub fn decode_saleae_state_cmd(rx_byte: uint<8>) -> SaleaeCmdDecode {
     let upper = to_upper(rx_byte);
     if upper == ascii_upper_s() {
-        (true, SaleaeState::SyncSignals())
+        SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals())
     } else if upper == ascii_upper_e() {
-        (true, SaleaeState::EdgeSignals())
+        SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals())
     } else if upper == ascii_upper_d() {
-        (true, SaleaeState::DataSignals())
+        SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals())
     } else if upper == ascii_upper_r() {
-        (true, SaleaeState::RawSignals())
+        SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals())
     } else if upper == ascii_upper_c() {
-        (true, SaleaeState::Counter())
+        SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter())
     } else {
-        (false, SaleaeState::DataSignals())
+        SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals())
     }
 }
 
 pub struct CycleDecode {
     bus: BusEventDecode,
-    bus_error: (bool, uint<8>),
-    rx_digit: (bool, uint<4>),
-    saleae_cmd: (bool, SaleaeState),
+    bus_error: BusError,
+    rx_digit: DigitDecode,
+    saleae_cmd: SaleaeCmdDecode,
     ft_cmd: FtStreamCmdDecode,
 }
 
@@ -205,11 +219,10 @@ pub struct BusSamplerOut {
     bus_start: bool,
     bus_event_valid: bool,
     bus_event_char: uint<8>,
-    bus_error_tx: bool,
-    bus_error_char: uint<8>,
+    bus_error: BusError,
     addr_fifo_wput: bool,
     event_fifo_wput: bool,
-    sample_tx_req: bool,
+    sample_tx_req: TxReq8,
 }
 
 pub fn sample_bus_cycle(
@@ -219,7 +232,7 @@ pub fn sample_bus_cycle(
     mreq_fall: bool,
     iorq_fall: bool,
     bus_decode: BusEventDecode,
-    bus_error: (bool, uint<8>),
+    bus_error: BusError,
     tx_busy: bool,
 ) -> BusSamplerOut {
     let sample = sample_flags(sample_state);
@@ -235,11 +248,14 @@ pub fn sample_bus_cycle(
         bus_start: bus_start,
         bus_event_valid: bus_decode.bus_event_valid,
         bus_event_char: bus_decode.bus_event_char,
-        bus_error_tx: bus_error.0,
-        bus_error_char: bus_error.1,
+        bus_error: bus_error,
         addr_fifo_wput: bus_start && sample_is_bus,
         event_fifo_wput: bus_decode.bus_event_valid,
-        sample_tx_req: sample_is_wait && wait_done && !tx_busy,
+        sample_tx_req: if sample_is_wait && wait_done && !tx_busy {
+            TxReq8$(valid: true, byte: ascii_dot())
+        } else {
+            tx_req_none()
+        },
     )
 }
 
@@ -248,8 +264,7 @@ pub struct UsbCmdOut {
     next_saleae_state: SaleaeState,
     rx_is_digit: bool,
     rx_is_saleae_cmd: bool,
-    tx_req_valid: bool,
-    tx_req_byte: uint<8>,
+    tx_req: TxReq8,
 }
 
 pub struct UsbCmdInputs {
@@ -259,26 +274,26 @@ pub struct UsbCmdInputs {
     wait_enabled: uint<8>,
     saleae_state: SaleaeState,
     cycle_decode: CycleDecode,
-    upstream_req: (bool, uint<8>),
+    upstream_req: TxReq8,
 }
 
 pub fn parse_usb_cmd(inputs: UsbCmdInputs) -> UsbCmdOut {
-    let next_wait_enabled = if inputs.rx_valid && inputs.cycle_decode.rx_digit.0 {
-        zext(inputs.cycle_decode.rx_digit.1)
+    let next_wait_enabled = if inputs.rx_valid && inputs.cycle_decode.rx_digit.valid {
+        zext(inputs.cycle_decode.rx_digit.value)
     } else {
         inputs.wait_enabled
     };
 
-    let next_saleae_state = if inputs.rx_valid && inputs.cycle_decode.saleae_cmd.0 {
-        inputs.cycle_decode.saleae_cmd.1
+    let next_saleae_state = if inputs.rx_valid && inputs.cycle_decode.saleae_cmd.valid {
+        inputs.cycle_decode.saleae_cmd.state
     } else {
         inputs.saleae_state
     };
 
-    let rx_is_digit = inputs.rx_valid && inputs.cycle_decode.rx_digit.0;
-    let rx_is_saleae_cmd = inputs.rx_valid && inputs.cycle_decode.saleae_cmd.0;
+    let rx_is_digit = inputs.rx_valid && inputs.cycle_decode.rx_digit.valid;
+    let rx_is_saleae_cmd = inputs.rx_valid && inputs.cycle_decode.saleae_cmd.valid;
     let rx_tx_req = if (rx_is_digit || rx_is_saleae_cmd) && !inputs.tx_busy {
-        (true, inputs.rx_byte)
+        TxReq8$(valid: true, byte: inputs.rx_byte)
     } else {
         inputs.upstream_req
     };
@@ -288,8 +303,7 @@ pub fn parse_usb_cmd(inputs: UsbCmdInputs) -> UsbCmdOut {
         next_saleae_state: next_saleae_state,
         rx_is_digit: rx_is_digit,
         rx_is_saleae_cmd: rx_is_saleae_cmd,
-        tx_req_valid: rx_tx_req.0,
-        tx_req_byte: rx_tx_req.1,
+        tx_req: rx_tx_req,
     )
 }
 
@@ -302,8 +316,7 @@ pub struct FtStreamMuxOut {
     ft_ui_din_be: uint<2>,
     ft_ui_dout_get: bool,
     stream_fifo_rget: bool,
-    ft_tx_req_valid: bool,
-    ft_tx_req_byte: uint<8>,
+    ft_tx_req: TxReq8,
 }
 
 pub fn run_ft_stream_mux(
@@ -370,11 +383,11 @@ pub fn run_ft_stream_mux(
         false
     };
     let ft_tx_req = if ft_cmd.enable && !tx_busy {
-        (true, ascii_plus())
+        TxReq8$(valid: true, byte: ascii_plus())
     } else if ft_cmd.disable && !tx_busy {
-        (true, ascii_minus())
+        TxReq8$(valid: true, byte: ascii_minus())
     } else {
-        (false, 0)
+        tx_req_none()
     };
 
     FtStreamMuxOut$(
@@ -386,8 +399,7 @@ pub fn run_ft_stream_mux(
         ft_ui_din_be: if ft_ui_din_valid { 0x3 } else { 0x0 },
         ft_ui_dout_get: !ft_ui_dout_empty,
         stream_fifo_rget: stream_fifo_rget,
-        ft_tx_req_valid: ft_tx_req.0,
-        ft_tx_req_byte: ft_tx_req.1,
+        ft_tx_req: ft_tx_req,
     )
 }
 
@@ -523,30 +535,5 @@ pub fn saleae_mux(
             ]
         },
         SaleaeState::Counter => saleae_counter.to_bits(),
-    }
-}
-
-pub fn telemetry_tx_arbiter(
-    highest: (bool, uint<8>),
-    high: (bool, uint<8>),
-    low: (bool, uint<8>),
-) -> (bool, uint<8>) {
-    if highest.0 {
-        highest
-    } else if high.0 {
-        high
-    } else {
-        low
-    }
-}
-
-pub fn telemetry_tx_arbiter2(
-    highest: (bool, uint<8>),
-    low: (bool, uint<8>),
-) -> (bool, uint<8>) {
-    if highest.0 {
-        highest
-    } else {
-        low
     }
 }

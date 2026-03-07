@@ -53,19 +53,24 @@ pub fn digit_value(byte: uint<8>) -> uint<4> {
     trunc(byte - ascii_zero())
 }
 
-pub fn decode_digit(byte: uint<8>) -> (bool, uint<4>) {
+pub struct DigitDecode {
+    valid: bool,
+    value: uint<4>,
+}
+
+pub fn decode_digit(byte: uint<8>) -> DigitDecode {
     if is_digit(byte) {
-        (true, digit_value(byte))
+        DigitDecode$(valid: true, value: digit_value(byte))
     } else {
-        (false, 0)
+        DigitDecode$(valid: false, value: 0)
     }
 }
 
-pub fn decode_digit_max(byte: uint<8>, max_value: uint<4>) -> (bool, uint<4>) {
+pub fn decode_digit_max(byte: uint<8>, max_value: uint<4>) -> DigitDecode {
     let decoded = decode_digit(byte);
-    if decoded.0 && decoded.1 <= max_value {
+    if decoded.valid && decoded.value <= max_value {
         decoded
     } else {
-        (false, 0)
+        DigitDecode$(valid: false, value: 0)
     }
 }
