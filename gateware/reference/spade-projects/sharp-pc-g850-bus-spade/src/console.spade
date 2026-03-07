@@ -2,7 +2,7 @@ use shared_components::bus_debug::SaleaeState;
 use shared_components::message_stream::ByteMsgStreamOut;
 use shared_components::message_stream::ByteMsgStreamState;
 use shared_components::message_stream::TxReq8;
-use shared_components::message_stream::byte_msg_stream_step;
+use shared_components::message_stream::byte_msg_stream_step_with;
 use shared_components::message_stream::tx_req_none;
 
 pub enum ConsoleMsg {
@@ -20,13 +20,6 @@ pub struct ConsoleMsgContext {
     ft_enabled: bool,
     ft_remote_allowed: bool,
     ft_armed: bool,
-}
-
-pub fn console_msg_is_none(msg: ConsoleMsg) -> bool {
-    match msg {
-        ConsoleMsg::None => true,
-        _ => false,
-    }
 }
 
 fn bool_char(v: bool) -> uint<8> {
@@ -156,19 +149,18 @@ pub fn console_stream_step(
     next_msg_valid: bool,
     next_msg: ConsoleMsg,
 ) -> ByteMsgStreamOut<ConsoleMsg, 16> {
-    let cur_byte = console_msg_byte(stream.cur_msg, stream.cur_idx, ctx);
-    let next_idx: uint<16> = trunc(stream.cur_idx + 1);
-    let next_byte = console_msg_byte(stream.cur_msg, next_idx, ctx);
-    byte_msg_stream_step(
+    byte_msg_stream_step_with(
         stream,
         ConsoleMsg::None(),
-        console_msg_is_none(stream.cur_msg),
-        console_msg_is_none(stream.pending_msg),
-        cur_byte,
-        next_byte,
+        fn |msg| {
+            match msg {
+                ConsoleMsg::None => true,
+                _ => false,
+            }
+        },
+        fn |msg, idx| { console_msg_byte(msg, idx, ctx) },
         block_tx,
         next_msg_valid,
         next_msg,
-        console_msg_is_none(next_msg),
     )
 }
