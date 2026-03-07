@@ -118,19 +118,15 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
         )
     }
 
-    pub fn step_with<FNone, FRender>(
+    pub fn step_with(
         self,
         none_msg: TMsg,
-        is_none: FNone,
-        render_byte: FRender,
+        is_none: impl Fn(TMsg) -> bool,
+        render_byte: impl Fn(TMsg, uint<IDX_W>) -> TxReq8,
         block_tx: bool,
         next_msg_valid: bool,
         next_msg: TMsg,
-    ) -> ByteMsgStreamOut<TMsg, IDX_W>
-    where
-        FNone: Fn(TMsg) -> bool,
-        FRender: Fn(TMsg, uint<IDX_W>) -> TxReq8,
-    {
+    ) -> ByteMsgStreamOut<TMsg, IDX_W> {
         let cur_msg_is_none = is_none.call((self.cur_msg,));
         let pending_msg_is_none = is_none.call((self.pending_msg,));
         let cur_byte = render_byte.call((self.cur_msg, self.cur_idx));
