@@ -10,10 +10,7 @@ pub enum Mode {
 
 impl Mode {
     pub fn is_echo(self) -> bool {
-        match self {
-            Self::Echo => true,
-            _ => false,
-        }
+        if let Self::Echo = self { true } else { false }
     }
     
     fn char(self) -> uint<8> {
@@ -90,10 +87,7 @@ pub enum CmdParseState {
 
 impl CmdParseState {
     pub fn is_idle(self) -> bool {
-        match self {
-            Self::Idle => true,
-            _ => false,
-        }
+        if let Self::Idle = self { true } else { false }
     }
 }
 
@@ -109,10 +103,7 @@ enum MsgKind {
 
 impl MsgKind {
     fn is_none(self) -> bool {
-        match self {
-            Self::None => true,
-            _ => false,
-        }
+        if let Self::None = self { true } else { false }
     }
 
     fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
