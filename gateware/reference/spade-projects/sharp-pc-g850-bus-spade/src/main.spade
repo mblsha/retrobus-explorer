@@ -1,15 +1,5 @@
 mod console;
 
-use shared_components::ascii::ascii_upper_a;
-use shared_components::ascii::ascii_upper_e;
-use shared_components::ascii::ascii_upper_f;
-use shared_components::ascii::ascii_upper_h;
-use shared_components::ascii::ascii_upper_k;
-use shared_components::ascii::ascii_upper_l;
-use shared_components::ascii::ascii_upper_o;
-use shared_components::ascii::ascii_upper_p;
-use shared_components::ascii::ascii_upper_q;
-use shared_components::ascii::ascii_upper_x;
 use shared_components::ascii::to_upper;
 use shared_components::bridges::BridgePolicy;
 use shared_components::bus_debug::CycleDecode;
@@ -352,15 +342,15 @@ entity main_core(
             };
 
             let rx_upper = to_upper(rx.byte);
-            let cmd_arm = rx.valid && rx_upper == ascii_upper_a();
-            let cmd_lock = rx.valid && rx_upper == ascii_upper_k();
-            let cmd_remote_on = rx.valid && rx_upper == ascii_upper_p();
-            let cmd_remote_off = rx.valid && rx_upper == ascii_upper_o();
-            let cmd_ft_on = rx.valid && rx_upper == ascii_upper_f();
-            let cmd_ft_off = rx.valid && rx_upper == ascii_upper_x();
-            let cmd_help = rx.valid && rx_upper == ascii_upper_h();
-            let cmd_status = rx.valid && rx_upper == ascii_upper_q();
-            let cmd_pin_map = rx.valid && rx_upper == ascii_upper_l();
+            let cmd_arm = rx.valid && rx_upper == b'A';
+            let cmd_lock = rx.valid && rx_upper == b'K';
+            let cmd_remote_on = rx.valid && rx_upper == b'P';
+            let cmd_remote_off = rx.valid && rx_upper == b'O';
+            let cmd_ft_on = rx.valid && rx_upper == b'F';
+            let cmd_ft_off = rx.valid && rx_upper == b'X';
+            let cmd_help = rx.valid && rx_upper == b'H';
+            let cmd_status = rx.valid && rx_upper == b'Q';
+            let cmd_pin_map = rx.valid && rx_upper == b'L';
 
             let cmd_remote_on_ok = cmd_remote_on && ft_armed;
             let cmd_ft_on_ok = cmd_ft_on && ft_armed;
@@ -491,7 +481,7 @@ entity main_core(
     let ft_mux = step.ft_mux;
 
     let frame_word = pack_event_word(last_addr, data_sync, bus_sample.bus_event_char);
-    let overflow_word = pack_overflow_word(fifo_full_counter, ascii_upper_e());
+    let overflow_word = pack_overflow_word(fifo_full_counter, b'E');
     let should_emit_overflow = step.should_emit_overflow;
     let stream_write_event = bus_sample.bus_event_valid && ft_enabled && !*stream_fifo_full;
     let stream_write_overflow = should_emit_overflow;
