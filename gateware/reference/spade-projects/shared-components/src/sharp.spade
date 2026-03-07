@@ -13,19 +13,17 @@ pub entity count_on_event<#uint WIDTH>(
     value
 }
 
-pub entity wait_hold_n<#uint RELOAD, #uint W>(
+pub entity wait_hold_n<#uint RELOAD>(
     clk: clock,
     rst: bool,
     mreq_fall: bool,
     iorq_fall: bool,
-) -> bool
-where W: {uint_bits_to_fit(RELOAD)}
-{
+) -> bool {
     let _ = require_positive::<RELOAD, _>();
 
-    let wait_reload: uint<W> = RELOAD;
-    let wait_zero: uint<W> = 0;
-    reg(clk) wait_counter: uint<W> reset(rst: 0) = if mreq_fall || iorq_fall {
+    let wait_reload: uint<{uint_bits_to_fit(RELOAD)}> = RELOAD;
+    let wait_zero: uint<{uint_bits_to_fit(RELOAD)}> = 0;
+    reg(clk) wait_counter: uint<{uint_bits_to_fit(RELOAD)}> reset(rst: 0) = if mreq_fall || iorq_fall {
         wait_reload
     } else if wait_counter != 0 {
         trunc(wait_counter - 1)
@@ -41,7 +39,7 @@ pub entity wait_hold(
     mreq_fall: bool,
     iorq_fall: bool,
 ) -> bool {
-    inst wait_hold_n::<3, _>(clk, rst, mreq_fall, iorq_fall)
+    inst wait_hold_n::<3>(clk, rst, mreq_fall, iorq_fall)
 }
 
 pub entity banked_rom_byte(
