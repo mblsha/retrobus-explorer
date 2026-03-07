@@ -2,7 +2,10 @@
 // Vivado clocking-wizard compatible wrapper.
 // Synthesis uses MMCM primitives to generate 200 MHz and 400 MHz from 100 MHz.
 // Simulation fallback uses passthrough clocks.
-module clk_wiz_0(
+module clk_wiz_0 #(
+    parameter BANDWIDTH = "OPTIMIZED",
+    parameter STARTUP_WAIT = "FALSE"
+) (
     output wire clk_out200,
     output wire clk_out400,
     input  wire clk_in100
@@ -32,7 +35,7 @@ module clk_wiz_0(
   );
 
   MMCME2_BASE #(
-      .BANDWIDTH("OPTIMIZED"),
+      .BANDWIDTH(BANDWIDTH),
       .CLKIN1_PERIOD(10.000),
       .DIVCLK_DIVIDE(1),
       .CLKFBOUT_MULT_F(8.000),
@@ -48,7 +51,7 @@ module clk_wiz_0(
       .CLKOUT4_DIVIDE(1),
       .CLKOUT5_DIVIDE(1),
       .CLKOUT6_DIVIDE(1),
-      .STARTUP_WAIT("FALSE")
+      .STARTUP_WAIT(STARTUP_WAIT)
   ) mmcm_inst (
       .CLKIN1(clk_in100),
       .CLKFBIN(clkfb_buf),
