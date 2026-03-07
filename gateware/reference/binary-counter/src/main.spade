@@ -1,9 +1,32 @@
+use shared_components::ascii::DigitDecode;
 use shared_components::primitives::reset_conditioner;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx;
 
 fn is_ascii_digit(byte: uint<8>) -> bool {
     byte >= b'0' && byte <= b'9'
+}
+
+fn default_digit_decode() -> DigitDecode {
+    DigitDecode$(valid: false, value: 0)
+}
+
+entity decode_rx_digit(
+    clk: clock,
+    rx_valid: bool,
+    rx_parity_error: bool,
+    rx_byte: uint<8>,
+) -> Option<DigitDecode> {
+    let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
+
+    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
+        let _ = clk;
+        let digit_valid = is_ascii_digit(byte);
+        DigitDecode$(
+            valid: digit_valid,
+            value: if digit_valid { trunc(byte - b'0') } else { 0 },
+        )
+    })
 }
 
 fn divider_last(slow_factor: uint<4>) -> uint<10> {
@@ -43,14 +66,14 @@ entity main(
     let rst = inst reset_conditioner::<4>(clk, rst_in);
 
     let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
-    let rx_digit = rx_out.valid && !rx_out.parity_error && is_ascii_digit(rx_out.byte);
-    let tx_out = inst uart_tx::<100_000_000, 1_000_000, 8>(clk, rst, false, rx_out.byte, rx_digit);
-    let accepted_digit = rx_digit && !tx_out.busy;
-    let rx_digit_value: uint<4> = trunc(rx_out.byte - b'0');
+    let rx_digit = inst decode_rx_digit(clk, rx_out.valid, rx_out.parity_error, rx_out.byte)
+        .unwrap_or(default_digit_decode());
+    let tx_out = inst uart_tx::<100_000_000, 1_000_000, 8>(clk, rst, false, rx_out.byte, rx_digit.valid);
+    let accepted_digit = rx_digit.valid && !tx_out.busy;
 
     reg(clk) slow_factor: uint<4> reset(rst: 0) = {
         if accepted_digit {
-            rx_digit_value
+            rx_digit.value
         } else {
             slow_factor
         }
