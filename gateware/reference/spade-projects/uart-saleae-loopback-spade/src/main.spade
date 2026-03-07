@@ -1,5 +1,6 @@
 use shared_components::bridges::BridgePolicy;
 use shared_components::clocking::clk_wiz_200_400;
+use shared_components::clocking::sampled_bool_clock;
 use shared_components::config::au_dual_bridge_u8x8_100_200;
 use shared_components::config::au_usb_uart_rx;
 use shared_components::config::au_usb_uart_tx8_tap;
@@ -22,7 +23,7 @@ entity main(
     let clk_wiz = inst clk_wiz_200_400(clk);
     let clk200_probe = clk_wiz.clk_out200;
     let clk400_probe = clk_wiz.clk_out400;
-    let clk_fast = unsafe { inst std::conv::bool_to_clock(clk400_probe) };
+    let clk_fast = unsafe { inst sampled_bool_clock(clk400_probe) };
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
