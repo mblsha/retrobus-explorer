@@ -1,15 +1,20 @@
 use super::{ascii::DigitDecode, message_stream::{TxReq8, tx_req_none}};
 
-pub fn pack_event_word(addr: uint<16>, data: uint<8>, event: uint<8>) -> uint<32> {
-    let addr_wide: uint<32> = zext(addr);
-    let data_wide: uint<32> = zext(data);
-    let event_wide: uint<32> = zext(event);
+pub type BusAddr = uint<16>;
+pub type TraceWord = uint<32>;
+pub type OverflowCount = uint<24>;
+pub type WaitCounter = uint<128>;
+
+pub fn pack_event_word(addr: BusAddr, data: uint<8>, event: uint<8>) -> TraceWord {
+    let addr_wide: TraceWord = zext(addr);
+    let data_wide: TraceWord = zext(data);
+    let event_wide: TraceWord = zext(event);
     (addr_wide << 16) | (data_wide << 8) | event_wide
 }
 
-pub fn pack_overflow_word(count: uint<24>, event: uint<8>) -> uint<32> {
-    let count_wide: uint<32> = zext(count);
-    let event_wide: uint<32> = zext(event);
+pub fn pack_overflow_word(count: OverflowCount, event: uint<8>) -> TraceWord {
+    let count_wide: TraceWord = zext(count);
+    let event_wide: TraceWord = zext(event);
     (count_wide << 8) | event_wide
 }
 
@@ -214,7 +219,7 @@ pub struct BusSamplerOut {
 
 fn sample_bus_cycle(
     sample_state: SampleState,
-    wait_counter: uint<128>,
+    wait_counter: WaitCounter,
     wait_enabled: uint<8>,
     mreq_fall: bool,
     iorq_fall: bool,
@@ -299,7 +304,7 @@ impl UsbCmdInputs {
 pub struct FtStreamMuxOut {
     next_ft_enabled: bool,
     next_ft_state: FtState,
-    next_ft_cur_value: uint<32>,
+    next_ft_cur_value: TraceWord,
     ft_ui_din_valid: bool,
     ft_ui_din: uint<16>,
     ft_ui_din_be: uint<2>,
@@ -311,13 +316,13 @@ pub struct FtStreamMuxOut {
 fn run_ft_stream_mux(
     ft_state: FtState,
     ft_enabled: bool,
-    ft_cur_value: uint<32>,
+    ft_cur_value: TraceWord,
     ft_cmd: FtStreamCmdDecode,
     tx_busy: bool,
     ft_ui_din_full: bool,
     ft_ui_dout_empty: bool,
     stream_fifo_empty: bool,
-    stream_fifo_dout: uint<32>,
+    stream_fifo_dout: TraceWord,
 ) -> FtStreamMuxOut {
     let ft_get_fifo = if let FtState::GetFifo = ft_state { true } else { false };
     let ft_stream = if let FtState::Stream = ft_state { true } else { false };
@@ -383,7 +388,7 @@ pub struct CoreStepOut {
 
 pub struct CoreStepInputs {
     sample_state: SampleState,
-    wait_counter: uint<128>,
+    wait_counter: WaitCounter,
     wait_enabled: uint<8>,
     mreq_fall: bool,
     iorq_fall: bool,
@@ -391,15 +396,15 @@ pub struct CoreStepInputs {
     tx_busy: bool,
     ft_state: FtState,
     ft_enabled: bool,
-    ft_cur_value: uint<32>,
+    ft_cur_value: TraceWord,
     ft_ui_din_full: bool,
     ft_ui_dout_empty: bool,
     stream_fifo_empty: bool,
-    stream_fifo_dout: uint<32>,
+    stream_fifo_dout: TraceWord,
     rd_rise: bool,
     wr_rise: bool,
     stream_fifo_full: bool,
-    fifo_full_counter: uint<24>,
+    fifo_full_counter: OverflowCount,
 }
 
 impl CoreStepInputs {

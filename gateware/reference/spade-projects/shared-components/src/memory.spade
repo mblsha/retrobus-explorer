@@ -56,6 +56,9 @@ pub struct FifoUsedOut<TData, TUsed> {
     used: TUsed,
 }
 
+pub type FifoUsed<#uint WIDTH, #uint ENTRIES> =
+    FifoUsedOut<uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>>;
+
 struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
     waddr: uint<ADDR_W>,
     waddr_delay: uint<ADDR_W>,
@@ -81,7 +84,7 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
     din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> FifoUsedOut<uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>> {
+) -> FifoUsed<WIDTH, ENTRIES> {
     let _ = require_positive::<WIDTH>();
     let _ = require_at_least_two::<ENTRIES>();
     let _ = require_power_of_two::<ENTRIES>();
@@ -161,7 +164,7 @@ pub entity fifo<#uint WIDTH, #uint ENTRIES>(
     din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> FifoUsedOut<uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>> {
+) -> FifoUsed<WIDTH, ENTRIES> {
     inst fifo_impl::<WIDTH, ENTRIES>(clk, rst, din, wput, rget)
 }
 

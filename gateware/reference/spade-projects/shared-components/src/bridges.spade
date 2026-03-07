@@ -11,6 +11,9 @@ pub struct UartFifoBridgeOut<TData, #uint DROP_COUNT_W> {
     dropped_count: uint<DROP_COUNT_W>,
 }
 
+pub type UartBridgeOut<#uint WIDTH, #uint DROP_COUNT_W> =
+    UartFifoBridgeOut<uint<WIDTH>, DROP_COUNT_W>;
+
 pub enum BridgePolicy {
     QueueOnly,
     DropWhenBusy,
@@ -25,7 +28,7 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     rrst: bool,
     send_enable: bool,
     policy: BridgePolicy,
-) -> UartFifoBridgeOut<uint<WIDTH>, DROP_COUNT_W> {
+) -> UartBridgeOut<WIDTH, DROP_COUNT_W> {
     let (bridge, bridge_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
 

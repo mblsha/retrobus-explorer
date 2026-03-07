@@ -3,13 +3,17 @@ mod console;
 use shared_components::{
     bridges::BridgePolicy,
     bus_debug::{
+        BusAddr,
         CycleDecode,
         CoreStepInputs,
         FtState,
         FtStreamCmdDecode,
+        OverflowCount,
         SaleaeState,
         SampleState,
+        TraceWord,
         UsbCmdInputs,
+        WaitCounter,
         decode_cycle,
         pack_event_word,
         pack_overflow_word,
@@ -19,6 +23,7 @@ use shared_components::{
     config::{au_bridge, au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_rx, au_usb_uart_tx8_tap},
     message_stream::{ByteMsgStreamState, TxReq8, tx_req_arbiter, tx_req_none},
     primitives::{falling_edge, reset_conditioner, rising_edge, sync_z80_controls},
+    serial::{FtBe, FtData},
 };
 use self::console::{ConsoleMsg, ConsoleMsgContext, console_stream_step};
 
@@ -64,16 +69,16 @@ impl CycleDecode {
 struct MainState {
     sample_state: SampleState,
     wait_enabled: uint<8>,
-    wait_counter: uint<128>,
-    last_addr: uint<16>,
+    wait_counter: WaitCounter,
+    last_addr: BusAddr,
     saleae_state: SaleaeState,
     saleae_counter: uint<8>,
     ft_enabled: bool,
     ft_state: FtState,
-    ft_cur_value: uint<32>,
-    fifo_full_counter: uint<24>,
-    addr_sync_d0: uint<16>,
-    addr_sync: uint<16>,
+    ft_cur_value: TraceWord,
+    fifo_full_counter: OverflowCount,
+    addr_sync_d0: BusAddr,
+    addr_sync: BusAddr,
     data_sync_d0: uint<8>,
     data_sync: uint<8>,
     ft_remote_allowed: bool,
@@ -91,7 +96,7 @@ impl MainState {
         ft_ui_din_full: bool,
         ft_ui_dout_empty: bool,
         stream_fifo_empty: bool,
-        stream_fifo_dout: uint<32>,
+        stream_fifo_dout: TraceWord,
         rd_rise: bool,
         wr_rise: bool,
         stream_fifo_full: bool,
@@ -190,10 +195,10 @@ entity main_core(
     ft_clk: bool,
     ft_rxf: bool,
     ft_txe: bool,
-    ft_data: uint<16>,
-    ft_be: uint<2>,
-    ft_data_drive: inv &uint<16>,
-    ft_be_drive: inv &uint<2>,
+    ft_data: FtData,
+    ft_be: FtBe,
+    ft_data_drive: inv &FtData,
+    ft_be_drive: inv &FtBe,
     ft_rd: inv &bool,
     ft_wr: inv &bool,
     ft_oe: inv &bool,
@@ -210,7 +215,7 @@ entity main_core(
     z80_wr: bool,
 
     data: uint<8>,
-    addr: uint<16>,
+    addr: BusAddr,
 
     addr_bnk: uint<2>,
     addr_ceram2: bool,
@@ -235,19 +240,19 @@ entity main_core(
     let (tx_line, tx_line_w): (&bool, inv &bool) = port;
     let (tx_busy, tx_busy_w): (&bool, inv &bool) = port;
 
-    let (ft_data_out, ft_data_out_w): (&uint<16>, inv &uint<16>) = port;
-    let (ft_be_out, ft_be_out_w): (&uint<2>, inv &uint<2>) = port;
+    let (ft_data_out, ft_data_out_w): (&FtData, inv &FtData) = port;
+    let (ft_be_out, ft_be_out_w): (&FtBe, inv &FtBe) = port;
     let (ft_rd_sig, ft_rd_sig_w): (&bool, inv &bool) = port;
     let (ft_wr_sig, ft_wr_sig_w): (&bool, inv &bool) = port;
     let (ft_oe_sig, ft_oe_sig_w): (&bool, inv &bool) = port;
     let (ft_ui_din_full, ft_ui_din_full_w): (&bool, inv &bool) = port;
-    let (ft_ui_dout, ft_ui_dout_w): (&uint<16>, inv &uint<16>) = port;
-    let (ft_ui_dout_be, ft_ui_dout_be_w): (&uint<2>, inv &uint<2>) = port;
+    let (ft_ui_dout, ft_ui_dout_w): (&FtData, inv &FtData) = port;
+    let (ft_ui_dout_be, ft_ui_dout_be_w): (&FtBe, inv &FtBe) = port;
     let (ft_ui_dout_empty, ft_ui_dout_empty_w): (&bool, inv &bool) = port;
 
     let (stream_fifo_full, stream_fifo_full_w): (&bool, inv &bool) = port;
     let (stream_fifo_empty, stream_fifo_empty_w): (&bool, inv &bool) = port;
-    let (stream_fifo_dout, stream_fifo_dout_w): (&uint<32>, inv &uint<32>) = port;
+    let (stream_fifo_dout, stream_fifo_dout_w): (&TraceWord, inv &TraceWord) = port;
 
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 

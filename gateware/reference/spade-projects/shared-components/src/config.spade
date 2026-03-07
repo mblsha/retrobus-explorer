@@ -1,11 +1,11 @@
 use super::{
-    bridges::{BridgePolicy, UartFifoBridgeOut, uart_fifo_bridge},
+    bridges::{BridgePolicy, UartBridgeOut, UartFifoBridgeOut, uart_fifo_bridge},
     memory::{FifoOut, sync_fifo},
-    serial::{UartRxOut, ft_tap, uart_rx, uart_tx_tap},
+    serial::{BitTime, FtBe, FtData, StopBits, UartRxOut, ft_tap, uart_rx, uart_tx_tap},
 };
 
-fn au_usb_uart_bit_time() -> uint<15> { 100 }
-fn au_usb_uart_stop_bits() -> uint<3> { 1 }
+fn au_usb_uart_bit_time() -> BitTime { 100 }
+fn au_usb_uart_stop_bits() -> StopBits { 1 }
 
 pub entity au_usb_uart_rx(
     clk: clock,
@@ -54,7 +54,7 @@ pub entity au_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD, #uint DROP_COUNT_W>
     rrst: bool,
     send_enable: bool,
     policy: BridgePolicy,
-) -> UartFifoBridgeOut<uint<WIDTH>, DROP_COUNT_W> {
+) -> UartBridgeOut<WIDTH, DROP_COUNT_W> {
     // Alchitry Au preset bridge wrapper: fixed 400 MHz TX-domain clock.
     inst uart_fifo_bridge::<WIDTH, ENTRIES, 3, 400_000_000, BAUD, DROP_COUNT_W>(
         wclk,
@@ -137,20 +137,20 @@ pub entity au_ft_tap_u16(
     ft_clk: clock,
     ft_rxf: bool,
     ft_txe: bool,
-    ft_data_in: uint<16>,
-    ft_be_in: uint<2>,
-    ui_din: uint<16>,
-    ui_din_be: uint<2>,
+    ft_data_in: FtData,
+    ft_be_in: FtBe,
+    ui_din: FtData,
+    ui_din_be: FtBe,
     ui_din_valid: bool,
     ui_dout_get: bool,
-    ft_data_out: inv &uint<16>,
-    ft_be_out: inv &uint<2>,
+    ft_data_out: inv &FtData,
+    ft_be_out: inv &FtBe,
     ft_rd: inv &bool,
     ft_wr: inv &bool,
     ft_oe: inv &bool,
     ui_din_full: inv &bool,
-    ui_dout: inv &uint<16>,
-    ui_dout_be: inv &uint<2>,
+    ui_dout: inv &FtData,
+    ui_dout_be: inv &FtBe,
     ui_dout_empty: inv &bool,
 ) {
     inst ft_tap::<16, 2, 8192, 64, 1, 0>(
