@@ -1,10 +1,7 @@
 use shared_components::ascii::DigitDecode;
-use shared_components::ascii::decode_digit_max;
-use shared_components::ascii::to_upper;
 use shared_components::message_stream::ByteMsgStreamOut;
 use shared_components::message_stream::ByteMsgStreamState;
 use shared_components::message_stream::TxReq8;
-use shared_components::message_stream::byte_msg_stream_step_with;
 
 pub enum Mode {
     ClockTester,
@@ -25,6 +22,24 @@ pub enum MsgKind {
     Ok,
     ErrCmd,
     ErrFreq,
+}
+
+impl MsgKind {
+    pub fn is_none(self) -> bool {
+        match self {
+            Self::None => true,
+            _ => false,
+        }
+    }
+
+    pub fn byte(self, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
+        let msg_tpl = msg_template(self, mode, freq_code);
+        if idx < msg_tpl.len {
+            TxReq8$(valid: true, byte: msg_tpl.bytes[trunc(idx)])
+        } else {
+            TxReq8$(valid: false, byte: 0)
+        }
+    }
 }
 
 pub fn mode_char(mode: Mode) -> uint<8> {
@@ -71,8 +86,8 @@ entity decode_rx_byte(
         let _ = clk;
         RxByteDecode$(
             byte: byte,
-            upper: to_upper(byte),
-            digit: decode_digit_max(byte, max_freq_code),
+            upper: byte.to_upper(),
+            digit: byte.decode_digit_max(max_freq_code),
         )
     })
 }
@@ -106,12 +121,7 @@ pub fn msg_template(msg: MsgKind, mode: Mode, freq_code: uint<4>) -> MsgTemplate
 }
 
 pub fn msg_byte(msg: MsgKind, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
-    let msg_tpl = msg_template(msg, mode, freq_code);
-    if idx < msg_tpl.len {
-        TxReq8$(valid: true, byte: msg_tpl.bytes[trunc(idx)])
-    } else {
-        TxReq8$(valid: false, byte: 0)
-    }
+    msg.byte(idx, mode, freq_code)
 }
 
 pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk400: bool) -> bool {
@@ -271,16 +281,10 @@ fn tx_stream_step(
     next_msg_valid: bool,
     next_msg: MsgKind,
 ) -> ByteMsgStreamOut<MsgKind, 8> {
-    byte_msg_stream_step_with(
-        tx_state,
+    tx_state.step_with(
         MsgKind::None(),
-        fn |msg| {
-            match msg {
-                MsgKind::None => true,
-                _ => false,
-            }
-        },
-        fn |msg, idx| { msg_byte(msg, idx, mode, freq_code) },
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx, mode, freq_code) },
         tx_busy,
         next_msg_valid,
         next_msg,

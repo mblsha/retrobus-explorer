@@ -1,6 +1,5 @@
 mod console;
 
-use shared_components::ascii::to_upper;
 use shared_components::bridges::BridgePolicy;
 use shared_components::bus_debug::CycleDecode;
 use shared_components::bus_debug::CoreStepInputs;
@@ -9,11 +8,9 @@ use shared_components::bus_debug::FtStreamCmdDecode;
 use shared_components::bus_debug::SaleaeState;
 use shared_components::bus_debug::SampleState;
 use shared_components::bus_debug::UsbCmdInputs;
-use shared_components::bus_debug::core_step;
 use shared_components::bus_debug::decode_cycle;
 use shared_components::bus_debug::pack_event_word;
 use shared_components::bus_debug::pack_overflow_word;
-use shared_components::bus_debug::parse_usb_cmd;
 use shared_components::bus_debug::saleae_mux;
 use shared_components::clocking::clk_wiz_400;
 use shared_components::config::au_bridge;
@@ -177,7 +174,7 @@ entity decode_console_cmd(
 
     maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
         let _ = clk;
-        let upper = to_upper(byte);
+        let upper = byte.to_upper();
         ConsoleCmdDecode$(
             arm: upper == b'A',
             lock: upper == b'K',
@@ -333,7 +330,7 @@ entity main_core(
                 wr_rise,
                 *stream_fifo_full,
             );
-            let step = core_step(step_inputs);
+            let step = step_inputs.run();
             let bus_sample = step.sample;
 
             let usb_cmd_inputs = mk_usb_inputs(
@@ -345,7 +342,7 @@ entity main_core(
                 *tx_busy,
                 tx_req_none(),
             );
-            let usb_cmd_state = parse_usb_cmd(usb_cmd_inputs);
+            let usb_cmd_state = usb_cmd_inputs.parse();
 
             let next_sample_state = if bus_sample.sample_is_bus {
                 if bus_sample.bus_start && wait_enabled > 0 {
@@ -527,7 +524,7 @@ entity main_core(
         wr_rise,
         *stream_fifo_full,
     );
-    let step = core_step(step_inputs);
+    let step = step_inputs.run();
     let bus_sample = step.sample;
     let ft_mux = step.ft_mux;
 
@@ -593,7 +590,7 @@ entity main_core(
         *tx_busy,
         uart_upstream_req,
     );
-    let usb_cmd = parse_usb_cmd(usb_cmd_inputs);
+    let usb_cmd = usb_cmd_inputs.parse();
 
     let tx_new_data = usb_cmd.tx_req.valid;
     let tx_data = usb_cmd.tx_req.byte;

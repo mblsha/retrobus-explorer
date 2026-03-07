@@ -28,6 +28,20 @@ extern entity sync_fifo_v<#uint WIDTH, #uint ENTRIES>(
     empty: inv &bool,
 );
 
+impl<T, #uint N> [T; N] {
+    fn write_at<#uint W>(self, idx: uint<W>, val: T) -> [T; N]
+    where W: {uint_bits_to_fit(N - 1)}
+    {
+        self.enumerate().map(fn |(i, item)| {
+            if i == idx {
+                val
+            } else {
+                item
+            }
+        })
+    }
+}
+
 fn write_at<T, #uint N, #uint W>(
     arr: [T; N],
     idx: uint<W>,
@@ -35,13 +49,7 @@ fn write_at<T, #uint N, #uint W>(
 ) -> [T; N]
 where W: {uint_bits_to_fit(N - 1)}
 {
-    arr.enumerate().map(fn |(i, item)| {
-        if i == idx {
-            val
-        } else {
-            item
-        }
-    })
+    arr.write_at(idx, val)
 }
 
 fn ptr_inc<#uint W>(ptr: uint<W>) -> uint<W> {
@@ -131,7 +139,7 @@ where
             let read_addr = if do_read { ptr_inc(raddr) } else { raddr };
             let next_read_data = storage[read_addr];
             let next_storage = if do_write {
-                write_at(storage, waddr, din)
+                storage.write_at(waddr, din)
             } else {
                 storage
             };
@@ -238,13 +246,22 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
     )
 }
 
+impl<T> FifoOut<T> {
+    pub entity tap(self, full: inv &bool, empty: inv &bool, dout: inv &T) {
+        let full_value = self.full;
+        let empty_value = self.empty;
+        let dout_value = self.dout;
+        set full = &full_value;
+        set empty = &empty_value;
+        set dout = &dout_value;
+    }
+}
+
 pub entity fifo_out_tap<T>(
     out: FifoOut<T>,
     full: inv &bool,
     empty: inv &bool,
     dout: inv &T,
 ) {
-    set full = &out.full;
-    set empty = &out.empty;
-    set dout = &out.dout;
+    out.inst tap(full, empty, dout);
 }

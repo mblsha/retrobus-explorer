@@ -29,6 +29,129 @@ pub struct ByteMsgStreamOut<TMsg, #uint IDX_W> {
     msg_none: bool,
 }
 
+impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
+    pub fn step(
+        self,
+        none_msg: TMsg,
+        cur_msg_is_none: bool,
+        pending_msg_is_none: bool,
+        cur_byte: TxReq8,
+        next_byte: TxReq8,
+        block_tx: bool,
+        next_msg_valid: bool,
+        next_msg: TMsg,
+        next_msg_is_none: bool,
+    ) -> ByteMsgStreamOut<TMsg, IDX_W> {
+        let tx_req = if !cur_msg_is_none && cur_byte.valid && !block_tx {
+            cur_byte
+        } else {
+            tx_req_none()
+        };
+        let sent = tx_req.valid;
+        let next_idx: uint<IDX_W> = trunc(self.cur_idx + 1);
+        let drained = sent && !next_byte.valid;
+        let post_cur_msg = if drained {
+            none_msg
+        } else {
+            self.cur_msg
+        };
+        let post_cur_idx: uint<IDX_W> = if sent {
+            if next_byte.valid {
+                next_idx
+            } else {
+                0
+            }
+        } else {
+            self.cur_idx
+        };
+        let post_msg_none = cur_msg_is_none || drained;
+        let load_pending = post_msg_none && !pending_msg_is_none;
+        let loaded_cur_msg = if load_pending {
+            self.pending_msg
+        } else {
+            post_cur_msg
+        };
+        let loaded_cur_idx: uint<IDX_W> = if load_pending {
+            0
+        } else {
+            post_cur_idx
+        };
+        let loaded_msg_none = if load_pending {
+            false
+        } else {
+            post_msg_none
+        };
+        let loaded_pending_msg = if load_pending {
+            none_msg
+        } else {
+            self.pending_msg
+        };
+        let enqueue_new = next_msg_valid && !next_msg_is_none;
+        let final_cur_msg = if enqueue_new && loaded_msg_none {
+            next_msg
+        } else {
+            loaded_cur_msg
+        };
+        let final_cur_idx: uint<IDX_W> = if enqueue_new && loaded_msg_none {
+            0
+        } else {
+            loaded_cur_idx
+        };
+        let final_pending_msg = if enqueue_new && !loaded_msg_none {
+            next_msg
+        } else {
+            loaded_pending_msg
+        };
+        let final_msg_none = if enqueue_new && loaded_msg_none {
+            false
+        } else {
+            loaded_msg_none
+        };
+        ByteMsgStreamOut$(
+            state: ByteMsgStreamState$(
+                cur_msg: final_cur_msg,
+                cur_idx: final_cur_idx,
+                pending_msg: final_pending_msg,
+            ),
+            tx_req: tx_req,
+            msg_none: final_msg_none,
+        )
+    }
+
+    pub fn step_with<FNone, FRender>(
+        self,
+        none_msg: TMsg,
+        is_none: FNone,
+        render_byte: FRender,
+        block_tx: bool,
+        next_msg_valid: bool,
+        next_msg: TMsg,
+    ) -> ByteMsgStreamOut<TMsg, IDX_W>
+    where
+        FNone: Fn(TMsg) -> bool,
+        FRender: Fn(TMsg, uint<IDX_W>) -> TxReq8,
+    {
+        let cur_msg_is_none = is_none.call((self.cur_msg,));
+        let pending_msg_is_none = is_none.call((self.pending_msg,));
+        let cur_byte = render_byte.call((self.cur_msg, self.cur_idx));
+        let next_idx: uint<IDX_W> = trunc(self.cur_idx + 1);
+        let next_byte = render_byte.call((self.cur_msg, next_idx));
+        let next_msg_is_none = is_none.call((next_msg,));
+
+        self.step(
+            none_msg,
+            cur_msg_is_none,
+            pending_msg_is_none,
+            cur_byte,
+            next_byte,
+            block_tx,
+            next_msg_valid,
+            next_msg,
+            next_msg_is_none,
+        )
+    }
+}
+
 pub fn byte_msg_stream_step<TMsg, #uint IDX_W>(
     state: ByteMsgStreamState<TMsg, IDX_W>,
     none_msg: TMsg,
@@ -41,79 +164,16 @@ pub fn byte_msg_stream_step<TMsg, #uint IDX_W>(
     next_msg: TMsg,
     next_msg_is_none: bool,
 ) -> ByteMsgStreamOut<TMsg, IDX_W> {
-    let tx_req = if !cur_msg_is_none && cur_byte.valid && !block_tx {
-        cur_byte
-    } else {
-        tx_req_none()
-    };
-    let sent = tx_req.valid;
-    let next_idx: uint<IDX_W> = trunc(state.cur_idx + 1);
-    let drained = sent && !next_byte.valid;
-    let post_cur_msg = if drained {
-        none_msg
-    } else {
-        state.cur_msg
-    };
-    let post_cur_idx: uint<IDX_W> = if sent {
-        if next_byte.valid {
-            next_idx
-        } else {
-            0
-        }
-    } else {
-        state.cur_idx
-    };
-    let post_msg_none = cur_msg_is_none || drained;
-    let load_pending = post_msg_none && !pending_msg_is_none;
-    let loaded_cur_msg = if load_pending {
-        state.pending_msg
-    } else {
-        post_cur_msg
-    };
-    let loaded_cur_idx: uint<IDX_W> = if load_pending {
-        0
-    } else {
-        post_cur_idx
-    };
-    let loaded_msg_none = if load_pending {
-        false
-    } else {
-        post_msg_none
-    };
-    let loaded_pending_msg = if load_pending {
-        none_msg
-    } else {
-        state.pending_msg
-    };
-    let enqueue_new = next_msg_valid && !next_msg_is_none;
-    let final_cur_msg = if enqueue_new && loaded_msg_none {
-        next_msg
-    } else {
-        loaded_cur_msg
-    };
-    let final_cur_idx: uint<IDX_W> = if enqueue_new && loaded_msg_none {
-        0
-    } else {
-        loaded_cur_idx
-    };
-    let final_pending_msg = if enqueue_new && !loaded_msg_none {
-        next_msg
-    } else {
-        loaded_pending_msg
-    };
-    let final_msg_none = if enqueue_new && loaded_msg_none {
-        false
-    } else {
-        loaded_msg_none
-    };
-    ByteMsgStreamOut$(
-        state: ByteMsgStreamState$(
-            cur_msg: final_cur_msg,
-            cur_idx: final_cur_idx,
-            pending_msg: final_pending_msg,
-        ),
-        tx_req: tx_req,
-        msg_none: final_msg_none,
+    state.step(
+        none_msg,
+        cur_msg_is_none,
+        pending_msg_is_none,
+        cur_byte,
+        next_byte,
+        block_tx,
+        next_msg_valid,
+        next_msg,
+        next_msg_is_none,
     )
 }
 
@@ -130,23 +190,12 @@ where
     FNone: Fn(TMsg) -> bool,
     FRender: Fn(TMsg, uint<IDX_W>) -> TxReq8,
 {
-    let cur_msg_is_none = is_none.call((state.cur_msg,));
-    let pending_msg_is_none = is_none.call((state.pending_msg,));
-    let cur_byte = render_byte.call((state.cur_msg, state.cur_idx));
-    let next_idx: uint<IDX_W> = trunc(state.cur_idx + 1);
-    let next_byte = render_byte.call((state.cur_msg, next_idx));
-    let next_msg_is_none = is_none.call((next_msg,));
-
-    byte_msg_stream_step(
-        state,
+    state.step_with(
         none_msg,
-        cur_msg_is_none,
-        pending_msg_is_none,
-        cur_byte,
-        next_byte,
+        is_none,
+        render_byte,
         block_tx,
         next_msg_valid,
         next_msg,
-        next_msg_is_none,
     )
 }

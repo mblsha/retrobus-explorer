@@ -2,7 +2,6 @@ use shared_components::bus_debug::SaleaeState;
 use shared_components::message_stream::ByteMsgStreamOut;
 use shared_components::message_stream::ByteMsgStreamState;
 use shared_components::message_stream::TxReq8;
-use shared_components::message_stream::byte_msg_stream_step_with;
 use shared_components::message_stream::tx_req_none;
 
 pub enum ConsoleMsg {
@@ -12,6 +11,26 @@ pub enum ConsoleMsg {
     Help,
     Status,
     PinMap,
+}
+
+impl ConsoleMsg {
+    pub fn is_none(self) -> bool {
+        match self {
+            Self::None => true,
+            _ => false,
+        }
+    }
+
+    pub fn byte(self, idx: uint<16>, ctx: ConsoleMsgContext) -> TxReq8 {
+        match self {
+            Self::None => tx_req_none(),
+            Self::Ok => text_byte(b"ok\r\n", idx),
+            Self::Err => text_byte(b"err\r\n", idx),
+            Self::Help => help_msg_byte(idx),
+            Self::Status => status_msg_byte(idx, ctx),
+            Self::PinMap => saleae_map_msg_byte(idx, ctx.saleae_state),
+        }
+    }
 }
 
 pub struct ConsoleMsgContext {
@@ -132,14 +151,7 @@ fn saleae_map_msg_byte(idx: uint<16>, saleae_state: SaleaeState) -> TxReq8 {
 }
 
 pub fn console_msg_byte(msg: ConsoleMsg, idx: uint<16>, ctx: ConsoleMsgContext) -> TxReq8 {
-    match msg {
-        ConsoleMsg::None => tx_req_none(),
-        ConsoleMsg::Ok => text_byte(b"ok\r\n", idx),
-        ConsoleMsg::Err => text_byte(b"err\r\n", idx),
-        ConsoleMsg::Help => help_msg_byte(idx),
-        ConsoleMsg::Status => status_msg_byte(idx, ctx),
-        ConsoleMsg::PinMap => saleae_map_msg_byte(idx, ctx.saleae_state),
-    }
+    msg.byte(idx, ctx)
 }
 
 pub fn console_stream_step(
@@ -149,16 +161,10 @@ pub fn console_stream_step(
     next_msg_valid: bool,
     next_msg: ConsoleMsg,
 ) -> ByteMsgStreamOut<ConsoleMsg, 16> {
-    byte_msg_stream_step_with(
-        stream,
+    stream.step_with(
         ConsoleMsg::None(),
-        fn |msg| {
-            match msg {
-                ConsoleMsg::None => true,
-                _ => false,
-            }
-        },
-        fn |msg, idx| { console_msg_byte(msg, idx, ctx) },
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx, ctx) },
         block_tx,
         next_msg_valid,
         next_msg,
