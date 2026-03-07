@@ -54,16 +54,10 @@ struct SampleFlags {
 
 impl SampleState {
     fn flags(self) -> SampleFlags {
-        SampleFlags$(
-            is_bus: match self {
-                Self::SampleBus => true,
-                _ => false,
-            },
-            is_wait: match self {
-                Self::InsertWait => true,
-                _ => false,
-            },
-        )
+        match self {
+            Self::SampleBus => SampleFlags$(is_bus: true, is_wait: false),
+            Self::InsertWait => SampleFlags$(is_bus: false, is_wait: true),
+        }
     }
 }
 
@@ -342,20 +336,9 @@ fn run_ft_stream_mux(
         ft_enabled
     };
     let next_ft_state = match ft_state {
-        FtState::GetFifo => {
-            if ft_can_push && !stream_fifo_empty {
-                FtState::Stream()
-            } else {
-                ft_state
-            }
-        },
-        FtState::Stream => {
-            if ft_can_push {
-                FtState::GetFifo()
-            } else {
-                ft_state
-            }
-        },
+        FtState::GetFifo if ft_can_push && !stream_fifo_empty => FtState::Stream(),
+        FtState::Stream if ft_can_push => FtState::GetFifo(),
+        _ => ft_state,
     };
     let next_ft_cur_value = if ft_get_fifo && ft_can_push && !stream_fifo_empty {
         stream_fifo_dout
