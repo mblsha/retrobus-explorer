@@ -1,5 +1,10 @@
 use super::guards::{require_at_least_two, require_positive, require_power_of_two};
 
+pub type BitTime = uint<15>;
+pub type StopBits = uint<3>;
+pub type FtData = uint<16>;
+pub type FtBe = uint<2>;
+
 pub struct UartTxOut {
     tx: bool,
     busy: bool,
@@ -304,9 +309,9 @@ pub entity uart_rx<#uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
     rx: bool,
-    bit_time: uint<15>,
+    bit_time: BitTime,
     parity: bool,
-    stop_bits: uint<3>,
+    stop_bits: StopBits,
 ) -> UartRxOut<uint<DATA_WIDTH>> {
     let _ = require_positive::<DATA_WIDTH>();
 
