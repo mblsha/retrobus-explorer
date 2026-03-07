@@ -1,38 +1,60 @@
-pub fn to_upper(byte: uint<8>) -> uint<8> {
-    let case_delta: uint<8> = trunc(b'a' - b'A');
-    if byte >= b'a' && byte <= b'z' {
-        trunc(byte - case_delta)
-    } else {
-        byte
-    }
-}
-
-pub fn is_digit(byte: uint<8>) -> bool {
-    byte >= b'0' && byte <= b'9'
-}
-
-pub fn digit_value(byte: uint<8>) -> uint<4> {
-    trunc(byte - b'0')
-}
-
 pub struct DigitDecode {
     valid: bool,
     value: uint<4>,
 }
 
-pub fn decode_digit(byte: uint<8>) -> DigitDecode {
-    if is_digit(byte) {
-        DigitDecode$(valid: true, value: digit_value(byte))
-    } else {
-        DigitDecode$(valid: false, value: 0)
+impl uint<8> {
+    pub fn to_upper(self) -> uint<8> {
+        let case_delta: uint<8> = trunc(b'a' - b'A');
+        if self >= b'a' && self <= b'z' {
+            trunc(self - case_delta)
+        } else {
+            self
+        }
+    }
+
+    pub fn is_digit(self) -> bool {
+        self >= b'0' && self <= b'9'
+    }
+
+    pub fn digit_value(self) -> uint<4> {
+        trunc(self - b'0')
+    }
+
+    pub fn decode_digit(self) -> DigitDecode {
+        if self.is_digit() {
+            DigitDecode$(valid: true, value: self.digit_value())
+        } else {
+            DigitDecode$(valid: false, value: 0)
+        }
+    }
+
+    pub fn decode_digit_max(self, max_value: uint<4>) -> DigitDecode {
+        let decoded = self.decode_digit();
+        if decoded.valid && decoded.value <= max_value {
+            decoded
+        } else {
+            DigitDecode$(valid: false, value: 0)
+        }
     }
 }
 
+pub fn to_upper(byte: uint<8>) -> uint<8> {
+    byte.to_upper()
+}
+
+pub fn is_digit(byte: uint<8>) -> bool {
+    byte.is_digit()
+}
+
+pub fn digit_value(byte: uint<8>) -> uint<4> {
+    byte.digit_value()
+}
+
+pub fn decode_digit(byte: uint<8>) -> DigitDecode {
+    byte.decode_digit()
+}
+
 pub fn decode_digit_max(byte: uint<8>, max_value: uint<4>) -> DigitDecode {
-    let decoded = decode_digit(byte);
-    if decoded.valid && decoded.value <= max_value {
-        decoded
-    } else {
-        DigitDecode$(valid: false, value: 0)
-    }
+    byte.decode_digit_max(max_value)
 }

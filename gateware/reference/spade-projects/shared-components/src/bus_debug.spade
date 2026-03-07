@@ -1,6 +1,4 @@
-use shared_components::ascii::decode_digit;
 use shared_components::ascii::DigitDecode;
-use shared_components::ascii::to_upper;
 use shared_components::message_stream::TxReq8;
 use shared_components::message_stream::tx_req_none;
 
@@ -142,7 +140,7 @@ pub struct FtStreamCmdDecode {
 pub fn decode_ft_stream_cmd(ft_ui_dout_empty: bool, ft_cmd_word: uint<16>) -> FtStreamCmdDecode {
     let cmd_b0: uint<8> = trunc(ft_cmd_word);
     let cmd_b1: uint<8> = trunc(ft_cmd_word >> 8);
-    let has_prefix = !ft_ui_dout_empty && to_upper(cmd_b0) == b'S';
+    let has_prefix = !ft_ui_dout_empty && cmd_b0.to_upper() == b'S';
     FtStreamCmdDecode$(
         enable: has_prefix && cmd_b1 == b'+',
         disable: has_prefix && cmd_b1 == b'-',
@@ -155,7 +153,7 @@ pub struct SaleaeCmdDecode {
 }
 
 pub fn decode_saleae_state_cmd(rx_byte: uint<8>) -> SaleaeCmdDecode {
-    let upper = to_upper(rx_byte);
+    let upper = rx_byte.to_upper();
     if upper == b'S' {
         SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals())
     } else if upper == b'E' {
@@ -193,7 +191,7 @@ pub fn decode_cycle(
     CycleDecode$(
         bus: bus,
         bus_error: bus_error_status(rd_rise, wr_rise, bus.invalid_bus_state),
-        rx_digit: decode_digit(rx_byte),
+        rx_digit: rx_byte.decode_digit(),
         saleae_cmd: decode_saleae_state_cmd(rx_byte),
         ft_cmd: decode_ft_stream_cmd(ft_ui_dout_empty, ft_cmd_word),
     )
@@ -264,34 +262,40 @@ pub struct UsbCmdInputs {
     upstream_req: TxReq8,
 }
 
+impl UsbCmdInputs {
+    pub fn parse(self) -> UsbCmdOut {
+        let next_wait_enabled = if self.rx_valid && self.cycle_decode.rx_digit.valid {
+            zext(self.cycle_decode.rx_digit.value)
+        } else {
+            self.wait_enabled
+        };
+
+        let next_saleae_state = if self.rx_valid && self.cycle_decode.saleae_cmd.valid {
+            self.cycle_decode.saleae_cmd.state
+        } else {
+            self.saleae_state
+        };
+
+        let rx_is_digit = self.rx_valid && self.cycle_decode.rx_digit.valid;
+        let rx_is_saleae_cmd = self.rx_valid && self.cycle_decode.saleae_cmd.valid;
+        let rx_tx_req = if (rx_is_digit || rx_is_saleae_cmd) && !self.tx_busy {
+            TxReq8$(valid: true, byte: self.rx_byte)
+        } else {
+            self.upstream_req
+        };
+
+        UsbCmdOut$(
+            next_wait_enabled: next_wait_enabled,
+            next_saleae_state: next_saleae_state,
+            rx_is_digit: rx_is_digit,
+            rx_is_saleae_cmd: rx_is_saleae_cmd,
+            tx_req: rx_tx_req,
+        )
+    }
+}
+
 pub fn parse_usb_cmd(inputs: UsbCmdInputs) -> UsbCmdOut {
-    let next_wait_enabled = if inputs.rx_valid && inputs.cycle_decode.rx_digit.valid {
-        zext(inputs.cycle_decode.rx_digit.value)
-    } else {
-        inputs.wait_enabled
-    };
-
-    let next_saleae_state = if inputs.rx_valid && inputs.cycle_decode.saleae_cmd.valid {
-        inputs.cycle_decode.saleae_cmd.state
-    } else {
-        inputs.saleae_state
-    };
-
-    let rx_is_digit = inputs.rx_valid && inputs.cycle_decode.rx_digit.valid;
-    let rx_is_saleae_cmd = inputs.rx_valid && inputs.cycle_decode.saleae_cmd.valid;
-    let rx_tx_req = if (rx_is_digit || rx_is_saleae_cmd) && !inputs.tx_busy {
-        TxReq8$(valid: true, byte: inputs.rx_byte)
-    } else {
-        inputs.upstream_req
-    };
-
-    UsbCmdOut$(
-        next_wait_enabled: next_wait_enabled,
-        next_saleae_state: next_saleae_state,
-        rx_is_digit: rx_is_digit,
-        rx_is_saleae_cmd: rx_is_saleae_cmd,
-        tx_req: rx_tx_req,
-    )
+    inputs.parse()
 }
 
 pub struct FtStreamMuxOut {
@@ -417,39 +421,45 @@ pub struct CoreStepInputs {
     fifo_full_counter: uint<24>,
 }
 
+impl CoreStepInputs {
+    pub fn run(self) -> CoreStepOut {
+        let sample = sample_bus_cycle(
+            self.sample_state,
+            self.wait_counter,
+            self.wait_enabled,
+            self.mreq_fall,
+            self.iorq_fall,
+            self.cycle_decode.bus,
+            self.cycle_decode.bus_error,
+            self.tx_busy,
+        );
+        let ft_mux = run_ft_stream_mux(
+            self.ft_state,
+            self.ft_enabled,
+            self.ft_cur_value,
+            self.cycle_decode.ft_cmd,
+            self.tx_busy,
+            self.ft_ui_din_full,
+            self.ft_ui_dout_empty,
+            self.stream_fifo_empty,
+            self.stream_fifo_dout,
+        );
+        let should_emit_overflow =
+            !self.rd_rise &&
+            !self.wr_rise &&
+            self.ft_enabled &&
+            !self.stream_fifo_full &&
+            self.fifo_full_counter > 0;
+        CoreStepOut$(
+            sample: sample,
+            ft_mux: ft_mux,
+            should_emit_overflow: should_emit_overflow,
+        )
+    }
+}
+
 pub fn core_step(inputs: CoreStepInputs) -> CoreStepOut {
-    let sample = sample_bus_cycle(
-        inputs.sample_state,
-        inputs.wait_counter,
-        inputs.wait_enabled,
-        inputs.mreq_fall,
-        inputs.iorq_fall,
-        inputs.cycle_decode.bus,
-        inputs.cycle_decode.bus_error,
-        inputs.tx_busy,
-    );
-    let ft_mux = run_ft_stream_mux(
-        inputs.ft_state,
-        inputs.ft_enabled,
-        inputs.ft_cur_value,
-        inputs.cycle_decode.ft_cmd,
-        inputs.tx_busy,
-        inputs.ft_ui_din_full,
-        inputs.ft_ui_dout_empty,
-        inputs.stream_fifo_empty,
-        inputs.stream_fifo_dout,
-    );
-    let should_emit_overflow =
-        !inputs.rd_rise &&
-        !inputs.wr_rise &&
-        inputs.ft_enabled &&
-        !inputs.stream_fifo_full &&
-        inputs.fifo_full_counter > 0;
-    CoreStepOut$(
-        sample: sample,
-        ft_mux: ft_mux,
-        should_emit_overflow: should_emit_overflow,
-    )
+    inputs.run()
 }
 
 pub fn saleae_mux(
