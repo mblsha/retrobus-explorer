@@ -5,9 +5,9 @@ pub struct DigitDecode {
 
 impl uint<8> {
     pub fn to_upper(self) -> uint<8> {
-        let case_delta: uint<8> = trunc(b'a' - b'A');
+        let case_delta: uint<8> = b'a' -. b'A';
         if self >= b'a' && self <= b'z' {
-            trunc(self - case_delta)
+            self -. case_delta
         } else {
             self
         }

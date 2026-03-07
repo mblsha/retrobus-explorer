@@ -77,13 +77,13 @@ entity main(
         usb_uart_w.busy,
     );
 
-    reg(clk_fast) clk_div: uint<10> reset(rst: 0) = trunc(clk_div + 1);
+    reg(clk_fast) clk_div: uint<10> reset(rst: 0) = clk_div +. 1;
     let clk_200_div = clk_div.to_bits()[0];
     let clk_100_div = clk_div.to_bits()[1];
     let clk_50_div = clk_div.to_bits()[2];
     let selected_clk = clock_from_code(cmd_core.freq_code, clk_div, clk200_probe, clk400_probe);
 
-    reg(clk) heartbeat: uint<24> reset(rst: 0) = trunc(heartbeat + 1);
+    reg(clk) heartbeat: uint<24> reset(rst: 0) = heartbeat +. 1;
     let cmd_waiting = !cmd_core.cmd_state.is_idle();
     let saleae_lines = saleae_outputs(
         mode_is_echo,

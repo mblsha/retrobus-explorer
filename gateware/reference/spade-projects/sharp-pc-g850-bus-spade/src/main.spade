@@ -351,7 +351,7 @@ entity main_core(
                     wait_counter
                 }
             } else {
-                trunc(wait_counter + 1)
+                wait_counter +. 1
             };
 
             let next_last_addr = if bus_sample.sample_is_bus && bus_sample.bus_start {
@@ -364,12 +364,12 @@ entity main_core(
             let next_saleae_state = usb_cmd_state.next_saleae_state;
 
             let next_saleae_counter = match saleae_state {
-                SaleaeState::Counter => trunc(saleae_counter + 1),
+                SaleaeState::Counter => saleae_counter +. 1,
                 _ => saleae_counter,
             };
 
             let next_fifo_full_counter = if cycle_decode.bus.bus_event_valid && ft_enabled && *stream_fifo_full {
-                trunc(fifo_full_counter + 1)
+                fifo_full_counter +. 1
             } else if step.should_emit_overflow {
                 0
             } else {

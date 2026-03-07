@@ -27,7 +27,7 @@ impl Mode {
 impl uint<4> {
     fn digit_char(self) -> uint<8> {
         let v: uint<8> = zext(self);
-        trunc(v + b'0')
+        v +. b'0'
     }
 }
 

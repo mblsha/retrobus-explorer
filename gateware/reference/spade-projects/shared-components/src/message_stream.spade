@@ -48,7 +48,7 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             tx_req_none()
         };
         let sent = tx_req.valid;
-        let next_idx: uint<IDX_W> = trunc(self.cur_idx + 1);
+        let next_idx: uint<IDX_W> = self.cur_idx +. 1;
         let drained = sent && !next_byte.valid;
         let post_cur_msg = if drained {
             none_msg
@@ -134,7 +134,7 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
         let cur_msg_is_none = is_none.call((self.cur_msg,));
         let pending_msg_is_none = is_none.call((self.pending_msg,));
         let cur_byte = render_byte.call((self.cur_msg, self.cur_idx));
-        let next_idx: uint<IDX_W> = trunc(self.cur_idx + 1);
+        let next_idx: uint<IDX_W> = self.cur_idx +. 1;
         let next_byte = render_byte.call((self.cur_msg, next_idx));
         let next_msg_is_none = is_none.call((next_msg,));
 

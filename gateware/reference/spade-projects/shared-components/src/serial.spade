@@ -85,7 +85,7 @@ impl uint<15> {
         if self == 0 {
             0
         } else {
-            trunc(self - 1)
+            self -. 1
         }
     }
 }
@@ -102,7 +102,7 @@ impl uint<3> {
     fn extra_stop_bits(self) -> uint<3> {
         let normalized = self.normalized_stop_bits();
         if normalized > 1 {
-            trunc(normalized - 1)
+            normalized -. 1
         } else {
             0
         }
@@ -150,7 +150,7 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
             let saved_data = regs.saved_data;
             let block_flag = regs.block_flag;
 
-            let ctr_inc: uint<32> = trunc(ctr + 1);
+            let ctr_inc: uint<32> = ctr +. 1;
             let block_flag_next = block;
 
             match state {
@@ -211,7 +211,7 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
                 UartTxState::Data => {
                     let tx_bit = saved_data.to_bits()[trunc(bit_ctr)];
                     if ctr == ctr_last {
-                        let bit_ctr_inc: uint<32> = trunc(bit_ctr + 1);
+                        let bit_ctr_inc: uint<32> = bit_ctr +. 1;
                         if bit_ctr == DATA_WIDTH - 1 {
                             UartTxRegs$(
                                 state: UartTxState::StopBit(),
@@ -338,7 +338,7 @@ pub entity uart_rx<#uint DATA_WIDTH>(
                 if time == half {
                     RxState::WaitData(0, 0, 0, false)
                 } else {
-                    RxState::WaitHalf(trunc(time + 1))
+                    RxState::WaitHalf(time +. 1)
                 }
             },
             RxState::WaitData$(time, bit_idx, data, odd_parity) => {
@@ -358,10 +358,10 @@ pub entity uart_rx<#uint DATA_WIDTH>(
                             }
                         }
                     } else {
-                        RxState::WaitData(0, trunc(bit_idx + 1), next_data, next_odd)
+                        RxState::WaitData(0, bit_idx +. 1, next_data, next_odd)
                     }
                 } else {
-                    RxState::WaitData(trunc(time + 1), bit_idx, data, odd_parity)
+                    RxState::WaitData(time +. 1, bit_idx, data, odd_parity)
                 }
             },
             RxState::WaitParity$(time, data, odd_parity) => {
@@ -372,7 +372,7 @@ pub entity uart_rx<#uint DATA_WIDTH>(
                         RxState::WaitExtraStop(0, stops_after_first)
                     }
                 } else {
-                    RxState::WaitParity(trunc(time + 1), data, odd_parity)
+                    RxState::WaitParity(time +. 1, data, odd_parity)
                 }
             },
             RxState::WaitExtraStop$(time, count) => {
@@ -380,10 +380,10 @@ pub entity uart_rx<#uint DATA_WIDTH>(
                     if count == 1 {
                         RxState::WaitHigh()
                     } else {
-                        RxState::WaitExtraStop(0, trunc(count - 1))
+                        RxState::WaitExtraStop(0, count -. 1)
                     }
                 } else {
-                    RxState::WaitExtraStop(trunc(time + 1), count)
+                    RxState::WaitExtraStop(time +. 1, count)
                 }
             },
             RxState::WaitHigh => {

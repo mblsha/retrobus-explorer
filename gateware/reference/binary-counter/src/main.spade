@@ -78,7 +78,7 @@ entity main(
         if accepted_digit || prescaler == last {
             0
         } else {
-            trunc(prescaler + 1)
+            prescaler +. 1
         }
     };
 
@@ -86,7 +86,7 @@ entity main(
         if accepted_digit {
             counter
         } else if prescaler == last {
-            trunc(counter + 1)
+            counter +. 1
         } else {
             counter
         }

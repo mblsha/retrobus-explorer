@@ -39,8 +39,8 @@ impl<T, #uint N> [T; N] {
 }
 
 fn ptr_inc<#uint W>(ptr: uint<W>) -> uint<W> {
-    // ENTRIES is expected to be a power of two, so trunc() wraps correctly.
-    trunc(ptr + 1)
+    // ENTRIES is expected to be a power of two, so wrapping increment is correct.
+    ptr +. 1
 }
 
 pub struct FifoOut<T> {
@@ -112,9 +112,9 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
             let next_waddr = if do_write { next_write } else { waddr };
             let next_raddr = if do_read { ptr_inc(raddr) } else { raddr };
             let next_used = if do_write && !do_read {
-                trunc(used + 1)
+                used +. 1
             } else if do_read && !do_write {
-                trunc(used - 1)
+                used -. 1
             } else {
                 used
             };

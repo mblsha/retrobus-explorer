@@ -6,7 +6,7 @@ pub entity count_on_event<#uint WIDTH>(
     event: bool,
 ) -> uint<WIDTH> {
     reg(clk) value: uint<WIDTH> reset(rst: 0) = if event {
-        trunc(value + 1)
+        value +. 1
     } else {
         value
     };
@@ -26,7 +26,7 @@ pub entity wait_hold_n<#uint RELOAD>(
     reg(clk) wait_counter: uint<{uint_bits_to_fit(RELOAD)}> reset(rst: 0) = if mreq_fall || iorq_fall {
         wait_reload
     } else if wait_counter != 0 {
-        trunc(wait_counter - 1)
+        wait_counter -. 1
     } else {
         wait_zero
     };

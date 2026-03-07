@@ -61,7 +61,7 @@ entity main(
 
     let rw_fall = inst falling_edge(clk, conn_rw_sync);
     let event_counter = inst count_on_event::<8>(clk, rst, rw_fall);
-    reg(clk_uart) fast_counter: uint<8> reset(rst: 0) = trunc(fast_counter + 1);
+    reg(clk_uart) fast_counter: uint<8> reset(rst: 0) = fast_counter +. 1;
 
     let event_bits = event_counter.to_bits();
     let fast_bits = fast_counter.to_bits();
