@@ -8,8 +8,8 @@ use shared_components::serial::ft_tap;
 use shared_components::serial::uart_rx;
 use shared_components::serial::uart_tx_tap;
 
-pub fn au_usb_uart_bit_time() -> uint<15> { 100 }
-pub fn au_usb_uart_stop_bits() -> uint<3> { 1 }
+fn au_usb_uart_bit_time() -> uint<15> { 100 }
+fn au_usb_uart_stop_bits() -> uint<3> { 1 }
 
 pub entity au_usb_uart_rx(
     clk: clock,
@@ -77,7 +77,7 @@ pub struct AuDualBridgeOut<TData, #uint DROP_COUNT_W> {
     tx_b: UartFifoBridgeOut<TData, DROP_COUNT_W>,
 }
 
-pub entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B, #uint DROP_COUNT_W>(
+entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B, #uint DROP_COUNT_W>(
     wclk: clock,
     wrst: bool,
     din: uint<WIDTH>,

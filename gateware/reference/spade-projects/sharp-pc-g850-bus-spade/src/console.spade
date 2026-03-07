@@ -4,7 +4,7 @@ use shared_components::message_stream::ByteMsgStreamState;
 use shared_components::message_stream::TxReq8;
 use shared_components::message_stream::tx_req_none;
 
-pub enum ConsoleMsg {
+pub(lib) enum ConsoleMsg {
     None,
     Ok,
     Err,
@@ -33,7 +33,7 @@ impl ConsoleMsg {
     }
 }
 
-pub struct ConsoleMsgContext {
+pub(lib) struct ConsoleMsgContext {
     wait_enabled: uint<8>,
     saleae_state: SaleaeState,
     ft_enabled: bool,
@@ -154,7 +154,7 @@ fn help_msg_byte(idx: uint<16>) -> TxReq8 {
     text_byte(msg, idx)
 }
 
-pub fn console_stream_step(
+pub(lib) fn console_stream_step(
     stream: ByteMsgStreamState<ConsoleMsg, 16>,
     ctx: ConsoleMsgContext,
     block_tx: bool,
