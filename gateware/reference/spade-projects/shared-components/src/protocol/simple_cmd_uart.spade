@@ -16,7 +16,7 @@ impl Mode {
         }
     }
     
-    pub fn char(self) -> uint<8> {
+    fn char(self) -> uint<8> {
         match self {
             Self::ClockTester => b'C',
             Self::Echo => b'E',
@@ -25,18 +25,18 @@ impl Mode {
 }
 
 impl uint<4> {
-    pub fn digit_char(self) -> uint<8> {
+    fn digit_char(self) -> uint<8> {
         let v: uint<8> = zext(self);
         trunc(v + b'0')
     }
 }
 
-pub struct MsgTemplate {
+struct MsgTemplate {
     len: uint<8>,
     bytes: [uint<8>; 64],
 }
 
-pub struct RxByteDecode {
+struct RxByteDecode {
     byte: uint<8>,
     upper: uint<8>,
     digit: DigitDecode,
@@ -69,11 +69,11 @@ entity decode_rx_byte(
     })
 }
 
-pub fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
+fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
     std::conv::concat_arrays(message, [0; 64 - N])
 }
 
-pub fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate {
+fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate {
     let len: uint<8> = N;
     MsgTemplate$(len: len, bytes: pad_message(message))
 }
@@ -97,7 +97,7 @@ impl CmdParseState {
     }
 }
 
-pub enum MsgKind {
+enum MsgKind {
     None,
     Ready,
     Help,
@@ -108,14 +108,14 @@ pub enum MsgKind {
 }
 
 impl MsgKind {
-    pub fn is_none(self) -> bool {
+    fn is_none(self) -> bool {
         match self {
             Self::None => true,
             _ => false,
         }
     }
 
-    pub fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
+    fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
         let m = mode.char();
         let f = freq_code.digit_char();
 
@@ -130,7 +130,7 @@ impl MsgKind {
         }
     }
 
-    pub fn byte(self, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
+    fn byte(self, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
         let msg_tpl = self.template(mode, freq_code);
         if idx < msg_tpl.len {
             TxReq8$(valid: true, byte: msg_tpl.bytes[trunc(idx)])
@@ -155,7 +155,7 @@ pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk4
     sources[idx]
 }
 
-pub fn next_cmd_state(
+fn next_cmd_state(
     state: CmdParseState,
     rx_ok: bool,
     rx_byte: uint<8>,
@@ -184,7 +184,7 @@ pub fn next_cmd_state(
     }
 }
 
-pub struct CmdDecode {
+struct CmdDecode {
     msg: MsgKind,
     msg_valid: bool,
     mode_write: bool,
@@ -193,7 +193,7 @@ pub struct CmdDecode {
     freq_value: uint<4>,
 }
 
-pub fn cmd_decode_base(
+fn cmd_decode_base(
     msg: MsgKind,
     msg_valid: bool,
     mode_write: bool,
@@ -211,23 +211,23 @@ pub fn cmd_decode_base(
     )
 }
 
-pub fn cmd_decode_none() -> CmdDecode {
+fn cmd_decode_none() -> CmdDecode {
     cmd_decode_base(MsgKind::None(), false, false, Mode::ClockTester(), false, 0)
 }
 
-pub fn cmd_decode_msg(msg: MsgKind) -> CmdDecode {
+fn cmd_decode_msg(msg: MsgKind) -> CmdDecode {
     cmd_decode_base(msg, true, false, Mode::ClockTester(), false, 0)
 }
 
-pub fn cmd_decode_set_mode(mode: Mode) -> CmdDecode {
+fn cmd_decode_set_mode(mode: Mode) -> CmdDecode {
     cmd_decode_base(MsgKind::Ok(), true, true, mode, false, 0)
 }
 
-pub fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
+fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
     cmd_decode_base(MsgKind::Ok(), true, true, Mode::ClockTester(), true, freq)
 }
 
-pub fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
+fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
     if rx_upper == b'H' {
         cmd_decode_msg(MsgKind::Help())
     } else if rx_upper == b'S' {
@@ -243,7 +243,7 @@ pub fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
     }
 }
 
-pub fn decode_cmd(
+fn decode_cmd(
     state: CmdParseState,
     rx_ok: bool,
     rx_upper: uint<8>,

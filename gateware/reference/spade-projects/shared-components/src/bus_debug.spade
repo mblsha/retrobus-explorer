@@ -49,13 +49,13 @@ pub enum SaleaeState {
     Counter,
 }
 
-pub struct SampleFlags {
+struct SampleFlags {
     is_bus: bool,
     is_wait: bool,
 }
 
 impl SampleState {
-    pub fn flags(self) -> SampleFlags {
+    fn flags(self) -> SampleFlags {
         SampleFlags$(
             is_bus: match self {
                 Self::SampleBus => true,
@@ -69,7 +69,7 @@ impl SampleState {
     }
 }
 
-pub fn bus_event_char_from_flags(
+fn bus_event_char_from_flags(
     rd_event_valid: bool,
     wr_event_valid: bool,
     z80_m1_sync: bool,
@@ -102,7 +102,7 @@ pub struct BusEventDecode {
     bus_event_char: uint<8>,
 }
 
-pub fn decode_bus_events(
+fn decode_bus_events(
     z80_m1_sync: bool,
     z80_mreq_sync: bool,
     z80_iorq_sync: bool,
@@ -128,7 +128,7 @@ pub struct BusError {
     ch: uint<8>,
 }
 
-pub fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> BusError {
+fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> BusError {
     if rd_rise {
         BusError$(valid: invalid_bus_state, ch: b'E')
     } else if wr_rise {
@@ -144,7 +144,7 @@ pub struct FtStreamCmdDecode {
 }
 
 impl uint<16> {
-    pub fn decode_ft_stream(self, ft_ui_dout_empty: bool) -> FtStreamCmdDecode {
+    fn decode_ft_stream(self, ft_ui_dout_empty: bool) -> FtStreamCmdDecode {
         let cmd_b0: uint<8> = trunc(self);
         let cmd_b1: uint<8> = trunc(self >> 8);
         let has_prefix = !ft_ui_dout_empty && cmd_b0.to_upper() == b'S';
@@ -161,7 +161,7 @@ pub struct SaleaeCmdDecode {
 }
 
 impl uint<8> {
-    pub fn decode_saleae_state(self) -> SaleaeCmdDecode {
+    fn decode_saleae_state(self) -> SaleaeCmdDecode {
         let upper = self.to_upper();
         if upper == b'S' {
             SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals())
@@ -220,7 +220,7 @@ pub struct BusSamplerOut {
     sample_tx_req: TxReq8,
 }
 
-pub fn sample_bus_cycle(
+fn sample_bus_cycle(
     sample_state: SampleState,
     wait_counter: uint<128>,
     wait_enabled: uint<8>,
@@ -316,7 +316,7 @@ pub struct FtStreamMuxOut {
     ft_tx_req: TxReq8,
 }
 
-pub fn run_ft_stream_mux(
+fn run_ft_stream_mux(
     ft_state: FtState,
     ft_enabled: bool,
     ft_cur_value: uint<32>,
