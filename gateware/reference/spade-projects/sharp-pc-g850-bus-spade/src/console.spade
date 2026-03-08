@@ -1,3 +1,5 @@
+use std::conv::concat_arrays;
+
 use shared_components::{
     bus_debug::SaleaeState,
     message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none},
@@ -44,19 +46,18 @@ impl ConsoleMsgContext {
     }
 
     fn status_byte(self, idx: uint<16>) -> TxReq8 {
-        let msg = [
-            b's', b't', b'a', b't', b' ', b'f', b'=',
-            bool_char(self.ft_enabled),
-            b' ', b'r', b'=',
-            bool_char(self.ft_remote_allowed),
-            b' ', b'a', b'=',
-            bool_char(self.ft_armed),
-            b' ', b'w', b'=',
-            self.wait_char(),
-            b' ', b'm', b'=',
-            self.saleae_state.lower_char(),
-            b'\r', b'\n',
-        ];
+        let ft_field = concat_arrays(b"stat f=", [bool_char(self.ft_enabled)]);
+        let remote_field = concat_arrays(b" r=", [bool_char(self.ft_remote_allowed)]);
+        let armed_field = concat_arrays(b" a=", [bool_char(self.ft_armed)]);
+        let wait_field = concat_arrays(b" w=", [self.wait_char()]);
+        let mode_field = concat_arrays(b" m=", [self.saleae_state.lower_char()]);
+        let msg = concat_arrays(
+            concat_arrays(ft_field, remote_field),
+            concat_arrays(
+                concat_arrays(armed_field, wait_field),
+                concat_arrays(mode_field, b"\r\n"),
+            ),
+        );
         text_byte(msg, idx)
     }
 }
@@ -73,31 +74,31 @@ impl SaleaeState {
     }
 
     fn map_byte(self, idx: uint<16>) -> TxReq8 {
-        let header = std::conv::concat_arrays(
-            std::conv::concat_arrays(b"map mode=", [self.lower_char()]),
+        let header = concat_arrays(
+            concat_arrays(b"map mode=", [self.lower_char()]),
             b"\r\n",
         );
-        let data_lines = std::conv::concat_arrays(
-            std::conv::concat_arrays(
+        let data_lines = concat_arrays(
+            concat_arrays(
                 b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n",
                 b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n",
             ),
-            std::conv::concat_arrays(
+            concat_arrays(
                 b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
                 b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
             ),
         );
-        let legend_lines = std::conv::concat_arrays(
-            std::conv::concat_arrays(
+        let legend_lines = concat_arrays(
+            concat_arrays(
                 b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
                 b"c: d0..d7=ctr[0..7]\r\n",
             ),
-            std::conv::concat_arrays(
+            concat_arrays(
                 b"legend: u=uart s=sync ^=fall n=active_low\r\n",
                 b"legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
             ),
         );
-        let msg = std::conv::concat_arrays(std::conv::concat_arrays(header, data_lines), legend_lines);
+        let msg = concat_arrays(concat_arrays(header, data_lines), legend_lines);
         text_byte(msg, idx)
     }
 }
@@ -119,34 +120,34 @@ fn text_byte<#uint N>(text: [uint<8>; N], idx: uint<16>) -> TxReq8 {
 }
 
 fn help_msg_byte(idx: uint<16>) -> TxReq8 {
-    let intro = std::conv::concat_arrays(
-        std::conv::concat_arrays(b"Help:\r\n", b" h : show help\r\n"),
-        std::conv::concat_arrays(
+    let intro = concat_arrays(
+        concat_arrays(b"Help:\r\n", b" h : show help\r\n"),
+        concat_arrays(
             b" q : show status (f,r,a,w,m)\r\n",
             b" l : show saleae map + legend\r\n",
         ),
     );
-    let mode_lines = std::conv::concat_arrays(
-        std::conv::concat_arrays(
+    let mode_lines = concat_arrays(
+        concat_arrays(
             b" d/s/e/r/c : select saleae mode\r\n",
             b"   d=data s=sync e=edge r=raw c=counter\r\n",
         ),
-        std::conv::concat_arrays(
+        concat_arrays(
             b" 0..9 : set wait level (0=min wait)\r\n",
             b" a/k : arm or lock FT control\r\n",
         ),
     );
-    let control_lines = std::conv::concat_arrays(
-        std::conv::concat_arrays(
+    let control_lines = concat_arrays(
+        concat_arrays(
             b" p/o : allow or block FT remote\r\n",
             b" f/x : force FT stream on/off\r\n",
         ),
-        std::conv::concat_arrays(
+        concat_arrays(
             b" legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
             b" note: commands are case-insensitive\r\n",
         ),
     );
-    let msg = std::conv::concat_arrays(std::conv::concat_arrays(intro, mode_lines), control_lines);
+    let msg = concat_arrays(concat_arrays(intro, mode_lines), control_lines);
     text_byte(msg, idx)
 }
 

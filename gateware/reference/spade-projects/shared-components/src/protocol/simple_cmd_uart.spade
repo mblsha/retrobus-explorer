@@ -1,3 +1,5 @@
+use std::conv::concat_arrays;
+
 use super::super::{
     ascii::DigitDecode,
     message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8},
@@ -67,7 +69,7 @@ entity decode_rx_byte(
 }
 
 fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; 64] {
-    std::conv::concat_arrays(message, [0; 64 - N])
+    concat_arrays(message, [0; 64 - N])
 }
 
 fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate {
@@ -76,7 +78,9 @@ fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate {
 }
 
 fn mode_freq_suffix(mode: uint<8>, freq: uint<8>) -> [uint<8>; 10] {
-    [b' ', b'M', b'=', mode, b' ', b'F', b'=', freq, b'\r', b'\n']
+    let mode_field = concat_arrays(b" M=", [mode]);
+    let freq_field = concat_arrays(b" F=", [freq]);
+    concat_arrays(concat_arrays(mode_field, freq_field), b"\r\n")
 }
 
 pub enum CmdParseState {
@@ -112,10 +116,10 @@ impl MsgKind {
 
         match self {
             Self::None => MsgTemplate$(len: 0, bytes: [0; 64]),
-            Self::Ready => msg_template_bytes(std::conv::concat_arrays(b"RBX READY", mode_freq_suffix(m, f))),
+            Self::Ready => msg_template_bytes(concat_arrays(b"RBX READY", mode_freq_suffix(m, f))),
             Self::Help => msg_template_bytes(b"RBX HELP !H !S !C !E !F0-5 M:CLOCK E:ECHO\r\n"),
-            Self::Status => msg_template_bytes(std::conv::concat_arrays(b"RBX STATUS", mode_freq_suffix(m, f))),
-            Self::Ok => msg_template_bytes(std::conv::concat_arrays(b"RBX OK", mode_freq_suffix(m, f))),
+            Self::Status => msg_template_bytes(concat_arrays(b"RBX STATUS", mode_freq_suffix(m, f))),
+            Self::Ok => msg_template_bytes(concat_arrays(b"RBX OK", mode_freq_suffix(m, f))),
             Self::ErrCmd => msg_template_bytes(b"RBX ERR CMD\r\n"),
             Self::ErrFreq => msg_template_bytes(b"RBX ERR FREQ\r\n"),
         }
