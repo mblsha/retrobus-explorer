@@ -1,3 +1,5 @@
+use std::conv::concat_arrays;
+
 use shared_components::{
     bus_debug::SaleaeState,
     message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none},
@@ -22,8 +24,8 @@ impl ConsoleMsg {
     fn byte(self, idx: ConsoleIdx, ctx: ConsoleMsgContext) -> TxReq8 {
         match self {
             Self::None => tx_req_none(),
-            Self::Ok => text_byte_at(b"ok\r\n", idx, 0),
-            Self::Err => text_byte_at(b"err\r\n", idx, 0),
+            Self::Ok => text_byte(b"ok\r\n", idx),
+            Self::Err => text_byte(b"err\r\n", idx),
             Self::Help => help_msg_byte(idx),
             Self::Status => ctx.status_byte(idx),
             Self::PinMap => ctx.saleae_state.map_byte(idx),
@@ -46,55 +48,19 @@ impl ConsoleMsgContext {
     }
 
     fn status_byte(self, idx: ConsoleIdx) -> TxReq8 {
-        let ft_char = bool_char(self.ft_enabled);
-        let remote_char = bool_char(self.ft_remote_allowed);
-        let armed_char = bool_char(self.ft_armed);
-        let wait_char = self.wait_char();
-        let mode_char = self.saleae_state.mode_char();
-
-        let ft_label_start = 0;
-        let ft_value_start = text_end(ft_label_start, b"stat f=");
-        let remote_label_start = text_end(ft_value_start, [ft_char]);
-        let remote_value_start = text_end(remote_label_start, b" r=");
-        let armed_label_start = text_end(remote_value_start, [remote_char]);
-        let armed_value_start = text_end(armed_label_start, b" a=");
-        let wait_label_start = text_end(armed_value_start, [armed_char]);
-        let wait_value_start = text_end(wait_label_start, b" w=");
-        let mode_label_start = text_end(wait_value_start, [wait_char]);
-        let mode_value_start = text_end(mode_label_start, b" m=");
-        let line_end_start = text_end(mode_value_start, [mode_char]);
-
-        first_valid_byte(
-            text_byte_at(b"stat f=", idx, ft_label_start),
-            first_valid_byte(
-                char_byte_at(ft_char, idx, ft_value_start),
-                first_valid_byte(
-                    text_byte_at(b" r=", idx, remote_label_start),
-                    first_valid_byte(
-                        char_byte_at(remote_char, idx, remote_value_start),
-                        first_valid_byte(
-                            text_byte_at(b" a=", idx, armed_label_start),
-                            first_valid_byte(
-                                char_byte_at(armed_char, idx, armed_value_start),
-                                first_valid_byte(
-                                    text_byte_at(b" w=", idx, wait_label_start),
-                                    first_valid_byte(
-                                        char_byte_at(wait_char, idx, wait_value_start),
-                                        first_valid_byte(
-                                            text_byte_at(b" m=", idx, mode_label_start),
-                                            first_valid_byte(
-                                                char_byte_at(mode_char, idx, mode_value_start),
-                                                text_byte_at(b"\r\n", idx, line_end_start),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
+        let ft_field = concat_arrays(b"stat f=", [bool_char(self.ft_enabled)]);
+        let remote_field = concat_arrays(b" r=", [bool_char(self.ft_remote_allowed)]);
+        let armed_field = concat_arrays(b" a=", [bool_char(self.ft_armed)]);
+        let wait_field = concat_arrays(b" w=", [self.wait_char()]);
+        let mode_field = concat_arrays(b" m=", [self.saleae_state.mode_char()]);
+        let msg = concat_arrays(
+            concat_arrays(ft_field, remote_field),
+            concat_arrays(
+                concat_arrays(armed_field, wait_field),
+                concat_arrays(mode_field, b"\r\n"),
             ),
-        )
+        );
+        text_byte(msg, idx)
     }
 }
 
@@ -109,26 +75,33 @@ impl SaleaeState {
         }
     }
 
-    fn map_header_byte(self, idx: ConsoleIdx) -> TxReq8 {
-        let mode_char = self.mode_char();
-        let mode_label_start = 0;
-        let mode_value_start = text_end(mode_label_start, b"map mode=");
-        let line_end_start = text_end(mode_value_start, [mode_char]);
-
-        first_valid_byte(
-            text_byte_at(b"map mode=", idx, mode_label_start),
-            first_valid_byte(
-                char_byte_at(mode_char, idx, mode_value_start),
-                text_byte_at(b"\r\n", idx, line_end_start),
-            ),
-        )
-    }
-
     fn map_byte(self, idx: ConsoleIdx) -> TxReq8 {
-        first_valid_byte(
-            self.map_header_byte(idx),
-            first_valid_byte(map_signal_byte(idx), map_legend_byte(idx)),
-        )
+        let header = concat_arrays(
+            concat_arrays(b"map mode=", [self.mode_char()]),
+            b"\r\n",
+        );
+        let data_lines = concat_arrays(
+            concat_arrays(
+                b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n",
+                b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n",
+            ),
+            concat_arrays(
+                b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
+                b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
+            ),
+        );
+        let legend_lines = concat_arrays(
+            concat_arrays(
+                b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
+                b"c: d0..d7=ctr[0..7]\r\n",
+            ),
+            concat_arrays(
+                b"legend: u=uart s=sync ^=fall n=active_low\r\n",
+                b"legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
+            ),
+        );
+        let msg = concat_arrays(concat_arrays(header, data_lines), legend_lines);
+        text_byte(msg, idx)
     }
 }
 
@@ -140,164 +113,44 @@ fn bool_char(v: bool) -> uint<8> {
     }
 }
 
-fn first_valid_byte(primary: TxReq8, fallback: TxReq8) -> TxReq8 {
-    if primary.valid {
-        primary
-    } else {
-        fallback
-    }
+fn help_msg_byte(idx: ConsoleIdx) -> TxReq8 {
+    let intro = concat_arrays(
+        concat_arrays(b"Help:\r\n", b" h : show help\r\n"),
+        concat_arrays(
+            b" q : show status (f,r,a,w,m)\r\n",
+            b" l : show saleae map + legend\r\n",
+        ),
+    );
+    let mode_lines = concat_arrays(
+        concat_arrays(
+            b" d/s/e/r/c : select saleae mode\r\n",
+            b"   d=data s=sync e=edge r=raw c=counter\r\n",
+        ),
+        concat_arrays(
+            b" 0..9 : set wait level (0=min wait)\r\n",
+            b" a/k : arm or lock FT control\r\n",
+        ),
+    );
+    let control_lines = concat_arrays(
+        concat_arrays(
+            b" p/o : allow or block FT remote\r\n",
+            b" f/x : force FT stream on/off\r\n",
+        ),
+        concat_arrays(
+            b" legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
+            b" note: commands are case-insensitive\r\n",
+        ),
+    );
+    let msg = concat_arrays(concat_arrays(intro, mode_lines), control_lines);
+    text_byte(msg, idx)
 }
 
-fn text_end<#uint N>(start: ConsoleIdx, text: [uint<8>; N]) -> ConsoleIdx {
-    let _ = text;
-    start +. N
-}
-
-fn text_byte_at<#uint N>(text: [uint<8>; N], idx: ConsoleIdx, start: ConsoleIdx) -> TxReq8 {
-    if idx >= start {
-        let rel = idx -. start;
-        if rel < N {
-            TxReq8$(valid: true, byte: text[trunc(rel)])
-        } else {
-            tx_req_none()
-        }
+fn text_byte<#uint N>(text: [uint<8>; N], idx: ConsoleIdx) -> TxReq8 {
+    if idx < N {
+        TxReq8$(valid: true, byte: text[trunc(idx)])
     } else {
         tx_req_none()
     }
-}
-
-fn char_byte_at(ch: uint<8>, idx: ConsoleIdx, start: ConsoleIdx) -> TxReq8 {
-    text_byte_at([ch], idx, start)
-}
-
-fn help_intro_byte(idx: ConsoleIdx) -> TxReq8 {
-    let title_start = 0;
-    let help_start = text_end(title_start, b"Help:\r\n");
-    let status_start = text_end(help_start, b" h : show help\r\n");
-    let map_start = text_end(status_start, b" q : show status (f,r,a,w,m)\r\n");
-
-    first_valid_byte(
-        text_byte_at(b"Help:\r\n", idx, title_start),
-        first_valid_byte(
-            text_byte_at(b" h : show help\r\n", idx, help_start),
-            first_valid_byte(
-                text_byte_at(b" q : show status (f,r,a,w,m)\r\n", idx, status_start),
-                text_byte_at(b" l : show saleae map + legend\r\n", idx, map_start),
-            ),
-        ),
-    )
-}
-
-fn help_intro_end() -> ConsoleIdx {
-    let title_start = 0;
-    let help_start = text_end(title_start, b"Help:\r\n");
-    let status_start = text_end(help_start, b" h : show help\r\n");
-    let map_start = text_end(status_start, b" q : show status (f,r,a,w,m)\r\n");
-    text_end(map_start, b" l : show saleae map + legend\r\n")
-}
-
-fn help_mode_byte(idx: ConsoleIdx) -> TxReq8 {
-    let select_start = help_intro_end();
-    let legend_start = text_end(select_start, b" d/s/e/r/c : select saleae mode\r\n");
-    let wait_start = text_end(legend_start, b"   d=data s=sync e=edge r=raw c=counter\r\n");
-    let arm_start = text_end(wait_start, b" 0..9 : set wait level (0=min wait)\r\n");
-
-    first_valid_byte(
-        text_byte_at(b" d/s/e/r/c : select saleae mode\r\n", idx, select_start),
-        first_valid_byte(
-            text_byte_at(b"   d=data s=sync e=edge r=raw c=counter\r\n", idx, legend_start),
-            first_valid_byte(
-                text_byte_at(b" 0..9 : set wait level (0=min wait)\r\n", idx, wait_start),
-                text_byte_at(b" a/k : arm or lock FT control\r\n", idx, arm_start),
-            ),
-        ),
-    )
-}
-
-fn help_mode_end() -> ConsoleIdx {
-    let select_start = help_intro_end();
-    let legend_start = text_end(select_start, b" d/s/e/r/c : select saleae mode\r\n");
-    let wait_start = text_end(legend_start, b"   d=data s=sync e=edge r=raw c=counter\r\n");
-    let arm_start = text_end(wait_start, b" 0..9 : set wait level (0=min wait)\r\n");
-    text_end(arm_start, b" a/k : arm or lock FT control\r\n")
-}
-
-fn help_control_byte(idx: ConsoleIdx) -> TxReq8 {
-    let remote_start = help_mode_end();
-    let force_start = text_end(remote_start, b" p/o : allow or block FT remote\r\n");
-    let uart_start = text_end(force_start, b" f/x : force FT stream on/off\r\n");
-    let note_start = text_end(uart_start, b" legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n");
-
-    first_valid_byte(
-        text_byte_at(b" p/o : allow or block FT remote\r\n", idx, remote_start),
-        first_valid_byte(
-            text_byte_at(b" f/x : force FT stream on/off\r\n", idx, force_start),
-            first_valid_byte(
-                text_byte_at(b" legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n", idx, uart_start),
-                text_byte_at(b" note: commands are case-insensitive\r\n", idx, note_start),
-            ),
-        ),
-    )
-}
-
-fn help_msg_byte(idx: ConsoleIdx) -> TxReq8 {
-    first_valid_byte(
-        help_intro_byte(idx),
-        first_valid_byte(help_mode_byte(idx), help_control_byte(idx)),
-    )
-}
-
-fn map_header_end() -> ConsoleIdx {
-    let mode_label_start = 0;
-    let mode_value_start = text_end(mode_label_start, b"map mode=");
-    let line_end_start = text_end(mode_value_start, [b'd']);
-    text_end(line_end_start, b"\r\n")
-}
-
-fn map_signal_byte(idx: ConsoleIdx) -> TxReq8 {
-    let data_start = map_header_end();
-    let data_uart_start = text_end(data_start, b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n");
-    let sync_start = text_end(data_uart_start, b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n");
-    let edge_start = text_end(sync_start, b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n");
-    let raw_start = text_end(edge_start, b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n");
-    let counter_start = text_end(raw_start, b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n");
-
-    first_valid_byte(
-        text_byte_at(b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n", idx, data_start),
-        first_valid_byte(
-            text_byte_at(b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n", idx, data_uart_start),
-            first_valid_byte(
-                text_byte_at(b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n", idx, sync_start),
-                first_valid_byte(
-                    text_byte_at(b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n", idx, edge_start),
-                    first_valid_byte(
-                        text_byte_at(b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n", idx, raw_start),
-                        text_byte_at(b"c: d0..d7=ctr[0..7]\r\n", idx, counter_start),
-                    ),
-                ),
-            ),
-        ),
-    )
-}
-
-fn map_signal_end() -> ConsoleIdx {
-    let data_start = map_header_end();
-    let data_uart_start = text_end(data_start, b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n");
-    let sync_start = text_end(data_uart_start, b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n");
-    let edge_start = text_end(sync_start, b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n");
-    let raw_start = text_end(edge_start, b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n");
-    let counter_start = text_end(raw_start, b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n");
-    text_end(counter_start, b"c: d0..d7=ctr[0..7]\r\n")
-}
-
-fn map_legend_byte(idx: ConsoleIdx) -> TxReq8 {
-    let legend_start = map_signal_end();
-    let char_start = text_end(legend_start, b"legend: u=uart s=sync ^=fall n=active_low\r\n");
-
-    first_valid_byte(
-        text_byte_at(b"legend: u=uart s=sync ^=fall n=active_low\r\n", idx, legend_start),
-        text_byte_at(b"legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n", idx, char_start),
-    )
 }
 
 pub(lib) fn console_stream_step(
