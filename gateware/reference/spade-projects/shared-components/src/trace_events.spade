@@ -1,0 +1,35 @@
+use super::trace_words::{TaggedTraceKind, TaggedTracePayload, TaggedTraceWord, pack_tagged_trace_kind};
+
+pub type TraceEventWord = TaggedTraceWord;
+
+pub struct TraceEvent {
+    kind: TaggedTraceKind,
+    payload: TaggedTracePayload,
+}
+
+pub struct TraceEventReq {
+    valid: bool,
+    event: TraceEvent,
+}
+
+pub fn trace_event_none() -> TraceEventReq {
+    TraceEventReq$(
+        valid: false,
+        event: TraceEvent$(kind: TaggedTraceKind::Addr(), payload: 0),
+    )
+}
+
+pub fn trace_event(kind: TaggedTraceKind, payload: TaggedTracePayload) -> TraceEventReq {
+    TraceEventReq$(
+        valid: true,
+        event: TraceEvent$(kind: kind, payload: payload),
+    )
+}
+
+pub fn overflow_trace_event(payload: TaggedTracePayload) -> TraceEventReq {
+    trace_event(TaggedTraceKind::Overflow(), payload)
+}
+
+pub fn pack_trace_event_word(event: TraceEvent) -> TraceEventWord {
+    pack_tagged_trace_kind(event.kind, event.payload)
+}

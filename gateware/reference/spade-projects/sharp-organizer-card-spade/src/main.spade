@@ -1,27 +1,26 @@
-mod board;
 mod cmd;
 mod monitor;
 mod msg;
 mod protocol;
 mod render;
+mod transport;
 
 use shared_components::{
     clocking::{clk_wiz_400, sampled_bool_clock},
-    config::{au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    config::au_usb_uart_rx,
     ft_stream::{FtWordStreamOut, FtWordStreamState, ft_word_stream_step},
     message_stream::TxReq8,
     primitives::{reset_conditioner, sync_bundle},
     serial::{FtBe, FtData},
+    trace_events::pack_trace_event_word,
 };
-use self::board::organizer_board_outputs;
 use self::cmd::{OrganizerUiEffect, OrganizerUiInputs, eval_organizer_ui};
-use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, reset_monitor_state};
+use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, OrganizerMonitorTransportOut, reset_monitor_state};
 use self::msg::{
     OrganizerMsgStreamOut,
     OrganizerMsgStreamState,
     init_organizer_msg_stream,
-    organizer_msg_from_replies,
-    organizer_msg_is_none,
+    organizer_msg_from_kinds,
     organizer_msg_stream_step,
 };
 use self::protocol::{
@@ -32,9 +31,9 @@ use self::protocol::{
     SaleaeState,
     SyncSubMode,
     misc_word,
-    pack_trace_event_word,
 };
 use self::render::{BoardOutputs, BoardRenderState};
+use self::transport::organizer_transport;
 
 struct FtRegs {
     enabled: bool,
@@ -124,8 +123,8 @@ impl MainState {
             inputs.data_sync,
             inputs.misc_sync,
             self.ft.enabled,
-            !inputs.stream_fifo_full,
         );
+        let monitor_transport: OrganizerMonitorTransportOut = monitor.next_state.drain_stream(!inputs.stream_fifo_full);
         let ft_stream = ft_word_stream_step(
             self.ft.stream_state,
             self.ft.cur_value,
@@ -134,16 +133,21 @@ impl MainState {
             inputs.stream_fifo_empty,
             inputs.stream_fifo_dout,
         );
-        let ui_msg = organizer_msg_from_replies(ui.primary_reply, ui.secondary_reply);
+        let ui_msg = organizer_msg_from_kinds(
+            ui.cmd.msg_valid,
+            ui.cmd.msg,
+            ui.ft.msg_valid,
+            ui.ft.msg,
+        );
         let msg_stream: OrganizerMsgStreamOut = organizer_msg_stream_step(
             self.msg_stream,
             inputs.tx_busy,
-            !organizer_msg_is_none(ui_msg),
+            !ui_msg.is_none(),
             ui_msg,
         );
-        let stream_word_valid = monitor.stream_event.valid;
-        let stream_word = if monitor.stream_event.valid {
-            pack_trace_event_word(monitor.stream_event.event)
+        let stream_word_valid = monitor_transport.stream_event.valid;
+        let stream_word = if monitor_transport.stream_event.valid {
+            pack_trace_event_word(monitor_transport.stream_event.event)
         } else {
             0
         };
@@ -151,20 +155,20 @@ impl MainState {
         MainEval$(
             next_state: MainState$(
                 ft: FtRegs$(
-                    enabled: ui.next_ft_enabled,
+                    enabled: ui.ft.next_ft_enabled,
                     cur_value: ft_stream.next_cur_value,
                     stream_state: ft_stream.next_state,
                 ),
                 saleae: SaleaeRegs$(
-                    state: ui.next_saleae_state,
+                    state: ui.cmd.next_saleae_state,
                     counter: if let SaleaeState::Counter = self.saleae.state {
                         self.saleae.counter +. 1
                     } else {
                         self.saleae.counter
                     },
-                    sync_sub_mode: ui.next_sync_sub_mode,
+                    sync_sub_mode: ui.cmd.next_sync_sub_mode,
                 ),
-                monitor: monitor.next_state,
+                monitor: monitor_transport.next_state,
                 msg_stream: msg_stream.state,
             ),
             tx_req: msg_stream.tx_req,
@@ -293,39 +297,22 @@ entity main_core(
         };
 
     let eval = state.eval(inputs);
-    let stream_fifo = inst au_stream_fifo_u32(
+    let monitor_lines = inst organizer_transport(
         clk,
         rst,
-        eval.stream_word,
-        eval.stream_word_valid,
-        eval.ft_stream.stream_fifo_rget,
-    );
-    set stream_fifo_full_w = &stream_fifo.full;
-    set stream_fifo_empty_w = &stream_fifo.empty;
-    set stream_fifo_dout_w = &stream_fifo.dout;
-
-    let _tx = inst au_usb_uart_tx8_tap(
-        clk,
-        rst,
-        false,
-        eval.tx_req.byte,
-        eval.tx_req.valid,
-        usb_tx_line_w,
-        usb_tx_busy_w,
-    );
-
-    let _ft = inst au_ft_tap_u16(
-        clk,
-        rst,
+        clk_uart,
         ft_clk_clock,
         ft_rxf,
         ft_txe,
         ft_data,
         ft_be,
-        eval.ft_stream.ui_din,
-        eval.ft_stream.ui_din_be,
-        eval.ft_stream.ui_din_valid,
-        eval.ft_stream.ui_dout_get,
+        eval.tx_req,
+        eval.monitor_samples,
+        eval.stream_word,
+        eval.stream_word_valid,
+        eval.ft_stream,
+        usb_tx_line_w,
+        usb_tx_busy_w,
         ft_data_out_w,
         ft_be_out_w,
         ft_rd_sig_w,
@@ -335,28 +322,32 @@ entity main_core(
         ft_ui_dout_w,
         ft_ui_dout_be_w,
         ft_ui_dout_empty_w,
+        stream_fifo_full_w,
+        stream_fifo_empty_w,
+        stream_fifo_dout_w,
     );
 
-    let board_outputs: BoardOutputs = inst organizer_board_outputs(
-        clk,
-        rst,
-        clk_uart,
-        eval.board_state,
-        eval.monitor_samples,
-        *stream_fifo_empty,
-        *stream_fifo_full,
-        ft_txe,
-        ft_rxf,
-        *ft_ui_dout_empty,
-        *ft_ui_din_full,
-        conn_rw_sync,
-        conn_oe_sync,
-        conn_ci_sync,
-        conn_e2_sync,
-        conn_mskrom_sync,
-        conn_sram1_sync,
-        conn_sram2_sync,
-        conn_eprom_sync,
+    let board_outputs: BoardOutputs = render::render_board_outputs(
+        render::BoardRenderInputs$(
+            state: eval.board_state,
+            stream_fifo_empty: *stream_fifo_empty,
+            stream_fifo_full: *stream_fifo_full,
+            ft_txe: ft_txe,
+            ft_rxf: ft_rxf,
+            ft_ui_dout_empty: *ft_ui_dout_empty,
+            ft_ui_din_full: *ft_ui_din_full,
+            conn_rw_sync: conn_rw_sync,
+            conn_oe_sync: conn_oe_sync,
+            conn_ci_sync: conn_ci_sync,
+            conn_e2_sync: conn_e2_sync,
+            conn_mskrom_sync: conn_mskrom_sync,
+            conn_sram1_sync: conn_sram1_sync,
+            conn_sram2_sync: conn_sram2_sync,
+            conn_eprom_sync: conn_eprom_sync,
+            misc_line: monitor_lines.misc,
+            data_line: monitor_lines.data,
+            addr_line: monitor_lines.addr,
+        ),
     );
 
     let _unused_ft_ui_dout_be = *ft_ui_dout_be;

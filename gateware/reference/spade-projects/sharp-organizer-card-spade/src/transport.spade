@@ -1,0 +1,93 @@
+use shared_components::{
+    config::{au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_tx8_tap},
+    ft_stream::FtWordStreamOut,
+    message_stream::TxReq8,
+    serial::{FtBe, FtData},
+};
+
+use super::{
+    monitor::{OrganizerMonitorLines, OrganizerMonitorSamples, organizer_monitor_uarts},
+    protocol::OrganizerTraceWord,
+};
+
+#[inline]
+pub(lib) entity organizer_transport(
+    clk: clock,
+    rst: bool,
+    clk_uart: clock,
+    ft_clk_clock: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: FtData,
+    ft_be: FtBe,
+    tx_req: TxReq8,
+    monitor_samples: OrganizerMonitorSamples,
+    stream_word: OrganizerTraceWord,
+    stream_word_valid: bool,
+    ft_stream: FtWordStreamOut,
+    usb_tx_line: inv &bool,
+    usb_tx_busy: inv &bool,
+    ft_data_out: inv &FtData,
+    ft_be_out: inv &FtBe,
+    ft_rd_sig: inv &bool,
+    ft_wr_sig: inv &bool,
+    ft_oe_sig: inv &bool,
+    ft_ui_din_full: inv &bool,
+    ft_ui_dout: inv &FtData,
+    ft_ui_dout_be: inv &FtBe,
+    ft_ui_dout_empty: inv &bool,
+    stream_fifo_full: inv &bool,
+    stream_fifo_empty: inv &bool,
+    stream_fifo_dout: inv &OrganizerTraceWord,
+) -> OrganizerMonitorLines {
+    let stream_fifo = inst au_stream_fifo_u32(
+        clk,
+        rst,
+        stream_word,
+        stream_word_valid,
+        ft_stream.stream_fifo_rget,
+    );
+    set stream_fifo_full = &stream_fifo.full;
+    set stream_fifo_empty = &stream_fifo.empty;
+    set stream_fifo_dout = &stream_fifo.dout;
+
+    let _tx = inst au_usb_uart_tx8_tap(
+        clk,
+        rst,
+        false,
+        tx_req.byte,
+        tx_req.valid,
+        usb_tx_line,
+        usb_tx_busy,
+    );
+
+    let _ft = inst au_ft_tap_u16(
+        clk,
+        rst,
+        ft_clk_clock,
+        ft_rxf,
+        ft_txe,
+        ft_data,
+        ft_be,
+        ft_stream.ui_din,
+        ft_stream.ui_din_be,
+        ft_stream.ui_din_valid,
+        ft_stream.ui_dout_get,
+        ft_data_out,
+        ft_be_out,
+        ft_rd_sig,
+        ft_wr_sig,
+        ft_oe_sig,
+        ft_ui_din_full,
+        ft_ui_dout,
+        ft_ui_dout_be,
+        ft_ui_dout_empty,
+    );
+
+    inst organizer_monitor_uarts(
+        clk,
+        rst,
+        clk_uart,
+        monitor_samples,
+    )
+}

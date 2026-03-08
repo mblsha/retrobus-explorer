@@ -8,6 +8,7 @@ pub mod message_stream;
 pub mod monitoring;
 pub mod ft_stream;
 pub mod trace_words;
+pub mod trace_events;
 pub mod bridges;
 pub mod protocol;
 pub(lib) mod guards;
