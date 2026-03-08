@@ -7,7 +7,11 @@ shared_components = { path = "../shared-components" }
 auto = true
 
 [verilog]
-sources = ["../shared-verilog/clk_wiz_0.v"]
+sources = [
+    "verilog/main_wrapper.v",
+    "../shared-verilog/clk_wiz_0.v",
+    "../shared-components/verilog/**/*.v",
+]
 
 [tooling]
 top = "main"
