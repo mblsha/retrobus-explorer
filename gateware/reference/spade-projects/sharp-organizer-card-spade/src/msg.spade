@@ -1,4 +1,6 @@
-use shared_components::message_stream::{TxReq8, tx_req_none};
+use shared_components::message_stream::{ByteMsgStreamState, TxReq8, tx_req_none};
+
+type OrganizerMsgIdx = uint<2>;
 
 pub(lib) enum OrganizerMsg {
     None,
@@ -10,9 +12,7 @@ pub(lib) enum OrganizerMsg {
 }
 
 pub(lib) struct OrganizerMsgStreamState {
-    cur_msg: OrganizerMsg,
-    cur_idx: uint<2>,
-    pending_msg: OrganizerMsg,
+    stream: ByteMsgStreamState<OrganizerMsg, 2>,
     backlog_msg: OrganizerMsg,
 }
 
@@ -27,11 +27,21 @@ fn organizer_msg_none() -> OrganizerMsg {
 
 pub(lib) fn init_organizer_msg_stream() -> OrganizerMsgStreamState {
     OrganizerMsgStreamState$(
-        cur_msg: organizer_msg_none(),
-        cur_idx: 0,
-        pending_msg: organizer_msg_none(),
+        stream: ByteMsgStreamState$(
+            cur_msg: organizer_msg_none(),
+            cur_idx: 0,
+            pending_msg: organizer_msg_none(),
+        ),
         backlog_msg: organizer_msg_none(),
     )
+}
+
+fn organizer_single_byte(byte: uint<8>, idx: OrganizerMsgIdx) -> TxReq8 {
+    if idx == 0 {
+        TxReq8$(valid: true, byte: byte)
+    } else {
+        tx_req_none()
+    }
 }
 
 impl OrganizerMsg {
@@ -39,158 +49,95 @@ impl OrganizerMsg {
         if let Self::None = self { true } else { false }
     }
 
-    fn byte(self, idx: uint<2>) -> TxReq8 {
+    fn byte(self, idx: OrganizerMsgIdx) -> TxReq8 {
         match self {
             Self::None => tx_req_none(),
-            Self::CounterSelected => if idx == 0 {
-                TxReq8$(valid: true, byte: b'c')
-            } else {
-                tx_req_none()
-            },
-            Self::SyncStandardSelected => if idx == 0 {
-                TxReq8$(valid: true, byte: b's')
-            } else {
-                tx_req_none()
-            },
-            Self::SyncMemorySelected => if idx == 0 {
-                TxReq8$(valid: true, byte: b'S')
-            } else {
-                tx_req_none()
-            },
-            Self::FtEnabled => if idx == 0 {
-                TxReq8$(valid: true, byte: b'+')
-            } else {
-                tx_req_none()
-            },
-            Self::FtDisabled => if idx == 0 {
-                TxReq8$(valid: true, byte: b'-')
-            } else {
-                tx_req_none()
-            },
+            Self::CounterSelected => organizer_single_byte(b'c', idx),
+            Self::SyncStandardSelected => organizer_single_byte(b's', idx),
+            Self::SyncMemorySelected => organizer_single_byte(b'S', idx),
+            Self::FtEnabled => organizer_single_byte(b'+', idx),
+            Self::FtDisabled => organizer_single_byte(b'-', idx),
         }
     }
 }
 
-struct OrganizerMsgQueueOut {
-    cur_msg: OrganizerMsg,
-    cur_idx: uint<2>,
-    pending_msg: OrganizerMsg,
-    backlog_msg: OrganizerMsg,
+fn promote_backlog(state: OrganizerMsgStreamState) -> OrganizerMsgStreamState {
+    if state.stream.pending_msg.is_none() && !state.backlog_msg.is_none() {
+        OrganizerMsgStreamState$(
+            stream: ByteMsgStreamState$(
+                cur_msg: state.stream.cur_msg,
+                cur_idx: state.stream.cur_idx,
+                pending_msg: state.backlog_msg,
+            ),
+            backlog_msg: organizer_msg_none(),
+        )
+    } else {
+        state
+    }
 }
 
 fn enqueue_msg(
-    cur_msg: OrganizerMsg,
-    cur_idx: uint<2>,
-    pending_msg: OrganizerMsg,
-    backlog_msg: OrganizerMsg,
+    state: OrganizerMsgStreamState,
+    msg_valid: bool,
     msg: OrganizerMsg,
-) -> OrganizerMsgQueueOut {
-    if msg.is_none() {
-        OrganizerMsgQueueOut$(
-            cur_msg: cur_msg,
-            cur_idx: cur_idx,
-            pending_msg: pending_msg,
-            backlog_msg: backlog_msg,
+) -> OrganizerMsgStreamState {
+    if !msg_valid || msg.is_none() {
+        state
+    } else if state.stream.cur_msg.is_none() {
+        OrganizerMsgStreamState$(
+            stream: ByteMsgStreamState$(
+                cur_msg: msg,
+                cur_idx: 0,
+                pending_msg: state.stream.pending_msg,
+            ),
+            backlog_msg: state.backlog_msg,
         )
-    } else if cur_msg.is_none() {
-        OrganizerMsgQueueOut$(
-            cur_msg: msg,
-            cur_idx: 0,
-            pending_msg: pending_msg,
-            backlog_msg: backlog_msg,
+    } else if state.stream.pending_msg.is_none() {
+        OrganizerMsgStreamState$(
+            stream: ByteMsgStreamState$(
+                cur_msg: state.stream.cur_msg,
+                cur_idx: state.stream.cur_idx,
+                pending_msg: msg,
+            ),
+            backlog_msg: state.backlog_msg,
         )
-    } else if pending_msg.is_none() {
-        OrganizerMsgQueueOut$(
-            cur_msg: cur_msg,
-            cur_idx: cur_idx,
-            pending_msg: msg,
-            backlog_msg: backlog_msg,
-        )
-    } else if backlog_msg.is_none() {
-        OrganizerMsgQueueOut$(
-            cur_msg: cur_msg,
-            cur_idx: cur_idx,
-            pending_msg: pending_msg,
+    } else if state.backlog_msg.is_none() {
+        OrganizerMsgStreamState$(
+            stream: state.stream,
             backlog_msg: msg,
         )
     } else {
-        OrganizerMsgQueueOut$(
-            cur_msg: cur_msg,
-            cur_idx: cur_idx,
-            pending_msg: pending_msg,
-            backlog_msg: backlog_msg,
-        )
+        state
     }
 }
 
 pub(lib) fn organizer_msg_stream_step(
     state: OrganizerMsgStreamState,
     block_tx: bool,
-    usb_msg: OrganizerMsg,
-    ft_msg: OrganizerMsg,
+    primary_msg_valid: bool,
+    primary_msg: OrganizerMsg,
+    secondary_msg_valid: bool,
+    secondary_msg: OrganizerMsg,
 ) -> OrganizerMsgStreamEval {
-    let cur_byte = state.cur_msg.byte(state.cur_idx);
-    let next_idx: uint<2> = state.cur_idx +. 1;
-    let next_byte = state.cur_msg.byte(next_idx);
-    let tx_req = if !state.cur_msg.is_none() && cur_byte.valid && !block_tx {
-        cur_byte
-    } else {
-        tx_req_none()
-    };
-    let sent = tx_req.valid;
-    let after_send_cur = if sent && !next_byte.valid {
-        organizer_msg_none()
-    } else {
-        state.cur_msg
-    };
-    let after_send_idx = if sent {
-        if next_byte.valid {
-            next_idx
-        } else {
-            0
-        }
-    } else {
-        state.cur_idx
-    };
-    let after_send_pending = state.pending_msg;
-    let after_send_backlog = state.backlog_msg;
-    let load_pending = after_send_cur.is_none() && !after_send_pending.is_none();
-    let loaded_cur = if load_pending {
-        after_send_pending
-    } else {
-        after_send_cur
-    };
-    let loaded_idx = if load_pending {
-        0
-    } else {
-        after_send_idx
-    };
-    let loaded_pending = if load_pending {
-        after_send_backlog
-    } else {
-        after_send_pending
-    };
-    let loaded_backlog = if load_pending {
-        organizer_msg_none()
-    } else {
-        after_send_backlog
-    };
-    let after_usb = enqueue_msg(loaded_cur, loaded_idx, loaded_pending, loaded_backlog, usb_msg);
-    let after_ft = enqueue_msg(
-        after_usb.cur_msg,
-        after_usb.cur_idx,
-        after_usb.pending_msg,
-        after_usb.backlog_msg,
-        ft_msg,
+    let stepped = state.stream.step_with(
+        organizer_msg_none(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
+        block_tx,
+        false,
+        organizer_msg_none(),
     );
+    let after_promote = promote_backlog(
+        OrganizerMsgStreamState$(
+            stream: stepped.state,
+            backlog_msg: state.backlog_msg,
+        ),
+    );
+    let after_primary = enqueue_msg(after_promote, primary_msg_valid, primary_msg);
+    let after_secondary = enqueue_msg(after_primary, secondary_msg_valid, secondary_msg);
 
     OrganizerMsgStreamEval$(
-        state: OrganizerMsgStreamState$(
-            cur_msg: after_ft.cur_msg,
-            cur_idx: after_ft.cur_idx,
-            pending_msg: after_ft.pending_msg,
-            backlog_msg: after_ft.backlog_msg,
-        ),
-        tx_req: tx_req,
+        state: after_secondary,
+        tx_req: stepped.tx_req,
     )
 }

@@ -338,7 +338,7 @@ async def ft_stream_emits_tagged_monitor_words_when_enabled(dut):
 
 
 @cocotb.test()
-async def ft_stream_emits_overflow_words_for_extra_samples(dut):
+async def ft_stream_queues_simultaneous_samples_before_overflowing(dut):
     await _init(dut)
 
     recv_plus = cocotb.start_soon(_uart_recv_byte(dut))
@@ -358,13 +358,44 @@ async def ft_stream_emits_overflow_words_for_extra_samples(dut):
     await tick(dut.clk, 16)
 
     dut.ft_txe.value = 0
-    words = await _collect_ft_writes(dut, 4)
-    assert words[0][1] == 0x3
-    assert words[1][1] == 0x3
-    assert words[2][1] == 0x3
-    assert words[3][1] == 0x3
-    assert (words[0][0] | (words[1][0] << 16)) == ((ord("A") << 24) | 0x2468A)
-    assert (words[2][0] | (words[3][0] << 16)) == ((ord("O") << 24) | 0x2)
+    assert await _ft_recv_stream_word(dut) == ((ord("A") << 24) | 0x2468A)
+    assert await _ft_recv_stream_word(dut) == ((ord("D") << 24) | 0x5C)
+    assert await _ft_recv_stream_word(dut) == ((ord("M") << 24) | _misc_word(1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1))
+
+
+@cocotb.test()
+async def ft_stream_preserves_later_stable_samples_under_ft_backpressure(dut):
+    await _init(dut)
+
+    recv_plus = cocotb.start_soon(_uart_recv_byte(dut))
+    await _ft_host_send_word(dut, ord("S") | (ord("+") << 8))
+    assert await recv_plus == ord("+")
+    await tick(dut.clk, 4)
+
+    dut.ft_txe.value = 1
+
+    dut.addr.value = 0x2468A
+    dut.data.value = 0x5C
+    dut.conn_rw.value = 1
+    dut.conn_ci.value = 1
+    dut.conn_mskrom.value = 1
+    dut.conn_sram2.value = 1
+    dut.conn_stnby.value = 1
+    dut.conn_vpp.value = 1
+    await tick(dut.clk, 16)
+
+    dut.addr.value = 0x13579
+    await tick(dut.clk, 16)
+
+    dut.data.value = 0xC3
+    await tick(dut.clk, 16)
+
+    dut.ft_txe.value = 0
+    assert await _ft_recv_stream_word(dut) == ((ord("A") << 24) | 0x2468A)
+    assert await _ft_recv_stream_word(dut) == ((ord("D") << 24) | 0x5C)
+    assert await _ft_recv_stream_word(dut) == ((ord("M") << 24) | _misc_word(1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1))
+    assert await _ft_recv_stream_word(dut) == ((ord("A") << 24) | 0x13579)
+    assert await _ft_recv_stream_word(dut) == ((ord("D") << 24) | 0xC3)
 
 
 @cocotb.test()

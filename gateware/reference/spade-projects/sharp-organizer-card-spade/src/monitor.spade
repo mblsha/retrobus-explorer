@@ -11,15 +11,11 @@ use super::protocol::{
     OrganizerData,
     OrganizerOverflowCount,
     OrganizerSampleReq,
-    OrganizerTraceEvent,
     SampleCount,
     organizer_addr_sample,
     organizer_data_sample,
     organizer_misc_sample,
-    organizer_overflow_event,
     organizer_sample_none,
-    organizer_trace_event_none,
-    organizer_trace_from_sample,
     sample_addr_value,
     sample_data_value,
     sample_misc_value,
@@ -29,11 +25,28 @@ type AddrSampleState = StableSampleState<20, 32>;
 type DataSampleState = StableSampleState<8, 32>;
 type MiscSampleState = StableSampleState<11, 32>;
 
+struct OrganizerQueuedSamples {
+    first: OrganizerSampleReq,
+    second: OrganizerSampleReq,
+    third: OrganizerSampleReq,
+}
+
+struct QueuePushOut {
+    queue: OrganizerQueuedSamples,
+    dropped: OrganizerOverflowCount,
+}
+
+struct MonitorDispatchState {
+    queue: OrganizerQueuedSamples,
+    emit_sample: OrganizerSampleReq,
+    overflow_count: OrganizerOverflowCount,
+}
+
 pub(lib) struct OrganizerMonitorState {
     addr: AddrSampleState,
     data: DataSampleState,
     misc: MiscSampleState,
-    pending_stream: OrganizerTraceEvent,
+    queued: OrganizerQueuedSamples,
     overflow_count: OrganizerOverflowCount,
 }
 
@@ -46,7 +59,9 @@ pub(lib) struct OrganizerMonitorSamples {
 pub(lib) struct OrganizerMonitorOut {
     next_state: OrganizerMonitorState,
     samples: OrganizerMonitorSamples,
-    stream_event: OrganizerTraceEvent,
+    stream_sample: OrganizerSampleReq,
+    stream_overflow_valid: bool,
+    stream_overflow_count: OrganizerOverflowCount,
 }
 
 pub(lib) struct OrganizerMonitorLines {
@@ -59,50 +74,107 @@ pub(lib) fn stable_threshold() -> SampleCount {
     5
 }
 
+fn empty_queued_samples() -> OrganizerQueuedSamples {
+    OrganizerQueuedSamples$(
+        first: organizer_sample_none(),
+        second: organizer_sample_none(),
+        third: organizer_sample_none(),
+    )
+}
+
 pub(lib) fn reset_monitor_state() -> OrganizerMonitorState {
     OrganizerMonitorState$(
         addr: stable_sample_reset::<20, 32>(0),
         data: stable_sample_reset::<8, 32>(0),
         misc: stable_sample_reset::<11, 32>(0),
-        pending_stream: organizer_trace_event_none(),
+        queued: empty_queued_samples(),
         overflow_count: 0,
     )
 }
 
-fn organizer_monitor_samples_none() -> OrganizerMonitorSamples {
+fn queue_push(queue: OrganizerQueuedSamples, sample: OrganizerSampleReq) -> QueuePushOut {
+    if !sample.valid {
+        QueuePushOut$(queue: queue, dropped: 0)
+    } else if !queue.first.valid {
+        QueuePushOut$(
+            queue: OrganizerQueuedSamples$(
+                first: sample,
+                second: queue.second,
+                third: queue.third,
+            ),
+            dropped: 0,
+        )
+    } else if !queue.second.valid {
+        QueuePushOut$(
+            queue: OrganizerQueuedSamples$(
+                first: queue.first,
+                second: sample,
+                third: queue.third,
+            ),
+            dropped: 0,
+        )
+    } else if !queue.third.valid {
+        QueuePushOut$(
+            queue: OrganizerQueuedSamples$(
+                first: queue.first,
+                second: queue.second,
+                third: sample,
+            ),
+            dropped: 0,
+        )
+    } else {
+        QueuePushOut$(queue: queue, dropped: 1)
+    }
+}
+
+fn dispatch_sample(
+    state: MonitorDispatchState,
+    sample: OrganizerSampleReq,
+    stream_ready: bool,
+) -> MonitorDispatchState {
+    if !sample.valid {
+        state
+    } else if stream_ready && !state.emit_sample.valid {
+        MonitorDispatchState$(
+            queue: state.queue,
+            emit_sample: sample,
+            overflow_count: state.overflow_count,
+        )
+    } else {
+        let pushed = queue_push(state.queue, sample);
+        MonitorDispatchState$(
+            queue: pushed.queue,
+            emit_sample: state.emit_sample,
+            overflow_count: state.overflow_count +. pushed.dropped,
+        )
+    }
+}
+
+fn live_samples(
+    addr_sync: OrganizerAddr,
+    data_sync: OrganizerData,
+    misc_sync: MiscWord,
+    addr_wput: bool,
+    data_wput: bool,
+    misc_wput: bool,
+) -> OrganizerMonitorSamples {
     OrganizerMonitorSamples$(
-        addr: organizer_sample_none(),
-        data: organizer_sample_none(),
-        misc: organizer_sample_none(),
+        addr: if addr_wput {
+            organizer_addr_sample(addr_sync)
+        } else {
+            organizer_sample_none()
+        },
+        data: if data_wput {
+            organizer_data_sample(data_sync)
+        } else {
+            organizer_sample_none()
+        },
+        misc: if misc_wput {
+            organizer_misc_sample(misc_sync)
+        } else {
+            organizer_sample_none()
+        },
     )
-}
-
-fn live_primary_event(samples: OrganizerMonitorSamples) -> OrganizerTraceEvent {
-    if samples.addr.valid {
-        organizer_trace_from_sample(samples.addr)
-    } else if samples.data.valid {
-        organizer_trace_from_sample(samples.data)
-    } else if samples.misc.valid {
-        organizer_trace_from_sample(samples.misc)
-    } else {
-        organizer_trace_event_none()
-    }
-}
-
-fn live_sample_count(samples: OrganizerMonitorSamples) -> OrganizerOverflowCount {
-    let addr_count: uint<2> = if samples.addr.valid { 1 } else { 0 };
-    let data_count: uint<2> = if samples.data.valid { 1 } else { 0 };
-    let misc_count: uint<2> = if samples.misc.valid { 1 } else { 0 };
-    zext(addr_count +. data_count +. misc_count)
-}
-
-fn live_extra_count(samples: OrganizerMonitorSamples) -> OrganizerOverflowCount {
-    let count = live_sample_count(samples);
-    if count != 0 {
-        count -. 1
-    } else {
-        0
-    }
 }
 
 impl OrganizerMonitorState {
@@ -117,87 +189,63 @@ impl OrganizerMonitorState {
         let addr_step = stable_sample_step(self.addr, addr_sync, stable_threshold());
         let data_step = stable_sample_step(self.data, data_sync, stable_threshold());
         let misc_step = stable_sample_step(self.misc, misc_sync, stable_threshold());
-
-        let samples = OrganizerMonitorSamples$(
-            addr: if addr_step.wput {
-                organizer_addr_sample(addr_sync)
-            } else {
-                organizer_sample_none()
-            },
-            data: if data_step.wput {
-                organizer_data_sample(data_sync)
-            } else {
-                organizer_sample_none()
-            },
-            misc: if misc_step.wput {
-                organizer_misc_sample(misc_sync)
-            } else {
-                organizer_sample_none()
-            },
+        let samples = live_samples(
+            addr_sync,
+            data_sync,
+            misc_sync,
+            addr_step.wput,
+            data_step.wput,
+            misc_step.wput,
         );
 
-        let live_event = live_primary_event(samples);
-        let live_extras = live_extra_count(samples);
-
-        let stream_event = if !stream_capture_enable {
-            organizer_trace_event_none()
-        } else if self.pending_stream.valid && stream_ready {
-            self.pending_stream
-        } else if self.pending_stream.valid {
-            organizer_trace_event_none()
-        } else if live_event.valid && stream_ready {
-            live_event
-        } else if !live_event.valid && self.overflow_count != 0 && stream_ready {
-            organizer_overflow_event(self.overflow_count)
+        if !stream_capture_enable {
+            OrganizerMonitorOut$(
+                next_state: OrganizerMonitorState$(
+                    addr: addr_step.next_state,
+                    data: data_step.next_state,
+                    misc: misc_step.next_state,
+                    queued: empty_queued_samples(),
+                    overflow_count: 0,
+                ),
+                samples: samples,
+                stream_sample: organizer_sample_none(),
+                stream_overflow_valid: false,
+                stream_overflow_count: 0,
+            )
         } else {
-            organizer_trace_event_none()
-        };
+            let dispatch0 = MonitorDispatchState$(
+                queue: empty_queued_samples(),
+                emit_sample: organizer_sample_none(),
+                overflow_count: self.overflow_count,
+            );
+            let dispatch1 = dispatch_sample(dispatch0, self.queued.first, stream_ready);
+            let dispatch2 = dispatch_sample(dispatch1, self.queued.second, stream_ready);
+            let dispatch3 = dispatch_sample(dispatch2, self.queued.third, stream_ready);
+            let dispatch4 = dispatch_sample(dispatch3, samples.addr, stream_ready);
+            let dispatch5 = dispatch_sample(dispatch4, samples.data, stream_ready);
+            let dispatch6 = dispatch_sample(dispatch5, samples.misc, stream_ready);
 
-        let next_pending_stream = if !stream_capture_enable {
-            organizer_trace_event_none()
-        } else if self.pending_stream.valid {
-            if stream_ready {
-                live_event
+            let emit_overflow = stream_ready && !dispatch6.emit_sample.valid && dispatch6.overflow_count != 0;
+            let next_overflow_count = if emit_overflow {
+                0
             } else {
-                self.pending_stream
-            }
-        } else if live_event.valid && !stream_ready {
-            live_event
-        } else {
-            organizer_trace_event_none()
-        };
+                dispatch6.overflow_count
+            };
 
-        let next_overflow_count = if !stream_capture_enable {
-            0
-        } else if self.pending_stream.valid {
-            if stream_ready {
-                self.overflow_count +. live_extras
-            } else {
-                self.overflow_count +. live_sample_count(samples)
-            }
-        } else if live_event.valid {
-            if stream_ready {
-                self.overflow_count +. live_extras
-            } else {
-                self.overflow_count +. live_extras
-            }
-        } else if self.overflow_count != 0 && stream_ready {
-            0
-        } else {
-            self.overflow_count
-        };
-
-        OrganizerMonitorOut$(
-            next_state: OrganizerMonitorState$(
-                addr: addr_step.next_state,
-                data: data_step.next_state,
-                misc: misc_step.next_state,
-                pending_stream: next_pending_stream,
-                overflow_count: next_overflow_count,
-            ),
-            samples: samples,
-            stream_event: stream_event,
-        )
+            OrganizerMonitorOut$(
+                next_state: OrganizerMonitorState$(
+                    addr: addr_step.next_state,
+                    data: data_step.next_state,
+                    misc: misc_step.next_state,
+                    queued: dispatch6.queue,
+                    overflow_count: next_overflow_count,
+                ),
+                samples: samples,
+                stream_sample: dispatch6.emit_sample,
+                stream_overflow_valid: emit_overflow,
+                stream_overflow_count: dispatch6.overflow_count,
+            )
+        }
     }
 }
 

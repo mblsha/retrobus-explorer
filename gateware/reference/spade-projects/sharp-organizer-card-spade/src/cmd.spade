@@ -12,6 +12,12 @@ pub(lib) enum OrganizerCmd {
     SyncMemory,
 }
 
+enum OrganizerFtCmd {
+    None,
+    Enable,
+    Disable,
+}
+
 pub(lib) struct OrganizerUiInputs {
     rx_valid: bool,
     rx_byte: uint<8>,
@@ -22,12 +28,29 @@ pub(lib) struct OrganizerUiInputs {
     ft_enabled: bool,
 }
 
+struct OrganizerCmdEffect {
+    next_saleae_state: SaleaeState,
+    next_sync_sub_mode: SyncSubMode,
+    msg: OrganizerMsg,
+}
+
+struct OrganizerFtCmdEffect {
+    next_ft_enabled: bool,
+    msg: OrganizerMsg,
+}
+
 pub(lib) struct OrganizerUiOut {
     next_saleae_state: SaleaeState,
     next_sync_sub_mode: SyncSubMode,
     next_ft_enabled: bool,
-    usb_msg: OrganizerMsg,
-    ft_msg: OrganizerMsg,
+    primary_msg_valid: bool,
+    primary_msg: OrganizerMsg,
+    secondary_msg_valid: bool,
+    secondary_msg: OrganizerMsg,
+}
+
+fn msg_is_none(msg: OrganizerMsg) -> bool {
+    if let OrganizerMsg::None = msg { true } else { false }
 }
 
 fn organizer_cmd_from_byte(rx_valid: bool, byte: uint<8>) -> OrganizerCmd {
@@ -44,41 +67,6 @@ fn organizer_cmd_from_byte(rx_valid: bool, byte: uint<8>) -> OrganizerCmd {
     }
 }
 
-impl OrganizerCmd {
-    fn msg(self) -> OrganizerMsg {
-        match self {
-            Self::None => OrganizerMsg::None(),
-            Self::Counter => OrganizerMsg::CounterSelected(),
-            Self::SyncStandard => OrganizerMsg::SyncStandardSelected(),
-            Self::SyncMemory => OrganizerMsg::SyncMemorySelected(),
-        }
-    }
-
-    fn next_saleae_state(self, saleae_state: SaleaeState) -> SaleaeState {
-        match self {
-            Self::Counter => SaleaeState::Counter(),
-            Self::SyncStandard => SaleaeState::SyncSignals(),
-            Self::SyncMemory => SaleaeState::SyncSignals(),
-            Self::None => saleae_state,
-        }
-    }
-
-    fn next_sync_sub_mode(self, sync_sub_mode: SyncSubMode) -> SyncSubMode {
-        match self {
-            Self::SyncStandard => SyncSubMode::StandardSignals(),
-            Self::SyncMemory => SyncSubMode::MemoryBanks(),
-            Self::Counter => sync_sub_mode,
-            Self::None => sync_sub_mode,
-        }
-    }
-}
-
-enum OrganizerFtCmd {
-    None,
-    Enable,
-    Disable,
-}
-
 fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData) -> OrganizerFtCmd {
     let b0: uint<8> = trunc(word);
     let b1: uint<8> = trunc(word >> 8);
@@ -93,32 +81,65 @@ fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData) -> Organizer
     }
 }
 
-impl OrganizerFtCmd {
-    fn msg(self) -> OrganizerMsg {
+impl OrganizerCmd {
+    fn effect(self, saleae_state: SaleaeState, sync_sub_mode: SyncSubMode) -> OrganizerCmdEffect {
         match self {
-            Self::None => OrganizerMsg::None(),
-            Self::Enable => OrganizerMsg::FtEnabled(),
-            Self::Disable => OrganizerMsg::FtDisabled(),
+            Self::None => OrganizerCmdEffect$(
+                next_saleae_state: saleae_state,
+                next_sync_sub_mode: sync_sub_mode,
+                msg: OrganizerMsg::None(),
+            ),
+            Self::Counter => OrganizerCmdEffect$(
+                next_saleae_state: SaleaeState::Counter(),
+                next_sync_sub_mode: sync_sub_mode,
+                msg: OrganizerMsg::CounterSelected(),
+            ),
+            Self::SyncStandard => OrganizerCmdEffect$(
+                next_saleae_state: SaleaeState::SyncSignals(),
+                next_sync_sub_mode: SyncSubMode::StandardSignals(),
+                msg: OrganizerMsg::SyncStandardSelected(),
+            ),
+            Self::SyncMemory => OrganizerCmdEffect$(
+                next_saleae_state: SaleaeState::SyncSignals(),
+                next_sync_sub_mode: SyncSubMode::MemoryBanks(),
+                msg: OrganizerMsg::SyncMemorySelected(),
+            ),
         }
     }
+}
 
-    fn next_ft_enabled(self, ft_enabled: bool) -> bool {
+impl OrganizerFtCmd {
+    fn effect(self, ft_enabled: bool) -> OrganizerFtCmdEffect {
         match self {
-            Self::Enable => true,
-            Self::Disable => false,
-            Self::None => ft_enabled,
+            Self::None => OrganizerFtCmdEffect$(
+                next_ft_enabled: ft_enabled,
+                msg: OrganizerMsg::None(),
+            ),
+            Self::Enable => OrganizerFtCmdEffect$(
+                next_ft_enabled: true,
+                msg: OrganizerMsg::FtEnabled(),
+            ),
+            Self::Disable => OrganizerFtCmdEffect$(
+                next_ft_enabled: false,
+                msg: OrganizerMsg::FtDisabled(),
+            ),
         }
     }
 }
 
 pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiOut {
-    let usb_cmd = organizer_cmd_from_byte(inputs.rx_valid, inputs.rx_byte);
-    let ft_cmd = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout);
+    let usb_effect = organizer_cmd_from_byte(inputs.rx_valid, inputs.rx_byte)
+        .effect(inputs.saleae_state, inputs.sync_sub_mode);
+    let ft_effect = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout)
+        .effect(inputs.ft_enabled);
+
     OrganizerUiOut$(
-        next_saleae_state: usb_cmd.next_saleae_state(inputs.saleae_state),
-        next_sync_sub_mode: usb_cmd.next_sync_sub_mode(inputs.sync_sub_mode),
-        next_ft_enabled: ft_cmd.next_ft_enabled(inputs.ft_enabled),
-        usb_msg: usb_cmd.msg(),
-        ft_msg: ft_cmd.msg(),
+        next_saleae_state: usb_effect.next_saleae_state,
+        next_sync_sub_mode: usb_effect.next_sync_sub_mode,
+        next_ft_enabled: ft_effect.next_ft_enabled,
+        primary_msg_valid: !msg_is_none(usb_effect.msg),
+        primary_msg: usb_effect.msg,
+        secondary_msg_valid: !msg_is_none(ft_effect.msg),
+        secondary_msg: ft_effect.msg,
     )
 }
