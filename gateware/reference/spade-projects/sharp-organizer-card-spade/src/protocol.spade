@@ -1,0 +1,191 @@
+pub type OrganizerAddr = uint<20>;
+pub type OrganizerData = uint<8>;
+pub type MiscWord = uint<11>;
+pub type SampleCount = uint<32>;
+pub type OrganizerTraceWord = uint<32>;
+pub type OrganizerOverflowCount = uint<24>;
+
+pub(lib) enum SaleaeState {
+    SyncSignals,
+    Counter,
+}
+
+pub(lib) enum SyncSubMode {
+    StandardSignals,
+    MemoryBanks,
+}
+
+pub(lib) enum OrganizerTraceKind {
+    Addr,
+    Data,
+    Misc,
+    Overflow,
+}
+
+pub(lib) struct OrganizerSample {
+    kind: OrganizerTraceKind,
+    addr: OrganizerAddr,
+    data: OrganizerData,
+    misc: MiscWord,
+}
+
+pub(lib) struct OrganizerSampleReq {
+    valid: bool,
+    sample: OrganizerSample,
+}
+
+pub(lib) struct OrganizerTraceEvent {
+    valid: bool,
+    sample: OrganizerSample,
+    overflow_count: OrganizerOverflowCount,
+}
+
+pub(lib) fn organizer_sample_none() -> OrganizerSampleReq {
+    OrganizerSampleReq$(
+        valid: false,
+        sample: OrganizerSample$(
+            kind: OrganizerTraceKind::Addr(),
+            addr: 0,
+            data: 0,
+            misc: 0,
+        ),
+    )
+}
+
+pub(lib) fn organizer_addr_sample(addr: OrganizerAddr) -> OrganizerSampleReq {
+    OrganizerSampleReq$(
+        valid: true,
+        sample: OrganizerSample$(
+            kind: OrganizerTraceKind::Addr(),
+            addr: addr,
+            data: 0,
+            misc: 0,
+        ),
+    )
+}
+
+pub(lib) fn organizer_data_sample(data: OrganizerData) -> OrganizerSampleReq {
+    OrganizerSampleReq$(
+        valid: true,
+        sample: OrganizerSample$(
+            kind: OrganizerTraceKind::Data(),
+            addr: 0,
+            data: data,
+            misc: 0,
+        ),
+    )
+}
+
+pub(lib) fn organizer_misc_sample(misc: MiscWord) -> OrganizerSampleReq {
+    OrganizerSampleReq$(
+        valid: true,
+        sample: OrganizerSample$(
+            kind: OrganizerTraceKind::Misc(),
+            addr: 0,
+            data: 0,
+            misc: misc,
+        ),
+    )
+}
+
+pub(lib) fn organizer_trace_event_none() -> OrganizerTraceEvent {
+    OrganizerTraceEvent$(
+        valid: false,
+        sample: organizer_sample_none().sample,
+        overflow_count: 0,
+    )
+}
+
+pub(lib) fn organizer_trace_from_sample(req: OrganizerSampleReq) -> OrganizerTraceEvent {
+    OrganizerTraceEvent$(
+        valid: req.valid,
+        sample: req.sample,
+        overflow_count: 0,
+    )
+}
+
+pub(lib) fn organizer_overflow_event(count: OrganizerOverflowCount) -> OrganizerTraceEvent {
+    OrganizerTraceEvent$(
+        valid: count != 0,
+        sample: OrganizerSample$(
+            kind: OrganizerTraceKind::Overflow(),
+            addr: 0,
+            data: 0,
+            misc: 0,
+        ),
+        overflow_count: count,
+    )
+}
+
+pub fn pack_addr_word(addr: OrganizerAddr) -> OrganizerTraceWord {
+    let tag: OrganizerTraceWord = zext(b'A');
+    let payload: OrganizerTraceWord = zext(addr);
+    (tag << 24) | payload
+}
+
+pub fn pack_data_word(data: OrganizerData) -> OrganizerTraceWord {
+    let tag: OrganizerTraceWord = zext(b'D');
+    let payload: OrganizerTraceWord = zext(data);
+    (tag << 24) | payload
+}
+
+pub fn pack_misc_word(misc: MiscWord) -> OrganizerTraceWord {
+    let tag: OrganizerTraceWord = zext(b'M');
+    let payload: OrganizerTraceWord = zext(misc);
+    (tag << 24) | payload
+}
+
+pub fn pack_overflow_word(count: OrganizerOverflowCount) -> OrganizerTraceWord {
+    let tag: OrganizerTraceWord = zext(b'O');
+    let payload: OrganizerTraceWord = zext(count);
+    (tag << 24) | payload
+}
+
+pub fn pack_trace_event_word(event: OrganizerTraceEvent) -> OrganizerTraceWord {
+    match event.sample.kind {
+        OrganizerTraceKind::Addr => pack_addr_word(event.sample.addr),
+        OrganizerTraceKind::Data => pack_data_word(event.sample.data),
+        OrganizerTraceKind::Misc => pack_misc_word(event.sample.misc),
+        OrganizerTraceKind::Overflow => pack_overflow_word(event.overflow_count),
+    }
+}
+
+pub fn sample_addr_value(req: OrganizerSampleReq) -> OrganizerAddr {
+    req.sample.addr
+}
+
+pub fn sample_data_value(req: OrganizerSampleReq) -> OrganizerData {
+    req.sample.data
+}
+
+pub fn sample_misc_value(req: OrganizerSampleReq) -> MiscWord {
+    req.sample.misc
+}
+
+pub fn misc_word(
+    conn_rw_sync: bool,
+    conn_oe_sync: bool,
+    conn_ci_sync: bool,
+    conn_e2_sync: bool,
+    conn_mskrom_sync: bool,
+    conn_sram1_sync: bool,
+    conn_sram2_sync: bool,
+    conn_eprom_sync: bool,
+    conn_stnby_sync: bool,
+    conn_vbatt_sync: bool,
+    conn_vpp_sync: bool,
+) -> MiscWord {
+    [
+        conn_vpp_sync,
+        conn_vbatt_sync,
+        conn_stnby_sync,
+        conn_eprom_sync,
+        conn_sram2_sync,
+        conn_sram1_sync,
+        conn_mskrom_sync,
+        conn_e2_sync,
+        conn_ci_sync,
+        conn_oe_sync,
+        conn_rw_sync,
+    ].to_uint()
+}

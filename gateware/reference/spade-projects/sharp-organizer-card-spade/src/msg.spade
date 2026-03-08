@@ -1,0 +1,196 @@
+use shared_components::message_stream::{TxReq8, tx_req_none};
+
+pub(lib) enum OrganizerMsg {
+    None,
+    CounterSelected,
+    SyncStandardSelected,
+    SyncMemorySelected,
+    FtEnabled,
+    FtDisabled,
+}
+
+pub(lib) struct OrganizerMsgStreamState {
+    cur_msg: OrganizerMsg,
+    cur_idx: uint<2>,
+    pending_msg: OrganizerMsg,
+    backlog_msg: OrganizerMsg,
+}
+
+pub(lib) struct OrganizerMsgStreamEval {
+    state: OrganizerMsgStreamState,
+    tx_req: TxReq8,
+}
+
+fn organizer_msg_none() -> OrganizerMsg {
+    OrganizerMsg::None()
+}
+
+pub(lib) fn init_organizer_msg_stream() -> OrganizerMsgStreamState {
+    OrganizerMsgStreamState$(
+        cur_msg: organizer_msg_none(),
+        cur_idx: 0,
+        pending_msg: organizer_msg_none(),
+        backlog_msg: organizer_msg_none(),
+    )
+}
+
+impl OrganizerMsg {
+    fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn byte(self, idx: uint<2>) -> TxReq8 {
+        match self {
+            Self::None => tx_req_none(),
+            Self::CounterSelected => if idx == 0 {
+                TxReq8$(valid: true, byte: b'c')
+            } else {
+                tx_req_none()
+            },
+            Self::SyncStandardSelected => if idx == 0 {
+                TxReq8$(valid: true, byte: b's')
+            } else {
+                tx_req_none()
+            },
+            Self::SyncMemorySelected => if idx == 0 {
+                TxReq8$(valid: true, byte: b'S')
+            } else {
+                tx_req_none()
+            },
+            Self::FtEnabled => if idx == 0 {
+                TxReq8$(valid: true, byte: b'+')
+            } else {
+                tx_req_none()
+            },
+            Self::FtDisabled => if idx == 0 {
+                TxReq8$(valid: true, byte: b'-')
+            } else {
+                tx_req_none()
+            },
+        }
+    }
+}
+
+struct OrganizerMsgQueueOut {
+    cur_msg: OrganizerMsg,
+    cur_idx: uint<2>,
+    pending_msg: OrganizerMsg,
+    backlog_msg: OrganizerMsg,
+}
+
+fn enqueue_msg(
+    cur_msg: OrganizerMsg,
+    cur_idx: uint<2>,
+    pending_msg: OrganizerMsg,
+    backlog_msg: OrganizerMsg,
+    msg: OrganizerMsg,
+) -> OrganizerMsgQueueOut {
+    if msg.is_none() {
+        OrganizerMsgQueueOut$(
+            cur_msg: cur_msg,
+            cur_idx: cur_idx,
+            pending_msg: pending_msg,
+            backlog_msg: backlog_msg,
+        )
+    } else if cur_msg.is_none() {
+        OrganizerMsgQueueOut$(
+            cur_msg: msg,
+            cur_idx: 0,
+            pending_msg: pending_msg,
+            backlog_msg: backlog_msg,
+        )
+    } else if pending_msg.is_none() {
+        OrganizerMsgQueueOut$(
+            cur_msg: cur_msg,
+            cur_idx: cur_idx,
+            pending_msg: msg,
+            backlog_msg: backlog_msg,
+        )
+    } else if backlog_msg.is_none() {
+        OrganizerMsgQueueOut$(
+            cur_msg: cur_msg,
+            cur_idx: cur_idx,
+            pending_msg: pending_msg,
+            backlog_msg: msg,
+        )
+    } else {
+        OrganizerMsgQueueOut$(
+            cur_msg: cur_msg,
+            cur_idx: cur_idx,
+            pending_msg: pending_msg,
+            backlog_msg: backlog_msg,
+        )
+    }
+}
+
+pub(lib) fn organizer_msg_stream_step(
+    state: OrganizerMsgStreamState,
+    block_tx: bool,
+    usb_msg: OrganizerMsg,
+    ft_msg: OrganizerMsg,
+) -> OrganizerMsgStreamEval {
+    let cur_byte = state.cur_msg.byte(state.cur_idx);
+    let next_idx: uint<2> = state.cur_idx +. 1;
+    let next_byte = state.cur_msg.byte(next_idx);
+    let tx_req = if !state.cur_msg.is_none() && cur_byte.valid && !block_tx {
+        cur_byte
+    } else {
+        tx_req_none()
+    };
+    let sent = tx_req.valid;
+    let after_send_cur = if sent && !next_byte.valid {
+        organizer_msg_none()
+    } else {
+        state.cur_msg
+    };
+    let after_send_idx = if sent {
+        if next_byte.valid {
+            next_idx
+        } else {
+            0
+        }
+    } else {
+        state.cur_idx
+    };
+    let after_send_pending = state.pending_msg;
+    let after_send_backlog = state.backlog_msg;
+    let load_pending = after_send_cur.is_none() && !after_send_pending.is_none();
+    let loaded_cur = if load_pending {
+        after_send_pending
+    } else {
+        after_send_cur
+    };
+    let loaded_idx = if load_pending {
+        0
+    } else {
+        after_send_idx
+    };
+    let loaded_pending = if load_pending {
+        after_send_backlog
+    } else {
+        after_send_pending
+    };
+    let loaded_backlog = if load_pending {
+        organizer_msg_none()
+    } else {
+        after_send_backlog
+    };
+    let after_usb = enqueue_msg(loaded_cur, loaded_idx, loaded_pending, loaded_backlog, usb_msg);
+    let after_ft = enqueue_msg(
+        after_usb.cur_msg,
+        after_usb.cur_idx,
+        after_usb.pending_msg,
+        after_usb.backlog_msg,
+        ft_msg,
+    );
+
+    OrganizerMsgStreamEval$(
+        state: OrganizerMsgStreamState$(
+            cur_msg: after_ft.cur_msg,
+            cur_idx: after_ft.cur_idx,
+            pending_msg: after_ft.pending_msg,
+            backlog_msg: after_ft.backlog_msg,
+        ),
+        tx_req: tx_req,
+    )
+}
