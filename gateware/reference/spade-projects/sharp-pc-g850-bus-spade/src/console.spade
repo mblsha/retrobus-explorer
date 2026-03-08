@@ -7,6 +7,20 @@ use shared_components::{
 
 type ConsoleIdx = uint<16>;
 
+pub(lib) enum ConsoleCmd {
+    None,
+    Arm,
+    Lock,
+    RemoteOn,
+    RemoteOff,
+    FtOn,
+    FtOff,
+    Help,
+    Status,
+    PinMap,
+    Unknown,
+}
+
 pub(lib) enum ConsoleMsg {
     None,
     Ok,
@@ -14,6 +28,24 @@ pub(lib) enum ConsoleMsg {
     Help,
     Status,
     PinMap,
+}
+
+impl ConsoleCmd {
+    fn key(self) -> uint<8> {
+        match self {
+            Self::None => 0,
+            Self::Arm => b'a',
+            Self::Lock => b'k',
+            Self::RemoteOn => b'p',
+            Self::RemoteOff => b'o',
+            Self::FtOn => b'f',
+            Self::FtOff => b'x',
+            Self::Help => b'h',
+            Self::Status => b'q',
+            Self::PinMap => b'l',
+            Self::Unknown => 0,
+        }
+    }
 }
 
 impl ConsoleMsg {
@@ -30,6 +62,31 @@ impl ConsoleMsg {
             Self::Status => ctx.status_byte(idx),
             Self::PinMap => ctx.saleae_state.map_byte(idx),
         }
+    }
+}
+
+pub(lib) fn console_cmd_from_byte(byte: uint<8>) -> ConsoleCmd {
+    let upper = byte.to_upper();
+    if upper == ConsoleCmd::Arm.key().to_upper() {
+        ConsoleCmd::Arm()
+    } else if upper == ConsoleCmd::Lock.key().to_upper() {
+        ConsoleCmd::Lock()
+    } else if upper == ConsoleCmd::RemoteOn.key().to_upper() {
+        ConsoleCmd::RemoteOn()
+    } else if upper == ConsoleCmd::RemoteOff.key().to_upper() {
+        ConsoleCmd::RemoteOff()
+    } else if upper == ConsoleCmd::FtOn.key().to_upper() {
+        ConsoleCmd::FtOn()
+    } else if upper == ConsoleCmd::FtOff.key().to_upper() {
+        ConsoleCmd::FtOff()
+    } else if upper == ConsoleCmd::Help.key().to_upper() {
+        ConsoleCmd::Help()
+    } else if upper == ConsoleCmd::Status.key().to_upper() {
+        ConsoleCmd::Status()
+    } else if upper == ConsoleCmd::PinMap.key().to_upper() {
+        ConsoleCmd::PinMap()
+    } else {
+        ConsoleCmd::Unknown()
     }
 }
 
@@ -114,27 +171,112 @@ fn bool_char(v: bool) -> uint<8> {
 }
 
 fn help_msg_byte(idx: ConsoleIdx) -> TxReq8 {
+    let mode_keys = [
+        SaleaeState::DataSignals().mode_char(),
+        b'/',
+        SaleaeState::SyncSignals().mode_char(),
+        b'/',
+        SaleaeState::EdgeSignals().mode_char(),
+        b'/',
+        SaleaeState::RawSignals().mode_char(),
+        b'/',
+        SaleaeState::Counter().mode_char(),
+    ];
+    let help_line = concat_arrays(
+        concat_arrays(b" ", [ConsoleCmd::Help().key()]),
+        b" : show help\r\n",
+    );
+    let status_line = concat_arrays(
+        concat_arrays(b" ", [ConsoleCmd::Status().key()]),
+        b" : show status (f,r,a,w,m)\r\n",
+    );
+    let map_line = concat_arrays(
+        concat_arrays(b" ", [ConsoleCmd::PinMap().key()]),
+        b" : show saleae map + legend\r\n",
+    );
     let intro = concat_arrays(
-        concat_arrays(b"Help:\r\n", b" h : show help\r\n"),
+        concat_arrays(b"Help:\r\n", help_line),
         concat_arrays(
-            b" q : show status (f,r,a,w,m)\r\n",
-            b" l : show saleae map + legend\r\n",
+            status_line,
+            map_line,
+        ),
+    );
+    let mode_select_line = concat_arrays(
+        concat_arrays(b" ", mode_keys),
+        b" : select saleae mode\r\n",
+    );
+    let mode_legend = concat_arrays(
+        concat_arrays(
+            [SaleaeState::DataSignals().mode_char()],
+            b"=data ",
+        ),
+        concat_arrays(
+            concat_arrays(
+                [SaleaeState::SyncSignals().mode_char()],
+                b"=sync ",
+            ),
+            concat_arrays(
+                concat_arrays(
+                    [SaleaeState::EdgeSignals().mode_char()],
+                    b"=edge ",
+                ),
+                concat_arrays(
+                    concat_arrays(
+                        [SaleaeState::RawSignals().mode_char()],
+                        b"=raw ",
+                    ),
+                    concat_arrays(
+                        [SaleaeState::Counter().mode_char()],
+                        b"=counter\r\n",
+                    ),
+                ),
+            ),
+        ),
+    );
+    let wait_line = concat_arrays(
+        b" 0..9 : set wait level (0=min wait)\r\n",
+        concat_arrays(
+            concat_arrays(b" ", [ConsoleCmd::Arm().key()]),
+            concat_arrays(
+                b"/",
+                concat_arrays(
+                    [ConsoleCmd::Lock().key()],
+                    b" : arm or lock FT control\r\n",
+                ),
+            ),
         ),
     );
     let mode_lines = concat_arrays(
         concat_arrays(
-            b" d/s/e/r/c : select saleae mode\r\n",
-            b"   d=data s=sync e=edge r=raw c=counter\r\n",
+            mode_select_line,
+            concat_arrays(b"   ", mode_legend),
         ),
+        wait_line,
+    );
+    let remote_line = concat_arrays(
+        concat_arrays(b" ", [ConsoleCmd::RemoteOn().key()]),
         concat_arrays(
-            b" 0..9 : set wait level (0=min wait)\r\n",
-            b" a/k : arm or lock FT control\r\n",
+            b"/",
+            concat_arrays(
+                [ConsoleCmd::RemoteOff().key()],
+                b" : allow or block FT remote\r\n",
+            ),
+        ),
+    );
+    let ft_line = concat_arrays(
+        concat_arrays(b" ", [ConsoleCmd::FtOn().key()]),
+        concat_arrays(
+            b"/",
+            concat_arrays(
+                [ConsoleCmd::FtOff().key()],
+                b" : force FT stream on/off\r\n",
+            ),
         ),
     );
     let control_lines = concat_arrays(
         concat_arrays(
-            b" p/o : allow or block FT remote\r\n",
-            b" f/x : force FT stream on/off\r\n",
+            remote_line,
+            ft_line,
         ),
         concat_arrays(
             b" legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
