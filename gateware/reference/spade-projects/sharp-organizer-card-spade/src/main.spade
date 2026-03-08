@@ -1,3 +1,4 @@
+mod board;
 mod cmd;
 mod monitor;
 mod msg;
@@ -14,13 +15,13 @@ use shared_components::{
     serial::{FtBe, FtData},
     trace_events::pack_trace_event_word,
 };
+use self::board::organizer_board_outputs;
 use self::cmd::{OrganizerUiEffect, OrganizerUiInputs, eval_organizer_ui};
 use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, OrganizerMonitorTransportOut, reset_monitor_state};
 use self::msg::{
     OrganizerMsgStreamOut,
     OrganizerMsgStreamState,
     init_organizer_msg_stream,
-    organizer_msg_from_kinds,
     organizer_msg_stream_step,
 };
 use self::protocol::{
@@ -32,7 +33,7 @@ use self::protocol::{
     SyncSubMode,
     misc_word,
 };
-use self::render::{BoardOutputs, BoardRenderState};
+use self::render::BoardRenderState;
 use self::transport::organizer_transport;
 
 struct FtRegs {
@@ -133,17 +134,11 @@ impl MainState {
             inputs.stream_fifo_empty,
             inputs.stream_fifo_dout,
         );
-        let ui_msg = organizer_msg_from_kinds(
-            ui.cmd.msg_valid,
-            ui.cmd.msg,
-            ui.ft.msg_valid,
-            ui.ft.msg,
-        );
         let msg_stream: OrganizerMsgStreamOut = organizer_msg_stream_step(
             self.msg_stream,
             inputs.tx_busy,
-            !ui_msg.is_none(),
-            ui_msg,
+            !ui.msg.is_none(),
+            ui.msg,
         );
         let stream_word_valid = monitor_transport.stream_event.valid;
         let stream_word = if monitor_transport.stream_event.valid {
@@ -155,18 +150,18 @@ impl MainState {
         MainEval$(
             next_state: MainState$(
                 ft: FtRegs$(
-                    enabled: ui.ft.next_ft_enabled,
+                    enabled: ui.next_ft_enabled,
                     cur_value: ft_stream.next_cur_value,
                     stream_state: ft_stream.next_state,
                 ),
                 saleae: SaleaeRegs$(
-                    state: ui.cmd.next_saleae_state,
+                    state: ui.next_saleae_state,
                     counter: if let SaleaeState::Counter = self.saleae.state {
                         self.saleae.counter +. 1
                     } else {
                         self.saleae.counter
                     },
-                    sync_sub_mode: ui.cmd.next_sync_sub_mode,
+                    sync_sub_mode: ui.next_sync_sub_mode,
                 ),
                 monitor: monitor_transport.next_state,
                 msg_stream: msg_stream.state,
@@ -297,17 +292,15 @@ entity main_core(
         };
 
     let eval = state.eval(inputs);
-    let monitor_lines = inst organizer_transport(
+    inst organizer_transport(
         clk,
         rst,
-        clk_uart,
         ft_clk_clock,
         ft_rxf,
         ft_txe,
         ft_data,
         ft_be,
         eval.tx_req,
-        eval.monitor_samples,
         eval.stream_word,
         eval.stream_word_valid,
         eval.ft_stream,
@@ -327,27 +320,28 @@ entity main_core(
         stream_fifo_dout_w,
     );
 
-    let board_outputs: BoardOutputs = render::render_board_outputs(
-        render::BoardRenderInputs$(
-            state: eval.board_state,
-            stream_fifo_empty: *stream_fifo_empty,
-            stream_fifo_full: *stream_fifo_full,
-            ft_txe: ft_txe,
-            ft_rxf: ft_rxf,
-            ft_ui_dout_empty: *ft_ui_dout_empty,
-            ft_ui_din_full: *ft_ui_din_full,
-            conn_rw_sync: conn_rw_sync,
-            conn_oe_sync: conn_oe_sync,
-            conn_ci_sync: conn_ci_sync,
-            conn_e2_sync: conn_e2_sync,
-            conn_mskrom_sync: conn_mskrom_sync,
-            conn_sram1_sync: conn_sram1_sync,
-            conn_sram2_sync: conn_sram2_sync,
-            conn_eprom_sync: conn_eprom_sync,
-            misc_line: monitor_lines.misc,
-            data_line: monitor_lines.data,
-            addr_line: monitor_lines.addr,
-        ),
+    inst organizer_board_outputs(
+        clk,
+        rst,
+        clk_uart,
+        eval.monitor_samples,
+        eval.board_state,
+        *stream_fifo_empty,
+        *stream_fifo_full,
+        ft_txe,
+        ft_rxf,
+        *ft_ui_dout_empty,
+        *ft_ui_din_full,
+        conn_rw_sync,
+        conn_oe_sync,
+        conn_ci_sync,
+        conn_e2_sync,
+        conn_mskrom_sync,
+        conn_sram1_sync,
+        conn_sram2_sync,
+        conn_eprom_sync,
+        led,
+        saleae,
     );
 
     let _unused_ft_ui_dout_be = *ft_ui_dout_be;
@@ -358,6 +352,4 @@ entity main_core(
     set ft_rd = &*ft_rd_sig;
     set ft_wr = &*ft_wr_sig;
     set ft_oe = &*ft_oe_sig;
-    set led = &board_outputs.led;
-    set saleae = &board_outputs.saleae;
 }

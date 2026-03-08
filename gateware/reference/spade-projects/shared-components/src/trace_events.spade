@@ -30,6 +30,26 @@ pub fn overflow_trace_event(payload: TaggedTracePayload) -> TraceEventReq {
     trace_event(TaggedTraceKind::Overflow(), payload)
 }
 
+pub fn pack_kind_trace_word(kind: TaggedTraceKind, payload: TaggedTracePayload) -> TraceEventWord {
+    pack_tagged_trace_kind(kind, payload)
+}
+
+pub fn pack_addr_trace_word(payload: TaggedTracePayload) -> TraceEventWord {
+    pack_kind_trace_word(TaggedTraceKind::Addr(), payload)
+}
+
+pub fn pack_data_trace_word(payload: TaggedTracePayload) -> TraceEventWord {
+    pack_kind_trace_word(TaggedTraceKind::Data(), payload)
+}
+
+pub fn pack_misc_trace_word(payload: TaggedTracePayload) -> TraceEventWord {
+    pack_kind_trace_word(TaggedTraceKind::Misc(), payload)
+}
+
+pub fn pack_overflow_trace_word(payload: TaggedTracePayload) -> TraceEventWord {
+    pack_kind_trace_word(TaggedTraceKind::Overflow(), payload)
+}
+
 pub fn pack_trace_event_word(event: TraceEvent) -> TraceEventWord {
-    pack_tagged_trace_kind(event.kind, event.payload)
+    pack_kind_trace_word(event.kind, event.payload)
 }
