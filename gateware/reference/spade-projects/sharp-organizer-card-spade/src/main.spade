@@ -1,73 +1,105 @@
+mod ui;
+
 use shared_components::{
     clocking::{clk_wiz_400, sampled_bool_clock},
     config::{au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_rx, au_usb_uart_tx8_tap},
-    memory::async_fifo,
-    primitives::{falling_edge, reset_conditioner, rising_edge, sync_bundle},
-    serial::{FtBe, FtData, UartLineBusyPort, uart_tx_tap},
+    ft_stream::{FtWordStreamOut, FtWordStreamState, ft_word_stream_step},
+    message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
+    monitoring::{AsyncUartMonitorOut, StableSampleOut, StableSampleState, async_uart_monitor, stable_sample_reset, stable_sample_step},
+    primitives::{reset_conditioner, sync_bundle},
+    serial::{FtBe, FtData},
+};
+use self::ui::{
+    BoardRenderInputs,
+    BoardOutputs,
+    OrganizerCmd,
+    OrganizerCmdEffect,
+    OrganizerFtCmd,
+    OrganizerFtCmdEffect,
+    SaleaeState,
+    SyncSubMode,
+    organizer_cmd_from_byte,
+    organizer_ft_cmd_from_word,
+    render_board_outputs,
 };
 
 type OrganizerAddr = uint<20>;
 type OrganizerData = uint<8>;
 type MiscWord = uint<11>;
+type SampleCount = uint<32>;
 
-enum FtState {
-    GetFifo,
-    Stream,
+type AddrSampleState = StableSampleState<20, 32>;
+type DataSampleState = StableSampleState<8, 32>;
+type MiscSampleState = StableSampleState<11, 32>;
+
+struct FtRegs {
+    enabled: bool,
+    cur_value: uint<32>,
+    stream_state: FtWordStreamState,
 }
 
-enum SaleaeState {
-    SyncSignals,
-    Counter,
+struct SaleaeRegs {
+    state: SaleaeState,
+    counter: uint<8>,
+    sync_sub_mode: SyncSubMode,
 }
 
-enum SyncSubMode {
-    StandardSignals,
-    MemoryBanks,
+struct MonitorRegs {
+    addr: AddrSampleState,
+    data: DataSampleState,
+    misc: MiscSampleState,
 }
 
 struct MainState {
-    ft_enabled: bool,
-    ft_cur_value: uint<32>,
-    ft_state: FtState,
-    saleae_state: SaleaeState,
-    saleae_counter: uint<8>,
-    sync_sub_mode: SyncSubMode,
-    last_addr: OrganizerAddr,
-    last_addr_sent: bool,
-    addr_counter: uint<32>,
-    last_data: OrganizerData,
-    last_data_sent: bool,
-    data_counter: uint<32>,
-    last_misc: MiscWord,
-    last_misc_sent: bool,
-    misc_counter: uint<32>,
+    ft: FtRegs,
+    saleae: SaleaeRegs,
+    monitor: MonitorRegs,
 }
 
-struct MonitorUartOut<#uint WIDTH> {
-    line: bool,
-    busy: bool,
-    fifo_full: bool,
-    fifo_empty: bool,
-    fifo_dout: uint<WIDTH>,
+struct MainInputs {
+    addr_sync: OrganizerAddr,
+    data_sync: OrganizerData,
+    misc_sync: MiscWord,
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    ft_ui_dout: FtData,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: uint<32>,
+}
+
+struct MainEval {
+    next_state: MainState,
+    tx_req: TxReq8,
+    addr_wput: bool,
+    data_wput: bool,
+    misc_wput: bool,
+    ft_stream: FtWordStreamOut,
+}
+
+fn stable_threshold() -> SampleCount {
+    5
 }
 
 fn reset_main_state() -> MainState {
     MainState$(
-        ft_enabled: false,
-        ft_cur_value: 0,
-        ft_state: FtState::GetFifo(),
-        saleae_state: SaleaeState::SyncSignals(),
-        saleae_counter: 0,
-        sync_sub_mode: SyncSubMode::StandardSignals(),
-        last_addr: 0,
-        last_addr_sent: false,
-        addr_counter: 0,
-        last_data: 0,
-        last_data_sent: false,
-        data_counter: 0,
-        last_misc: 0,
-        last_misc_sent: false,
-        misc_counter: 0,
+        ft: FtRegs$(
+            enabled: false,
+            cur_value: 0,
+            stream_state: FtWordStreamState::GetFifo(),
+        ),
+        saleae: SaleaeRegs$(
+            state: SaleaeState::SyncSignals(),
+            counter: 0,
+            sync_sub_mode: SyncSubMode::StandardSignals(),
+        ),
+        monitor: MonitorRegs$(
+            addr: stable_sample_reset::<20, 32>(0),
+            data: stable_sample_reset::<8, 32>(0),
+            misc: stable_sample_reset::<11, 32>(0),
+        ),
     )
 }
 
@@ -99,135 +131,57 @@ fn misc_word(
     ].to_uint()
 }
 
-fn ft_cmd_low(word: FtData) -> uint<8> {
-    trunc(word)
-}
+impl MainState {
+    fn eval(self, inputs: MainInputs) -> MainEval {
+        let usb_cmd = organizer_cmd_from_byte(inputs.rx_valid, inputs.rx_byte);
+        let ft_cmd = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout);
+        let usb_effect: OrganizerCmdEffect =
+            usb_cmd.effect(self.saleae.state, self.saleae.sync_sub_mode, inputs.tx_busy);
+        let ft_effect: OrganizerFtCmdEffect = ft_cmd.effect(self.ft.enabled, inputs.tx_busy);
+        let addr_sample: StableSampleOut<20, 32> =
+            stable_sample_step(self.monitor.addr, inputs.addr_sync, stable_threshold());
+        let data_sample: StableSampleOut<8, 32> =
+            stable_sample_step(self.monitor.data, inputs.data_sync, stable_threshold());
+        let misc_sample: StableSampleOut<11, 32> =
+            stable_sample_step(self.monitor.misc, inputs.misc_sync, stable_threshold());
+        let ft_stream = ft_word_stream_step(
+            self.ft.stream_state,
+            self.ft.cur_value,
+            inputs.ft_ui_din_full,
+            inputs.ft_ui_dout_empty,
+            inputs.stream_fifo_empty,
+            inputs.stream_fifo_dout,
+        );
 
-fn ft_cmd_high(word: FtData) -> uint<8> {
-    trunc(word >> 8)
-}
-
-fn saleae_standard_signals(
-    conn_rw_sync: bool,
-    conn_oe_sync: bool,
-    conn_ci_sync: bool,
-    conn_e2_sync: bool,
-    conn_mskrom_sync: bool,
-    misc_line: bool,
-    data_line: bool,
-    addr_line: bool,
-) -> [bool; 8] {
-    [
-        conn_rw_sync,
-        conn_oe_sync,
-        conn_ci_sync,
-        conn_e2_sync,
-        conn_mskrom_sync,
-        misc_line,
-        data_line,
-        addr_line,
-    ]
-}
-
-fn saleae_memory_banks(
-    conn_rw_sync: bool,
-    conn_mskrom_sync: bool,
-    conn_sram1_sync: bool,
-    conn_sram2_sync: bool,
-    conn_eprom_sync: bool,
-    misc_line: bool,
-    data_line: bool,
-    addr_line: bool,
-) -> [bool; 8] {
-    [
-        conn_rw_sync,
-        conn_mskrom_sync,
-        conn_sram1_sync,
-        conn_sram2_sync,
-        conn_eprom_sync,
-        misc_line,
-        data_line,
-        addr_line,
-    ]
-}
-
-entity organizer_uart_monitor<#uint WIDTH>(
-    wclk: clock,
-    wrst: bool,
-    din: uint<WIDTH>,
-    wput: bool,
-    rclk: clock,
-    rrst: bool,
-) -> MonitorUartOut<WIDTH> {
-    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
-    let fifo = inst async_fifo::<WIDTH, 4, 3>(wclk, wrst, din, wput, rclk, rrst, *fifo_rget);
-    let tx_fire = !fifo.empty && !*uart.busy;
-    set fifo_rget_w = &tx_fire;
-    let _tx = inst uart_tx_tap::<400_000_000, 100_000_000, WIDTH>(
-        rclk,
-        rrst,
-        false,
-        fifo.dout,
-        tx_fire,
-        uart_w.line,
-        uart_w.busy,
-    );
-
-    MonitorUartOut$(
-        line: *uart.line,
-        busy: *uart.busy,
-        fifo_full: fifo.full,
-        fifo_empty: fifo.empty,
-        fifo_dout: fifo.dout,
-    )
-}
-
-#[inline]
-entity organizer_ft_link(
-    clk: clock,
-    rst: bool,
-    ft_clk: clock,
-    ft_rxf: bool,
-    ft_txe: bool,
-    ft_data_in: FtData,
-    ft_be_in: FtBe,
-    ui_din: FtData,
-    ui_din_be: FtBe,
-    ui_din_valid: bool,
-    ui_dout_get: bool,
-    ft_data_out: inv &FtData,
-    ft_be_out: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &FtData,
-    ui_dout_be: inv &FtBe,
-    ui_dout_empty: inv &bool,
-) {
-    inst au_ft_tap_u16(
-        clk,
-        rst,
-        ft_clk,
-        ft_rxf,
-        ft_txe,
-        ft_data_in,
-        ft_be_in,
-        ui_din,
-        ui_din_be,
-        ui_din_valid,
-        ui_dout_get,
-        ft_data_out,
-        ft_be_out,
-        ft_rd,
-        ft_wr,
-        ft_oe,
-        ui_din_full,
-        ui_dout,
-        ui_dout_be,
-        ui_dout_empty,
-    );
+        MainEval$(
+            next_state: MainState$(
+                ft: FtRegs$(
+                    enabled: ft_effect.next_ft_enabled,
+                    cur_value: ft_stream.next_cur_value,
+                    stream_state: ft_stream.next_state,
+                ),
+                saleae: SaleaeRegs$(
+                    state: usb_effect.next_saleae_state,
+                    counter: if let SaleaeState::Counter = self.saleae.state {
+                        self.saleae.counter +. 1
+                    } else {
+                        self.saleae.counter
+                    },
+                    sync_sub_mode: usb_effect.next_sync_sub_mode,
+                ),
+                monitor: MonitorRegs$(
+                    addr: addr_sample.next_state,
+                    data: data_sample.next_state,
+                    misc: misc_sample.next_state,
+                ),
+            ),
+            tx_req: tx_req_arbiter(usb_effect.tx_req, ft_effect.tx_req, tx_req_none()),
+            addr_wput: addr_sample.wput,
+            data_wput: data_sample.wput,
+            misc_wput: misc_sample.wput,
+            ft_stream: ft_stream,
+        )
+    }
 }
 
 #[no_mangle(all)]
@@ -305,9 +259,6 @@ entity main_core(
         conn_vpp_sync,
     );
 
-    let _rw_fall = inst falling_edge(clk, conn_rw_sync);
-    let _rw_rise = inst rising_edge(clk, conn_rw_sync);
-
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
 
@@ -321,219 +272,76 @@ entity main_core(
     let (ft_ui_dout_be, ft_ui_dout_be_w): (&FtBe, inv &FtBe) = port;
     let (ft_ui_dout_empty, ft_ui_dout_empty_w): (&bool, inv &bool) = port;
     let (stream_fifo_rget, stream_fifo_rget_w): (&bool, inv &bool) = port;
+    let (stream_fifo_full, stream_fifo_full_w): (&bool, inv &bool) = port;
+    let (stream_fifo_empty, stream_fifo_empty_w): (&bool, inv &bool) = port;
+    let (stream_fifo_dout, stream_fifo_dout_w): (&uint<32>, inv &uint<32>) = port;
 
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
     let stream_fifo = inst au_stream_fifo_u32(clk, rst, 0, false, *stream_fifo_rget);
 
-    reg(clk) state: MainState reset(rst: reset_main_state()) = {
-        let ft_get_word = if let FtState::GetFifo = state.ft_state {
-            !stream_fifo.empty && !*ft_ui_din_full
-        } else {
-            false
-        };
-        let ft_stream_word = if let FtState::Stream = state.ft_state {
-            !*ft_ui_din_full
-        } else {
-            false
-        };
+    let inputs = MainInputs$(
+        addr_sync: addr_sync,
+        data_sync: data_sync,
+        misc_sync: misc_sync,
+        rx_valid: rx.valid,
+        rx_byte: rx.byte,
+        tx_busy: *usb_tx_busy,
+        ft_ui_din_full: *ft_ui_din_full,
+        ft_ui_dout_empty: *ft_ui_dout_empty,
+        ft_ui_dout: *ft_ui_dout,
+        stream_fifo_empty: *stream_fifo_empty,
+        stream_fifo_dout: *stream_fifo_dout,
+    );
 
-        let next_ft_state = if ft_get_word {
-            FtState::Stream()
-        } else if ft_stream_word {
-            FtState::GetFifo()
-        } else {
-            state.ft_state
-        };
-
-        let next_ft_cur_value = if ft_get_word {
-            stream_fifo.dout
-        } else {
-            state.ft_cur_value
+    reg(clk) state: MainState
+        reset(rst: reset_main_state())
+        = {
+            let eval = state.eval(inputs);
+            eval.next_state
         };
 
-        let ft_host_enable = !*ft_ui_dout_empty && ft_cmd_low(*ft_ui_dout) == b'S' && ft_cmd_high(*ft_ui_dout) == b'+';
-        let ft_host_disable = !*ft_ui_dout_empty && ft_cmd_low(*ft_ui_dout) == b'S' && ft_cmd_high(*ft_ui_dout) == b'-';
+    let eval = state.eval(inputs);
+    set stream_fifo_rget_w = &eval.ft_stream.stream_fifo_rget;
+    set stream_fifo_full_w = &stream_fifo.full;
+    set stream_fifo_empty_w = &stream_fifo.empty;
+    set stream_fifo_dout_w = &stream_fifo.dout;
 
-        let next_ft_enabled = if ft_host_enable {
-            true
-        } else if ft_host_disable {
-            false
-        } else {
-            state.ft_enabled
-        };
-
-        let usb_cmd_counter = rx.valid && rx.byte == b'c';
-        let usb_cmd_sync_standard = rx.valid && rx.byte == b's';
-        let usb_cmd_sync_memory = rx.valid && rx.byte == b'S';
-
-        let next_saleae_state = if usb_cmd_counter {
-            SaleaeState::Counter()
-        } else if usb_cmd_sync_standard || usb_cmd_sync_memory {
-            SaleaeState::SyncSignals()
-        } else {
-            state.saleae_state
-        };
-
-        let next_sync_sub_mode = if usb_cmd_sync_standard {
-            SyncSubMode::StandardSignals()
-        } else if usb_cmd_sync_memory {
-            SyncSubMode::MemoryBanks()
-        } else {
-            state.sync_sub_mode
-        };
-
-        let next_saleae_counter = if let SaleaeState::Counter = state.saleae_state {
-            state.saleae_counter +. 1
-        } else {
-            state.saleae_counter
-        };
-
-        let addr_changed = state.last_addr != addr_sync;
-        let addr_wput = !addr_changed && !state.last_addr_sent && state.addr_counter > 5;
-        let next_last_addr = if addr_changed { addr_sync } else { state.last_addr };
-        let next_last_addr_sent = if addr_changed {
-            false
-        } else if addr_wput {
-            true
-        } else {
-            state.last_addr_sent
-        };
-        let next_addr_counter = if addr_changed { 0 } else { state.addr_counter +. 1 };
-
-        let data_changed = state.last_data != data_sync;
-        let data_wput = !data_changed && !state.last_data_sent && state.data_counter > 5;
-        let next_last_data = if data_changed { data_sync } else { state.last_data };
-        let next_last_data_sent = if data_changed {
-            false
-        } else if data_wput {
-            true
-        } else {
-            state.last_data_sent
-        };
-        let next_data_counter = if data_changed { 0 } else { state.data_counter +. 1 };
-
-        let misc_changed = state.last_misc != misc_sync;
-        let misc_wput = !misc_changed && !state.last_misc_sent && state.misc_counter > 5;
-        let next_last_misc = if misc_changed { misc_sync } else { state.last_misc };
-        let next_last_misc_sent = if misc_changed {
-            false
-        } else if misc_wput {
-            true
-        } else {
-            state.last_misc_sent
-        };
-        let next_misc_counter = if misc_changed { 0 } else { state.misc_counter +. 1 };
-
-        let _ = addr_wput;
-        let _ = data_wput;
-        let _ = misc_wput;
-
-        MainState$(
-            ft_enabled: next_ft_enabled,
-            ft_cur_value: next_ft_cur_value,
-            ft_state: next_ft_state,
-            saleae_state: next_saleae_state,
-            saleae_counter: next_saleae_counter,
-            sync_sub_mode: next_sync_sub_mode,
-            last_addr: next_last_addr,
-            last_addr_sent: next_last_addr_sent,
-            addr_counter: next_addr_counter,
-            last_data: next_last_data,
-            last_data_sent: next_last_data_sent,
-            data_counter: next_data_counter,
-            last_misc: next_last_misc,
-            last_misc_sent: next_last_misc_sent,
-            misc_counter: next_misc_counter,
-        )
-    };
-
-    let usb_cmd_counter = rx.valid && rx.byte == b'c';
-    let usb_cmd_sync_standard = rx.valid && rx.byte == b's';
-    let usb_cmd_sync_memory = rx.valid && rx.byte == b'S';
-
-    let ft_host_enable = !*ft_ui_dout_empty && ft_cmd_low(*ft_ui_dout) == b'S' && ft_cmd_high(*ft_ui_dout) == b'+';
-    let ft_host_disable = !*ft_ui_dout_empty && ft_cmd_low(*ft_ui_dout) == b'S' && ft_cmd_high(*ft_ui_dout) == b'-';
-    let ft_ui_dout_get = !*ft_ui_dout_empty;
-
-    let ft_echo_valid = ft_host_enable || ft_host_disable;
-    let ft_echo_byte = if ft_host_enable {
-        b'+'
-    } else if ft_host_disable {
-        b'-'
-    } else {
-        0
-    };
-
-    let usb_echo_valid = usb_cmd_counter || usb_cmd_sync_standard || usb_cmd_sync_memory;
-    let usb_echo_byte = if usb_cmd_counter {
-        b'c'
-    } else if usb_cmd_sync_standard {
-        b's'
-    } else if usb_cmd_sync_memory {
-        b'S'
-    } else {
-        0
-    };
-
-    let usb_tx_valid_prebusy = if usb_echo_valid { true } else { ft_echo_valid };
-    let usb_tx_byte = if usb_echo_valid {
-        usb_echo_byte
-    } else {
-        ft_echo_byte
-    };
-    let usb_tx_fire = usb_tx_valid_prebusy && !*usb_tx_busy;
-
-    let _usb_tx = inst au_usb_uart_tx8_tap(
+    let _tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
         false,
-        usb_tx_byte,
-        usb_tx_fire,
+        eval.tx_req.byte,
+        eval.tx_req.valid,
         usb_tx_line_w,
         usb_tx_busy_w,
     );
 
-    let stream_fifo_rget_val = if let FtState::GetFifo = state.ft_state {
-        !stream_fifo.empty && !*ft_ui_din_full
-    } else if let FtState::Stream = state.ft_state {
-        !*ft_ui_din_full
-    } else {
-        false
-    };
-    set stream_fifo_rget_w = &stream_fifo_rget_val;
+    let addr_uart: AsyncUartMonitorOut<20> = inst async_uart_monitor::<20, 4, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        addr_sync,
+        eval.addr_wput,
+        clk_uart,
+        rst,
+    );
+    let data_uart: AsyncUartMonitorOut<8> = inst async_uart_monitor::<8, 4, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        data_sync,
+        eval.data_wput,
+        clk_uart,
+        rst,
+    );
+    let misc_uart: AsyncUartMonitorOut<11> = inst async_uart_monitor::<11, 4, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        misc_sync,
+        eval.misc_wput,
+        clk_uart,
+        rst,
+    );
 
-    let addr_changed = state.last_addr != addr_sync;
-    let addr_wput = !addr_changed && !state.last_addr_sent && state.addr_counter > 5;
-    let data_changed = state.last_data != data_sync;
-    let data_wput = !data_changed && !state.last_data_sent && state.data_counter > 5;
-    let misc_changed = state.last_misc != misc_sync;
-    let misc_wput = !misc_changed && !state.last_misc_sent && state.misc_counter > 5;
-
-    let addr_uart = inst organizer_uart_monitor::<20>(clk, rst, addr_sync, addr_wput, clk_uart, rst);
-    let data_uart = inst organizer_uart_monitor::<8>(clk, rst, data_sync, data_wput, clk_uart, rst);
-    let misc_uart = inst organizer_uart_monitor::<11>(clk, rst, misc_sync, misc_wput, clk_uart, rst);
-
-    let ft_get_word = if let FtState::GetFifo = state.ft_state {
-        !stream_fifo.empty && !*ft_ui_din_full
-    } else {
-        false
-    };
-    let ft_stream_word = if let FtState::Stream = state.ft_state {
-        !*ft_ui_din_full
-    } else {
-        false
-    };
-    let ft_ui_din_valid = ft_get_word || ft_stream_word;
-    let ft_ui_din = if ft_get_word {
-        trunc(stream_fifo.dout)
-    } else if ft_stream_word {
-        trunc(state.ft_cur_value >> 16)
-    } else {
-        0
-    };
-    let ft_ui_din_be = if ft_ui_din_valid { 0b11 } else { 0 };
-
-    let _ft = inst organizer_ft_link(
+    let _ft = inst au_ft_tap_u16(
         clk,
         rst,
         ft_clk_clock,
@@ -541,10 +349,10 @@ entity main_core(
         ft_txe,
         ft_data,
         ft_be,
-        ft_ui_din,
-        ft_ui_din_be,
-        ft_ui_din_valid,
-        ft_ui_dout_get,
+        eval.ft_stream.ui_din,
+        eval.ft_stream.ui_din_be,
+        eval.ft_stream.ui_din_valid,
+        eval.ft_stream.ui_dout_get,
         ft_data_out_w,
         ft_be_out_w,
         ft_rd_sig_w,
@@ -556,48 +364,36 @@ entity main_core(
         ft_ui_dout_empty_w,
     );
 
+    let board_outputs: BoardOutputs = render_board_outputs(
+        BoardRenderInputs$(
+            ft_enabled: state.ft.enabled,
+            stream_fifo_empty: *stream_fifo_empty,
+            stream_fifo_full: *stream_fifo_full,
+            ft_txe: ft_txe,
+            ft_rxf: ft_rxf,
+            ft_ui_dout_empty: *ft_ui_dout_empty,
+            ft_ui_din_full: *ft_ui_din_full,
+            saleae_state: state.saleae.state,
+            saleae_counter: state.saleae.counter,
+            sync_sub_mode: state.saleae.sync_sub_mode,
+            conn_rw_sync: conn_rw_sync,
+            conn_oe_sync: conn_oe_sync,
+            conn_ci_sync: conn_ci_sync,
+            conn_e2_sync: conn_e2_sync,
+            conn_mskrom_sync: conn_mskrom_sync,
+            conn_sram1_sync: conn_sram1_sync,
+            conn_sram2_sync: conn_sram2_sync,
+            conn_eprom_sync: conn_eprom_sync,
+            misc_line: misc_uart.line,
+            data_line: data_uart.line,
+            addr_line: addr_uart.line,
+        ),
+    );
+
     let _unused_ft_ui_dout_be = *ft_ui_dout_be;
-    let _unused_rw_rise = _rw_rise;
     let _unused_addr_uart = addr_uart.fifo_dout;
     let _unused_data_uart = data_uart.fifo_dout;
     let _unused_misc_uart = misc_uart.fifo_dout;
-
-    let led_bits = [
-        state.ft_enabled,
-        stream_fifo.empty,
-        stream_fifo.full,
-        false,
-        !ft_txe,
-        !ft_rxf,
-        !*ft_ui_dout_empty,
-        *ft_ui_din_full,
-    ];
-
-    let saleae_bits = match state.saleae_state {
-        SaleaeState::Counter => state.saleae_counter.to_bits(),
-        SaleaeState::SyncSignals => match state.sync_sub_mode {
-            SyncSubMode::StandardSignals => saleae_standard_signals(
-                conn_rw_sync,
-                conn_oe_sync,
-                conn_ci_sync,
-                conn_e2_sync,
-                conn_mskrom_sync,
-                misc_uart.line,
-                data_uart.line,
-                addr_uart.line,
-            ),
-            SyncSubMode::MemoryBanks => saleae_memory_banks(
-                conn_rw_sync,
-                conn_mskrom_sync,
-                conn_sram1_sync,
-                conn_sram2_sync,
-                conn_eprom_sync,
-                misc_uart.line,
-                data_uart.line,
-                addr_uart.line,
-            ),
-        },
-    };
 
     set usb_tx = &*usb_tx_line;
     set ft_data_drive = &*ft_data_out;
@@ -605,6 +401,6 @@ entity main_core(
     set ft_rd = &*ft_rd_sig;
     set ft_wr = &*ft_wr_sig;
     set ft_oe = &*ft_oe_sig;
-    set led = &led_bits;
-    set saleae = &saleae_bits;
+    set led = &board_outputs.led;
+    set saleae = &board_outputs.saleae;
 }

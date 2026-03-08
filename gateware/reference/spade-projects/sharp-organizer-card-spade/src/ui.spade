@@ -1,0 +1,205 @@
+use shared_components::{
+    message_stream::{TxReq8, tx_req_none},
+    serial::FtData,
+};
+
+pub(lib) enum SaleaeState {
+    SyncSignals,
+    Counter,
+}
+
+pub(lib) enum SyncSubMode {
+    StandardSignals,
+    MemoryBanks,
+}
+
+pub(lib) enum OrganizerCmd {
+    None,
+    Counter,
+    SyncStandard,
+    SyncMemory,
+}
+
+pub(lib) struct OrganizerCmdEffect {
+    next_saleae_state: SaleaeState,
+    next_sync_sub_mode: SyncSubMode,
+    tx_req: TxReq8,
+}
+
+pub(lib) enum OrganizerFtCmd {
+    None,
+    Enable,
+    Disable,
+}
+
+pub(lib) struct OrganizerFtCmdEffect {
+    next_ft_enabled: bool,
+    tx_req: TxReq8,
+}
+
+impl OrganizerCmd {
+    fn echo_byte(self) -> uint<8> {
+        match self {
+            Self::Counter => b'c',
+            Self::SyncStandard => b's',
+            Self::SyncMemory => b'S',
+            Self::None => 0,
+        }
+    }
+
+    pub fn effect(self, saleae_state: SaleaeState, sync_sub_mode: SyncSubMode, tx_busy: bool) -> OrganizerCmdEffect {
+        OrganizerCmdEffect$(
+            next_saleae_state: match self {
+                Self::Counter => SaleaeState::Counter(),
+                Self::SyncStandard => SaleaeState::SyncSignals(),
+                Self::SyncMemory => SaleaeState::SyncSignals(),
+                Self::None => saleae_state,
+            },
+            next_sync_sub_mode: match self {
+                Self::SyncStandard => SyncSubMode::StandardSignals(),
+                Self::SyncMemory => SyncSubMode::MemoryBanks(),
+                Self::Counter => sync_sub_mode,
+                Self::None => sync_sub_mode,
+            },
+            tx_req: if let Self::None = self {
+                tx_req_none()
+            } else if tx_busy {
+                tx_req_none()
+            } else {
+                TxReq8$(valid: true, byte: self.echo_byte())
+            },
+        )
+    }
+}
+
+pub(lib) fn organizer_cmd_from_byte(rx_valid: bool, byte: uint<8>) -> OrganizerCmd {
+    if !rx_valid {
+        OrganizerCmd::None()
+    } else if byte == b'c' {
+        OrganizerCmd::Counter()
+    } else if byte == b's' {
+        OrganizerCmd::SyncStandard()
+    } else if byte == b'S' {
+        OrganizerCmd::SyncMemory()
+    } else {
+        OrganizerCmd::None()
+    }
+}
+
+impl OrganizerFtCmd {
+    fn echo_byte(self) -> uint<8> {
+        match self {
+            Self::Enable => b'+',
+            Self::Disable => b'-',
+            Self::None => 0,
+        }
+    }
+
+    pub fn effect(self, ft_enabled: bool, tx_busy: bool) -> OrganizerFtCmdEffect {
+        OrganizerFtCmdEffect$(
+            next_ft_enabled: match self {
+                Self::Enable => true,
+                Self::Disable => false,
+                Self::None => ft_enabled,
+            },
+            tx_req: if let Self::None = self {
+                tx_req_none()
+            } else if tx_busy {
+                tx_req_none()
+            } else {
+                TxReq8$(valid: true, byte: self.echo_byte())
+            },
+        )
+    }
+}
+
+pub(lib) fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData) -> OrganizerFtCmd {
+    let b0: uint<8> = trunc(word);
+    let b1: uint<8> = trunc(word >> 8);
+    if ft_ui_dout_empty || b0 != b'S' {
+        OrganizerFtCmd::None()
+    } else if b1 == b'+' {
+        OrganizerFtCmd::Enable()
+    } else if b1 == b'-' {
+        OrganizerFtCmd::Disable()
+    } else {
+        OrganizerFtCmd::None()
+    }
+}
+
+pub(lib) struct BoardRenderInputs {
+    ft_enabled: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_full: bool,
+    ft_txe: bool,
+    ft_rxf: bool,
+    ft_ui_dout_empty: bool,
+    ft_ui_din_full: bool,
+    saleae_state: SaleaeState,
+    saleae_counter: uint<8>,
+    sync_sub_mode: SyncSubMode,
+    conn_rw_sync: bool,
+    conn_oe_sync: bool,
+    conn_ci_sync: bool,
+    conn_e2_sync: bool,
+    conn_mskrom_sync: bool,
+    conn_sram1_sync: bool,
+    conn_sram2_sync: bool,
+    conn_eprom_sync: bool,
+    misc_line: bool,
+    data_line: bool,
+    addr_line: bool,
+}
+
+pub(lib) struct BoardOutputs {
+    led: [bool; 8],
+    saleae: [bool; 8],
+}
+
+fn saleae_standard_signals(inputs: BoardRenderInputs) -> [bool; 8] {
+    [
+        inputs.conn_rw_sync,
+        inputs.conn_oe_sync,
+        inputs.conn_ci_sync,
+        inputs.conn_e2_sync,
+        inputs.conn_mskrom_sync,
+        inputs.misc_line,
+        inputs.data_line,
+        inputs.addr_line,
+    ]
+}
+
+fn saleae_memory_banks(inputs: BoardRenderInputs) -> [bool; 8] {
+    [
+        inputs.conn_rw_sync,
+        inputs.conn_mskrom_sync,
+        inputs.conn_sram1_sync,
+        inputs.conn_sram2_sync,
+        inputs.conn_eprom_sync,
+        inputs.misc_line,
+        inputs.data_line,
+        inputs.addr_line,
+    ]
+}
+
+pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
+    BoardOutputs$(
+        led: [
+            inputs.ft_enabled,
+            inputs.stream_fifo_empty,
+            inputs.stream_fifo_full,
+            false,
+            !inputs.ft_txe,
+            !inputs.ft_rxf,
+            !inputs.ft_ui_dout_empty,
+            inputs.ft_ui_din_full,
+        ],
+        saleae: match inputs.saleae_state {
+            SaleaeState::Counter => inputs.saleae_counter.to_bits(),
+            SaleaeState::SyncSignals => match inputs.sync_sub_mode {
+                SyncSubMode::StandardSignals => saleae_standard_signals(inputs),
+                SyncSubMode::MemoryBanks => saleae_memory_banks(inputs),
+            },
+        },
+    )
+}

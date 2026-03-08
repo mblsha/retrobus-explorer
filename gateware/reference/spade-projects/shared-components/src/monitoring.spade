@@ -1,0 +1,86 @@
+use super::{
+    memory::async_fifo,
+    serial::{UartLineBusyPort, uart_tx_tap},
+};
+
+pub struct StableSampleState<#uint WIDTH, #uint COUNT_W> {
+    last: uint<WIDTH>,
+    sent: bool,
+    counter: uint<COUNT_W>,
+}
+
+pub struct StableSampleOut<#uint WIDTH, #uint COUNT_W> {
+    next_state: StableSampleState<WIDTH, COUNT_W>,
+    wput: bool,
+}
+
+pub fn stable_sample_reset<#uint WIDTH, #uint COUNT_W>(value: uint<WIDTH>) -> StableSampleState<WIDTH, COUNT_W> {
+    StableSampleState$(
+        last: value,
+        sent: false,
+        counter: 0,
+    )
+}
+
+pub fn stable_sample_step<#uint WIDTH, #uint COUNT_W>(
+    state: StableSampleState<WIDTH, COUNT_W>,
+    current: uint<WIDTH>,
+    threshold: uint<COUNT_W>,
+) -> StableSampleOut<WIDTH, COUNT_W> {
+    let changed = state.last != current;
+    let wput = !changed && !state.sent && state.counter > threshold;
+    StableSampleOut$(
+        next_state: StableSampleState$(
+            last: if changed { current } else { state.last },
+            sent: if changed {
+                false
+            } else if wput {
+                true
+            } else {
+                state.sent
+            },
+            counter: if changed { 0 } else { state.counter +. 1 },
+        ),
+        wput: wput,
+    )
+}
+
+pub struct AsyncUartMonitorOut<#uint WIDTH> {
+    line: bool,
+    busy: bool,
+    fifo_full: bool,
+    fifo_empty: bool,
+    fifo_dout: uint<WIDTH>,
+}
+
+pub entity async_uart_monitor<#uint WIDTH, #uint ENTRIES, #uint ADDR_W, #uint TX_CLK_FREQ, #uint BAUD>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<WIDTH>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+) -> AsyncUartMonitorOut<WIDTH> {
+    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
+    let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
+    let fifo = inst async_fifo::<WIDTH, ENTRIES, ADDR_W>(wclk, wrst, din, wput, rclk, rrst, *fifo_rget);
+    let tx_fire = !fifo.empty && !*uart.busy;
+    set fifo_rget_w = &tx_fire;
+    let _tx = inst uart_tx_tap::<TX_CLK_FREQ, BAUD, WIDTH>(
+        rclk,
+        rrst,
+        false,
+        fifo.dout,
+        tx_fire,
+        uart_w.line,
+        uart_w.busy,
+    );
+
+    AsyncUartMonitorOut$(
+        line: *uart.line,
+        busy: *uart.busy,
+        fifo_full: fifo.full,
+        fifo_empty: fifo.empty,
+        fifo_dout: fifo.dout,
+    )
+}
