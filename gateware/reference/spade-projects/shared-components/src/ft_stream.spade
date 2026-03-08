@@ -1,0 +1,64 @@
+pub enum FtWordStreamState {
+    GetFifo,
+    Stream,
+}
+
+pub struct FtWordStreamOut {
+    next_state: FtWordStreamState,
+    next_cur_value: uint<32>,
+    ui_din_valid: bool,
+    ui_din: uint<16>,
+    ui_din_be: uint<2>,
+    ui_dout_get: bool,
+    stream_fifo_rget: bool,
+}
+
+pub fn ft_word_stream_step(
+    state: FtWordStreamState,
+    cur_value: uint<32>,
+    ui_din_full: bool,
+    ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: uint<32>,
+) -> FtWordStreamOut {
+    let get_fifo = if let FtWordStreamState::GetFifo = state { true } else { false };
+    let stream = if let FtWordStreamState::Stream = state { true } else { false };
+    let can_push = !ui_din_full;
+    let next_state = if get_fifo && can_push && !stream_fifo_empty {
+        FtWordStreamState::Stream()
+    } else if stream && can_push {
+        FtWordStreamState::GetFifo()
+    } else {
+        state
+    };
+    let next_cur_value = if get_fifo && can_push && !stream_fifo_empty {
+        stream_fifo_dout
+    } else {
+        cur_value
+    };
+    let ui_din_valid = (get_fifo && can_push && !stream_fifo_empty) || (stream && can_push);
+    let ui_din = if get_fifo && can_push && !stream_fifo_empty {
+        trunc(stream_fifo_dout)
+    } else if stream && can_push {
+        trunc(cur_value >> 16)
+    } else {
+        0
+    };
+    let stream_fifo_rget = if get_fifo {
+        can_push && !stream_fifo_empty
+    } else if stream {
+        can_push
+    } else {
+        false
+    };
+
+    FtWordStreamOut$(
+        next_state: next_state,
+        next_cur_value: next_cur_value,
+        ui_din_valid: ui_din_valid,
+        ui_din: ui_din,
+        ui_din_be: if ui_din_valid { 0x3 } else { 0x0 },
+        ui_dout_get: !ui_dout_empty,
+        stream_fifo_rget: stream_fifo_rget,
+    )
+}
