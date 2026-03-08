@@ -33,6 +33,7 @@ pub entity wait_hold_n<#uint RELOAD>(
     wait_counter != 0
 }
 
+#[inline]
 pub entity wait_hold(
     clk: clock,
     rst: bool,
@@ -68,6 +69,7 @@ pub entity gate_bits<#uint WIDTH>(
     if enable { value } else { zero }
 }
 
+#[inline]
 pub entity gate_byte8(
     enable: bool,
     value: [bool; 8],

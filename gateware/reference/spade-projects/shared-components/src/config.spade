@@ -7,6 +7,7 @@ use super::{
 fn au_usb_uart_bit_time() -> BitTime { 100 }
 fn au_usb_uart_stop_bits() -> StopBits { 1 }
 
+#[inline]
 pub entity au_usb_uart_rx(
     clk: clock,
     rst: bool,
@@ -15,6 +16,7 @@ pub entity au_usb_uart_rx(
     inst uart_rx::<8>(clk, rst, rx, au_usb_uart_bit_time(), false, au_usb_uart_stop_bits())
 }
 
+#[inline]
 pub entity au_usb_uart_tx8_tap(
     clk: clock,
     rst: bool,
@@ -35,6 +37,7 @@ pub entity au_usb_uart_tx8_tap(
     );
 }
 
+#[inline]
 pub entity au_stream_fifo_u32(
     clk: clock,
     rst: bool,
@@ -45,6 +48,7 @@ pub entity au_stream_fifo_u32(
     inst sync_fifo::<32, 32768>(clk, rst, din, wput, rget)
 }
 
+#[inline]
 pub entity au_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD, #uint DROP_COUNT_W>(
     wclk: clock,
     wrst: bool,
@@ -109,6 +113,7 @@ entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B, #u
     )
 }
 
+#[inline]
 pub entity au_dual_bridge_u8x8_100_200<#uint DROP_COUNT_W>(
     wclk: clock,
     wrst: bool,
@@ -131,6 +136,7 @@ pub entity au_dual_bridge_u8x8_100_200<#uint DROP_COUNT_W>(
     )
 }
 
+#[inline]
 pub entity au_ft_tap_u16(
     clk: clock,
     rst: bool,
