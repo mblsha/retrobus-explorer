@@ -1,8 +1,8 @@
-use shared_components::message_stream::{ByteMsgStreamState, TxReq8, tx_req_none};
+use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
 
 type OrganizerMsgIdx = uint<2>;
 
-pub(lib) enum OrganizerMsg {
+pub(lib) enum OrganizerReply {
     None,
     CounterSelected,
     SyncStandardSelected,
@@ -11,133 +11,87 @@ pub(lib) enum OrganizerMsg {
     FtDisabled,
 }
 
-pub(lib) struct OrganizerMsgStreamState {
-    stream: ByteMsgStreamState<OrganizerMsg, 2>,
-    backlog_msg: OrganizerMsg,
+pub struct OrganizerMsg {
+    len: OrganizerMsgIdx,
+    bytes: [uint<8>; 2],
 }
 
-pub(lib) struct OrganizerMsgStreamEval {
-    state: OrganizerMsgStreamState,
-    tx_req: TxReq8,
-}
+pub type OrganizerMsgStreamState = ByteMsgStreamState<OrganizerMsg, 2>;
+pub type OrganizerMsgStreamOut = ByteMsgStreamOut<OrganizerMsg, 2>;
 
-fn organizer_msg_none() -> OrganizerMsg {
-    OrganizerMsg::None()
-}
-
-pub(lib) fn init_organizer_msg_stream() -> OrganizerMsgStreamState {
-    OrganizerMsgStreamState$(
-        stream: ByteMsgStreamState$(
-            cur_msg: organizer_msg_none(),
-            cur_idx: 0,
-            pending_msg: organizer_msg_none(),
-        ),
-        backlog_msg: organizer_msg_none(),
+pub fn init_organizer_msg_stream() -> OrganizerMsgStreamState {
+    ByteMsgStreamState$(
+        cur_msg: organizer_msg_none(),
+        cur_idx: 0,
+        pending_msg: organizer_msg_none(),
     )
 }
 
-fn organizer_single_byte(byte: uint<8>, idx: OrganizerMsgIdx) -> TxReq8 {
-    if idx == 0 {
-        TxReq8$(valid: true, byte: byte)
+fn organizer_reply_byte(reply: OrganizerReply) -> uint<8> {
+    match reply {
+        OrganizerReply::None => 0,
+        OrganizerReply::CounterSelected => b'c',
+        OrganizerReply::SyncStandardSelected => b's',
+        OrganizerReply::SyncMemorySelected => b'S',
+        OrganizerReply::FtEnabled => b'+',
+        OrganizerReply::FtDisabled => b'-',
+    }
+}
+
+pub fn organizer_reply_is_none(reply: OrganizerReply) -> bool {
+    if let OrganizerReply::None = reply { true } else { false }
+}
+
+pub fn organizer_msg_none() -> OrganizerMsg {
+    OrganizerMsg$(len: 0, bytes: [0, 0])
+}
+
+pub fn organizer_msg_is_none(msg: OrganizerMsg) -> bool {
+    msg.len == 0
+}
+
+pub fn organizer_msg_from_replies(primary: OrganizerReply, secondary: OrganizerReply) -> OrganizerMsg {
+    if organizer_reply_is_none(primary) && organizer_reply_is_none(secondary) {
+        organizer_msg_none()
+    } else if organizer_reply_is_none(secondary) {
+        OrganizerMsg$(
+            len: 1,
+            bytes: [organizer_reply_byte(primary), 0],
+        )
+    } else if organizer_reply_is_none(primary) {
+        OrganizerMsg$(
+            len: 1,
+            bytes: [organizer_reply_byte(secondary), 0],
+        )
+    } else {
+        OrganizerMsg$(
+            len: 2,
+            bytes: [organizer_reply_byte(primary), organizer_reply_byte(secondary)],
+        )
+    }
+}
+
+fn organizer_msg_byte(msg: OrganizerMsg, idx: OrganizerMsgIdx) -> TxReq8 {
+    if idx < msg.len {
+        let byte_idx: uint<1> = trunc(idx);
+        TxReq8$(valid: true, byte: msg.bytes[byte_idx])
     } else {
         tx_req_none()
     }
 }
 
-impl OrganizerMsg {
-    fn is_none(self) -> bool {
-        if let Self::None = self { true } else { false }
-    }
-
-    fn byte(self, idx: OrganizerMsgIdx) -> TxReq8 {
-        match self {
-            Self::None => tx_req_none(),
-            Self::CounterSelected => organizer_single_byte(b'c', idx),
-            Self::SyncStandardSelected => organizer_single_byte(b's', idx),
-            Self::SyncMemorySelected => organizer_single_byte(b'S', idx),
-            Self::FtEnabled => organizer_single_byte(b'+', idx),
-            Self::FtDisabled => organizer_single_byte(b'-', idx),
-        }
-    }
-}
-
-fn promote_backlog(state: OrganizerMsgStreamState) -> OrganizerMsgStreamState {
-    if state.stream.pending_msg.is_none() && !state.backlog_msg.is_none() {
-        OrganizerMsgStreamState$(
-            stream: ByteMsgStreamState$(
-                cur_msg: state.stream.cur_msg,
-                cur_idx: state.stream.cur_idx,
-                pending_msg: state.backlog_msg,
-            ),
-            backlog_msg: organizer_msg_none(),
-        )
-    } else {
-        state
-    }
-}
-
-fn enqueue_msg(
-    state: OrganizerMsgStreamState,
-    msg_valid: bool,
-    msg: OrganizerMsg,
-) -> OrganizerMsgStreamState {
-    if !msg_valid || msg.is_none() {
-        state
-    } else if state.stream.cur_msg.is_none() {
-        OrganizerMsgStreamState$(
-            stream: ByteMsgStreamState$(
-                cur_msg: msg,
-                cur_idx: 0,
-                pending_msg: state.stream.pending_msg,
-            ),
-            backlog_msg: state.backlog_msg,
-        )
-    } else if state.stream.pending_msg.is_none() {
-        OrganizerMsgStreamState$(
-            stream: ByteMsgStreamState$(
-                cur_msg: state.stream.cur_msg,
-                cur_idx: state.stream.cur_idx,
-                pending_msg: msg,
-            ),
-            backlog_msg: state.backlog_msg,
-        )
-    } else if state.backlog_msg.is_none() {
-        OrganizerMsgStreamState$(
-            stream: state.stream,
-            backlog_msg: msg,
-        )
-    } else {
-        state
-    }
-}
-
-pub(lib) fn organizer_msg_stream_step(
+pub fn organizer_msg_stream_step(
     state: OrganizerMsgStreamState,
     block_tx: bool,
-    primary_msg_valid: bool,
-    primary_msg: OrganizerMsg,
-    secondary_msg_valid: bool,
-    secondary_msg: OrganizerMsg,
-) -> OrganizerMsgStreamEval {
-    let stepped = state.stream.step_with(
+    msg_valid: bool,
+    msg: OrganizerMsg,
+) -> OrganizerMsgStreamOut {
+    state.step_with(
         organizer_msg_none(),
-        fn |msg| { msg.is_none() },
-        fn |msg, idx| { msg.byte(idx) },
+        fn |msg| { organizer_msg_is_none(msg) },
+        fn |msg, idx| { organizer_msg_byte(msg, idx) },
         block_tx,
-        false,
-        organizer_msg_none(),
-    );
-    let after_promote = promote_backlog(
-        OrganizerMsgStreamState$(
-            stream: stepped.state,
-            backlog_msg: state.backlog_msg,
-        ),
-    );
-    let after_primary = enqueue_msg(after_promote, primary_msg_valid, primary_msg);
-    let after_secondary = enqueue_msg(after_primary, secondary_msg_valid, secondary_msg);
-
-    OrganizerMsgStreamEval$(
-        state: after_secondary,
-        tx_req: stepped.tx_req,
+        msg_valid,
+        msg,
     )
 }

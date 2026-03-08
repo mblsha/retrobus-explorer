@@ -1,6 +1,26 @@
 pub type TaggedTraceWord = uint<32>;
 pub type TaggedTracePayload = uint<24>;
 
+pub enum TaggedTraceKind {
+    Addr,
+    Data,
+    Misc,
+    Overflow,
+}
+
 pub fn pack_tagged_trace_word(tag: uint<8>, payload: TaggedTracePayload) -> TaggedTraceWord {
     (zext(tag) << 24) | zext(payload)
+}
+
+pub fn tagged_trace_tag(kind: TaggedTraceKind) -> uint<8> {
+    match kind {
+        TaggedTraceKind::Addr => b'A',
+        TaggedTraceKind::Data => b'D',
+        TaggedTraceKind::Misc => b'M',
+        TaggedTraceKind::Overflow => b'O',
+    }
+}
+
+pub fn pack_tagged_trace_kind(kind: TaggedTraceKind, payload: TaggedTracePayload) -> TaggedTraceWord {
+    pack_tagged_trace_word(tagged_trace_tag(kind), payload)
 }
