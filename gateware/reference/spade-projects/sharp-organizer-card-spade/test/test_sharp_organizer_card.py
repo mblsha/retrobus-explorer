@@ -143,6 +143,28 @@ async def _ft_host_send_word(dut, word: int, timeout_cycles: int = 2000):
     raise AssertionError("timeout waiting for FT read handshake")
 
 
+async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 4000) -> list[tuple[int, int]]:
+    observed: list[tuple[int, int]] = []
+    for _ in range(timeout_cycles):
+        await FallingEdge(dut.ft_clk)
+        will_write = int(dut.ft_oe.value) == 1 and int(dut.ft_wr.value) == 0 and int(dut.ft_txe.value) == 0
+        sampled = (int(dut.ft_data_drive.value) & 0xFFFF, int(dut.ft_be_drive.value) & 0x3)
+        await RisingEdge(dut.ft_clk)
+        await Timer(1, units="ps")
+        if will_write:
+            observed.append(sampled)
+            if len(observed) == count:
+                return observed
+    raise AssertionError(f"timeout waiting for {count} FT writes")
+
+
+async def _ft_recv_stream_word(dut, timeout_cycles: int = 4000) -> int:
+    words = await _collect_ft_writes(dut, 2, timeout_cycles)
+    assert words[0][1] == 0x3
+    assert words[1][1] == 0x3
+    return words[0][0] | (words[1][0] << 16)
+
+
 async def _wait_saleae_fall(dut, bit_idx: int, timeout_cycles: int = 4000):
     prev = _saleae_bit(int(dut.saleae.value), bit_idx)
     for _ in range(timeout_cycles):
@@ -283,3 +305,110 @@ async def stable_bus_changes_emit_debounced_uart_monitor_streams(dut):
     assert await addr_task == 0x5A35
     assert await data_task == 0xC3
     assert await misc_task == expected_misc
+
+
+@cocotb.test()
+async def ft_stream_emits_tagged_monitor_words_when_enabled(dut):
+    await _init(dut)
+
+    recv_plus = cocotb.start_soon(_uart_recv_byte(dut))
+    await _ft_host_send_word(dut, ord("S") | (ord("+") << 8))
+    assert await recv_plus == ord("+")
+    await tick(dut.clk, 4)
+
+    dut.ft_txe.value = 0
+
+    dut.addr.value = 0x13579
+    await tick(dut.clk, 16)
+    assert await _ft_recv_stream_word(dut) == ((ord("A") << 24) | 0x13579)
+
+    dut.data.value = 0xC3
+    await tick(dut.clk, 16)
+    assert await _ft_recv_stream_word(dut) == ((ord("D") << 24) | 0xC3)
+
+    dut.conn_rw.value = 1
+    dut.conn_ci.value = 1
+    dut.conn_mskrom.value = 1
+    dut.conn_sram2.value = 1
+    dut.conn_stnby.value = 1
+    dut.conn_vpp.value = 1
+    expected_misc = _misc_word(1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1)
+    await tick(dut.clk, 16)
+    assert await _ft_recv_stream_word(dut) == ((ord("M") << 24) | expected_misc)
+
+
+@cocotb.test()
+async def ft_stream_emits_overflow_words_for_extra_samples(dut):
+    await _init(dut)
+
+    recv_plus = cocotb.start_soon(_uart_recv_byte(dut))
+    await _ft_host_send_word(dut, ord("S") | (ord("+") << 8))
+    assert await recv_plus == ord("+")
+    await tick(dut.clk, 4)
+
+    dut.ft_txe.value = 1
+    dut.addr.value = 0x2468A
+    dut.data.value = 0x5C
+    dut.conn_rw.value = 1
+    dut.conn_ci.value = 1
+    dut.conn_mskrom.value = 1
+    dut.conn_sram2.value = 1
+    dut.conn_stnby.value = 1
+    dut.conn_vpp.value = 1
+    await tick(dut.clk, 16)
+
+    dut.ft_txe.value = 0
+    words = await _collect_ft_writes(dut, 4)
+    assert words[0][1] == 0x3
+    assert words[1][1] == 0x3
+    assert words[2][1] == 0x3
+    assert words[3][1] == 0x3
+    assert (words[0][0] | (words[1][0] << 16)) == ((ord("A") << 24) | 0x2468A)
+    assert (words[2][0] | (words[3][0] << 16)) == ((ord("O") << 24) | 0x2)
+
+
+@cocotb.test()
+async def reply_queue_holds_three_messages_while_usb_tx_is_busy(dut):
+    await _init(dut)
+
+    recv_first = cocotb.start_soon(_uart_recv_byte(dut))
+    await _ft_host_send_word(dut, ord("S") | (ord("+") << 8))
+    await tick(dut.clk, 20)
+    await _ft_host_send_word(dut, ord("S") | (ord("-") << 8))
+    await tick(dut.clk, 20)
+    await _ft_host_send_word(dut, ord("S") | (ord("+") << 8))
+
+    assert await recv_first == ord("+")
+    recv_second = cocotb.start_soon(_uart_recv_byte(dut))
+    assert await recv_second == ord("-")
+    recv_third = cocotb.start_soon(_uart_recv_byte(dut))
+    assert await recv_third == ord("+")
+
+
+@cocotb.test()
+async def ft_stream_and_command_replies_survive_contention_and_backpressure(dut):
+    await _init(dut)
+
+    recv_plus = cocotb.start_soon(_uart_recv_byte(dut))
+    await _ft_host_send_word(dut, ord("S") | (ord("+") << 8))
+    assert await recv_plus == ord("+")
+    await tick(dut.clk, 4)
+
+    dut.ft_txe.value = 1
+    dut.addr.value = 0x2468A
+    await tick(dut.clk, 16)
+
+    recv_counter = cocotb.start_soon(_uart_recv_byte(dut))
+    await _uart_send_byte(dut, ord("c"))
+    await tick(dut.clk, 20)
+    await _ft_host_send_word(dut, ord("S") | (ord("-") << 8))
+
+    assert await recv_counter == ord("c")
+    recv_disable = cocotb.start_soon(_uart_recv_byte(dut))
+    assert await recv_disable == ord("-")
+
+    await tick(dut.clk, 8)
+    assert int(dut.led.value) & 0x01 == 0
+
+    dut.ft_txe.value = 0
+    assert await _ft_recv_stream_word(dut) == ((ord("A") << 24) | 0x2468A)

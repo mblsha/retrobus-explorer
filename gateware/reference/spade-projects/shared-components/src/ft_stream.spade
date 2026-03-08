@@ -44,13 +44,7 @@ pub fn ft_word_stream_step(
     } else {
         0
     };
-    let stream_fifo_rget = if get_fifo {
-        can_push && !stream_fifo_empty
-    } else if stream {
-        can_push
-    } else {
-        false
-    };
+    let stream_fifo_rget = get_fifo && can_push && !stream_fifo_empty;
 
     FtWordStreamOut$(
         next_state: next_state,

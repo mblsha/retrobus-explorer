@@ -1,0 +1,124 @@
+use shared_components::serial::FtData;
+
+use super::{
+    msg::OrganizerMsg,
+    protocol::{SaleaeState, SyncSubMode},
+};
+
+pub(lib) enum OrganizerCmd {
+    None,
+    Counter,
+    SyncStandard,
+    SyncMemory,
+}
+
+pub(lib) struct OrganizerUiInputs {
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    ft_ui_dout_empty: bool,
+    ft_ui_dout: FtData,
+    saleae_state: SaleaeState,
+    sync_sub_mode: SyncSubMode,
+    ft_enabled: bool,
+}
+
+pub(lib) struct OrganizerUiOut {
+    next_saleae_state: SaleaeState,
+    next_sync_sub_mode: SyncSubMode,
+    next_ft_enabled: bool,
+    usb_msg: OrganizerMsg,
+    ft_msg: OrganizerMsg,
+}
+
+fn organizer_cmd_from_byte(rx_valid: bool, byte: uint<8>) -> OrganizerCmd {
+    if !rx_valid {
+        OrganizerCmd::None()
+    } else if byte == b'c' {
+        OrganizerCmd::Counter()
+    } else if byte == b's' {
+        OrganizerCmd::SyncStandard()
+    } else if byte == b'S' {
+        OrganizerCmd::SyncMemory()
+    } else {
+        OrganizerCmd::None()
+    }
+}
+
+impl OrganizerCmd {
+    fn msg(self) -> OrganizerMsg {
+        match self {
+            Self::None => OrganizerMsg::None(),
+            Self::Counter => OrganizerMsg::CounterSelected(),
+            Self::SyncStandard => OrganizerMsg::SyncStandardSelected(),
+            Self::SyncMemory => OrganizerMsg::SyncMemorySelected(),
+        }
+    }
+
+    fn next_saleae_state(self, saleae_state: SaleaeState) -> SaleaeState {
+        match self {
+            Self::Counter => SaleaeState::Counter(),
+            Self::SyncStandard => SaleaeState::SyncSignals(),
+            Self::SyncMemory => SaleaeState::SyncSignals(),
+            Self::None => saleae_state,
+        }
+    }
+
+    fn next_sync_sub_mode(self, sync_sub_mode: SyncSubMode) -> SyncSubMode {
+        match self {
+            Self::SyncStandard => SyncSubMode::StandardSignals(),
+            Self::SyncMemory => SyncSubMode::MemoryBanks(),
+            Self::Counter => sync_sub_mode,
+            Self::None => sync_sub_mode,
+        }
+    }
+}
+
+enum OrganizerFtCmd {
+    None,
+    Enable,
+    Disable,
+}
+
+fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData) -> OrganizerFtCmd {
+    let b0: uint<8> = trunc(word);
+    let b1: uint<8> = trunc(word >> 8);
+    if ft_ui_dout_empty || b0 != b'S' {
+        OrganizerFtCmd::None()
+    } else if b1 == b'+' {
+        OrganizerFtCmd::Enable()
+    } else if b1 == b'-' {
+        OrganizerFtCmd::Disable()
+    } else {
+        OrganizerFtCmd::None()
+    }
+}
+
+impl OrganizerFtCmd {
+    fn msg(self) -> OrganizerMsg {
+        match self {
+            Self::None => OrganizerMsg::None(),
+            Self::Enable => OrganizerMsg::FtEnabled(),
+            Self::Disable => OrganizerMsg::FtDisabled(),
+        }
+    }
+
+    fn next_ft_enabled(self, ft_enabled: bool) -> bool {
+        match self {
+            Self::Enable => true,
+            Self::Disable => false,
+            Self::None => ft_enabled,
+        }
+    }
+}
+
+pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiOut {
+    let usb_cmd = organizer_cmd_from_byte(inputs.rx_valid, inputs.rx_byte);
+    let ft_cmd = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout);
+    OrganizerUiOut$(
+        next_saleae_state: usb_cmd.next_saleae_state(inputs.saleae_state),
+        next_sync_sub_mode: usb_cmd.next_sync_sub_mode(inputs.sync_sub_mode),
+        next_ft_enabled: ft_cmd.next_ft_enabled(inputs.ft_enabled),
+        usb_msg: usb_cmd.msg(),
+        ft_msg: ft_cmd.msg(),
+    )
+}
