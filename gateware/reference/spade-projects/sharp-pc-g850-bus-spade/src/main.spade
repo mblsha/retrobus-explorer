@@ -29,11 +29,9 @@ use shared_components::{
     primitives::{falling_edge, reset_conditioner, rising_edge, sync_z80_controls_n},
     serial::{FtBe, FtData},
 };
-use self::console::{ConsoleMsg, ConsoleMsgContext, console_stream_step};
+use self::console::{ConsoleCmd, ConsoleMsg, ConsoleMsgContext, console_cmd_from_byte, console_stream_step};
 
 type ConsoleStreamState = ByteMsgStreamState<ConsoleMsg, 16>;
-type G850BridgeAddrOut = UartBridgeOut<16, 24>;
-type G850BridgeByteOut = UartBridgeOut<8, 24>;
 
 impl CycleDecode {
     fn gate_ft(self, allow_ft_remote: bool) -> CycleDecode {
@@ -102,16 +100,12 @@ struct CaptureRegs {
     data: uint<8>,
 }
 
-struct ConsoleRegs {
-    stream: ConsoleStreamState,
-}
-
 struct MainState {
     wait: WaitRegs,
     saleae: SaleaeRegs,
     ft: FtRegs,
     capture: CaptureRegs,
-    console: ConsoleRegs,
+    console_stream: ConsoleStreamState,
 }
 
 struct MainInputs {
@@ -142,25 +136,16 @@ struct MainEval {
     stream_fifo_wput: bool,
 }
 
-enum ConsoleCmd {
-    None,
-    Arm,
-    Lock,
-    RemoteOn,
-    RemoteOff,
-    FtOn,
-    FtOff,
-    Help,
-    Status,
-    PinMap,
-    Unknown,
-}
-
 struct ConsoleCmdEffect {
     next_ft_enabled: bool,
     next_ft_remote_allowed: bool,
     next_ft_armed: bool,
     msg: ConsoleMsg,
+}
+
+struct ConsoleStreamEval {
+    next_state: ConsoleStreamState,
+    tx_req: TxReq8,
 }
 
 struct BoardRenderInputs {
@@ -225,123 +210,79 @@ fn reset_main_state() -> MainState {
             data_d0: 0,
             data: 0,
         ),
-        console: ConsoleRegs$(
-            stream: init_console_stream(),
-        ),
+        console_stream: init_console_stream(),
     )
 }
 
-fn decode_console_cmd(rx_valid: bool, rx_byte: uint<8>, cycle_decode: CycleDecode) -> ConsoleCmd {
-    if !rx_valid || cycle_decode.rx_digit.valid || cycle_decode.saleae_cmd.valid {
-        ConsoleCmd::None()
-    } else {
-        let upper = rx_byte.to_upper();
-        if upper == b'A' {
-            ConsoleCmd::Arm()
-        } else if upper == b'K' {
-            ConsoleCmd::Lock()
-        } else if upper == b'P' {
-            ConsoleCmd::RemoteOn()
-        } else if upper == b'O' {
-            ConsoleCmd::RemoteOff()
-        } else if upper == b'F' {
-            ConsoleCmd::FtOn()
-        } else if upper == b'X' {
-            ConsoleCmd::FtOff()
-        } else if upper == b'H' {
-            ConsoleCmd::Help()
-        } else if upper == b'Q' {
-            ConsoleCmd::Status()
-        } else if upper == b'L' {
-            ConsoleCmd::PinMap()
-        } else {
-            ConsoleCmd::Unknown()
-        }
-    }
+fn console_effect_keep(ft: FtRegs, enabled: bool, msg: ConsoleMsg) -> ConsoleCmdEffect {
+    ConsoleCmdEffect$(
+        next_ft_enabled: enabled,
+        next_ft_remote_allowed: ft.remote_allowed,
+        next_ft_armed: ft.armed,
+        msg: msg,
+    )
+}
+
+fn console_effect_set(enabled: bool, remote_allowed: bool, armed: bool, msg: ConsoleMsg) -> ConsoleCmdEffect {
+    ConsoleCmdEffect$(
+        next_ft_enabled: enabled,
+        next_ft_remote_allowed: remote_allowed,
+        next_ft_armed: armed,
+        msg: msg,
+    )
+}
+
+fn eval_console_stream(
+    stream: ConsoleStreamState,
+    ctx: ConsoleMsgContext,
+    block_tx: bool,
+    next_msg: ConsoleMsg,
+) -> ConsoleStreamEval {
+    let next = console_stream_step(stream, ctx, block_tx, true, next_msg);
+    let current = console_stream_step(stream, ctx, block_tx, false, ConsoleMsg::None());
+    ConsoleStreamEval$(
+        next_state: next.state,
+        tx_req: current.tx_req,
+    )
 }
 
 impl ConsoleCmd {
     fn effect(self, ft: FtRegs, next_ft_enabled_default: bool) -> ConsoleCmdEffect {
         match self {
-            Self::None => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::None(),
-            ),
-            Self::Arm => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: true,
-                msg: ConsoleMsg::Ok(),
-            ),
-            Self::Lock => ConsoleCmdEffect$(
-                next_ft_enabled: false,
-                next_ft_remote_allowed: false,
-                next_ft_armed: false,
-                msg: ConsoleMsg::Ok(),
-            ),
-            Self::RemoteOn if ft.armed => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: true,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Ok(),
-            ),
-            Self::RemoteOn => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Err(),
-            ),
-            Self::RemoteOff => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: false,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Ok(),
-            ),
-            Self::FtOn if ft.armed => ConsoleCmdEffect$(
-                next_ft_enabled: true,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Ok(),
-            ),
-            Self::FtOn => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Err(),
-            ),
-            Self::FtOff => ConsoleCmdEffect$(
-                next_ft_enabled: false,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Ok(),
-            ),
-            Self::Help => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Help(),
-            ),
-            Self::Status => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Status(),
-            ),
-            Self::PinMap => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::PinMap(),
-            ),
-            Self::Unknown => ConsoleCmdEffect$(
-                next_ft_enabled: next_ft_enabled_default,
-                next_ft_remote_allowed: ft.remote_allowed,
-                next_ft_armed: ft.armed,
-                msg: ConsoleMsg::Help(),
-            ),
+            Self::None => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::None()),
+            Self::Arm => console_effect_set(next_ft_enabled_default, ft.remote_allowed, true, ConsoleMsg::Ok()),
+            Self::Lock => console_effect_set(false, false, false, ConsoleMsg::Ok()),
+            Self::RemoteOn if ft.armed => console_effect_set(next_ft_enabled_default, true, ft.armed, ConsoleMsg::Ok()),
+            Self::RemoteOn => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Err()),
+            Self::RemoteOff => console_effect_set(next_ft_enabled_default, false, ft.armed, ConsoleMsg::Ok()),
+            Self::FtOn if ft.armed => console_effect_set(true, ft.remote_allowed, ft.armed, ConsoleMsg::Ok()),
+            Self::FtOn => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Err()),
+            Self::FtOff => console_effect_set(false, ft.remote_allowed, ft.armed, ConsoleMsg::Ok()),
+            Self::Help => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Help()),
+            Self::Status => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Status()),
+            Self::PinMap => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::PinMap()),
+            Self::Unknown => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Help()),
         }
+    }
+}
+
+impl UsbCmdOut {
+    fn rx_preempts_console(self, tx_busy: bool) -> bool {
+        (self.rx_is_digit || self.rx_is_saleae_cmd) && !tx_busy
+    }
+
+    fn with_upstream(self, tx_busy: bool, rx_byte: uint<8>, upstream_req: TxReq8) -> UsbCmdOut {
+        UsbCmdOut$(
+            next_wait_enabled: self.next_wait_enabled,
+            next_saleae_state: self.next_saleae_state,
+            rx_is_digit: self.rx_is_digit,
+            rx_is_saleae_cmd: self.rx_is_saleae_cmd,
+            tx_req: if self.rx_preempts_console(tx_busy) {
+                TxReq8$(valid: true, byte: rx_byte)
+            } else {
+                upstream_req
+            },
+        )
     }
 }
 
@@ -436,17 +377,17 @@ impl MainState {
             self.ft.fifo_full_counter
         };
 
-        let console_cmd = decode_console_cmd(inputs.rx_valid, inputs.rx_byte, inputs.cycle_decode);
+        let console_cmd = if !inputs.rx_valid || usb_cmd_state.rx_is_digit || usb_cmd_state.rx_is_saleae_cmd {
+            ConsoleCmd::None()
+        } else {
+            console_cmd_from_byte(inputs.rx_byte)
+        };
         let console_effect = console_cmd.effect(self.ft, ft_mux.next_ft_enabled);
-        let rx_preempts_console =
-            (usb_cmd_state.rx_is_digit || usb_cmd_state.rx_is_saleae_cmd) &&
-            !inputs.tx_busy;
-
-        let next_console_stream = console_stream_step(
-            self.console.stream,
+        let rx_preempts_console = usb_cmd_state.rx_preempts_console(inputs.tx_busy);
+        let console_eval = eval_console_stream(
+            self.console_stream,
             self.console_ctx(),
             inputs.tx_busy || rx_preempts_console,
-            true,
             console_effect.msg,
         );
 
@@ -480,23 +421,8 @@ impl MainState {
         );
         let ft_tx_req = tx_req_arbiter(ft_mux.ft_tx_req, bus_tx_req, tx_req_none());
 
-        let console_stream = console_stream_step(
-            self.console.stream,
-            self.console_ctx(),
-            inputs.tx_busy || rx_preempts_console,
-            false,
-            ConsoleMsg::None(),
-        );
-        let uart_upstream_req = tx_req_arbiter(console_stream.tx_req, ft_tx_req, tx_req_none());
-
-        let usb_cmd = inputs.cycle_decode.usb_inputs(
-            self.wait.enabled,
-            self.saleae.state,
-            inputs.rx_valid,
-            inputs.rx_byte,
-            inputs.tx_busy,
-            uart_upstream_req,
-        ).parse();
+        let uart_upstream_req = tx_req_arbiter(console_eval.tx_req, ft_tx_req, tx_req_none());
+        let usb_cmd = usb_cmd_state.with_upstream(inputs.tx_busy, inputs.rx_byte, uart_upstream_req);
 
         MainEval$(
             next_state: MainState$(
@@ -524,9 +450,7 @@ impl MainState {
                     data_d0: inputs.data,
                     data: self.capture.data_d0,
                 ),
-                console: ConsoleRegs$(
-                    stream: next_console_stream.state,
-                ),
+                console_stream: console_eval.next_state,
             ),
             usb_cmd: usb_cmd,
             bus_sample: bus_sample,
@@ -577,15 +501,15 @@ fn render_board_outputs(
 }
 
 #[inline]
-entity g850_uart_bridge_addr(
+entity g850_uart_bridge<#uint WIDTH>(
     wclk: clock,
     wrst: bool,
-    din: BusAddr,
+    din: uint<WIDTH>,
     wput: bool,
     rclk: clock,
     rrst: bool,
-) -> G850BridgeAddrOut {
-    inst au_bridge::<16, 4, 100_000_000, 24>(
+) -> UartBridgeOut<WIDTH, 24> {
+    inst au_bridge::<WIDTH, 4, 100_000_000, 24>(
         wclk,
         wrst,
         din,
@@ -595,74 +519,6 @@ entity g850_uart_bridge_addr(
         true,
         BridgePolicy::QueueOnly(),
     )
-}
-
-#[inline]
-entity g850_uart_bridge_u8(
-    wclk: clock,
-    wrst: bool,
-    din: uint<8>,
-    wput: bool,
-    rclk: clock,
-    rrst: bool,
-) -> G850BridgeByteOut {
-    inst au_bridge::<8, 4, 100_000_000, 24>(
-        wclk,
-        wrst,
-        din,
-        wput,
-        rclk,
-        rrst,
-        true,
-        BridgePolicy::QueueOnly(),
-    )
-}
-
-#[inline]
-entity g850_ft_link(
-    clk: clock,
-    rst: bool,
-    ft_clk: clock,
-    ft_rxf: bool,
-    ft_txe: bool,
-    ft_data_in: FtData,
-    ft_be_in: FtBe,
-    ui_din: FtData,
-    ui_din_be: FtBe,
-    ui_din_valid: bool,
-    ui_dout_get: bool,
-    ft_data_out: inv &FtData,
-    ft_be_out: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &FtData,
-    ui_dout_be: inv &FtBe,
-    ui_dout_empty: inv &bool,
-) {
-    inst au_ft_tap_u16(
-        clk,
-        rst,
-        ft_clk,
-        ft_rxf,
-        ft_txe,
-        ft_data_in,
-        ft_be_in,
-        ui_din,
-        ui_din_be,
-        ui_din_valid,
-        ui_dout_get,
-        ft_data_out,
-        ft_be_out,
-        ft_rd,
-        ft_wr,
-        ft_oe,
-        ui_din_full,
-        ui_dout,
-        ui_dout_be,
-        ui_dout_empty,
-    );
 }
 
 #[no_mangle(all)]
@@ -800,7 +656,7 @@ entity main_core(
     set stream_fifo_empty_w = &stream_fifo.empty;
     set stream_fifo_dout_w = &stream_fifo.dout;
 
-    let addr_bridge = inst g850_uart_bridge_addr(
+    let addr_bridge = inst g850_uart_bridge::<16>(
         clk,
         rst,
         state.capture.addr,
@@ -808,7 +664,7 @@ entity main_core(
         clk_uart,
         rst,
     );
-    let event_bridge = inst g850_uart_bridge_u8(
+    let event_bridge = inst g850_uart_bridge::<8>(
         clk,
         rst,
         bus_sample.bus_event_char,
@@ -816,7 +672,7 @@ entity main_core(
         clk_uart,
         rst,
     );
-    let data_bridge = inst g850_uart_bridge_u8(
+    let data_bridge = inst g850_uart_bridge::<8>(
         clk,
         rst,
         state.capture.data,
@@ -825,7 +681,7 @@ entity main_core(
         rst,
     );
 
-    let _ft = inst g850_ft_link(
+    let _ft = inst au_ft_tap_u16(
         clk,
         rst,
         ft_clk_clock,
