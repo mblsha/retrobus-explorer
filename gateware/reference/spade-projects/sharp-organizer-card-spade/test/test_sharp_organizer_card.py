@@ -399,7 +399,7 @@ async def ft_stream_preserves_later_stable_samples_under_ft_backpressure(dut):
 
 
 @cocotb.test()
-async def reply_queue_holds_three_messages_while_usb_tx_is_busy(dut):
+async def reply_stream_delivers_sequential_messages_with_shared_stream_state(dut):
     await _init(dut)
 
     recv_first = cocotb.start_soon(_uart_recv_byte(dut))

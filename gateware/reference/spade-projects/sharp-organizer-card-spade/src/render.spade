@@ -1,7 +1,4 @@
-use super::{
-    monitor::OrganizerMonitorLines,
-    protocol::{SaleaeState, SyncSubMode},
-};
+use super::protocol::{SaleaeState, SyncSubMode};
 
 pub(lib) struct BoardRenderState {
     ft_enabled: bool,
@@ -81,47 +78,5 @@ pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
                 SyncSubMode::MemoryBanks => saleae_memory_banks(inputs),
             },
         },
-    )
-}
-
-pub(lib) fn render_board_outputs_with_lines(
-    state: BoardRenderState,
-    stream_fifo_empty: bool,
-    stream_fifo_full: bool,
-    ft_txe: bool,
-    ft_rxf: bool,
-    ft_ui_dout_empty: bool,
-    ft_ui_din_full: bool,
-    conn_rw_sync: bool,
-    conn_oe_sync: bool,
-    conn_ci_sync: bool,
-    conn_e2_sync: bool,
-    conn_mskrom_sync: bool,
-    conn_sram1_sync: bool,
-    conn_sram2_sync: bool,
-    conn_eprom_sync: bool,
-    lines: OrganizerMonitorLines,
-) -> BoardOutputs {
-    render_board_outputs(
-        BoardRenderInputs$(
-            state: state,
-            stream_fifo_empty: stream_fifo_empty,
-            stream_fifo_full: stream_fifo_full,
-            ft_txe: ft_txe,
-            ft_rxf: ft_rxf,
-            ft_ui_dout_empty: ft_ui_dout_empty,
-            ft_ui_din_full: ft_ui_din_full,
-            conn_rw_sync: conn_rw_sync,
-            conn_oe_sync: conn_oe_sync,
-            conn_ci_sync: conn_ci_sync,
-            conn_e2_sync: conn_e2_sync,
-            conn_mskrom_sync: conn_mskrom_sync,
-            conn_sram1_sync: conn_sram1_sync,
-            conn_sram2_sync: conn_sram2_sync,
-            conn_eprom_sync: conn_eprom_sync,
-            misc_line: lines.misc,
-            data_line: lines.data,
-            addr_line: lines.addr,
-        ),
     )
 }

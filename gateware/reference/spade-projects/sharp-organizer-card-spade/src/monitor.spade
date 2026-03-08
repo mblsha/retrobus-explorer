@@ -10,12 +10,18 @@ use super::protocol::{
     OrganizerAddr,
     OrganizerData,
     OrganizerOverflowCount,
+    OrganizerSample,
     OrganizerSampleReq,
+    OrganizerTraceEventReq,
     SampleCount,
     organizer_addr_sample,
     organizer_data_sample,
     organizer_misc_sample,
     organizer_sample_none,
+    organizer_trace_event_none,
+    organizer_trace_event_overflow,
+    organizer_trace_event_sample,
+    organizer_zero_sample,
     sample_addr_value,
     sample_data_value,
     sample_misc_value,
@@ -25,10 +31,15 @@ type AddrSampleState = StableSampleState<20, 32>;
 type DataSampleState = StableSampleState<8, 32>;
 type MiscSampleState = StableSampleState<11, 32>;
 
+struct QueuedSample {
+    valid: bool,
+    sample: OrganizerSample,
+}
+
 struct OrganizerQueuedSamples {
-    first: OrganizerSampleReq,
-    second: OrganizerSampleReq,
-    third: OrganizerSampleReq,
+    first: QueuedSample,
+    second: QueuedSample,
+    third: QueuedSample,
 }
 
 struct QueuePushOut {
@@ -38,7 +49,7 @@ struct QueuePushOut {
 
 struct MonitorDispatchState {
     queue: OrganizerQueuedSamples,
-    emit_sample: OrganizerSampleReq,
+    emit_sample: QueuedSample,
     overflow_count: OrganizerOverflowCount,
 }
 
@@ -59,9 +70,7 @@ pub(lib) struct OrganizerMonitorSamples {
 pub(lib) struct OrganizerMonitorOut {
     next_state: OrganizerMonitorState,
     samples: OrganizerMonitorSamples,
-    stream_sample: OrganizerSampleReq,
-    stream_overflow_valid: bool,
-    stream_overflow_count: OrganizerOverflowCount,
+    stream_event: OrganizerTraceEventReq,
 }
 
 pub(lib) struct OrganizerMonitorLines {
@@ -74,11 +83,15 @@ pub(lib) fn stable_threshold() -> SampleCount {
     5
 }
 
+fn empty_queued_sample() -> QueuedSample {
+    QueuedSample$(valid: false, sample: organizer_zero_sample())
+}
+
 fn empty_queued_samples() -> OrganizerQueuedSamples {
     OrganizerQueuedSamples$(
-        first: organizer_sample_none(),
-        second: organizer_sample_none(),
-        third: organizer_sample_none(),
+        first: empty_queued_sample(),
+        second: empty_queued_sample(),
+        third: empty_queued_sample(),
     )
 }
 
@@ -92,13 +105,13 @@ pub(lib) fn reset_monitor_state() -> OrganizerMonitorState {
     )
 }
 
-fn queue_push(queue: OrganizerQueuedSamples, sample: OrganizerSampleReq) -> QueuePushOut {
-    if !sample.valid {
+fn queue_push(queue: OrganizerQueuedSamples, sample_valid: bool, sample: OrganizerSample) -> QueuePushOut {
+    if !sample_valid {
         QueuePushOut$(queue: queue, dropped: 0)
     } else if !queue.first.valid {
         QueuePushOut$(
             queue: OrganizerQueuedSamples$(
-                first: sample,
+                first: QueuedSample$(valid: true, sample: sample),
                 second: queue.second,
                 third: queue.third,
             ),
@@ -108,7 +121,7 @@ fn queue_push(queue: OrganizerQueuedSamples, sample: OrganizerSampleReq) -> Queu
         QueuePushOut$(
             queue: OrganizerQueuedSamples$(
                 first: queue.first,
-                second: sample,
+                second: QueuedSample$(valid: true, sample: sample),
                 third: queue.third,
             ),
             dropped: 0,
@@ -118,7 +131,7 @@ fn queue_push(queue: OrganizerQueuedSamples, sample: OrganizerSampleReq) -> Queu
             queue: OrganizerQueuedSamples$(
                 first: queue.first,
                 second: queue.second,
-                third: sample,
+                third: QueuedSample$(valid: true, sample: sample),
             ),
             dropped: 0,
         )
@@ -129,19 +142,20 @@ fn queue_push(queue: OrganizerQueuedSamples, sample: OrganizerSampleReq) -> Queu
 
 fn dispatch_sample(
     state: MonitorDispatchState,
-    sample: OrganizerSampleReq,
+    sample_valid: bool,
+    sample: OrganizerSample,
     stream_ready: bool,
 ) -> MonitorDispatchState {
-    if !sample.valid {
+    if !sample_valid {
         state
     } else if stream_ready && !state.emit_sample.valid {
         MonitorDispatchState$(
             queue: state.queue,
-            emit_sample: sample,
+            emit_sample: QueuedSample$(valid: true, sample: sample),
             overflow_count: state.overflow_count,
         )
     } else {
-        let pushed = queue_push(state.queue, sample);
+        let pushed = queue_push(state.queue, sample_valid, sample);
         MonitorDispatchState$(
             queue: pushed.queue,
             emit_sample: state.emit_sample,
@@ -208,28 +222,33 @@ impl OrganizerMonitorState {
                     overflow_count: 0,
                 ),
                 samples: samples,
-                stream_sample: organizer_sample_none(),
-                stream_overflow_valid: false,
-                stream_overflow_count: 0,
+                stream_event: organizer_trace_event_none(),
             )
         } else {
             let dispatch0 = MonitorDispatchState$(
                 queue: empty_queued_samples(),
-                emit_sample: organizer_sample_none(),
+                emit_sample: empty_queued_sample(),
                 overflow_count: self.overflow_count,
             );
-            let dispatch1 = dispatch_sample(dispatch0, self.queued.first, stream_ready);
-            let dispatch2 = dispatch_sample(dispatch1, self.queued.second, stream_ready);
-            let dispatch3 = dispatch_sample(dispatch2, self.queued.third, stream_ready);
-            let dispatch4 = dispatch_sample(dispatch3, samples.addr, stream_ready);
-            let dispatch5 = dispatch_sample(dispatch4, samples.data, stream_ready);
-            let dispatch6 = dispatch_sample(dispatch5, samples.misc, stream_ready);
+            let dispatch1 = dispatch_sample(dispatch0, self.queued.first.valid, self.queued.first.sample, stream_ready);
+            let dispatch2 = dispatch_sample(dispatch1, self.queued.second.valid, self.queued.second.sample, stream_ready);
+            let dispatch3 = dispatch_sample(dispatch2, self.queued.third.valid, self.queued.third.sample, stream_ready);
+            let dispatch4 = dispatch_sample(dispatch3, samples.addr.valid, samples.addr.sample, stream_ready);
+            let dispatch5 = dispatch_sample(dispatch4, samples.data.valid, samples.data.sample, stream_ready);
+            let dispatch6 = dispatch_sample(dispatch5, samples.misc.valid, samples.misc.sample, stream_ready);
 
             let emit_overflow = stream_ready && !dispatch6.emit_sample.valid && dispatch6.overflow_count != 0;
             let next_overflow_count = if emit_overflow {
                 0
             } else {
                 dispatch6.overflow_count
+            };
+            let stream_event = if dispatch6.emit_sample.valid {
+                organizer_trace_event_sample(dispatch6.emit_sample.sample)
+            } else if emit_overflow {
+                organizer_trace_event_overflow(dispatch6.overflow_count)
+            } else {
+                organizer_trace_event_none()
             };
 
             OrganizerMonitorOut$(
@@ -241,9 +260,7 @@ impl OrganizerMonitorState {
                     overflow_count: next_overflow_count,
                 ),
                 samples: samples,
-                stream_sample: dispatch6.emit_sample,
-                stream_overflow_valid: emit_overflow,
-                stream_overflow_count: dispatch6.overflow_count,
+                stream_event: stream_event,
             )
         }
     }

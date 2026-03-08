@@ -1,7 +1,7 @@
 use shared_components::serial::FtData;
 
 use super::{
-    msg::OrganizerMsg,
+    msg::OrganizerReply,
     protocol::{SaleaeState, SyncSubMode},
 };
 
@@ -31,26 +31,20 @@ pub(lib) struct OrganizerUiInputs {
 struct OrganizerCmdEffect {
     next_saleae_state: SaleaeState,
     next_sync_sub_mode: SyncSubMode,
-    msg: OrganizerMsg,
+    reply: OrganizerReply,
 }
 
 struct OrganizerFtCmdEffect {
     next_ft_enabled: bool,
-    msg: OrganizerMsg,
+    reply: OrganizerReply,
 }
 
-pub(lib) struct OrganizerUiOut {
+pub(lib) struct OrganizerUiEffect {
     next_saleae_state: SaleaeState,
     next_sync_sub_mode: SyncSubMode,
     next_ft_enabled: bool,
-    primary_msg_valid: bool,
-    primary_msg: OrganizerMsg,
-    secondary_msg_valid: bool,
-    secondary_msg: OrganizerMsg,
-}
-
-fn msg_is_none(msg: OrganizerMsg) -> bool {
-    if let OrganizerMsg::None = msg { true } else { false }
+    primary_reply: OrganizerReply,
+    secondary_reply: OrganizerReply,
 }
 
 fn organizer_cmd_from_byte(rx_valid: bool, byte: uint<8>) -> OrganizerCmd {
@@ -87,22 +81,22 @@ impl OrganizerCmd {
             Self::None => OrganizerCmdEffect$(
                 next_saleae_state: saleae_state,
                 next_sync_sub_mode: sync_sub_mode,
-                msg: OrganizerMsg::None(),
+                reply: OrganizerReply::None(),
             ),
             Self::Counter => OrganizerCmdEffect$(
                 next_saleae_state: SaleaeState::Counter(),
                 next_sync_sub_mode: sync_sub_mode,
-                msg: OrganizerMsg::CounterSelected(),
+                reply: OrganizerReply::CounterSelected(),
             ),
             Self::SyncStandard => OrganizerCmdEffect$(
                 next_saleae_state: SaleaeState::SyncSignals(),
                 next_sync_sub_mode: SyncSubMode::StandardSignals(),
-                msg: OrganizerMsg::SyncStandardSelected(),
+                reply: OrganizerReply::SyncStandardSelected(),
             ),
             Self::SyncMemory => OrganizerCmdEffect$(
                 next_saleae_state: SaleaeState::SyncSignals(),
                 next_sync_sub_mode: SyncSubMode::MemoryBanks(),
-                msg: OrganizerMsg::SyncMemorySelected(),
+                reply: OrganizerReply::SyncMemorySelected(),
             ),
         }
     }
@@ -113,33 +107,31 @@ impl OrganizerFtCmd {
         match self {
             Self::None => OrganizerFtCmdEffect$(
                 next_ft_enabled: ft_enabled,
-                msg: OrganizerMsg::None(),
+                reply: OrganizerReply::None(),
             ),
             Self::Enable => OrganizerFtCmdEffect$(
                 next_ft_enabled: true,
-                msg: OrganizerMsg::FtEnabled(),
+                reply: OrganizerReply::FtEnabled(),
             ),
             Self::Disable => OrganizerFtCmdEffect$(
                 next_ft_enabled: false,
-                msg: OrganizerMsg::FtDisabled(),
+                reply: OrganizerReply::FtDisabled(),
             ),
         }
     }
 }
 
-pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiOut {
+pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
     let usb_effect = organizer_cmd_from_byte(inputs.rx_valid, inputs.rx_byte)
         .effect(inputs.saleae_state, inputs.sync_sub_mode);
     let ft_effect = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout)
         .effect(inputs.ft_enabled);
 
-    OrganizerUiOut$(
+    OrganizerUiEffect$(
         next_saleae_state: usb_effect.next_saleae_state,
         next_sync_sub_mode: usb_effect.next_sync_sub_mode,
         next_ft_enabled: ft_effect.next_ft_enabled,
-        primary_msg_valid: !msg_is_none(usb_effect.msg),
-        primary_msg: usb_effect.msg,
-        secondary_msg_valid: !msg_is_none(ft_effect.msg),
-        secondary_msg: ft_effect.msg,
+        primary_reply: usb_effect.reply,
+        secondary_reply: ft_effect.reply,
     )
 }

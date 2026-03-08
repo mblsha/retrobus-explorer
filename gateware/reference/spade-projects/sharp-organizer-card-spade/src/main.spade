@@ -1,3 +1,4 @@
+mod board;
 mod cmd;
 mod monitor;
 mod msg;
@@ -12,33 +13,28 @@ use shared_components::{
     primitives::{reset_conditioner, sync_bundle},
     serial::{FtBe, FtData},
 };
-use self::cmd::{
-    OrganizerUiInputs,
-    OrganizerUiOut,
-    eval_organizer_ui,
+use self::board::organizer_board_outputs;
+use self::cmd::{OrganizerUiEffect, OrganizerUiInputs, eval_organizer_ui};
+use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, reset_monitor_state};
+use self::msg::{
+    OrganizerMsgStreamOut,
+    OrganizerMsgStreamState,
+    init_organizer_msg_stream,
+    organizer_msg_from_replies,
+    organizer_msg_is_none,
+    organizer_msg_stream_step,
 };
-use self::monitor::{
-    OrganizerMonitorOut,
-    OrganizerMonitorSamples,
-    OrganizerMonitorLines,
-    OrganizerMonitorState,
-    organizer_monitor_uarts,
-    reset_monitor_state,
-};
-use self::msg::{OrganizerMsgStreamState, init_organizer_msg_stream, organizer_msg_stream_step};
 use self::protocol::{
     MiscWord,
     OrganizerAddr,
     OrganizerData,
-    OrganizerSampleReq,
     OrganizerTraceWord,
     SaleaeState,
     SyncSubMode,
     misc_word,
-    pack_overflow_word,
-    pack_sample_word,
+    pack_trace_event_word,
 };
-use self::render::{BoardOutputs, BoardRenderState, render_board_outputs_with_lines};
+use self::render::{BoardOutputs, BoardRenderState};
 
 struct FtRegs {
     enabled: bool,
@@ -78,9 +74,8 @@ struct MainEval {
     next_state: MainState,
     tx_req: TxReq8,
     monitor_samples: OrganizerMonitorSamples,
-    stream_sample: OrganizerSampleReq,
-    stream_overflow_valid: bool,
-    stream_overflow_count: uint<24>,
+    stream_word_valid: bool,
+    stream_word: OrganizerTraceWord,
     ft_stream: FtWordStreamOut,
     board_state: BoardRenderState,
 }
@@ -113,7 +108,7 @@ fn current_board_state(state: MainState) -> BoardRenderState {
 
 impl MainState {
     fn eval(self, inputs: MainInputs) -> MainEval {
-        let ui: OrganizerUiOut = eval_organizer_ui(
+        let ui: OrganizerUiEffect = eval_organizer_ui(
             OrganizerUiInputs$(
                 rx_valid: inputs.rx_valid,
                 rx_byte: inputs.rx_byte,
@@ -139,14 +134,19 @@ impl MainState {
             inputs.stream_fifo_empty,
             inputs.stream_fifo_dout,
         );
-        let msg_stream = organizer_msg_stream_step(
+        let ui_msg = organizer_msg_from_replies(ui.primary_reply, ui.secondary_reply);
+        let msg_stream: OrganizerMsgStreamOut = organizer_msg_stream_step(
             self.msg_stream,
             inputs.tx_busy,
-            ui.primary_msg_valid,
-            ui.primary_msg,
-            ui.secondary_msg_valid,
-            ui.secondary_msg,
+            !organizer_msg_is_none(ui_msg),
+            ui_msg,
         );
+        let stream_word_valid = monitor.stream_event.valid;
+        let stream_word = if monitor.stream_event.valid {
+            pack_trace_event_word(monitor.stream_event.event)
+        } else {
+            0
+        };
 
         MainEval$(
             next_state: MainState$(
@@ -169,9 +169,8 @@ impl MainState {
             ),
             tx_req: msg_stream.tx_req,
             monitor_samples: monitor.samples,
-            stream_sample: monitor.stream_sample,
-            stream_overflow_valid: monitor.stream_overflow_valid,
-            stream_overflow_count: monitor.stream_overflow_count,
+            stream_word_valid: stream_word_valid,
+            stream_word: stream_word,
             ft_stream: ft_stream,
             board_state: current_board_state(self),
         )
@@ -294,19 +293,11 @@ entity main_core(
         };
 
     let eval = state.eval(inputs);
-    let stream_fifo_wput = eval.stream_sample.valid || eval.stream_overflow_valid;
-    let stream_fifo_din = if eval.stream_sample.valid {
-        pack_sample_word(eval.stream_sample.sample)
-    } else if eval.stream_overflow_valid {
-        pack_overflow_word(eval.stream_overflow_count)
-    } else {
-        0
-    };
     let stream_fifo = inst au_stream_fifo_u32(
         clk,
         rst,
-        stream_fifo_din,
-        stream_fifo_wput,
+        eval.stream_word,
+        eval.stream_word_valid,
         eval.ft_stream.stream_fifo_rget,
     );
     set stream_fifo_full_w = &stream_fifo.full;
@@ -346,14 +337,12 @@ entity main_core(
         ft_ui_dout_empty_w,
     );
 
-    let monitor_lines: OrganizerMonitorLines = inst organizer_monitor_uarts(
+    let board_outputs: BoardOutputs = inst organizer_board_outputs(
         clk,
         rst,
         clk_uart,
-        eval.monitor_samples,
-    );
-    let board_outputs: BoardOutputs = render_board_outputs_with_lines(
         eval.board_state,
+        eval.monitor_samples,
         *stream_fifo_empty,
         *stream_fifo_full,
         ft_txe,
@@ -368,7 +357,6 @@ entity main_core(
         conn_sram1_sync,
         conn_sram2_sync,
         conn_eprom_sync,
-        monitor_lines,
     );
 
     let _unused_ft_ui_dout_be = *ft_ui_dout_be;
