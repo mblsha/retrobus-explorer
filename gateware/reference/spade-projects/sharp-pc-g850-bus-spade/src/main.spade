@@ -22,7 +22,7 @@ use shared_components::{
     clocking::{clk_wiz_400, sampled_bool_clock},
     config::{au_bridge, au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_rx, au_usb_uart_tx8_tap},
     message_stream::{ByteMsgStreamState, TxReq8, tx_req_arbiter, tx_req_none},
-    primitives::{falling_edge, reset_conditioner, rising_edge, sync_z80_controls},
+    primitives::{falling_edge, reset_conditioner, rising_edge, sync_z80_controls_n},
     serial::{FtBe, FtData},
 };
 use self::console::{ConsoleMsg, ConsoleMsgContext, console_stream_step};
@@ -225,7 +225,7 @@ entity main_core(
     let clk_uart = unsafe { inst clk_wiz_400(clk) };
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
 
-    let z80_sync = inst sync_z80_controls(clk, z80_m1, z80_mreq, z80_iorq, z80_rd, z80_wr);
+    let z80_sync = inst sync_z80_controls_n::<6, 4, 4, 2, 2>(clk, z80_m1, z80_mreq, z80_iorq, z80_rd, z80_wr);
     let z80_m1_sync = z80_sync.m1;
     let z80_mreq_sync = z80_sync.mreq;
     let z80_iorq_sync = z80_sync.iorq;

@@ -234,6 +234,7 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
 }
 
 impl<T> FifoOut<T> {
+    #[inline]
     pub entity tap(self, full: inv &bool, empty: inv &bool, dout: inv &T) {
         let full_value = self.full;
         let empty_value = self.empty;

@@ -511,6 +511,7 @@ pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER
     )
 }
 
+#[inline]
 pub entity ft_out_tap<TData, TBe>(
     out: FtOut<TData, TBe>,
     ft_data_out: inv &TData,
