@@ -1,18 +1,22 @@
 mod console;
 
 use shared_components::{
-    bridges::BridgePolicy,
+    bridges::{BridgePolicy, UartBridgeOut},
     bus_debug::{
         BusAddr,
-        CycleDecode,
+        BusSamplerOut,
         CoreStepInputs,
+        CoreStepOut,
+        CycleDecode,
         FtState,
         FtStreamCmdDecode,
+        FtStreamMuxOut,
         OverflowCount,
         SaleaeState,
         SampleState,
         TraceWord,
         UsbCmdInputs,
+        UsbCmdOut,
         WaitCounter,
         decode_cycle,
         pack_event_word,
@@ -26,6 +30,10 @@ use shared_components::{
     serial::{FtBe, FtData},
 };
 use self::console::{ConsoleMsg, ConsoleMsgContext, console_stream_step};
+
+type ConsoleStreamState = ByteMsgStreamState<ConsoleMsg, 16>;
+type G850BridgeAddrOut = UartBridgeOut<16, 24>;
+type G850BridgeByteOut = UartBridgeOut<8, 24>;
 
 impl CycleDecode {
     fn gate_ft(self, allow_ft_remote: bool) -> CycleDecode {
@@ -66,122 +74,595 @@ impl CycleDecode {
     }
 }
 
-struct MainState {
+struct WaitRegs {
     sample_state: SampleState,
-    wait_enabled: uint<8>,
-    wait_counter: WaitCounter,
+    enabled: uint<8>,
+    counter: WaitCounter,
     last_addr: BusAddr,
-    saleae_state: SaleaeState,
-    saleae_counter: uint<8>,
-    ft_enabled: bool,
-    ft_state: FtState,
-    ft_cur_value: TraceWord,
+}
+
+struct SaleaeRegs {
+    state: SaleaeState,
+    counter: uint<8>,
+}
+
+struct FtRegs {
+    enabled: bool,
+    state: FtState,
+    cur_value: TraceWord,
     fifo_full_counter: OverflowCount,
-    addr_sync_d0: BusAddr,
-    addr_sync: BusAddr,
-    data_sync_d0: uint<8>,
-    data_sync: uint<8>,
-    ft_remote_allowed: bool,
-    ft_armed: bool,
-    console_stream: ByteMsgStreamState<ConsoleMsg, 16>,
+    remote_allowed: bool,
+    armed: bool,
+}
+
+struct CaptureRegs {
+    addr_d0: BusAddr,
+    addr: BusAddr,
+    data_d0: uint<8>,
+    data: uint<8>,
+}
+
+struct ConsoleRegs {
+    stream: ConsoleStreamState,
+}
+
+struct MainState {
+    wait: WaitRegs,
+    saleae: SaleaeRegs,
+    ft: FtRegs,
+    capture: CaptureRegs,
+    console: ConsoleRegs,
+}
+
+struct MainInputs {
+    cycle_decode: CycleDecode,
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    rd_rise: bool,
+    wr_rise: bool,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    ft_ui_dout: FtData,
+    stream_fifo_full: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: TraceWord,
+    addr: BusAddr,
+    data: uint<8>,
+}
+
+struct MainEval {
+    next_state: MainState,
+    usb_cmd: UsbCmdOut,
+    bus_sample: BusSamplerOut,
+    ft_mux: FtStreamMuxOut,
+    stream_fifo_din: TraceWord,
+    stream_fifo_wput: bool,
+}
+
+enum ConsoleCmd {
+    None,
+    Arm,
+    Lock,
+    RemoteOn,
+    RemoteOff,
+    FtOn,
+    FtOff,
+    Help,
+    Status,
+    PinMap,
+    Unknown,
+}
+
+struct ConsoleCmdEffect {
+    next_ft_enabled: bool,
+    next_ft_remote_allowed: bool,
+    next_ft_armed: bool,
+    msg: ConsoleMsg,
+}
+
+struct BoardRenderInputs {
+    ft_txe: bool,
+    ft_rxf: bool,
+    ft_ui_dout_empty: bool,
+    ft_ui_din_full: bool,
+    z80_wr_sync: bool,
+    z80_rd_sync: bool,
+    z80_iorq_sync: bool,
+    z80_mreq_sync: bool,
+    z80_m1_sync: bool,
+    wr_rise: bool,
+    rd_rise: bool,
+    iorq_fall: bool,
+    mreq_fall: bool,
+    z80_wr: bool,
+    z80_rd: bool,
+    z80_iorq: bool,
+    z80_mreq: bool,
+    data_line: bool,
+    event_line: bool,
+    addr_line: bool,
+}
+
+struct BoardOutputs {
+    led: [bool; 8],
+    saleae: [bool; 8],
+}
+
+fn init_console_stream() -> ConsoleStreamState {
+    ByteMsgStreamState$(
+        cur_msg: ConsoleMsg::None(),
+        cur_idx: 0,
+        pending_msg: ConsoleMsg::None(),
+    )
+}
+
+fn reset_main_state() -> MainState {
+    MainState$(
+        wait: WaitRegs$(
+            sample_state: SampleState::SampleBus(),
+            enabled: 0,
+            counter: 0,
+            last_addr: 0,
+        ),
+        saleae: SaleaeRegs$(
+            state: SaleaeState::DataSignals(),
+            counter: 0,
+        ),
+        ft: FtRegs$(
+            enabled: false,
+            state: FtState::GetFifo(),
+            cur_value: 0,
+            fifo_full_counter: 0,
+            remote_allowed: false,
+            armed: false,
+        ),
+        capture: CaptureRegs$(
+            addr_d0: 0,
+            addr: 0,
+            data_d0: 0,
+            data: 0,
+        ),
+        console: ConsoleRegs$(
+            stream: init_console_stream(),
+        ),
+    )
+}
+
+fn decode_console_cmd(rx_valid: bool, rx_byte: uint<8>, cycle_decode: CycleDecode) -> ConsoleCmd {
+    if !rx_valid || cycle_decode.rx_digit.valid || cycle_decode.saleae_cmd.valid {
+        ConsoleCmd::None()
+    } else {
+        let upper = rx_byte.to_upper();
+        if upper == b'A' {
+            ConsoleCmd::Arm()
+        } else if upper == b'K' {
+            ConsoleCmd::Lock()
+        } else if upper == b'P' {
+            ConsoleCmd::RemoteOn()
+        } else if upper == b'O' {
+            ConsoleCmd::RemoteOff()
+        } else if upper == b'F' {
+            ConsoleCmd::FtOn()
+        } else if upper == b'X' {
+            ConsoleCmd::FtOff()
+        } else if upper == b'H' {
+            ConsoleCmd::Help()
+        } else if upper == b'Q' {
+            ConsoleCmd::Status()
+        } else if upper == b'L' {
+            ConsoleCmd::PinMap()
+        } else {
+            ConsoleCmd::Unknown()
+        }
+    }
+}
+
+impl ConsoleCmd {
+    fn effect(self, ft: FtRegs, next_ft_enabled_default: bool) -> ConsoleCmdEffect {
+        match self {
+            Self::None => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::None(),
+            ),
+            Self::Arm => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: true,
+                msg: ConsoleMsg::Ok(),
+            ),
+            Self::Lock => ConsoleCmdEffect$(
+                next_ft_enabled: false,
+                next_ft_remote_allowed: false,
+                next_ft_armed: false,
+                msg: ConsoleMsg::Ok(),
+            ),
+            Self::RemoteOn if ft.armed => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: true,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Ok(),
+            ),
+            Self::RemoteOn => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Err(),
+            ),
+            Self::RemoteOff => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: false,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Ok(),
+            ),
+            Self::FtOn if ft.armed => ConsoleCmdEffect$(
+                next_ft_enabled: true,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Ok(),
+            ),
+            Self::FtOn => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Err(),
+            ),
+            Self::FtOff => ConsoleCmdEffect$(
+                next_ft_enabled: false,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Ok(),
+            ),
+            Self::Help => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Help(),
+            ),
+            Self::Status => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Status(),
+            ),
+            Self::PinMap => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::PinMap(),
+            ),
+            Self::Unknown => ConsoleCmdEffect$(
+                next_ft_enabled: next_ft_enabled_default,
+                next_ft_remote_allowed: ft.remote_allowed,
+                next_ft_armed: ft.armed,
+                msg: ConsoleMsg::Help(),
+            ),
+        }
+    }
 }
 
 impl MainState {
-    fn step_inputs(
-        self,
-        cycle_decode: CycleDecode,
-        mreq_fall: bool,
-        iorq_fall: bool,
-        tx_busy: bool,
-        ft_ui_din_full: bool,
-        ft_ui_dout_empty: bool,
-        stream_fifo_empty: bool,
-        stream_fifo_dout: TraceWord,
-        rd_rise: bool,
-        wr_rise: bool,
-        stream_fifo_full: bool,
-    ) -> CoreStepInputs {
+    fn step_inputs(self, cycle_decode: CycleDecode, inputs: MainInputs) -> CoreStepInputs {
         CoreStepInputs$(
-            sample_state: self.sample_state,
-            wait_counter: self.wait_counter,
-            wait_enabled: self.wait_enabled,
-            mreq_fall: mreq_fall,
-            iorq_fall: iorq_fall,
+            sample_state: self.wait.sample_state,
+            wait_counter: self.wait.counter,
+            wait_enabled: self.wait.enabled,
+            mreq_fall: inputs.mreq_fall,
+            iorq_fall: inputs.iorq_fall,
             cycle_decode: cycle_decode,
-            tx_busy: tx_busy,
-            ft_state: self.ft_state,
-            ft_enabled: self.ft_enabled,
-            ft_cur_value: self.ft_cur_value,
-            ft_ui_din_full: ft_ui_din_full,
-            ft_ui_dout_empty: ft_ui_dout_empty,
-            stream_fifo_empty: stream_fifo_empty,
-            stream_fifo_dout: stream_fifo_dout,
-            rd_rise: rd_rise,
-            wr_rise: wr_rise,
-            stream_fifo_full: stream_fifo_full,
-            fifo_full_counter: self.fifo_full_counter,
+            tx_busy: inputs.tx_busy,
+            ft_state: self.ft.state,
+            ft_enabled: self.ft.enabled,
+            ft_cur_value: self.ft.cur_value,
+            ft_ui_din_full: inputs.ft_ui_din_full,
+            ft_ui_dout_empty: inputs.ft_ui_dout_empty,
+            stream_fifo_empty: inputs.stream_fifo_empty,
+            stream_fifo_dout: inputs.stream_fifo_dout,
+            rd_rise: inputs.rd_rise,
+            wr_rise: inputs.wr_rise,
+            stream_fifo_full: inputs.stream_fifo_full,
+            fifo_full_counter: self.ft.fifo_full_counter,
         )
     }
 
     fn console_ctx(self) -> ConsoleMsgContext {
         ConsoleMsgContext$(
-            wait_enabled: self.wait_enabled,
-            saleae_state: self.saleae_state,
-            ft_enabled: self.ft_enabled,
-            ft_remote_allowed: self.ft_remote_allowed,
-            ft_armed: self.ft_armed,
+            wait_enabled: self.wait.enabled,
+            saleae_state: self.saleae.state,
+            ft_enabled: self.ft.enabled,
+            ft_remote_allowed: self.ft.remote_allowed,
+            ft_armed: self.ft.armed,
+        )
+    }
+
+    fn eval(self, inputs: MainInputs) -> MainEval {
+        let cycle_decode_for_step = inputs.cycle_decode.gate_ft(self.ft.remote_allowed);
+        let step: CoreStepOut = self.step_inputs(cycle_decode_for_step, inputs).run();
+        let bus_sample = step.sample;
+        let ft_mux = step.ft_mux;
+
+        let usb_cmd_state = inputs.cycle_decode.usb_inputs(
+            self.wait.enabled,
+            self.saleae.state,
+            inputs.rx_valid,
+            inputs.rx_byte,
+            inputs.tx_busy,
+            tx_req_none(),
+        ).parse();
+
+        let next_sample_state = if bus_sample.sample_is_bus {
+            if bus_sample.bus_start && self.wait.enabled > 0 {
+                SampleState::InsertWait()
+            } else {
+                self.wait.sample_state
+            }
+        } else if bus_sample.wait_done {
+            SampleState::SampleBus()
+        } else {
+            self.wait.sample_state
+        };
+
+        let next_wait_counter = if bus_sample.sample_is_bus {
+            if bus_sample.bus_start && self.wait.enabled > 0 {
+                0
+            } else {
+                self.wait.counter
+            }
+        } else {
+            self.wait.counter +. 1
+        };
+
+        let next_last_addr = if bus_sample.sample_is_bus && bus_sample.bus_start {
+            self.capture.addr
+        } else {
+            self.wait.last_addr
+        };
+
+        let next_saleae_counter = if let SaleaeState::Counter = self.saleae.state {
+            self.saleae.counter +. 1
+        } else {
+            self.saleae.counter
+        };
+
+        let next_fifo_full_counter = if inputs.cycle_decode.bus.bus_event_valid && self.ft.enabled && inputs.stream_fifo_full {
+            self.ft.fifo_full_counter +. 1
+        } else if step.should_emit_overflow {
+            0
+        } else {
+            self.ft.fifo_full_counter
+        };
+
+        let console_cmd = decode_console_cmd(inputs.rx_valid, inputs.rx_byte, inputs.cycle_decode);
+        let console_effect = console_cmd.effect(self.ft, ft_mux.next_ft_enabled);
+        let rx_preempts_console =
+            (usb_cmd_state.rx_is_digit || usb_cmd_state.rx_is_saleae_cmd) &&
+            !inputs.tx_busy;
+
+        let next_console_stream = console_stream_step(
+            self.console.stream,
+            self.console_ctx(),
+            inputs.tx_busy || rx_preempts_console,
+            true,
+            console_effect.msg,
+        );
+
+        let frame_word = pack_event_word(self.wait.last_addr, self.capture.data, bus_sample.bus_event_char);
+        let overflow_word = pack_overflow_word(self.ft.fifo_full_counter, b'E');
+        let stream_write_event = bus_sample.bus_event_valid && self.ft.enabled && !inputs.stream_fifo_full;
+        let stream_write_overflow = step.should_emit_overflow;
+        let stream_fifo_wput = stream_write_event || stream_write_overflow;
+        let stream_fifo_din: TraceWord = if stream_write_event {
+            frame_word
+        } else if stream_write_overflow {
+            overflow_word
+        } else {
+            0
+        };
+
+        let bus_error_tx = if bus_sample.bus_error.valid && !inputs.tx_busy {
+            TxReq8$(valid: true, byte: bus_sample.bus_error.ch)
+        } else {
+            tx_req_none()
+        };
+        let stream_drop_tx = if bus_sample.bus_event_valid && self.ft.enabled && inputs.stream_fifo_full && !inputs.tx_busy {
+            TxReq8$(valid: true, byte: bus_sample.bus_event_char)
+        } else {
+            tx_req_none()
+        };
+        let bus_tx_req = tx_req_arbiter(
+            bus_error_tx,
+            stream_drop_tx,
+            bus_sample.sample_tx_req,
+        );
+        let ft_tx_req = tx_req_arbiter(ft_mux.ft_tx_req, bus_tx_req, tx_req_none());
+
+        let console_stream = console_stream_step(
+            self.console.stream,
+            self.console_ctx(),
+            inputs.tx_busy || rx_preempts_console,
+            false,
+            ConsoleMsg::None(),
+        );
+        let uart_upstream_req = tx_req_arbiter(console_stream.tx_req, ft_tx_req, tx_req_none());
+
+        let usb_cmd = inputs.cycle_decode.usb_inputs(
+            self.wait.enabled,
+            self.saleae.state,
+            inputs.rx_valid,
+            inputs.rx_byte,
+            inputs.tx_busy,
+            uart_upstream_req,
+        ).parse();
+
+        MainEval$(
+            next_state: MainState$(
+                wait: WaitRegs$(
+                    sample_state: next_sample_state,
+                    enabled: usb_cmd_state.next_wait_enabled,
+                    counter: next_wait_counter,
+                    last_addr: next_last_addr,
+                ),
+                saleae: SaleaeRegs$(
+                    state: usb_cmd_state.next_saleae_state,
+                    counter: next_saleae_counter,
+                ),
+                ft: FtRegs$(
+                    enabled: console_effect.next_ft_enabled,
+                    state: ft_mux.next_ft_state,
+                    cur_value: ft_mux.next_ft_cur_value,
+                    fifo_full_counter: next_fifo_full_counter,
+                    remote_allowed: console_effect.next_ft_remote_allowed,
+                    armed: console_effect.next_ft_armed,
+                ),
+                capture: CaptureRegs$(
+                    addr_d0: inputs.addr,
+                    addr: self.capture.addr_d0,
+                    data_d0: inputs.data,
+                    data: self.capture.data_d0,
+                ),
+                console: ConsoleRegs$(
+                    stream: next_console_stream.state,
+                ),
+            ),
+            usb_cmd: usb_cmd,
+            bus_sample: bus_sample,
+            ft_mux: ft_mux,
+            stream_fifo_din: stream_fifo_din,
+            stream_fifo_wput: stream_fifo_wput,
         )
     }
 }
 
-struct ConsoleCmdDecode {
-    arm: bool,
-    lock: bool,
-    remote_on: bool,
-    remote_off: bool,
-    ft_on: bool,
-    ft_off: bool,
-    help: bool,
-    status: bool,
-    pin_map: bool,
-}
-
-fn default_console_cmd_decode() -> ConsoleCmdDecode {
-    ConsoleCmdDecode$(
-        arm: false,
-        lock: false,
-        remote_on: false,
-        remote_off: false,
-        ft_on: false,
-        ft_off: false,
-        help: false,
-        status: false,
-        pin_map: false,
+fn render_board_outputs(
+    state: MainState,
+    bus_sample: BusSamplerOut,
+    inputs: BoardRenderInputs,
+) -> BoardOutputs {
+    BoardOutputs$(
+        led: [
+            state.ft.enabled,
+            state.ft.remote_allowed,
+            state.ft.armed,
+            bus_sample.sample_is_wait,
+            !inputs.ft_txe,
+            !inputs.ft_rxf,
+            !inputs.ft_ui_dout_empty,
+            inputs.ft_ui_din_full,
+        ],
+        saleae: saleae_mux(
+            state.saleae.state,
+            inputs.z80_wr_sync,
+            inputs.z80_rd_sync,
+            inputs.z80_iorq_sync,
+            inputs.z80_mreq_sync,
+            inputs.z80_m1_sync,
+            inputs.wr_rise,
+            inputs.rd_rise,
+            inputs.iorq_fall,
+            inputs.mreq_fall,
+            inputs.z80_wr,
+            inputs.z80_rd,
+            inputs.z80_iorq,
+            inputs.z80_mreq,
+            inputs.data_line,
+            inputs.event_line,
+            inputs.addr_line,
+            state.saleae.counter,
+        ),
     )
 }
 
-entity decode_console_cmd(
-    clk: clock,
-    rx_valid: bool,
-    rx_byte: uint<8>,
-) -> Option<ConsoleCmdDecode> {
-    let maybe_rx_byte = if rx_valid { Some(rx_byte) } else { None };
+#[inline]
+entity g850_uart_bridge_addr(
+    wclk: clock,
+    wrst: bool,
+    din: BusAddr,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+) -> G850BridgeAddrOut {
+    inst au_bridge::<16, 4, 100_000_000, 24>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        true,
+        BridgePolicy::QueueOnly(),
+    )
+}
 
-    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
-        let _ = clk;
-        let upper = byte.to_upper();
-        ConsoleCmdDecode$(
-            arm: upper == b'A',
-            lock: upper == b'K',
-            remote_on: upper == b'P',
-            remote_off: upper == b'O',
-            ft_on: upper == b'F',
-            ft_off: upper == b'X',
-            help: upper == b'H',
-            status: upper == b'Q',
-            pin_map: upper == b'L',
-        )
-    })
+#[inline]
+entity g850_uart_bridge_u8(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+) -> G850BridgeByteOut {
+    inst au_bridge::<8, 4, 100_000_000, 24>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        true,
+        BridgePolicy::QueueOnly(),
+    )
+}
+
+#[inline]
+entity g850_ft_link(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: FtData,
+    ft_be_in: FtBe,
+    ui_din: FtData,
+    ui_din_be: FtBe,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+    ft_data_out: inv &FtData,
+    ft_be_out: inv &FtBe,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &FtData,
+    ui_dout_be: inv &FtBe,
+    ui_dout_empty: inv &bool,
+) {
+    inst au_ft_tap_u16(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_dout_get,
+        ft_data_out,
+        ft_be_out,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ui_din_full,
+        ui_dout,
+        ui_dout_be,
+        ui_dout_empty,
+    );
 }
 
 #[no_mangle(all)]
@@ -267,361 +748,84 @@ entity main_core(
         *ft_ui_dout,
     );
 
+    let inputs = MainInputs$(
+        cycle_decode: cycle_decode,
+        rx_valid: rx.valid,
+        rx_byte: rx.byte,
+        tx_busy: *tx_busy,
+        mreq_fall: mreq_fall,
+        iorq_fall: iorq_fall,
+        rd_rise: rd_rise,
+        wr_rise: wr_rise,
+        ft_ui_din_full: *ft_ui_din_full,
+        ft_ui_dout_empty: *ft_ui_dout_empty,
+        ft_ui_dout: *ft_ui_dout,
+        stream_fifo_full: *stream_fifo_full,
+        stream_fifo_empty: *stream_fifo_empty,
+        stream_fifo_dout: *stream_fifo_dout,
+        addr: addr,
+        data: data,
+    );
+
     reg(clk) state: MainState
-        reset(rst: MainState$(
-            sample_state: SampleState::SampleBus(),
-            wait_enabled: 0,
-            wait_counter: 0,
-            last_addr: 0,
-            saleae_state: SaleaeState::DataSignals(),
-            saleae_counter: 0,
-            ft_enabled: false,
-            ft_state: FtState::GetFifo(),
-            ft_cur_value: 0,
-            fifo_full_counter: 0,
-            addr_sync_d0: 0,
-            addr_sync: 0,
-            data_sync_d0: 0,
-            data_sync: 0,
-            ft_remote_allowed: false,
-            ft_armed: false,
-            console_stream: ByteMsgStreamState$(
-                cur_msg: ConsoleMsg::None(),
-                cur_idx: 0,
-                pending_msg: ConsoleMsg::None(),
-            ),
-        ))
+        reset(rst: reset_main_state())
         = {
-            let sample_state = state.sample_state;
-            let wait_enabled = state.wait_enabled;
-            let wait_counter = state.wait_counter;
-            let last_addr = state.last_addr;
-            let saleae_state = state.saleae_state;
-            let saleae_counter = state.saleae_counter;
-            let ft_enabled = state.ft_enabled;
-            let ft_state = state.ft_state;
-            let ft_cur_value = state.ft_cur_value;
-            let fifo_full_counter = state.fifo_full_counter;
-            let addr_sync_d0 = state.addr_sync_d0;
-            let addr_sync = state.addr_sync;
-            let data_sync_d0 = state.data_sync_d0;
-            let ft_remote_allowed = state.ft_remote_allowed;
-            let ft_armed = state.ft_armed;
-            let console_stream = state.console_stream;
-
-            let cycle_decode_for_step = cycle_decode.gate_ft(ft_remote_allowed);
-
-            let step_inputs = state.step_inputs(
-                cycle_decode_for_step,
-                mreq_fall,
-                iorq_fall,
-                *tx_busy,
-                *ft_ui_din_full,
-                *ft_ui_dout_empty,
-                *stream_fifo_empty,
-                *stream_fifo_dout,
-                rd_rise,
-                wr_rise,
-                *stream_fifo_full,
-            );
-            let step = step_inputs.run();
-            let bus_sample = step.sample;
-
-            let usb_cmd_inputs = cycle_decode.usb_inputs(
-                wait_enabled,
-                saleae_state,
-                rx.valid,
-                rx.byte,
-                *tx_busy,
-                tx_req_none(),
-            );
-            let usb_cmd_state = usb_cmd_inputs.parse();
-
-            let next_sample_state = if bus_sample.sample_is_bus {
-                if bus_sample.bus_start && wait_enabled > 0 {
-                    SampleState::InsertWait()
-                } else {
-                    sample_state
-                }
-            } else if bus_sample.wait_done {
-                SampleState::SampleBus()
-            } else {
-                sample_state
-            };
-
-            let next_wait_counter = if bus_sample.sample_is_bus {
-                if bus_sample.bus_start && wait_enabled > 0 {
-                    0
-                } else {
-                    wait_counter
-                }
-            } else {
-                wait_counter +. 1
-            };
-
-            let next_last_addr = if bus_sample.sample_is_bus && bus_sample.bus_start {
-                addr_sync
-            } else {
-                last_addr
-            };
-
-            let next_wait_enabled = usb_cmd_state.next_wait_enabled;
-            let next_saleae_state = usb_cmd_state.next_saleae_state;
-
-            let next_saleae_counter = if let SaleaeState::Counter = saleae_state {
-                saleae_counter +. 1
-            } else {
-                saleae_counter
-            };
-
-            let next_fifo_full_counter = if cycle_decode.bus.bus_event_valid && ft_enabled && *stream_fifo_full {
-                fifo_full_counter +. 1
-            } else if step.should_emit_overflow {
-                0
-            } else {
-                fifo_full_counter
-            };
-
-            let console_cmd = inst decode_console_cmd(clk, rx.valid, rx.byte)
-                .unwrap_or(default_console_cmd_decode());
-            let cmd_arm = console_cmd.arm;
-            let cmd_lock = console_cmd.lock;
-            let cmd_remote_on = console_cmd.remote_on;
-            let cmd_remote_off = console_cmd.remote_off;
-            let cmd_ft_on = console_cmd.ft_on;
-            let cmd_ft_off = console_cmd.ft_off;
-            let cmd_help = console_cmd.help;
-            let cmd_status = console_cmd.status;
-            let cmd_pin_map = console_cmd.pin_map;
-
-            let cmd_remote_on_ok = cmd_remote_on && ft_armed;
-            let cmd_ft_on_ok = cmd_ft_on && ft_armed;
-            let cmd_fail = (cmd_remote_on && !ft_armed) || (cmd_ft_on && !ft_armed);
-            let cmd_known =
-                cycle_decode.rx_digit.valid ||
-                cycle_decode.saleae_cmd.valid ||
-                cmd_arm || cmd_lock || cmd_remote_on || cmd_remote_off || cmd_ft_on || cmd_ft_off ||
-                cmd_help || cmd_status || cmd_pin_map;
-            let cmd_unknown = rx.valid && !cmd_known;
-
-            let next_ft_armed = if cmd_lock {
-                false
-            } else if cmd_arm {
-                true
-            } else {
-                ft_armed
-            };
-
-            let next_ft_remote_allowed = if cmd_lock {
-                false
-            } else if cmd_remote_off {
-                false
-            } else if cmd_remote_on_ok {
-                true
-            } else {
-                ft_remote_allowed
-            };
-
-            let next_ft_enabled = if cmd_lock {
-                false
-            } else if cmd_ft_off {
-                false
-            } else if cmd_ft_on_ok {
-                true
-            } else {
-                step.ft_mux.next_ft_enabled
-            };
-            let rx_preempts_console =
-                (usb_cmd_state.rx_is_digit || usb_cmd_state.rx_is_saleae_cmd) &&
-                !*tx_busy;
-
-            let cmd_msg = if cmd_help {
-                ConsoleMsg::Help()
-            } else if cmd_status {
-                ConsoleMsg::Status()
-            } else if cmd_pin_map {
-                ConsoleMsg::PinMap()
-            } else if cmd_unknown {
-                ConsoleMsg::Help()
-            } else if cmd_fail {
-                ConsoleMsg::Err()
-            } else if cmd_arm || cmd_lock || cmd_remote_on_ok || cmd_remote_off || cmd_ft_on_ok || cmd_ft_off {
-                ConsoleMsg::Ok()
-            } else {
-                ConsoleMsg::None()
-            };
-            let console_ctx = state.console_ctx();
-            let next_console_stream = console_stream_step(
-                console_stream,
-                console_ctx,
-                *tx_busy || rx_preempts_console,
-                true,
-                cmd_msg,
-            );
-
-            MainState$(
-                sample_state: next_sample_state,
-                wait_enabled: next_wait_enabled,
-                wait_counter: next_wait_counter,
-                last_addr: next_last_addr,
-                saleae_state: next_saleae_state,
-                saleae_counter: next_saleae_counter,
-                ft_enabled: next_ft_enabled,
-                ft_state: step.ft_mux.next_ft_state,
-                ft_cur_value: step.ft_mux.next_ft_cur_value,
-                fifo_full_counter: next_fifo_full_counter,
-                addr_sync_d0: addr,
-                addr_sync: addr_sync_d0,
-                data_sync_d0: data,
-                data_sync: data_sync_d0,
-                ft_remote_allowed: next_ft_remote_allowed,
-                ft_armed: next_ft_armed,
-                console_stream: next_console_stream.state,
-            )
+            let eval = state.eval(inputs);
+            eval.next_state
         };
 
-    let sample_state = state.sample_state;
-    let wait_enabled = state.wait_enabled;
-    let wait_counter = state.wait_counter;
-    let last_addr = state.last_addr;
-    let saleae_state = state.saleae_state;
-    let saleae_counter = state.saleae_counter;
-    let ft_enabled = state.ft_enabled;
-    let ft_state = state.ft_state;
-    let ft_cur_value = state.ft_cur_value;
-    let fifo_full_counter = state.fifo_full_counter;
-    let addr_sync = state.addr_sync;
-    let data_sync = state.data_sync;
-    let ft_remote_allowed = state.ft_remote_allowed;
-    let ft_armed = state.ft_armed;
-    let console_stream_state = state.console_stream;
-
-    let cycle_decode_for_step = cycle_decode.gate_ft(ft_remote_allowed);
-
-    let step_inputs = state.step_inputs(
-        cycle_decode_for_step,
-        mreq_fall,
-        iorq_fall,
-        *tx_busy,
-        *ft_ui_din_full,
-        *ft_ui_dout_empty,
-        *stream_fifo_empty,
-        *stream_fifo_dout,
-        rd_rise,
-        wr_rise,
-        *stream_fifo_full,
-    );
-    let step = step_inputs.run();
-    let bus_sample = step.sample;
-    let ft_mux = step.ft_mux;
-
-    let frame_word = pack_event_word(last_addr, data_sync, bus_sample.bus_event_char);
-    let overflow_word = pack_overflow_word(fifo_full_counter, b'E');
-    let should_emit_overflow = step.should_emit_overflow;
-    let stream_write_event = bus_sample.bus_event_valid && ft_enabled && !*stream_fifo_full;
-    let stream_write_overflow = should_emit_overflow;
-    let stream_fifo_wput = stream_write_event || stream_write_overflow;
-    let stream_fifo_din: uint<32> = if stream_write_event {
-        frame_word
-    } else if stream_write_overflow {
-        overflow_word
-    } else {
-        0
-    };
-
-    let bus_error_tx = if bus_sample.bus_error.valid && !*tx_busy {
-        TxReq8$(valid: true, byte: bus_sample.bus_error.ch)
-    } else {
-        tx_req_none()
-    };
-    let stream_drop_tx = if bus_sample.bus_event_valid && ft_enabled && *stream_fifo_full && !*tx_busy {
-        TxReq8$(valid: true, byte: bus_sample.bus_event_char)
-    } else {
-        tx_req_none()
-    };
-    // Intentional lossy behavior: when USB TX is busy, one-cycle bus error/drop
-    // markers are dropped instead of queued to keep this telemetry path simple.
-    let bus_tx_req = tx_req_arbiter(
-        bus_error_tx,
-        stream_drop_tx,
-        bus_sample.sample_tx_req,
-    );
-
-    let ft_tx_req = tx_req_arbiter(ft_mux.ft_tx_req, bus_tx_req, tx_req_none());
-    let rx_preempts_console =
-        rx.valid &&
-        (cycle_decode.rx_digit.valid || cycle_decode.saleae_cmd.valid) &&
-        !*tx_busy;
-    let console_ctx = state.console_ctx();
-    let console_stream = console_stream_step(
-        console_stream_state,
-        console_ctx,
-        *tx_busy || rx_preempts_console,
-        false,
-        ConsoleMsg::None(),
-    );
-    let uart_upstream_req = tx_req_arbiter(console_stream.tx_req, ft_tx_req, tx_req_none());
-
-    let usb_cmd_inputs = cycle_decode.usb_inputs(
-        wait_enabled,
-        saleae_state,
-        rx.valid,
-        rx.byte,
-        *tx_busy,
-        uart_upstream_req,
-    );
-    let usb_cmd = usb_cmd_inputs.parse();
-
-    let tx_new_data = usb_cmd.tx_req.valid;
-    let tx_data = usb_cmd.tx_req.byte;
+    let eval = state.eval(inputs);
+    let bus_sample = eval.bus_sample;
+    let ft_mux = eval.ft_mux;
+    let usb_cmd = eval.usb_cmd;
 
     let _tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
         false,
-        tx_data,
-        tx_new_data,
+        usb_cmd.tx_req.byte,
+        usb_cmd.tx_req.valid,
         tx_line_w,
         tx_busy_w,
     );
 
-    let stream_fifo = inst au_stream_fifo_u32(clk, rst, stream_fifo_din, stream_fifo_wput, ft_mux.stream_fifo_rget);
+    let stream_fifo = inst au_stream_fifo_u32(
+        clk,
+        rst,
+        eval.stream_fifo_din,
+        eval.stream_fifo_wput,
+        ft_mux.stream_fifo_rget,
+    );
     set stream_fifo_full_w = &stream_fifo.full;
     set stream_fifo_empty_w = &stream_fifo.empty;
     set stream_fifo_dout_w = &stream_fifo.dout;
 
-    let addr_bridge = inst au_bridge::<16, 4, 100_000_000, 24>(
+    let addr_bridge = inst g850_uart_bridge_addr(
         clk,
         rst,
-        addr_sync,
+        state.capture.addr,
         bus_sample.addr_fifo_wput,
         clk_uart,
         rst,
-        true,
-        BridgePolicy::QueueOnly(),
     );
-    let event_bridge = inst au_bridge::<8, 4, 100_000_000, 24>(
+    let event_bridge = inst g850_uart_bridge_u8(
         clk,
         rst,
         bus_sample.bus_event_char,
         bus_sample.event_fifo_wput,
         clk_uart,
         rst,
-        true,
-        BridgePolicy::QueueOnly(),
     );
-    let data_bridge = inst au_bridge::<8, 4, 100_000_000, 24>(
+    let data_bridge = inst g850_uart_bridge_u8(
         clk,
         rst,
-        data_sync,
+        state.capture.data,
         bus_sample.event_fifo_wput,
         clk_uart,
         rst,
-        true,
-        BridgePolicy::QueueOnly(),
     );
 
-    let _ft = inst au_ft_tap_u16(
+    let _ft = inst g850_ft_link(
         clk,
         rst,
         ft_clk_clock,
@@ -650,36 +854,31 @@ entity main_core(
     let _unused_addr_cerom2 = addr_cerom2;
     let _unused_bus_aux = z80_m1 || z80_ioreset || z80_int1;
 
-    let led_out = [
-        ft_enabled,
-        ft_remote_allowed,
-        ft_armed,
-        bus_sample.sample_is_wait,
-        !ft_txe,
-        !ft_rxf,
-        !*ft_ui_dout_empty,
-        *ft_ui_din_full,
-    ];
-
-    let saleae_out = saleae_mux(
-        saleae_state,
-        z80_wr_sync,
-        z80_rd_sync,
-        z80_iorq_sync,
-        z80_mreq_sync,
-        z80_m1_sync,
-        wr_rise,
-        rd_rise,
-        iorq_fall,
-        mreq_fall,
-        z80_wr,
-        z80_rd,
-        z80_iorq,
-        z80_mreq,
-        data_bridge.line,
-        event_bridge.line,
-        addr_bridge.line,
-        saleae_counter,
+    let board_outputs = render_board_outputs(
+        state,
+        bus_sample,
+        BoardRenderInputs$(
+            ft_txe: ft_txe,
+            ft_rxf: ft_rxf,
+            ft_ui_dout_empty: *ft_ui_dout_empty,
+            ft_ui_din_full: *ft_ui_din_full,
+            z80_wr_sync: z80_wr_sync,
+            z80_rd_sync: z80_rd_sync,
+            z80_iorq_sync: z80_iorq_sync,
+            z80_mreq_sync: z80_mreq_sync,
+            z80_m1_sync: z80_m1_sync,
+            wr_rise: wr_rise,
+            rd_rise: rd_rise,
+            iorq_fall: iorq_fall,
+            mreq_fall: mreq_fall,
+            z80_wr: z80_wr,
+            z80_rd: z80_rd,
+            z80_iorq: z80_iorq,
+            z80_mreq: z80_mreq,
+            data_line: data_bridge.line,
+            event_line: event_bridge.line,
+            addr_line: addr_bridge.line,
+        ),
     );
 
     set ft_data_drive = &*ft_data_out;
@@ -689,6 +888,6 @@ entity main_core(
     set ft_wr = &*ft_wr_sig;
     set ft_oe = &*ft_oe_sig;
     set z80_wait = &!bus_sample.sample_is_wait;
-    set led = &led_out;
-    set saleae = &saleae_out;
+    set led = &board_outputs.led;
+    set saleae = &board_outputs.saleae;
 }
