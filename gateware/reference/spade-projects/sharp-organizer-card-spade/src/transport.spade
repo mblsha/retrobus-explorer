@@ -5,23 +5,18 @@ use shared_components::{
     serial::{FtBe, FtData},
 };
 
-use super::{
-    monitor::{OrganizerMonitorLines, OrganizerMonitorSamples, organizer_monitor_uarts},
-    protocol::OrganizerTraceWord,
-};
+use super::protocol::OrganizerTraceWord;
 
 #[inline]
 pub(lib) entity organizer_transport(
     clk: clock,
     rst: bool,
-    clk_uart: clock,
     ft_clk_clock: clock,
     ft_rxf: bool,
     ft_txe: bool,
     ft_data: FtData,
     ft_be: FtBe,
     tx_req: TxReq8,
-    monitor_samples: OrganizerMonitorSamples,
     stream_word: OrganizerTraceWord,
     stream_word_valid: bool,
     ft_stream: FtWordStreamOut,
@@ -39,7 +34,7 @@ pub(lib) entity organizer_transport(
     stream_fifo_full: inv &bool,
     stream_fifo_empty: inv &bool,
     stream_fifo_dout: inv &OrganizerTraceWord,
-) -> OrganizerMonitorLines {
+) {
     let stream_fifo = inst au_stream_fifo_u32(
         clk,
         rst,
@@ -83,11 +78,4 @@ pub(lib) entity organizer_transport(
         ft_ui_dout_be,
         ft_ui_dout_empty,
     );
-
-    inst organizer_monitor_uarts(
-        clk,
-        rst,
-        clk_uart,
-        monitor_samples,
-    )
 }
