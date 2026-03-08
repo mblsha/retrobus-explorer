@@ -47,10 +47,9 @@ struct QueuePushOut {
     dropped: OrganizerOverflowCount,
 }
 
-struct MonitorDispatchState {
+struct QueuePopOut {
     queue: OrganizerQueuedSamples,
-    emit_sample: QueuedSample,
-    overflow_count: OrganizerOverflowCount,
+    head: QueuedSample,
 }
 
 pub(lib) struct OrganizerMonitorState {
@@ -70,6 +69,10 @@ pub(lib) struct OrganizerMonitorSamples {
 pub(lib) struct OrganizerMonitorOut {
     next_state: OrganizerMonitorState,
     samples: OrganizerMonitorSamples,
+}
+
+pub(lib) struct OrganizerMonitorTransportOut {
+    next_state: OrganizerMonitorState,
     stream_event: OrganizerTraceEventReq,
 }
 
@@ -140,28 +143,15 @@ fn queue_push(queue: OrganizerQueuedSamples, sample_valid: bool, sample: Organiz
     }
 }
 
-fn dispatch_sample(
-    state: MonitorDispatchState,
-    sample_valid: bool,
-    sample: OrganizerSample,
-    stream_ready: bool,
-) -> MonitorDispatchState {
-    if !sample_valid {
-        state
-    } else if stream_ready && !state.emit_sample.valid {
-        MonitorDispatchState$(
-            queue: state.queue,
-            emit_sample: QueuedSample$(valid: true, sample: sample),
-            overflow_count: state.overflow_count,
-        )
-    } else {
-        let pushed = queue_push(state.queue, sample_valid, sample);
-        MonitorDispatchState$(
-            queue: pushed.queue,
-            emit_sample: state.emit_sample,
-            overflow_count: state.overflow_count +. pushed.dropped,
-        )
-    }
+fn queue_pop(queue: OrganizerQueuedSamples) -> QueuePopOut {
+    QueuePopOut$(
+        head: queue.first,
+        queue: OrganizerQueuedSamples$(
+            first: queue.second,
+            second: queue.third,
+            third: empty_queued_sample(),
+        ),
+    )
 }
 
 fn live_samples(
@@ -198,7 +188,6 @@ impl OrganizerMonitorState {
         data_sync: OrganizerData,
         misc_sync: MiscWord,
         stream_capture_enable: bool,
-        stream_ready: bool,
     ) -> OrganizerMonitorOut {
         let addr_step = stable_sample_step(self.addr, addr_sync, stable_threshold());
         let data_step = stable_sample_step(self.data, data_sync, stable_threshold());
@@ -222,45 +211,57 @@ impl OrganizerMonitorState {
                     overflow_count: 0,
                 ),
                 samples: samples,
-                stream_event: organizer_trace_event_none(),
             )
         } else {
-            let dispatch0 = MonitorDispatchState$(
-                queue: empty_queued_samples(),
-                emit_sample: empty_queued_sample(),
-                overflow_count: self.overflow_count,
-            );
-            let dispatch1 = dispatch_sample(dispatch0, self.queued.first.valid, self.queued.first.sample, stream_ready);
-            let dispatch2 = dispatch_sample(dispatch1, self.queued.second.valid, self.queued.second.sample, stream_ready);
-            let dispatch3 = dispatch_sample(dispatch2, self.queued.third.valid, self.queued.third.sample, stream_ready);
-            let dispatch4 = dispatch_sample(dispatch3, samples.addr.valid, samples.addr.sample, stream_ready);
-            let dispatch5 = dispatch_sample(dispatch4, samples.data.valid, samples.data.sample, stream_ready);
-            let dispatch6 = dispatch_sample(dispatch5, samples.misc.valid, samples.misc.sample, stream_ready);
-
-            let emit_overflow = stream_ready && !dispatch6.emit_sample.valid && dispatch6.overflow_count != 0;
-            let next_overflow_count = if emit_overflow {
-                0
-            } else {
-                dispatch6.overflow_count
-            };
-            let stream_event = if dispatch6.emit_sample.valid {
-                organizer_trace_event_sample(dispatch6.emit_sample.sample)
-            } else if emit_overflow {
-                organizer_trace_event_overflow(dispatch6.overflow_count)
-            } else {
-                organizer_trace_event_none()
-            };
-
+            let pushed_addr = queue_push(self.queued, samples.addr.valid, samples.addr.sample);
+            let pushed_data = queue_push(pushed_addr.queue, samples.data.valid, samples.data.sample);
+            let pushed_misc = queue_push(pushed_data.queue, samples.misc.valid, samples.misc.sample);
             OrganizerMonitorOut$(
                 next_state: OrganizerMonitorState$(
                     addr: addr_step.next_state,
                     data: data_step.next_state,
                     misc: misc_step.next_state,
-                    queued: dispatch6.queue,
-                    overflow_count: next_overflow_count,
+                    queued: pushed_misc.queue,
+                    overflow_count: self.overflow_count +. pushed_addr.dropped +. pushed_data.dropped +. pushed_misc.dropped,
                 ),
                 samples: samples,
-                stream_event: stream_event,
+            )
+        }
+    }
+
+    pub fn drain_stream(self, stream_ready: bool) -> OrganizerMonitorTransportOut {
+        if !stream_ready {
+            OrganizerMonitorTransportOut$(
+                next_state: self,
+                stream_event: organizer_trace_event_none(),
+            )
+        } else if self.queued.first.valid {
+            let popped = queue_pop(self.queued);
+            OrganizerMonitorTransportOut$(
+                next_state: OrganizerMonitorState$(
+                    addr: self.addr,
+                    data: self.data,
+                    misc: self.misc,
+                    queued: popped.queue,
+                    overflow_count: self.overflow_count,
+                ),
+                stream_event: organizer_trace_event_sample(popped.head.sample),
+            )
+        } else if self.overflow_count != 0 {
+            OrganizerMonitorTransportOut$(
+                next_state: OrganizerMonitorState$(
+                    addr: self.addr,
+                    data: self.data,
+                    misc: self.misc,
+                    queued: self.queued,
+                    overflow_count: 0,
+                ),
+                stream_event: organizer_trace_event_overflow(self.overflow_count),
+            )
+        } else {
+            OrganizerMonitorTransportOut$(
+                next_state: self,
+                stream_event: organizer_trace_event_none(),
             )
         }
     }

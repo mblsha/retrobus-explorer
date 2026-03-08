@@ -2,8 +2,7 @@ use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, Tx
 
 type OrganizerMsgIdx = uint<2>;
 
-pub(lib) enum OrganizerReply {
-    None,
+pub(lib) enum OrganizerMsgKind {
     CounterSelected,
     SyncStandardSelected,
     SyncMemorySelected,
@@ -11,9 +10,19 @@ pub(lib) enum OrganizerReply {
     FtDisabled,
 }
 
-pub struct OrganizerMsg {
-    len: OrganizerMsgIdx,
-    bytes: [uint<8>; 2],
+pub(lib) enum OrganizerMsg {
+    None,
+    CounterSelected,
+    SyncStandardSelected,
+    SyncMemorySelected,
+    FtEnabled,
+    FtDisabled,
+    CounterFtEnabled,
+    CounterFtDisabled,
+    SyncStandardFtEnabled,
+    SyncStandardFtDisabled,
+    SyncMemoryFtEnabled,
+    SyncMemoryFtDisabled,
 }
 
 pub type OrganizerMsgStreamState = ByteMsgStreamState<OrganizerMsg, 2>;
@@ -21,62 +30,93 @@ pub type OrganizerMsgStreamOut = ByteMsgStreamOut<OrganizerMsg, 2>;
 
 pub fn init_organizer_msg_stream() -> OrganizerMsgStreamState {
     ByteMsgStreamState$(
-        cur_msg: organizer_msg_none(),
+        cur_msg: OrganizerMsg::None(),
         cur_idx: 0,
-        pending_msg: organizer_msg_none(),
+        pending_msg: OrganizerMsg::None(),
     )
 }
 
-fn organizer_reply_byte(reply: OrganizerReply) -> uint<8> {
-    match reply {
-        OrganizerReply::None => 0,
-        OrganizerReply::CounterSelected => b'c',
-        OrganizerReply::SyncStandardSelected => b's',
-        OrganizerReply::SyncMemorySelected => b'S',
-        OrganizerReply::FtEnabled => b'+',
-        OrganizerReply::FtDisabled => b'-',
+impl OrganizerMsgKind {
+    fn byte(self) -> uint<8> {
+        match self {
+            Self::CounterSelected => b'c',
+            Self::SyncStandardSelected => b's',
+            Self::SyncMemorySelected => b'S',
+            Self::FtEnabled => b'+',
+            Self::FtDisabled => b'-',
+        }
     }
 }
 
-pub fn organizer_reply_is_none(reply: OrganizerReply) -> bool {
-    if let OrganizerReply::None = reply { true } else { false }
-}
+impl OrganizerMsg {
+    pub fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
 
-pub fn organizer_msg_none() -> OrganizerMsg {
-    OrganizerMsg$(len: 0, bytes: [0, 0])
-}
+    fn len(self) -> OrganizerMsgIdx {
+        match self {
+            Self::None => 0,
+            Self::CounterSelected => 1,
+            Self::SyncStandardSelected => 1,
+            Self::SyncMemorySelected => 1,
+            Self::FtEnabled => 1,
+            Self::FtDisabled => 1,
+            _ => 2,
+        }
+    }
 
-pub fn organizer_msg_is_none(msg: OrganizerMsg) -> bool {
-    msg.len == 0
-}
-
-pub fn organizer_msg_from_replies(primary: OrganizerReply, secondary: OrganizerReply) -> OrganizerMsg {
-    if organizer_reply_is_none(primary) && organizer_reply_is_none(secondary) {
-        organizer_msg_none()
-    } else if organizer_reply_is_none(secondary) {
-        OrganizerMsg$(
-            len: 1,
-            bytes: [organizer_reply_byte(primary), 0],
-        )
-    } else if organizer_reply_is_none(primary) {
-        OrganizerMsg$(
-            len: 1,
-            bytes: [organizer_reply_byte(secondary), 0],
-        )
-    } else {
-        OrganizerMsg$(
-            len: 2,
-            bytes: [organizer_reply_byte(primary), organizer_reply_byte(secondary)],
-        )
+    fn byte(self, idx: OrganizerMsgIdx) -> TxReq8 {
+        if idx >= self.len() {
+            tx_req_none()
+        } else {
+            let byte = match self {
+                Self::None => 0,
+                Self::CounterSelected => OrganizerMsgKind::CounterSelected().byte(),
+                Self::SyncStandardSelected => OrganizerMsgKind::SyncStandardSelected().byte(),
+                Self::SyncMemorySelected => OrganizerMsgKind::SyncMemorySelected().byte(),
+                Self::FtEnabled => OrganizerMsgKind::FtEnabled().byte(),
+                Self::FtDisabled => OrganizerMsgKind::FtDisabled().byte(),
+                Self::CounterFtEnabled => if idx == 0 { OrganizerMsgKind::CounterSelected().byte() } else { OrganizerMsgKind::FtEnabled().byte() },
+                Self::CounterFtDisabled => if idx == 0 { OrganizerMsgKind::CounterSelected().byte() } else { OrganizerMsgKind::FtDisabled().byte() },
+                Self::SyncStandardFtEnabled => if idx == 0 { OrganizerMsgKind::SyncStandardSelected().byte() } else { OrganizerMsgKind::FtEnabled().byte() },
+                Self::SyncStandardFtDisabled => if idx == 0 { OrganizerMsgKind::SyncStandardSelected().byte() } else { OrganizerMsgKind::FtDisabled().byte() },
+                Self::SyncMemoryFtEnabled => if idx == 0 { OrganizerMsgKind::SyncMemorySelected().byte() } else { OrganizerMsgKind::FtEnabled().byte() },
+                Self::SyncMemoryFtDisabled => if idx == 0 { OrganizerMsgKind::SyncMemorySelected().byte() } else { OrganizerMsgKind::FtDisabled().byte() },
+            };
+            TxReq8$(valid: true, byte: byte)
+        }
     }
 }
 
-fn organizer_msg_byte(msg: OrganizerMsg, idx: OrganizerMsgIdx) -> TxReq8 {
-    if idx < msg.len {
-        let byte_idx: uint<1> = trunc(idx);
-        TxReq8$(valid: true, byte: msg.bytes[byte_idx])
+pub fn organizer_msg_from_kinds(primary_valid: bool, primary: OrganizerMsgKind, secondary_valid: bool, secondary: OrganizerMsgKind) -> OrganizerMsg {
+    if primary_valid && secondary_valid {
+        match (primary, secondary) {
+            (OrganizerMsgKind::CounterSelected, OrganizerMsgKind::FtEnabled) => OrganizerMsg::CounterFtEnabled(),
+            (OrganizerMsgKind::CounterSelected, OrganizerMsgKind::FtDisabled) => OrganizerMsg::CounterFtDisabled(),
+            (OrganizerMsgKind::SyncStandardSelected, OrganizerMsgKind::FtEnabled) => OrganizerMsg::SyncStandardFtEnabled(),
+            (OrganizerMsgKind::SyncStandardSelected, OrganizerMsgKind::FtDisabled) => OrganizerMsg::SyncStandardFtDisabled(),
+            (OrganizerMsgKind::SyncMemorySelected, OrganizerMsgKind::FtEnabled) => OrganizerMsg::SyncMemoryFtEnabled(),
+            (OrganizerMsgKind::SyncMemorySelected, OrganizerMsgKind::FtDisabled) => OrganizerMsg::SyncMemoryFtDisabled(),
+            (_, _) => OrganizerMsg::None(),
+        }
+    } else if primary_valid {
+        match primary {
+            OrganizerMsgKind::CounterSelected => OrganizerMsg::CounterSelected(),
+            OrganizerMsgKind::SyncStandardSelected => OrganizerMsg::SyncStandardSelected(),
+            OrganizerMsgKind::SyncMemorySelected => OrganizerMsg::SyncMemorySelected(),
+            OrganizerMsgKind::FtEnabled => OrganizerMsg::FtEnabled(),
+            OrganizerMsgKind::FtDisabled => OrganizerMsg::FtDisabled(),
+        }
+    } else if secondary_valid {
+        match secondary {
+            OrganizerMsgKind::CounterSelected => OrganizerMsg::CounterSelected(),
+            OrganizerMsgKind::SyncStandardSelected => OrganizerMsg::SyncStandardSelected(),
+            OrganizerMsgKind::SyncMemorySelected => OrganizerMsg::SyncMemorySelected(),
+            OrganizerMsgKind::FtEnabled => OrganizerMsg::FtEnabled(),
+            OrganizerMsgKind::FtDisabled => OrganizerMsg::FtDisabled(),
+        }
     } else {
-        tx_req_none()
+        OrganizerMsg::None()
     }
 }
 
@@ -87,9 +127,9 @@ pub fn organizer_msg_stream_step(
     msg: OrganizerMsg,
 ) -> OrganizerMsgStreamOut {
     state.step_with(
-        organizer_msg_none(),
-        fn |msg| { organizer_msg_is_none(msg) },
-        fn |msg, idx| { organizer_msg_byte(msg, idx) },
+        OrganizerMsg::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
         block_tx,
         msg_valid,
         msg,
