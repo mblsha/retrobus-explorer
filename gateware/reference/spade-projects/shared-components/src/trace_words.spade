@@ -1,0 +1,6 @@
+pub type TaggedTraceWord = uint<32>;
+pub type TaggedTracePayload = uint<24>;
+
+pub fn pack_tagged_trace_word(tag: uint<8>, payload: TaggedTracePayload) -> TaggedTraceWord {
+    (zext(tag) << 24) | zext(payload)
+}

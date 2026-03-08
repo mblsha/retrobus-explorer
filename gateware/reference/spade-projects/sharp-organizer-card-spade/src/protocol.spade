@@ -1,8 +1,10 @@
+use shared_components::trace_words::{TaggedTracePayload, TaggedTraceWord, pack_tagged_trace_word};
+
 pub type OrganizerAddr = uint<20>;
 pub type OrganizerData = uint<8>;
 pub type MiscWord = uint<11>;
 pub type SampleCount = uint<32>;
-pub type OrganizerTraceWord = uint<32>;
+pub type OrganizerTraceWord = TaggedTraceWord;
 pub type OrganizerOverflowCount = uint<24>;
 
 pub(lib) enum SaleaeState {
@@ -19,7 +21,6 @@ pub(lib) enum OrganizerTraceKind {
     Addr,
     Data,
     Misc,
-    Overflow,
 }
 
 pub(lib) struct OrganizerSample {
@@ -32,12 +33,6 @@ pub(lib) struct OrganizerSample {
 pub(lib) struct OrganizerSampleReq {
     valid: bool,
     sample: OrganizerSample,
-}
-
-pub(lib) struct OrganizerTraceEvent {
-    valid: bool,
-    sample: OrganizerSample,
-    overflow_count: OrganizerOverflowCount,
 }
 
 pub(lib) fn organizer_sample_none() -> OrganizerSampleReq {
@@ -88,66 +83,40 @@ pub(lib) fn organizer_misc_sample(misc: MiscWord) -> OrganizerSampleReq {
     )
 }
 
-pub(lib) fn organizer_trace_event_none() -> OrganizerTraceEvent {
-    OrganizerTraceEvent$(
-        valid: false,
-        sample: organizer_sample_none().sample,
-        overflow_count: 0,
-    )
+fn sample_payload(sample: OrganizerSample) -> TaggedTracePayload {
+    match sample.kind {
+        OrganizerTraceKind::Addr => zext(sample.addr),
+        OrganizerTraceKind::Data => zext(sample.data),
+        OrganizerTraceKind::Misc => zext(sample.misc),
+    }
 }
 
-pub(lib) fn organizer_trace_from_sample(req: OrganizerSampleReq) -> OrganizerTraceEvent {
-    OrganizerTraceEvent$(
-        valid: req.valid,
-        sample: req.sample,
-        overflow_count: 0,
-    )
-}
-
-pub(lib) fn organizer_overflow_event(count: OrganizerOverflowCount) -> OrganizerTraceEvent {
-    OrganizerTraceEvent$(
-        valid: count != 0,
-        sample: OrganizerSample$(
-            kind: OrganizerTraceKind::Overflow(),
-            addr: 0,
-            data: 0,
-            misc: 0,
-        ),
-        overflow_count: count,
-    )
+fn sample_tag(sample: OrganizerSample) -> uint<8> {
+    match sample.kind {
+        OrganizerTraceKind::Addr => b'A',
+        OrganizerTraceKind::Data => b'D',
+        OrganizerTraceKind::Misc => b'M',
+    }
 }
 
 pub fn pack_addr_word(addr: OrganizerAddr) -> OrganizerTraceWord {
-    let tag: OrganizerTraceWord = zext(b'A');
-    let payload: OrganizerTraceWord = zext(addr);
-    (tag << 24) | payload
+    pack_tagged_trace_word(b'A', zext(addr))
 }
 
 pub fn pack_data_word(data: OrganizerData) -> OrganizerTraceWord {
-    let tag: OrganizerTraceWord = zext(b'D');
-    let payload: OrganizerTraceWord = zext(data);
-    (tag << 24) | payload
+    pack_tagged_trace_word(b'D', zext(data))
 }
 
 pub fn pack_misc_word(misc: MiscWord) -> OrganizerTraceWord {
-    let tag: OrganizerTraceWord = zext(b'M');
-    let payload: OrganizerTraceWord = zext(misc);
-    (tag << 24) | payload
+    pack_tagged_trace_word(b'M', zext(misc))
 }
 
 pub fn pack_overflow_word(count: OrganizerOverflowCount) -> OrganizerTraceWord {
-    let tag: OrganizerTraceWord = zext(b'O');
-    let payload: OrganizerTraceWord = zext(count);
-    (tag << 24) | payload
+    pack_tagged_trace_word(b'O', count)
 }
 
-pub fn pack_trace_event_word(event: OrganizerTraceEvent) -> OrganizerTraceWord {
-    match event.sample.kind {
-        OrganizerTraceKind::Addr => pack_addr_word(event.sample.addr),
-        OrganizerTraceKind::Data => pack_data_word(event.sample.data),
-        OrganizerTraceKind::Misc => pack_misc_word(event.sample.misc),
-        OrganizerTraceKind::Overflow => pack_overflow_word(event.overflow_count),
-    }
+pub fn pack_sample_word(sample: OrganizerSample) -> OrganizerTraceWord {
+    pack_tagged_trace_word(sample_tag(sample), sample_payload(sample))
 }
 
 pub fn sample_addr_value(req: OrganizerSampleReq) -> OrganizerAddr {

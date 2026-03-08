@@ -1,5 +1,5 @@
 use super::{
-    monitor::{OrganizerMonitorSamples, organizer_monitor_uarts},
+    monitor::OrganizerMonitorLines,
     protocol::{SaleaeState, SyncSubMode},
 };
 
@@ -84,12 +84,7 @@ pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
     )
 }
 
-#[inline]
-pub(lib) entity organizer_render_outputs(
-    clk: clock,
-    rst: bool,
-    clk_uart: clock,
-    samples: OrganizerMonitorSamples,
+pub(lib) fn render_board_outputs_with_lines(
     state: BoardRenderState,
     stream_fifo_empty: bool,
     stream_fifo_full: bool,
@@ -105,8 +100,8 @@ pub(lib) entity organizer_render_outputs(
     conn_sram1_sync: bool,
     conn_sram2_sync: bool,
     conn_eprom_sync: bool,
+    lines: OrganizerMonitorLines,
 ) -> BoardOutputs {
-    let lines = inst organizer_monitor_uarts(clk, rst, clk_uart, samples);
     render_board_outputs(
         BoardRenderInputs$(
             state: state,
