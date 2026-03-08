@@ -1,6 +1,6 @@
 use shared_components::{
     clocking::clk_wiz_400,
-    primitives::{falling_edge, sync2_bundle},
+    primitives::{falling_edge, sync_bundle},
     sharp::count_on_event,
     serial::{ft_aux_activity, usb_loopback},
 };
@@ -43,8 +43,8 @@ entity main(
     let rst = !rst_n;
     let clk_uart = unsafe { inst clk_wiz_400(clk) };
 
-    let conn_core_sync = inst sync2_bundle::<4>(clk, [conn_rw, conn_oe, conn_ci, conn_e2]);
-    let conn_aux_sync = inst sync2_bundle::<7>(clk, [conn_mskrom, conn_sram1, conn_sram2, conn_eprom, conn_stnby, conn_vbatt, conn_vpp]);
+    let conn_core_sync = inst sync_bundle::<2, 4>(clk, [conn_rw, conn_oe, conn_ci, conn_e2]);
+    let conn_aux_sync = inst sync_bundle::<2, 7>(clk, [conn_mskrom, conn_sram1, conn_sram2, conn_eprom, conn_stnby, conn_vbatt, conn_vpp]);
 
     let conn_rw_sync = conn_core_sync[0];
     let conn_oe_sync = conn_core_sync[1];

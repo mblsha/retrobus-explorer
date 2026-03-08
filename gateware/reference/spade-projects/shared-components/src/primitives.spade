@@ -32,16 +32,6 @@ pub entity sync_bundle<#int STAGES, #uint N>(
     inst(STAGES) sync_bundle_pipe::<STAGES, N>(clk, input_signals)
 }
 
-#[deprecated = "Use sync_bundle::<2, N>"]
-#[inline]
-pub entity sync2_bundle<#uint N>(
-    clk: clock,
-    input_signals: [bool; N],
-) -> [bool; N] {
-    // Compatibility wrapper for two-stage bundle sync.
-    inst sync_bundle::<2, N>(clk, input_signals)
-}
-
 pub enum SyncStagePreset {
     Stages2,
     Stages4,
@@ -100,20 +90,6 @@ pub entity sync_z80_controls_n<#int M1_STAGES, #int MREQ_STAGES, #int IORQ_STAGE
         rd: rd_sync,
         wr: wr_sync,
     )
-}
-
-#[deprecated = "Use sync_z80_controls_n::<6, 4, 4, 2, 2>"]
-#[inline]
-pub entity sync_z80_controls(
-    clk: clock,
-    m1: bool,
-    mreq: bool,
-    iorq: bool,
-    rd: bool,
-    wr: bool,
-) -> Z80ControlSync {
-    // Compatibility wrapper for Alchitry-like stage depths.
-    inst sync_z80_controls_n::<6, 4, 4, 2, 2>(clk, m1, mreq, iorq, rd, wr)
 }
 
 pub entity reset_conditioner<#uint STAGES>(
