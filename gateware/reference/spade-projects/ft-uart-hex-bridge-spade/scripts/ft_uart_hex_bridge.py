@@ -32,6 +32,8 @@ def parse_word_token(token: str) -> tuple[int, int]:
         word_text, be_text = token, "3"
     if len(word_text) != 4:
         raise ValueError(f"expected 4 hex digits, got {word_text!r}")
+    if len(be_text) != 1:
+        raise ValueError(f"expected single byte-enable digit, got {be_text!r}")
     word = int(word_text, 16)
     be = int(be_text, 16)
     if not 0 <= be <= 3:
