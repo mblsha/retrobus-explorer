@@ -1,0 +1,379 @@
+mod board;
+mod msg;
+mod protocol;
+mod render;
+
+use shared_components::{
+    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
+    message_stream::TxReq8,
+    monitoring::{StableSampleState, stable_sample_step},
+    primitives::reset_conditioner,
+};
+
+use self::board::card_board_outputs;
+use self::msg::{CardMsg, CardMsgStreamOut, CardMsgStreamState, card_msg_stream_step, init_card_msg_stream};
+use self::protocol::{
+    BusAddr,
+    CardData,
+    CardOffset,
+    Counter,
+    ParserEvent,
+    ParserState,
+    bus_addr_in_card,
+    bus_addr_offset,
+    host_addr_in_card,
+    host_addr_offset,
+    init_parser,
+    line_parser_step,
+};
+
+#[no_mangle(all)]
+extern entity sram_card_mem_v(
+    clk: clock,
+    rst: bool,
+    waddr: CardOffset,
+    din: CardData,
+    we: bool,
+    bus_raddr: CardOffset,
+    bus_dout: inv &CardData,
+    uart_raddr: CardOffset,
+    uart_dout: inv &CardData,
+);
+
+struct MainState {
+    parser: ParserState,
+    msg_stream: CardMsgStreamState,
+    present: bool,
+    bus_read_active: bool,
+    bus_write_active: bool,
+    bus_reads: Counter,
+    bus_writes: Counter,
+    uart_reads: Counter,
+    uart_writes: Counter,
+    parse_err_seen: bool,
+    addr_monitor: StableSampleState<18, 32>,
+    data_monitor: StableSampleState<8, 32>,
+    monitor_addr_candidate: BusAddr,
+    monitor_data_candidate: CardData,
+    last_sample_addr: BusAddr,
+    last_sample_data: CardData,
+    addr_changed: bool,
+    data_changed: bool,
+}
+
+fn stable_monitor_threshold() -> uint<32> {
+    5
+}
+
+fn init_addr_monitor() -> StableSampleState<18, 32> {
+    StableSampleState$(
+        last: 0,
+        sent: true,
+        counter: 0,
+    )
+}
+
+fn init_data_monitor() -> StableSampleState<8, 32> {
+    StableSampleState$(
+        last: 0,
+        sent: true,
+        counter: 0,
+    )
+}
+
+fn init_main_state() -> MainState {
+    MainState$(
+        parser: init_parser(),
+        msg_stream: init_card_msg_stream(),
+        present: true,
+        bus_read_active: false,
+        bus_write_active: false,
+        bus_reads: 0,
+        bus_writes: 0,
+        uart_reads: 0,
+        uart_writes: 0,
+        parse_err_seen: false,
+        addr_monitor: init_addr_monitor(),
+        data_monitor: init_data_monitor(),
+        monitor_addr_candidate: 0,
+        monitor_data_candidate: 0,
+        last_sample_addr: 0,
+        last_sample_data: 0,
+        addr_changed: false,
+        data_changed: false,
+    )
+}
+
+fn parser_uart_msg(
+    event: ParserEvent,
+    present: bool,
+    bus_reads: Counter,
+    bus_writes: Counter,
+    uart_reads: Counter,
+    uart_writes: Counter,
+    uart_read_value: CardData,
+) -> CardMsg {
+    match event {
+        ParserEvent::None => CardMsg::None(),
+        ParserEvent::Read$(addr) => CardMsg::Read(
+            addr,
+            if present && host_addr_in_card(addr) {
+                uart_read_value
+            } else {
+                0
+            },
+        ),
+        ParserEvent::Write(_, _) => CardMsg::Ok(),
+        ParserEvent::SetPresent$(present) => CardMsg::Present(present),
+        ParserEvent::Status => CardMsg::Status(present, bus_reads, bus_writes, uart_reads, uart_writes),
+        ParserEvent::Help => CardMsg::Help(),
+        ParserEvent::ParseErr => CardMsg::Err(),
+    }
+}
+
+#[no_mangle(all)]
+entity main_core(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+    saleae: inv &[bool; 8],
+
+    rw: bool,
+    oe: bool,
+    card_ram_ce1: bool,
+    card_rom_ce6: bool,
+    vcc2: bool,
+    nc: bool,
+    addr: BusAddr,
+    data_in: CardData,
+    data_drive: inv &CardData,
+    data_oe: inv &bool,
+) {
+    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
+
+    let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
+    let (usb_busy, usb_busy_w): (&bool, inv &bool) = port;
+    let (mem_bus_dout, mem_bus_dout_w): (&CardData, inv &CardData) = port;
+    let (mem_uart_dout, mem_uart_dout_w): (&CardData, inv &CardData) = port;
+
+    reg(clk) state: MainState reset(rst: init_main_state()) = {
+        let parse = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
+        let card_ram_selected = !card_ram_ce1;
+        let bus_read_cycle = card_ram_selected && !oe && rw;
+        let bus_write_cycle = card_ram_selected && !rw;
+        let bus_read_event = bus_read_cycle && !state.bus_read_active;
+        let bus_write_event = bus_write_cycle && !state.bus_write_active;
+        let next_present = if let ParserEvent::SetPresent$(present) = parse.event {
+            present
+        } else {
+            state.present
+        };
+        let sample_event = bus_read_event || bus_write_event;
+        let sample_addr = addr;
+        let sample_data = if bus_write_event {
+            data_in
+        } else if bus_read_event {
+            if next_present && bus_addr_in_card(addr) {
+                *mem_bus_dout
+            } else {
+                0
+            }
+        } else {
+            state.monitor_data_candidate
+        };
+        let next_monitor_addr_candidate = if sample_event { sample_addr } else { state.monitor_addr_candidate };
+        let next_monitor_data_candidate = if sample_event { sample_data } else { state.monitor_data_candidate };
+        let addr_monitor_step = stable_sample_step(
+            state.addr_monitor,
+            next_monitor_addr_candidate,
+            stable_monitor_threshold(),
+        );
+        let data_monitor_step = stable_sample_step(
+            state.data_monitor,
+            next_monitor_data_candidate,
+            stable_monitor_threshold(),
+        );
+        let uart_read_event = if let ParserEvent::Read(_) = parse.event { true } else { false };
+        let uart_write_event = if let ParserEvent::Write(_, _) = parse.event { true } else { false };
+        let parser_msg = parser_uart_msg(
+            parse.event,
+            next_present,
+            if bus_read_event { state.bus_reads +. 1 } else { state.bus_reads },
+            if bus_write_event { state.bus_writes +. 1 } else { state.bus_writes },
+            if uart_read_event { state.uart_reads +. 1 } else { state.uart_reads },
+            if uart_write_event { state.uart_writes +. 1 } else { state.uart_writes },
+            *mem_uart_dout,
+        );
+        let msg_stream: CardMsgStreamOut = card_msg_stream_step(
+            state.msg_stream,
+            *usb_busy,
+            !parser_msg.is_none(),
+            parser_msg,
+        );
+        MainState$(
+            parser: parse.state,
+            msg_stream: msg_stream.state,
+            present: next_present,
+            bus_read_active: bus_read_cycle,
+            bus_write_active: bus_write_cycle,
+            bus_reads: if bus_read_event { state.bus_reads +. 1 } else { state.bus_reads },
+            bus_writes: if bus_write_event { state.bus_writes +. 1 } else { state.bus_writes },
+            uart_reads: if uart_read_event { state.uart_reads +. 1 } else { state.uart_reads },
+            uart_writes: if uart_write_event { state.uart_writes +. 1 } else { state.uart_writes },
+            parse_err_seen: state.parse_err_seen || if let ParserEvent::ParseErr = parse.event { true } else { false },
+            addr_monitor: addr_monitor_step.next_state,
+            data_monitor: data_monitor_step.next_state,
+            monitor_addr_candidate: next_monitor_addr_candidate,
+            monitor_data_candidate: next_monitor_data_candidate,
+            last_sample_addr: if sample_event { next_monitor_addr_candidate } else { state.last_sample_addr },
+            last_sample_data: if sample_event { next_monitor_data_candidate } else { state.last_sample_data },
+            addr_changed: if sample_event { next_monitor_addr_candidate != state.last_sample_addr } else { state.addr_changed },
+            data_changed: if sample_event { next_monitor_data_candidate != state.last_sample_data } else { state.data_changed },
+        )
+    };
+
+    let parse = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
+    let card_ram_selected = !card_ram_ce1;
+    let bus_read_cycle = card_ram_selected && !oe && rw;
+    let bus_write_cycle = card_ram_selected && !rw;
+    let uart_write_valid = if let ParserEvent::Write(_, _) = parse.event { true } else { false };
+    let uart_write_in_range = if let ParserEvent::Write$(addr, value) = parse.event {
+        let _ = value;
+        host_addr_in_card(addr)
+    } else {
+        false
+    };
+    let uart_write_addr = if let ParserEvent::Write$(addr, value) = parse.event {
+        let _ = value;
+        host_addr_offset(addr)
+    } else {
+        0
+    };
+    let uart_write_data = if let ParserEvent::Write$(addr, value) = parse.event {
+        let _ = addr;
+        value
+    } else {
+        0
+    };
+    let mem_we = (state.present && bus_write_cycle && bus_addr_in_card(addr)) || (uart_write_valid && uart_write_in_range);
+    let mem_waddr = if state.present && bus_write_cycle {
+        bus_addr_offset(addr)
+    } else {
+        uart_write_addr
+    };
+    let mem_din = if state.present && bus_write_cycle {
+        data_in
+    } else {
+        uart_write_data
+    };
+    let uart_raddr = if let ParserEvent::Read$(addr) = parse.event {
+        host_addr_offset(addr)
+    } else {
+        0
+    };
+    let _mem = inst sram_card_mem_v(
+        clk,
+        rst,
+        mem_waddr,
+        mem_din,
+        mem_we,
+        bus_addr_offset(addr),
+        mem_bus_dout_w,
+        uart_raddr,
+        mem_uart_dout_w,
+    );
+
+    let parser_msg = parser_uart_msg(
+        parse.event,
+        if let ParserEvent::SetPresent$(present) = parse.event { present } else { state.present },
+        state.bus_reads,
+        state.bus_writes,
+        state.uart_reads,
+        state.uart_writes,
+        *mem_uart_dout,
+    );
+    let msg_stream: CardMsgStreamOut = card_msg_stream_step(
+        state.msg_stream,
+        *usb_busy,
+        !parser_msg.is_none(),
+        parser_msg,
+    );
+    let tx_req: TxReq8 = msg_stream.tx_req;
+    let _tx = inst au_usb_uart_tx8_tap(
+        clk,
+        rst,
+        false,
+        tx_req.byte,
+        tx_req.valid,
+        usb_tx_line_w,
+        usb_busy_w,
+    );
+
+    set usb_tx = &*usb_tx_line;
+    let bus_data_out = if state.present && bus_addr_in_card(addr) { *mem_bus_dout } else { 0 };
+    let bus_read_event = bus_read_cycle && !state.bus_read_active;
+    let bus_write_event = bus_write_cycle && !state.bus_write_active;
+    let monitor_sample_valid = bus_read_event || bus_write_event;
+    let monitor_data_sample = if bus_write_event {
+        data_in
+    } else if bus_read_event {
+        bus_data_out
+    } else {
+        state.monitor_data_candidate
+    };
+    let monitor_addr_candidate = if monitor_sample_valid { addr } else { state.monitor_addr_candidate };
+    let monitor_data_candidate = if monitor_sample_valid { monitor_data_sample } else { state.monitor_data_candidate };
+    let addr_monitor_step = stable_sample_step(
+        state.addr_monitor,
+        monitor_addr_candidate,
+        stable_monitor_threshold(),
+    );
+    let data_monitor_step = stable_sample_step(
+        state.data_monitor,
+        monitor_data_candidate,
+        stable_monitor_threshold(),
+    );
+    let addr_changed = if monitor_sample_valid {
+        addr != state.last_sample_addr
+    } else {
+        state.addr_changed
+    };
+    let data_changed = if monitor_sample_valid {
+        monitor_data_sample != state.last_sample_data
+    } else {
+        state.data_changed
+    };
+
+    set data_drive = &bus_data_out;
+    set data_oe = &bus_read_cycle;
+
+    let _board = inst card_board_outputs(
+        clk,
+        rst,
+        monitor_addr_candidate,
+        addr_monitor_step.wput,
+        monitor_data_candidate,
+        data_monitor_step.wput,
+        state.present,
+        bus_read_cycle,
+        bus_write_cycle,
+        card_ram_ce1,
+        card_rom_ce6,
+        oe,
+        rw,
+        addr_changed,
+        data_changed,
+        state.parse_err_seen,
+        state.uart_writes,
+        state.bus_reads,
+        state.bus_writes,
+        led,
+        saleae,
+    );
+
+    let _ = vcc2;
+    let _ = nc;
+}

@@ -1,0 +1,71 @@
+use shared_components::monitoring::async_uart_monitor;
+
+use super::{
+    protocol::{BusAddr, CardData, Counter},
+    render::{BoardRenderInputs, render_board_outputs},
+};
+
+#[inline]
+pub(lib) entity card_board_outputs(
+    clk: clock,
+    rst: bool,
+    addr_uart_sample: BusAddr,
+    addr_uart_wput: bool,
+    data_uart_sample: CardData,
+    data_uart_wput: bool,
+    present: bool,
+    bus_read_cycle: bool,
+    bus_write_cycle: bool,
+    card_ram_ce1: bool,
+    card_rom_ce6: bool,
+    oe: bool,
+    rw: bool,
+    addr_changed: bool,
+    data_changed: bool,
+    parse_err_seen: bool,
+    uart_writes: Counter,
+    bus_reads: Counter,
+    bus_writes: Counter,
+    led: inv &[bool; 8],
+    saleae: inv &[bool; 8],
+) {
+    let addr_uart = inst async_uart_monitor::<18, 4, 3, 100_000_000, 100_000_000>(
+        clk,
+        rst,
+        addr_uart_sample,
+        addr_uart_wput,
+        clk,
+        rst,
+    );
+    let data_uart = inst async_uart_monitor::<8, 4, 3, 100_000_000, 100_000_000>(
+        clk,
+        rst,
+        data_uart_sample,
+        data_uart_wput,
+        clk,
+        rst,
+    );
+
+    let board = render_board_outputs(
+        BoardRenderInputs$(
+            present: present,
+            bus_read_cycle: bus_read_cycle,
+            bus_write_cycle: bus_write_cycle,
+            card_ram_ce1: card_ram_ce1,
+            card_rom_ce6: card_rom_ce6,
+            oe: oe,
+            rw: rw,
+            addr_changed: addr_changed,
+            data_changed: data_changed,
+            parse_err_seen: parse_err_seen,
+            uart_writes: uart_writes,
+            bus_reads: bus_reads,
+            bus_writes: bus_writes,
+            addr_uart_line: addr_uart.line,
+            data_uart_line: data_uart.line,
+        ),
+    );
+
+    set led = &board.led;
+    set saleae = &board.saleae;
+}
