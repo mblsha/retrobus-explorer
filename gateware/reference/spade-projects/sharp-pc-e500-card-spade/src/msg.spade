@@ -1,0 +1,187 @@
+use std::conv::concat_arrays;
+
+use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
+
+use super::protocol::{CardData, Counter, HostAddr, card_size_bytes};
+
+type CardMsgIdx = uint<7>;
+
+pub enum CardMsg {
+    None,
+    Ok,
+    Err,
+    Help,
+    Present{present: bool},
+    Read{addr: HostAddr, value: CardData},
+    Status{
+        present: bool,
+        bus_reads: Counter,
+        bus_writes: Counter,
+        uart_reads: Counter,
+        uart_writes: Counter,
+    },
+}
+
+pub type CardMsgStreamState = ByteMsgStreamState<CardMsg, 7>;
+pub type CardMsgStreamOut = ByteMsgStreamOut<CardMsg, 7>;
+
+pub fn init_card_msg_stream() -> CardMsgStreamState {
+    ByteMsgStreamState$(
+        cur_msg: CardMsg::None(),
+        cur_idx: 0,
+        pending_msg: CardMsg::None(),
+    )
+}
+
+fn hex_char(value: uint<4>) -> uint<8> {
+    if value < 10 {
+        b'0' +. zext(value)
+    } else {
+        b'A' +. zext(value -. 10)
+    }
+}
+
+fn addr_hex_char(addr: HostAddr, idx: uint<3>) -> uint<8> {
+    match idx {
+        0 => hex_char(trunc(addr >> 20)),
+        1 => hex_char(trunc(addr >> 16)),
+        2 => hex_char(trunc(addr >> 12)),
+        3 => hex_char(trunc(addr >> 8)),
+        4 => hex_char(trunc(addr >> 4)),
+        _ => hex_char(trunc(addr)),
+    }
+}
+
+fn byte_hex_char(value: CardData, idx: bool) -> uint<8> {
+    if !idx {
+        hex_char(trunc(value >> 4))
+    } else {
+        hex_char(trunc(value))
+    }
+}
+
+fn count_hex_char(value: Counter, idx: uint<2>) -> uint<8> {
+    match idx {
+        0 => hex_char(trunc(value >> 12)),
+        1 => hex_char(trunc(value >> 8)),
+        2 => hex_char(trunc(value >> 4)),
+        _ => hex_char(trunc(value)),
+    }
+}
+
+fn help_text() -> [uint<8>; 127] {
+    concat_arrays(
+        concat_arrays(
+            b"rAAAAAA wAAAAAA=BB p0|p1 ? h\r\n",
+            b"S0=CE1_RAM# S1=CE6_ROM# S2=OE# S3=R/W\r\n",
+        ),
+        b"S4=AD_CHG S5=DATA_CHG S6=ADDR18_UART100 S7=DATA8_UART100\r\n",
+    )
+}
+
+impl CardMsg {
+    pub fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn len(self) -> CardMsgIdx {
+        match self {
+            Self::None => 0,
+            Self::Ok => 4,
+            Self::Err => 5,
+            Self::Help => 127,
+            Self::Present(_) => 4,
+            Self::Read(_, _) => 11,
+            Self::Status(_, _, _, _, _) => 38,
+        }
+    }
+
+    pub fn byte(self, idx: CardMsgIdx) -> TxReq8 {
+        if idx >= self.len() {
+            tx_req_none()
+        } else {
+            let byte = match self {
+                Self::None => 0,
+                Self::Ok => b"OK\r\n"[trunc(idx)],
+                Self::Err => b"ERR\r\n"[trunc(idx)],
+                Self::Help => help_text()[trunc(idx)],
+                Self::Present$(present) => match idx {
+                    0 => b'P',
+                    1 => if present { b'1' } else { b'0' },
+                    2 => b'\r',
+                    _ => b'\n',
+                },
+                Self::Read$(addr, value) => match idx {
+                    0 => addr_hex_char(addr, 0),
+                    1 => addr_hex_char(addr, 1),
+                    2 => addr_hex_char(addr, 2),
+                    3 => addr_hex_char(addr, 3),
+                    4 => addr_hex_char(addr, 4),
+                    5 => addr_hex_char(addr, 5),
+                    6 => b'=',
+                    7 => byte_hex_char(value, false),
+                    8 => byte_hex_char(value, true),
+                    9 => b'\r',
+                    _ => b'\n',
+                },
+                Self::Status$(present, bus_reads, bus_writes, uart_reads, uart_writes) => match idx {
+                    0 => b'P',
+                    1 => if present { b'1' } else { b'0' },
+                    2 => b' ',
+                    3 => b'S',
+                    4 => hex_char(trunc(card_size_bytes() >> 12)),
+                    5 => hex_char(trunc(card_size_bytes() >> 8)),
+                    6 => hex_char(trunc(card_size_bytes() >> 4)),
+                    7 => hex_char(trunc(card_size_bytes())),
+                    8 => b' ',
+                    9 => b'B',
+                    10 => b'R',
+                    11 => count_hex_char(bus_reads, 0),
+                    12 => count_hex_char(bus_reads, 1),
+                    13 => count_hex_char(bus_reads, 2),
+                    14 => count_hex_char(bus_reads, 3),
+                    15 => b' ',
+                    16 => b'B',
+                    17 => b'W',
+                    18 => count_hex_char(bus_writes, 0),
+                    19 => count_hex_char(bus_writes, 1),
+                    20 => count_hex_char(bus_writes, 2),
+                    21 => count_hex_char(bus_writes, 3),
+                    22 => b' ',
+                    23 => b'U',
+                    24 => b'R',
+                    25 => count_hex_char(uart_reads, 0),
+                    26 => count_hex_char(uart_reads, 1),
+                    27 => count_hex_char(uart_reads, 2),
+                    28 => count_hex_char(uart_reads, 3),
+                    29 => b' ',
+                    30 => b'U',
+                    31 => b'W',
+                    32 => count_hex_char(uart_writes, 0),
+                    33 => count_hex_char(uart_writes, 1),
+                    34 => count_hex_char(uart_writes, 2),
+                    35 => count_hex_char(uart_writes, 3),
+                    36 => b'\r',
+                    _ => b'\n',
+                },
+            };
+            TxReq8$(valid: true, byte: byte)
+        }
+    }
+}
+
+pub fn card_msg_stream_step(
+    state: CardMsgStreamState,
+    block_tx: bool,
+    msg_valid: bool,
+    msg: CardMsg,
+) -> CardMsgStreamOut {
+    state.step_with(
+        CardMsg::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
+        block_tx,
+        msg_valid,
+        msg,
+    )
+}
