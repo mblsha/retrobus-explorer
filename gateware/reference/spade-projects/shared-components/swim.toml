@@ -2,6 +2,7 @@ name = "shared_components"
 
 [libraries]
 protocols.git = "https://gitlab.com/spade-lang/lib/protocols"
+ready_valid.git = "https://gitlab.com/spade-lang/lib/ready_valid"
 
 [tooling]
 top = "tb_sync2"

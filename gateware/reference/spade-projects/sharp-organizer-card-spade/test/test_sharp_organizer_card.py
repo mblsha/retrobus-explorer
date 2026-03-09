@@ -125,8 +125,12 @@ async def _uart_recv_byte(dut, timeout_cycles: int = 12000) -> int:
 
 
 async def _ft_host_send_word(dut, word: int, timeout_cycles: int = 2000):
+    await _ft_host_send_word_be(dut, word, 0x3, timeout_cycles)
+
+
+async def _ft_host_send_word_be(dut, word: int, be: int, timeout_cycles: int = 2000):
     dut.ft_data_host.value = word & 0xFFFF
-    dut.ft_be_host.value = 0x3
+    dut.ft_be_host.value = be & 0x3
     dut.ft_host_drive.value = 1
     dut.ft_rxf.value = 0
 
@@ -216,6 +220,22 @@ async def leds_and_ft_host_commands_match_lucid(dut):
     assert await recv_minus == ord("-")
     await tick(dut.clk, 4)
     assert int(dut.led.value) & 0x01 == 0
+
+
+@cocotb.test()
+async def partial_ft_host_word_does_not_toggle_streaming(dut):
+    await _init(dut)
+
+    await _ft_host_send_word_be(dut, ord("S") | (ord("+") << 8), 0x1)
+    await tick(dut.clk, USB_UART_BIT_CYCLES * 2)
+    assert int(dut.led.value) & 0x01 == 0
+    assert int(dut.usb_tx.value) == 1
+
+    recv_plus = cocotb.start_soon(_uart_recv_byte(dut))
+    await _ft_host_send_word(dut, ord("S") | (ord("+") << 8))
+    assert await recv_plus == ord("+")
+    await tick(dut.clk, 4)
+    assert int(dut.led.value) & 0x01 == 1
 
 
 @cocotb.test()

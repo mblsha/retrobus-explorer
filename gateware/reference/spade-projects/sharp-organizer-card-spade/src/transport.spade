@@ -1,7 +1,9 @@
+use ready_valid::Rv;
+
 use shared_components::{
-    config::{au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_tx8_tap},
+    config::{au_ft_tap_u16, au_stream_fifo_u32},
     ft_stream::FtWordStreamOut,
-    message_stream::TxReq8,
+    rv::au_usb_uart_tx8_rv_tap,
     serial::{FtBe, FtData},
 };
 
@@ -16,7 +18,7 @@ pub(lib) entity organizer_transport(
     ft_txe: bool,
     ft_data: FtData,
     ft_be: FtBe,
-    tx_req: TxReq8,
+    tx_bytes: Rv<uint<8>>,
     stream_word: OrganizerTraceWord,
     stream_word_valid: bool,
     ft_stream: FtWordStreamOut,
@@ -46,12 +48,11 @@ pub(lib) entity organizer_transport(
     set stream_fifo_empty = &stream_fifo.empty;
     set stream_fifo_dout = &stream_fifo.dout;
 
-    let _tx = inst au_usb_uart_tx8_tap(
+    let _tx = inst au_usb_uart_tx8_rv_tap(
         clk,
         rst,
         false,
-        tx_req.byte,
-        tx_req.valid,
+        tx_bytes,
         usb_tx_line,
         usb_tx_busy,
     );

@@ -1,0 +1,91 @@
+use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
+use shared_components::serial::{FtBe, FtData};
+
+use super::protocol::{BridgeCount, packed_ft_byte, status_byte};
+
+type BridgeMsgIdx = uint<6>;
+
+pub enum BridgeMsg {
+    None,
+    FtRx{word: FtData, be: FtBe},
+    Help,
+    Status{
+        rx_count: BridgeCount,
+        tx_count: BridgeCount,
+        err_count: BridgeCount,
+        stall_count: BridgeCount,
+    },
+    ParseErr,
+    TxFull,
+}
+
+pub type BridgeMsgStreamState = ByteMsgStreamState<BridgeMsg, 6>;
+pub type BridgeMsgStreamOut = ByteMsgStreamOut<BridgeMsg, 6>;
+
+pub fn init_bridge_msg_stream() -> BridgeMsgStreamState {
+    ByteMsgStreamState$(
+        cur_msg: BridgeMsg::None(),
+        cur_idx: 0,
+        pending_msg: BridgeMsg::None(),
+    )
+}
+
+impl BridgeMsg {
+    pub fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn len(self) -> BridgeMsgIdx {
+        match self {
+            Self::None => 0,
+            Self::FtRx(_, _) => 8,
+            Self::Help => 14,
+            Self::Status(_, _, _, _) => 25,
+            Self::ParseErr => 5,
+            Self::TxFull => 6,
+        }
+    }
+
+    pub fn byte(self, idx: BridgeMsgIdx) -> TxReq8 {
+        if idx >= self.len() {
+            tx_req_none()
+        } else {
+            let byte = match self {
+                Self::None => 0,
+                Self::FtRx$(word, be) => packed_ft_byte(word, be, trunc(idx)),
+                Self::Help => {
+                    let text = b"hhhh[/b] ? h\r\n";
+                    text[trunc(idx)]
+                },
+                Self::Status$(rx_count, tx_count, err_count, stall_count) => {
+                    status_byte(rx_count, tx_count, err_count, stall_count, idx)
+                },
+                Self::ParseErr => {
+                    let text = b"ERR\r\n";
+                    text[trunc(idx)]
+                },
+                Self::TxFull => {
+                    let text = b"FULL\r\n";
+                    text[trunc(idx)]
+                },
+            };
+            TxReq8$(valid: true, byte: byte)
+        }
+    }
+}
+
+pub fn bridge_msg_stream_step(
+    state: BridgeMsgStreamState,
+    block_tx: bool,
+    msg_valid: bool,
+    msg: BridgeMsg,
+) -> BridgeMsgStreamOut {
+    state.step_with(
+        BridgeMsg::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
+        block_tx,
+        msg_valid,
+        msg,
+    )
+}

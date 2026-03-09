@@ -12,6 +12,7 @@ use shared_components::{
     ft_stream::{FtWordStreamOut, FtWordStreamState, ft_word_stream_step},
     message_stream::TxReq8,
     primitives::{reset_conditioner, sync_bundle},
+    rv::tx_req_as_rv,
     serial::{FtBe, FtData},
     trace_events::pack_trace_event_word,
 };
@@ -65,6 +66,7 @@ struct MainInputs {
     ft_ui_din_full: bool,
     ft_ui_dout_empty: bool,
     ft_ui_dout: FtData,
+    ft_ui_dout_be: FtBe,
     stream_fifo_full: bool,
     stream_fifo_empty: bool,
     stream_fifo_dout: OrganizerTraceWord,
@@ -114,6 +116,7 @@ impl MainState {
                 rx_byte: inputs.rx_byte,
                 ft_ui_dout_empty: inputs.ft_ui_dout_empty,
                 ft_ui_dout: inputs.ft_ui_dout,
+                ft_ui_dout_be: inputs.ft_ui_dout_be,
                 saleae_state: self.saleae.state,
                 sync_sub_mode: self.saleae.sync_sub_mode,
                 ft_enabled: self.ft.enabled,
@@ -279,6 +282,7 @@ entity main_core(
         ft_ui_din_full: *ft_ui_din_full,
         ft_ui_dout_empty: *ft_ui_dout_empty,
         ft_ui_dout: *ft_ui_dout,
+        ft_ui_dout_be: *ft_ui_dout_be,
         stream_fifo_full: *stream_fifo_full,
         stream_fifo_empty: *stream_fifo_empty,
         stream_fifo_dout: *stream_fifo_dout,
@@ -300,7 +304,7 @@ entity main_core(
         ft_txe,
         ft_data,
         ft_be,
-        eval.tx_req,
+        tx_req_as_rv(eval.tx_req),
         eval.stream_word,
         eval.stream_word_valid,
         eval.ft_stream,
@@ -343,8 +347,6 @@ entity main_core(
         led,
         saleae,
     );
-
-    let _unused_ft_ui_dout_be = *ft_ui_dout_be;
 
     set usb_tx = &*usb_tx_line;
     set ft_data_drive = &*ft_data_out;

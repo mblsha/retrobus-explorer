@@ -1,0 +1,59 @@
+use ready_valid::Rv;
+
+use super::{
+    config::au_usb_uart_tx8_tap,
+    message_stream::{TxReq8, tx_req_none},
+};
+
+pub fn tx_req_as_rv(tx: TxReq8) -> Rv<uint<8>> {
+    let (ready, ready_inv) = port;
+    let data = if tx.valid { Some(tx.byte) } else { None };
+    Rv$(data: &data, ready: ready_inv)
+}
+
+pub entity rv_peek_tx_req(rv: Rv<uint<8>>) -> TxReq8 {
+    set rv.ready = &true;
+
+    if let Some(byte) = *rv.data {
+        TxReq8$(valid: true, byte: byte)
+    } else {
+        tx_req_none()
+    }
+}
+
+#[inline]
+pub entity au_usb_uart_tx8_rv_tap(
+    clk: clock,
+    rst: bool,
+    block: bool,
+    tx_bytes: Rv<uint<8>>,
+    tx_line: inv &bool,
+    busy: inv &bool,
+) {
+    let (busy_sig, busy_sig_w): (&bool, inv &bool) = port;
+    let tx_ready = !block && !*busy_sig;
+
+    set tx_bytes.ready = &tx_ready;
+
+    let tx_req = if tx_ready {
+        if let Some(byte) = *tx_bytes.data {
+            TxReq8$(valid: true, byte: byte)
+        } else {
+            tx_req_none()
+        }
+    } else {
+        tx_req_none()
+    };
+
+    let _tx = inst au_usb_uart_tx8_tap(
+        clk,
+        rst,
+        block,
+        tx_req.byte,
+        tx_req.valid,
+        tx_line,
+        busy_sig_w,
+    );
+
+    set busy = &*busy_sig;
+}
