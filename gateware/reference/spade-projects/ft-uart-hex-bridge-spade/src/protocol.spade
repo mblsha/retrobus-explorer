@@ -1,0 +1,265 @@
+use shared_components::serial::{FtBe, FtData};
+
+pub type BridgeCount = uint<16>;
+pub type PackedFtWord = uint<18>;
+
+pub enum ParserPhase {
+    Idle,
+    NeedHex1,
+    NeedHex2,
+    NeedHex3,
+    NeedLineEnd,
+    NeedBeLineEnd,
+    CmdHelp,
+    CmdStatus,
+    Error,
+}
+
+pub struct LineParserState {
+    phase: ParserPhase,
+    word: FtData,
+    be: FtBe,
+}
+
+pub enum ParserEvent {
+    None,
+    Send{word: FtData, be: FtBe},
+    Help,
+    Status,
+    ParseErr,
+}
+
+pub struct ParserStepOut {
+    state: LineParserState,
+    event: ParserEvent,
+}
+
+pub fn init_line_parser() -> LineParserState {
+    LineParserState$(
+        phase: ParserPhase::Idle(),
+        word: 0,
+        be: 0x3,
+    )
+}
+
+pub fn parser_event_none() -> ParserEvent {
+    ParserEvent::None()
+}
+
+pub fn parser_event_is_none(event: ParserEvent) -> bool {
+    if let ParserEvent::None = event { true } else { false }
+}
+
+fn parser_step(state: LineParserState, phase: ParserPhase, word: FtData, be: FtBe, event: ParserEvent) -> ParserStepOut {
+    ParserStepOut$(
+        state: LineParserState$(phase: phase, word: word, be: be),
+        event: event,
+    )
+}
+
+fn parser_error() -> ParserStepOut {
+    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::ParseErr())
+}
+
+fn is_line_end(byte: uint<8>) -> bool {
+    byte == b'\r' || byte == b'\n'
+}
+
+fn hex_char(value: uint<4>) -> uint<8> {
+    let value_u8: uint<8> = zext(value);
+    if value < 10 {
+        b'0' +. value_u8
+    } else {
+        b'A' +. (value_u8 -. 10)
+    }
+}
+
+fn decode_hex_nibble(byte: uint<8>) -> uint<5> {
+    let upper = byte.to_upper();
+    let valid_base: uint<5> = 16;
+    if upper.is_digit() {
+        valid_base +. zext(upper.digit_value())
+    } else if upper >= b'A' && upper <= b'F' {
+        let alpha_value: uint<4> = trunc((upper -. b'A') +. 10);
+        valid_base +. zext(alpha_value)
+    } else {
+        0
+    }
+}
+
+fn hex_valid(decoded: uint<5>) -> bool {
+    decoded >= 16
+}
+
+fn hex_value(decoded: uint<5>) -> uint<4> {
+    trunc(decoded - 16)
+}
+
+pub fn line_parser_step(
+    state: LineParserState,
+    rx_valid: bool,
+    rx_parity_error: bool,
+    rx_byte: uint<8>,
+) -> ParserStepOut {
+    if !rx_valid {
+        ParserStepOut$(state: state, event: ParserEvent::None())
+    } else if rx_parity_error {
+        parser_error()
+    } else {
+        let decoded = decode_hex_nibble(rx_byte);
+        let nibble_ok = hex_valid(decoded);
+        let nibble = hex_value(decoded);
+        let next_word = (state.word << 4) | zext(nibble);
+
+        match state.phase {
+            ParserPhase::Idle => {
+                if is_line_end(rx_byte) {
+                    ParserStepOut$(state: state, event: ParserEvent::None())
+                } else if rx_byte == b'?' {
+                    parser_step(state, ParserPhase::CmdStatus(), 0, 0x3, ParserEvent::None())
+                } else if rx_byte.to_upper() == b'H' {
+                    parser_step(state, ParserPhase::CmdHelp(), 0, 0x3, ParserEvent::None())
+                } else if nibble_ok {
+                    parser_step(state, ParserPhase::NeedHex1(), zext(nibble), 0x3, ParserEvent::None())
+                } else {
+                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                }
+            },
+            ParserPhase::NeedHex1 => {
+                if nibble_ok {
+                    parser_step(state, ParserPhase::NeedHex2(), next_word, state.be, ParserEvent::None())
+                } else {
+                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                }
+            },
+            ParserPhase::NeedHex2 => {
+                if nibble_ok {
+                    parser_step(state, ParserPhase::NeedHex3(), next_word, state.be, ParserEvent::None())
+                } else {
+                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                }
+            },
+            ParserPhase::NeedHex3 => {
+                if nibble_ok {
+                    parser_step(state, ParserPhase::NeedLineEnd(), next_word, state.be, ParserEvent::None())
+                } else {
+                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                }
+            },
+            ParserPhase::NeedLineEnd => {
+                if rx_byte == b'/' {
+                    parser_step(state, ParserPhase::NeedBeLineEnd(), state.word, state.be, ParserEvent::None())
+                } else if is_line_end(rx_byte) {
+                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Send(state.word, state.be))
+                } else {
+                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                }
+            },
+            ParserPhase::NeedBeLineEnd => {
+                let be_digit = rx_byte.decode_digit_max(3);
+                if be_digit.valid {
+                    parser_step(
+                        state,
+                        ParserPhase::NeedLineEnd(),
+                        state.word,
+                        trunc(be_digit.value),
+                        ParserEvent::None(),
+                    )
+                } else {
+                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                }
+            },
+            ParserPhase::CmdHelp => {
+                if is_line_end(rx_byte) {
+                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Help())
+                } else {
+                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                }
+            },
+            ParserPhase::CmdStatus => {
+                if is_line_end(rx_byte) {
+                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Status())
+                } else {
+                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                }
+            },
+            ParserPhase::Error => {
+                if is_line_end(rx_byte) {
+                    parser_error()
+                } else {
+                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                }
+            },
+        }
+    }
+}
+
+pub fn pack_ft_word(word: FtData, be: FtBe) -> PackedFtWord {
+    (zext(be) << 16) | zext(word)
+}
+
+pub fn unpack_ft_word(packed: PackedFtWord) -> FtData {
+    trunc(packed)
+}
+
+pub fn unpack_ft_be(packed: PackedFtWord) -> FtBe {
+    trunc(packed >> 16)
+}
+
+pub fn packed_ft_byte(word: FtData, be: FtBe, idx: uint<3>) -> uint<8> {
+    match idx {
+        0 => hex_char(trunc(word >> 12)),
+        1 => hex_char(trunc(word >> 8)),
+        2 => hex_char(trunc(word >> 4)),
+        3 => hex_char(trunc(word)),
+        4 => b'/',
+        5 => hex_char(zext(be)),
+        6 => b'\r',
+        _ => b'\n',
+    }
+}
+
+fn count_hex_char(value: BridgeCount, idx: uint<3>) -> uint<8> {
+    match idx {
+        0 => hex_char(trunc(value >> 12)),
+        1 => hex_char(trunc(value >> 8)),
+        2 => hex_char(trunc(value >> 4)),
+        _ => hex_char(trunc(value)),
+    }
+}
+
+pub fn status_byte(
+    rx_count: BridgeCount,
+    tx_count: BridgeCount,
+    err_count: BridgeCount,
+    stall_count: BridgeCount,
+    idx: uint<6>,
+) -> uint<8> {
+    if idx == 0 {
+        b'R'
+    } else if idx >= 1 && idx <= 4 {
+        count_hex_char(rx_count, trunc(idx -. 1))
+    } else if idx == 5 {
+        b' '
+    } else if idx == 6 {
+        b'T'
+    } else if idx >= 7 && idx <= 10 {
+        count_hex_char(tx_count, trunc(idx -. 7))
+    } else if idx == 11 {
+        b' '
+    } else if idx == 12 {
+        b'E'
+    } else if idx >= 13 && idx <= 16 {
+        count_hex_char(err_count, trunc(idx -. 13))
+    } else if idx == 17 {
+        b' '
+    } else if idx == 18 {
+        b'S'
+    } else if idx >= 19 && idx <= 22 {
+        count_hex_char(stall_count, trunc(idx -. 19))
+    } else if idx == 23 {
+        b'\r'
+    } else {
+        b'\n'
+    }
+}

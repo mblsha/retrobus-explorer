@@ -1,0 +1,5 @@
+[project]
+name = "ft-uart-hex-bridge-spade"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []

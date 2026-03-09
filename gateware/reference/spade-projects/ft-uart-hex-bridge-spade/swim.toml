@@ -1,8 +1,7 @@
-name = "sharp_organizer_card_spade"
+name = "ft_uart_hex_bridge_spade"
 
 [libraries]
 shared_components = { path = "../shared-components" }
-ready_valid.git = "https://gitlab.com/spade-lang/lib/ready_valid"
 
 [constraints]
 auto = true
@@ -10,13 +9,12 @@ auto = true
 [verilog]
 sources = [
     "verilog/main_wrapper.v",
-    "../shared-verilog/clk_wiz_0.v",
     "../shared-components/verilog/**/*.v",
 ]
 
 [tooling]
 top = "main"
-test_module = "test_sharp_organizer_card"
+test_module = "test_ft_uart_hex_bridge"
 
 [simulation]
 testbench_dir = "test"

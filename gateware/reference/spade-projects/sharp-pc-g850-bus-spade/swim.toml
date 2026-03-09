@@ -2,6 +2,7 @@ name = "sharp_pc_g850_bus_spade"
 
 [libraries]
 shared_components = { path = "../shared-components" }
+ready_valid.git = "https://gitlab.com/spade-lang/lib/ready_valid"
 
 [constraints]
 auto = true

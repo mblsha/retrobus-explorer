@@ -1,0 +1,325 @@
+mod msg;
+mod protocol;
+
+use shared_components::{
+    clocking::sampled_bool_clock,
+    config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    primitives::reset_conditioner,
+    serial::{FtBe, FtData},
+};
+
+use self::msg::{BridgeMsg, BridgeMsgStreamState, bridge_msg_stream_step, init_bridge_msg_stream};
+use self::protocol::{
+    BridgeCount,
+    LineParserState,
+    PackedFtWord,
+    ParserEvent,
+    ParserStepOut,
+    init_line_parser,
+    line_parser_step,
+    pack_ft_word,
+    unpack_ft_be,
+    unpack_ft_word,
+};
+
+struct MainState {
+    parser: LineParserState,
+    msg_stream: BridgeMsgStreamState,
+    pending_ctrl_msg: BridgeMsg,
+    pending_tx_word: FtData,
+    pending_tx_be: FtBe,
+    pending_tx_valid: bool,
+    rx_waddr: uint<2>,
+    rx_raddr: uint<2>,
+    rx_used: uint<3>,
+    rx_storage: [PackedFtWord; 4],
+    rx_count: BridgeCount,
+    tx_count: BridgeCount,
+    err_count: BridgeCount,
+    stall_count: BridgeCount,
+    parse_err_seen: bool,
+    stall_seen: bool,
+    stall_active: bool,
+}
+
+fn init_main_state() -> MainState {
+    MainState$(
+        parser: init_line_parser(),
+        msg_stream: init_bridge_msg_stream(),
+        pending_ctrl_msg: BridgeMsg::None(),
+        pending_tx_word: 0,
+        pending_tx_be: 0x3,
+        pending_tx_valid: false,
+        rx_waddr: 0,
+        rx_raddr: 0,
+        rx_used: 0,
+        rx_storage: [0; 4],
+        rx_count: 0,
+        tx_count: 0,
+        err_count: 0,
+        stall_count: 0,
+        parse_err_seen: false,
+        stall_seen: false,
+        stall_active: false,
+    )
+}
+
+fn choose_ctrl_msg(existing: BridgeMsg, candidate: BridgeMsg) -> BridgeMsg {
+    if !existing.is_none() {
+        existing
+    } else {
+        candidate
+    }
+}
+
+fn next_pending_ctrl(existing: BridgeMsg, candidate: BridgeMsg, offered: bool) -> BridgeMsg {
+    if offered {
+        if !existing.is_none() {
+            candidate
+        } else {
+            BridgeMsg::None()
+        }
+    } else if !existing.is_none() {
+        existing
+    } else {
+        candidate
+    }
+}
+
+fn rx_queue_write_at(storage: [PackedFtWord; 4], idx: uint<2>, value: PackedFtWord) -> [PackedFtWord; 4] {
+    storage.enumerate().map(fn |(i, item)| {
+        if i == idx {
+            value
+        } else {
+            item
+        }
+    })
+}
+
+#[no_mangle(all)]
+entity main_core(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+
+    ft_clk: bool,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: FtData,
+    ft_be: FtBe,
+    ft_data_drive: inv &FtData,
+    ft_be_drive: inv &FtBe,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+) {
+    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
+    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
+
+    let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
+    let (usb_busy, usb_busy_w): (&bool, inv &bool) = port;
+    let (ft_ui_din_full, ft_ui_din_full_w): (&bool, inv &bool) = port;
+    let (ft_ui_dout, ft_ui_dout_w): (&FtData, inv &FtData) = port;
+    let (ft_ui_dout_be, ft_ui_dout_be_w): (&FtBe, inv &FtBe) = port;
+    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (&bool, inv &bool) = port;
+
+    reg(clk) state: MainState reset(rst: init_main_state()) = {
+        let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
+        let rx_empty = state.rx_used == 0;
+        let rx_full = state.rx_used == 4;
+        let rx_dout = state.rx_storage[state.rx_raddr];
+        let send_word_valid = if let ParserEvent::Send(_, _) = parse.event { true } else { false };
+        let send_word = if let ParserEvent::Send$(word, be) = parse.event {
+            let _ = be;
+            word
+        } else {
+            0
+        };
+        let send_be = if let ParserEvent::Send$(word, be) = parse.event {
+            let _ = word;
+            be
+        } else {
+            0x3
+        };
+        let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
+        let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
+        let parser_msg = match parse.event {
+            ParserEvent::Help => BridgeMsg::Help(),
+            ParserEvent::Status => BridgeMsg::Status(
+                state.rx_count,
+                state.tx_count,
+                state.err_count,
+                state.stall_count,
+            ),
+            ParserEvent::ParseErr => BridgeMsg::ParseErr(),
+            ParserEvent::Send(_, _) if tx_queue_overflow => BridgeMsg::TxFull(),
+            _ => BridgeMsg::None(),
+        };
+        let ctrl_msg = choose_ctrl_msg(state.pending_ctrl_msg, parser_msg);
+        let can_offer_msg = state.msg_stream.pending_msg.is_none();
+        let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
+        let offer_ft_rx = can_offer_msg && ctrl_msg.is_none() && !rx_empty;
+        let next_msg_valid = offer_ctrl || offer_ft_rx;
+        let next_msg = if offer_ctrl {
+            ctrl_msg
+        } else if offer_ft_rx {
+            BridgeMsg::FtRx(unpack_ft_word(rx_dout), unpack_ft_be(rx_dout))
+        } else {
+            BridgeMsg::None()
+        };
+        let msg_stream = bridge_msg_stream_step(
+            state.msg_stream,
+            *usb_busy,
+            next_msg_valid,
+            next_msg,
+        );
+        let parse_err_event = if let ParserEvent::ParseErr = parse.event { true } else { false };
+        let tx_full_event = tx_queue_overflow;
+        let rx_stall_now = !*ft_ui_dout_empty && rx_full;
+        let rx_stall_event = rx_stall_now && !state.stall_active;
+        let rx_write = !*ft_ui_dout_empty && !rx_full;
+        let rx_read = offer_ft_rx;
+        let next_rx_storage = if rx_write {
+            rx_queue_write_at(state.rx_storage, state.rx_waddr, pack_ft_word(*ft_ui_dout, *ft_ui_dout_be))
+        } else {
+            state.rx_storage
+        };
+        let next_pending_tx_valid = if tx_write {
+            send_word_valid
+        } else {
+            state.pending_tx_valid || send_word_valid
+        };
+        let next_pending_tx_word = if tx_write {
+            send_word
+        } else if send_word_valid && !state.pending_tx_valid {
+            send_word
+        } else {
+            state.pending_tx_word
+        };
+        let next_pending_tx_be = if tx_write {
+            send_be
+        } else if send_word_valid && !state.pending_tx_valid {
+            send_be
+        } else {
+            state.pending_tx_be
+        };
+
+        MainState$(
+            parser: parse.state,
+            msg_stream: msg_stream.state,
+            pending_ctrl_msg: next_pending_ctrl(state.pending_ctrl_msg, parser_msg, offer_ctrl),
+            pending_tx_word: next_pending_tx_word,
+            pending_tx_be: next_pending_tx_be,
+            pending_tx_valid: next_pending_tx_valid,
+            rx_waddr: if rx_write { state.rx_waddr +. 1 } else { state.rx_waddr },
+            rx_raddr: if rx_read { state.rx_raddr +. 1 } else { state.rx_raddr },
+            rx_used: if rx_write && !rx_read {
+                state.rx_used +. 1
+            } else if rx_read && !rx_write {
+                state.rx_used -. 1
+            } else {
+                state.rx_used
+            },
+            rx_storage: next_rx_storage,
+            rx_count: if rx_write { state.rx_count +. 1 } else { state.rx_count },
+            tx_count: if tx_write { state.tx_count +. 1 } else { state.tx_count },
+            err_count: if parse_err_event || tx_full_event {
+                state.err_count +. 1
+            } else {
+                state.err_count
+            },
+            stall_count: if rx_stall_event { state.stall_count +. 1 } else { state.stall_count },
+            parse_err_seen: state.parse_err_seen || parse_err_event,
+            stall_seen: state.stall_seen || rx_stall_event,
+            stall_active: rx_stall_now,
+        )
+    };
+
+    let rx_empty = state.rx_used == 0;
+    let rx_full = state.rx_used == 4;
+    let rx_dout = state.rx_storage[state.rx_raddr];
+    let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
+    let send_word_valid = if let ParserEvent::Send(_, _) = parse.event { true } else { false };
+    let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
+    let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
+    let parser_msg = match parse.event {
+        ParserEvent::Help => BridgeMsg::Help(),
+        ParserEvent::Status => BridgeMsg::Status(
+            state.rx_count,
+            state.tx_count,
+            state.err_count,
+            state.stall_count,
+        ),
+        ParserEvent::ParseErr => BridgeMsg::ParseErr(),
+        ParserEvent::Send(_, _) if tx_queue_overflow => BridgeMsg::TxFull(),
+        _ => BridgeMsg::None(),
+    };
+    let ctrl_msg = choose_ctrl_msg(state.pending_ctrl_msg, parser_msg);
+    let can_offer_msg = state.msg_stream.pending_msg.is_none();
+    let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
+    let offer_ft_rx = can_offer_msg && ctrl_msg.is_none() && !rx_empty;
+    let next_msg_valid = offer_ctrl || offer_ft_rx;
+    let next_msg = if offer_ctrl {
+        ctrl_msg
+    } else if offer_ft_rx {
+        BridgeMsg::FtRx(unpack_ft_word(rx_dout), unpack_ft_be(rx_dout))
+    } else {
+        BridgeMsg::None()
+    };
+    let msg_stream = bridge_msg_stream_step(
+        state.msg_stream,
+        *usb_busy,
+        next_msg_valid,
+        next_msg,
+    );
+
+    let _usb_tx = inst au_usb_uart_tx8_tap(
+        clk,
+        rst,
+        false,
+        msg_stream.tx_req.byte,
+        msg_stream.tx_req.valid,
+        usb_tx_line_w,
+        usb_busy_w,
+    );
+
+    let _ft = inst au_ft_tap_u16(
+        clk,
+        rst,
+        ft_clk_clock,
+        ft_rxf,
+        ft_txe,
+        ft_data,
+        ft_be,
+        if tx_write { state.pending_tx_word } else { 0 },
+        if tx_write { state.pending_tx_be } else { 0 },
+        tx_write,
+        !*ft_ui_dout_empty && !rx_full,
+        ft_data_drive,
+        ft_be_drive,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ft_ui_din_full_w,
+        ft_ui_dout_w,
+        ft_ui_dout_be_w,
+        ft_ui_dout_empty_w,
+    );
+
+    reg(clk) heartbeat: uint<24> reset(rst: 0) = heartbeat +. 1;
+
+    set usb_tx = &*usb_tx_line;
+    set led = &[
+        !rx_empty,
+        state.pending_tx_valid,
+        state.parse_err_seen,
+        state.stall_seen,
+        !*ft_ui_dout_empty,
+        !*ft_ui_din_full,
+        *usb_busy,
+        heartbeat.to_bits()[23],
+    ];
+}

@@ -1,4 +1,4 @@
-use shared_components::serial::FtData;
+use shared_components::serial::{FtBe, FtData};
 
 use super::{
     msg::{OrganizerMsg, organizer_msg_combine},
@@ -23,6 +23,7 @@ pub(lib) struct OrganizerUiInputs {
     rx_byte: uint<8>,
     ft_ui_dout_empty: bool,
     ft_ui_dout: FtData,
+    ft_ui_dout_be: FtBe,
     saleae_state: SaleaeState,
     sync_sub_mode: SyncSubMode,
     ft_enabled: bool,
@@ -60,10 +61,10 @@ fn organizer_cmd_from_byte(rx_valid: bool, byte: uint<8>) -> OrganizerCmd {
     }
 }
 
-fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData) -> OrganizerFtCmd {
+fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData, be: FtBe) -> OrganizerFtCmd {
     let b0: uint<8> = trunc(word);
     let b1: uint<8> = trunc(word >> 8);
-    if ft_ui_dout_empty || b0 != b'S' {
+    if ft_ui_dout_empty || be != 0x3 || b0 != b'S' {
         OrganizerFtCmd::None()
     } else if b1 == b'+' {
         OrganizerFtCmd::Enable()
@@ -132,7 +133,7 @@ fn merge_ui_effects(cmd: OrganizerCmdEffect, ft: OrganizerFtCmdEffect) -> Organi
 pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
     let usb_effect = organizer_cmd_from_byte(inputs.rx_valid, inputs.rx_byte)
         .effect(inputs.saleae_state, inputs.sync_sub_mode);
-    let ft_effect = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout)
+    let ft_effect = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout, inputs.ft_ui_dout_be)
         .effect(inputs.ft_enabled);
 
     merge_ui_effects(usb_effect, ft_effect)

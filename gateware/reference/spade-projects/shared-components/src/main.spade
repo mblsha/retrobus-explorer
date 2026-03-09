@@ -5,6 +5,7 @@ pub mod serial;
 pub mod memory;
 pub mod ascii;
 pub mod message_stream;
+pub mod rv;
 pub mod monitoring;
 pub mod ft_stream;
 pub mod trace_words;

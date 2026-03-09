@@ -24,9 +24,10 @@ use shared_components::{
         saleae_mux,
     },
     clocking::{clk_wiz_400, sampled_bool_clock},
-    config::{au_bridge, au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    config::{au_bridge, au_ft_tap_u16, au_stream_fifo_u32, au_usb_uart_rx},
     message_stream::{ByteMsgStreamState, TxReq8, tx_req_arbiter, tx_req_none},
     primitives::{falling_edge, reset_conditioner, rising_edge, sync_z80_controls_n},
+    rv::{au_usb_uart_tx8_rv_tap, tx_req_as_rv},
     serial::{FtBe, FtData},
 };
 use self::console::{ConsoleCmd, ConsoleMsg, ConsoleMsgContext, console_cmd_from_byte, console_stream_step};
@@ -635,12 +636,11 @@ entity main_core(
     let ft_mux = eval.ft_mux;
     let usb_cmd = eval.usb_cmd;
 
-    let _tx = inst au_usb_uart_tx8_tap(
+    let _tx = inst au_usb_uart_tx8_rv_tap(
         clk,
         rst,
         false,
-        usb_cmd.tx_req.byte,
-        usb_cmd.tx_req.valid,
+        tx_req_as_rv(usb_cmd.tx_req),
         tx_line_w,
         tx_busy_w,
     );
