@@ -172,6 +172,15 @@ async def help_status_and_parse_error_reporting_work(dut):
 
 
 @cocotb.test()
+async def multi_digit_be_suffix_is_rejected_as_parse_error(dut):
+    await _init(dut)
+
+    err_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "1234/01\r")
+    assert await err_line == "ERR\r\n"
+
+
+@cocotb.test()
 async def counters_track_ft_rx_and_uart_tx_activity(dut):
     await _init(dut)
 
