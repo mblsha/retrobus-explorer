@@ -9,7 +9,7 @@ module sram_card_mem_v (
     input wire [10:0] uart_raddr,
     output wire [7:0] uart_dout
 );
-    reg [7:0] mem [0:2047];
+    (* ram_style = "distributed" *) reg [7:0] mem [0:2047];
     integer i;
 
     initial begin
@@ -19,11 +19,7 @@ module sram_card_mem_v (
     end
 
     always @(posedge clk) begin
-        if (rst) begin
-            for (i = 0; i < 2048; i = i + 1) begin
-                mem[i] <= 8'h00;
-            end
-        end else if (we) begin
+        if (we) begin
             mem[waddr] <= din;
         end
     end

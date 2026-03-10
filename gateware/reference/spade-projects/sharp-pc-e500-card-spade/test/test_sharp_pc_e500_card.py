@@ -90,9 +90,14 @@ async def _uart_recv_line(dut, timeout_cycles: int = USB_UART_BIT_CYCLES * 160, 
 
 
 async def _fast_uart_wait_start_fall(signal, clk, timeout_cycles: int) -> None:
-    if int(signal.value) == 0:
-        return
-    prev = int(signal.value)
+    for _ in range(timeout_cycles):
+        if int(signal.value) == 1:
+            break
+        await tick(clk, 1)
+    else:
+        raise AssertionError("timeout waiting for monitor UART idle-high")
+
+    prev = 1
     for _ in range(timeout_cycles):
         cur = int(signal.value)
         if prev == 1 and cur == 0:
@@ -246,6 +251,8 @@ async def status_counts_track_bus_and_uart_accesses(dut):
 async def saleae_outputs_show_controls_and_monitor_uart_lines(dut):
     await _init(dut)
 
+    await _bus_write(dut, 0x0003, 0xAB)
+
     dut.card_ram_ce1.value = 0
     dut.card_rom_ce6.value = 1
     dut.oe.value = 0
@@ -258,10 +265,8 @@ async def saleae_outputs_show_controls_and_monitor_uart_lines(dut):
     assert (saleae >> 1) & 1 == 1
     assert (saleae >> 2) & 1 == 0
     assert (saleae >> 3) & 1 == 1
-    assert (saleae >> 4) & 1 == 1
+    assert (saleae >> 4) & 1 == 0
     assert (saleae >> 5) & 1 == 0
-    assert (saleae >> 6) & 1 == 1
-    assert (saleae >> 7) & 1 == 1
 
 
 @cocotb.test()

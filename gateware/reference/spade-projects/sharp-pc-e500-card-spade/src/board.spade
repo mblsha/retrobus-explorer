@@ -1,18 +1,152 @@
-use shared_components::monitoring::async_uart_monitor;
-
 use super::{
-    protocol::{BusAddr, CardData, Counter},
+    protocol::Counter,
     render::{BoardRenderInputs, render_board_outputs},
 };
+
+struct FastUart18State {
+    busy: bool,
+    bits_left: uint<5>,
+    frame: uint<20>,
+}
+
+struct FastUart8State {
+    busy: bool,
+    bits_left: uint<4>,
+    frame: uint<10>,
+}
+
+fn fast_uart_frame18(data: uint<18>) -> uint<20> {
+    let framed_data: uint<20> = zext(data) << 1;
+    framed_data | (1 << 19)
+}
+
+fn fast_uart_frame8(data: uint<8>) -> uint<10> {
+    let framed_data: uint<10> = zext(data) << 1;
+    framed_data | (1 << 9)
+}
+
+fn init_fast_uart18() -> FastUart18State {
+    FastUart18State$(
+        busy: false,
+        bits_left: 0,
+        frame: 0,
+    )
+}
+
+fn init_fast_uart8() -> FastUart8State {
+    FastUart8State$(
+        busy: false,
+        bits_left: 0,
+        frame: 0,
+    )
+}
+
+entity fast_uart_monitor_line18(
+    clk: clock,
+    rst: bool,
+    din: uint<18>,
+    wput: bool,
+) -> bool {
+    reg(clk) state: FastUart18State
+        reset(rst: init_fast_uart18())
+        = {
+            let cur = state;
+
+            if cur.busy {
+                if cur.bits_left == 1 {
+                    if wput {
+                        FastUart18State$(
+                            busy: true,
+                            bits_left: 20,
+                            frame: fast_uart_frame18(din),
+                        )
+                    } else {
+                        FastUart18State$(
+                            busy: false,
+                            bits_left: 0,
+                            frame: 0,
+                        )
+                    }
+                } else {
+                    FastUart18State$(
+                        busy: true,
+                        bits_left: cur.bits_left -. 1,
+                        frame: cur.frame >> 1,
+                    )
+                }
+            } else if wput {
+                FastUart18State$(
+                    busy: true,
+                    bits_left: 20,
+                    frame: fast_uart_frame18(din),
+                )
+            } else {
+                cur
+            }
+        };
+
+    if state.busy {
+        state.frame.to_bits()[0]
+    } else {
+        true
+    }
+}
+
+entity fast_uart_monitor_line8(
+    clk: clock,
+    rst: bool,
+    din: uint<8>,
+    wput: bool,
+) -> bool {
+    reg(clk) state: FastUart8State
+        reset(rst: init_fast_uart8())
+        = {
+            let cur = state;
+
+            if cur.busy {
+                if cur.bits_left == 1 {
+                    if wput {
+                        FastUart8State$(
+                            busy: true,
+                            bits_left: 10,
+                            frame: fast_uart_frame8(din),
+                        )
+                    } else {
+                        FastUart8State$(
+                            busy: false,
+                            bits_left: 0,
+                            frame: 0,
+                        )
+                    }
+                } else {
+                    FastUart8State$(
+                        busy: true,
+                        bits_left: cur.bits_left -. 1,
+                        frame: cur.frame >> 1,
+                    )
+                }
+            } else if wput {
+                FastUart8State$(
+                    busy: true,
+                    bits_left: 10,
+                    frame: fast_uart_frame8(din),
+                )
+            } else {
+                cur
+            }
+        };
+
+    if state.busy {
+        state.frame.to_bits()[0]
+    } else {
+        true
+    }
+}
 
 #[inline]
 pub(lib) entity card_board_outputs(
     clk: clock,
     rst: bool,
-    addr_uart_sample: BusAddr,
-    addr_uart_wput: bool,
-    data_uart_sample: CardData,
-    data_uart_wput: bool,
     present: bool,
     bus_read_cycle: bool,
     bus_write_cycle: bool,
@@ -26,24 +160,24 @@ pub(lib) entity card_board_outputs(
     uart_writes: Counter,
     bus_reads: Counter,
     bus_writes: Counter,
+    addr_uart_sample: uint<18>,
+    addr_uart_wput: bool,
+    data_uart_sample: uint<8>,
+    data_uart_wput: bool,
     led: inv &[bool; 8],
     saleae: inv &[bool; 8],
 ) {
-    let addr_uart = inst async_uart_monitor::<18, 4, 3, 100_000_000, 100_000_000>(
+    let addr_uart_line = inst fast_uart_monitor_line18(
         clk,
         rst,
         addr_uart_sample,
         addr_uart_wput,
-        clk,
-        rst,
     );
-    let data_uart = inst async_uart_monitor::<8, 4, 3, 100_000_000, 100_000_000>(
+    let data_uart_line = inst fast_uart_monitor_line8(
         clk,
         rst,
         data_uart_sample,
         data_uart_wput,
-        clk,
-        rst,
     );
 
     let board = render_board_outputs(
@@ -61,8 +195,8 @@ pub(lib) entity card_board_outputs(
             uart_writes: uart_writes,
             bus_reads: bus_reads,
             bus_writes: bus_writes,
-            addr_uart_line: addr_uart.line,
-            data_uart_line: data_uart.line,
+            addr_uart_line: addr_uart_line,
+            data_uart_line: data_uart_line,
         ),
     );
 
