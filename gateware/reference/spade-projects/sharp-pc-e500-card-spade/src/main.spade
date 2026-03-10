@@ -51,29 +51,21 @@ struct MainState {
     uart_reads: Counter,
     uart_writes: Counter,
     parse_err_seen: bool,
-    addr_monitor: StableSampleState<18, 32>,
-    data_monitor: StableSampleState<8, 32>,
-    monitor_addr_candidate: BusAddr,
-    monitor_data_candidate: CardData,
     last_sample_addr: BusAddr,
     last_sample_data: CardData,
     addr_changed: bool,
     data_changed: bool,
+    addr_monitor: StableSampleState<18, 32>,
+    data_monitor: StableSampleState<8, 32>,
+    monitor_addr_candidate: BusAddr,
+    monitor_data_candidate: CardData,
 }
 
 fn stable_monitor_threshold() -> uint<32> {
     5
 }
 
-fn init_addr_monitor() -> StableSampleState<18, 32> {
-    StableSampleState$(
-        last: 0,
-        sent: true,
-        counter: 0,
-    )
-}
-
-fn init_data_monitor() -> StableSampleState<8, 32> {
+fn init_stable_monitor<#uint WIDTH>() -> StableSampleState<WIDTH, 32> {
     StableSampleState$(
         last: 0,
         sent: true,
@@ -93,14 +85,14 @@ fn init_main_state() -> MainState {
         uart_reads: 0,
         uart_writes: 0,
         parse_err_seen: false,
-        addr_monitor: init_addr_monitor(),
-        data_monitor: init_data_monitor(),
-        monitor_addr_candidate: 0,
-        monitor_data_candidate: 0,
         last_sample_addr: 0,
         last_sample_data: 0,
         addr_changed: false,
         data_changed: false,
+        addr_monitor: init_stable_monitor::<18>(),
+        data_monitor: init_stable_monitor::<8>(),
+        monitor_addr_candidate: 0,
+        monitor_data_candidate: 0,
     )
 }
 
@@ -171,33 +163,32 @@ entity main_core(
         } else {
             state.present
         };
+        let uart_read_event = if let ParserEvent::Read(_) = parse.event { true } else { false };
+        let uart_write_event = if let ParserEvent::Write(_, _) = parse.event { true } else { false };
+        let bus_data_out = if next_present && bus_addr_in_card(addr) { *mem_bus_dout } else { 0 };
         let sample_event = bus_read_event || bus_write_event;
-        let sample_addr = addr;
-        let sample_data = if bus_write_event {
+        let monitor_addr_candidate = if sample_event {
+            addr
+        } else {
+            state.monitor_addr_candidate
+        };
+        let monitor_data_candidate = if bus_write_event {
             data_in
         } else if bus_read_event {
-            if next_present && bus_addr_in_card(addr) {
-                *mem_bus_dout
-            } else {
-                0
-            }
+            bus_data_out
         } else {
             state.monitor_data_candidate
         };
-        let next_monitor_addr_candidate = if sample_event { sample_addr } else { state.monitor_addr_candidate };
-        let next_monitor_data_candidate = if sample_event { sample_data } else { state.monitor_data_candidate };
         let addr_monitor_step = stable_sample_step(
             state.addr_monitor,
-            next_monitor_addr_candidate,
+            monitor_addr_candidate,
             stable_monitor_threshold(),
         );
         let data_monitor_step = stable_sample_step(
             state.data_monitor,
-            next_monitor_data_candidate,
+            monitor_data_candidate,
             stable_monitor_threshold(),
         );
-        let uart_read_event = if let ParserEvent::Read(_) = parse.event { true } else { false };
-        let uart_write_event = if let ParserEvent::Write(_, _) = parse.event { true } else { false };
         let parser_msg = parser_uart_msg(
             parse.event,
             next_present,
@@ -224,14 +215,26 @@ entity main_core(
             uart_reads: if uart_read_event { state.uart_reads +. 1 } else { state.uart_reads },
             uart_writes: if uart_write_event { state.uart_writes +. 1 } else { state.uart_writes },
             parse_err_seen: state.parse_err_seen || if let ParserEvent::ParseErr = parse.event { true } else { false },
+            last_sample_addr: if bus_read_event || bus_write_event { addr } else { state.last_sample_addr },
+            last_sample_data: if bus_write_event {
+                data_in
+            } else if bus_read_event {
+                bus_data_out
+            } else {
+                state.last_sample_data
+            },
+            addr_changed: if bus_read_event || bus_write_event { addr != state.last_sample_addr } else { state.addr_changed },
+            data_changed: if bus_write_event {
+                data_in != state.last_sample_data
+            } else if bus_read_event {
+                bus_data_out != state.last_sample_data
+            } else {
+                state.data_changed
+            },
             addr_monitor: addr_monitor_step.next_state,
             data_monitor: data_monitor_step.next_state,
-            monitor_addr_candidate: next_monitor_addr_candidate,
-            monitor_data_candidate: next_monitor_data_candidate,
-            last_sample_addr: if sample_event { next_monitor_addr_candidate } else { state.last_sample_addr },
-            last_sample_data: if sample_event { next_monitor_data_candidate } else { state.last_sample_data },
-            addr_changed: if sample_event { next_monitor_addr_candidate != state.last_sample_addr } else { state.addr_changed },
-            data_changed: if sample_event { next_monitor_data_candidate != state.last_sample_data } else { state.data_changed },
+            monitor_addr_candidate: monitor_addr_candidate,
+            monitor_data_candidate: monitor_data_candidate,
         )
     };
 
@@ -316,16 +319,19 @@ entity main_core(
     let bus_data_out = if state.present && bus_addr_in_card(addr) { *mem_bus_dout } else { 0 };
     let bus_read_event = bus_read_cycle && !state.bus_read_active;
     let bus_write_event = bus_write_cycle && !state.bus_write_active;
-    let monitor_sample_valid = bus_read_event || bus_write_event;
-    let monitor_data_sample = if bus_write_event {
+    let sample_event = bus_read_event || bus_write_event;
+    let monitor_addr_candidate = if sample_event {
+        addr
+    } else {
+        state.monitor_addr_candidate
+    };
+    let monitor_data_candidate = if bus_write_event {
         data_in
     } else if bus_read_event {
         bus_data_out
     } else {
         state.monitor_data_candidate
     };
-    let monitor_addr_candidate = if monitor_sample_valid { addr } else { state.monitor_addr_candidate };
-    let monitor_data_candidate = if monitor_sample_valid { monitor_data_sample } else { state.monitor_data_candidate };
     let addr_monitor_step = stable_sample_step(
         state.addr_monitor,
         monitor_addr_candidate,
@@ -336,13 +342,13 @@ entity main_core(
         monitor_data_candidate,
         stable_monitor_threshold(),
     );
-    let addr_changed = if monitor_sample_valid {
+    let addr_changed = if sample_event {
         addr != state.last_sample_addr
     } else {
         state.addr_changed
     };
-    let data_changed = if monitor_sample_valid {
-        monitor_data_sample != state.last_sample_data
+    let data_changed = if sample_event {
+        (if bus_write_event { data_in } else { bus_data_out }) != state.last_sample_data
     } else {
         state.data_changed
     };
@@ -353,10 +359,6 @@ entity main_core(
     let _board = inst card_board_outputs(
         clk,
         rst,
-        monitor_addr_candidate,
-        addr_monitor_step.wput,
-        monitor_data_candidate,
-        data_monitor_step.wput,
         state.present,
         bus_read_cycle,
         bus_write_cycle,
@@ -370,6 +372,10 @@ entity main_core(
         state.uart_writes,
         state.bus_reads,
         state.bus_writes,
+        monitor_addr_candidate,
+        addr_monitor_step.wput,
+        monitor_data_candidate,
+        data_monitor_step.wput,
         led,
         saleae,
     );

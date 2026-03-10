@@ -5,6 +5,7 @@ shared_components = { path = "../shared-components" }
 
 [constraints]
 auto = true
+top_entity = "main_core"
 
 [verilog]
 sources = [
