@@ -14,8 +14,8 @@ pub(lib) struct BoardRenderInputs {
     uart_writes: Counter,
     bus_reads: Counter,
     bus_writes: Counter,
-    addr_uart_line: bool,
-    data_uart_line: bool,
+    saleae6_line: bool,
+    saleae7_line: bool,
 }
 
 pub(lib) struct BoardOutputs {
@@ -47,8 +47,8 @@ pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
             inputs.rw,
             inputs.addr_changed,
             inputs.data_changed,
-            inputs.addr_uart_line,
-            inputs.data_uart_line,
+            inputs.saleae6_line,
+            inputs.saleae7_line,
         ],
     )
 }

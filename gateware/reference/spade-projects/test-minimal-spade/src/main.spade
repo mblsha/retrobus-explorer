@@ -1,3 +1,4 @@
+mod build_info;
 use shared_components::primitives::counter;
 
 #[no_mangle(all)]

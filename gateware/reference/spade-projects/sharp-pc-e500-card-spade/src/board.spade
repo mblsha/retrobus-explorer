@@ -1,5 +1,5 @@
 use super::{
-    protocol::Counter,
+    protocol::{BusAddr, CardData, Counter},
     render::{BoardRenderInputs, render_board_outputs},
 };
 
@@ -13,6 +13,46 @@ struct FastUart8State {
     busy: bool,
     bits_left: uint<4>,
     frame: uint<10>,
+}
+
+struct PinDebugUartState {
+    busy: bool,
+    bits_left: uint<4>,
+    frame0: uint<10>,
+    frame1: uint<10>,
+}
+
+struct PinDebugMonitorState {
+    pin: PinDebugState,
+    uart: PinDebugUartState,
+}
+
+struct PinDebugState {
+    armed: bool,
+    prev_card_ram_ce1: bool,
+    prev_card_rom_ce6: bool,
+    prev_oe: bool,
+    prev_rw: bool,
+    prev_addr: BusAddr,
+    prev_data: CardData,
+    pending_ctrl: uint<4>,
+    pending_addr: BusAddr,
+    pending_data: CardData,
+}
+
+struct PinDebugEvent {
+    valid: bool,
+    char0: uint<8>,
+    char1: uint<8>,
+    clear_ctrl: uint<4>,
+    clear_addr: BusAddr,
+    clear_data: CardData,
+}
+
+struct PinDebugStepOut {
+    state: PinDebugState,
+    event: PinDebugEvent,
+    emit: bool,
 }
 
 fn fast_uart_frame18(data: uint<18>) -> uint<20> {
@@ -41,6 +81,384 @@ fn init_fast_uart8() -> FastUart8State {
     )
 }
 
+fn init_pin_debug_uart() -> PinDebugUartState {
+    PinDebugUartState$(
+        busy: false,
+        bits_left: 0,
+        frame0: 0,
+        frame1: 0,
+    )
+}
+
+fn init_pin_debug_monitor() -> PinDebugMonitorState {
+    PinDebugMonitorState$(
+        pin: init_pin_debug_state(),
+        uart: init_pin_debug_uart(),
+    )
+}
+
+fn next_fast_uart18_state(cur: FastUart18State, din: uint<18>, wput: bool) -> FastUart18State {
+    if cur.busy {
+        if cur.bits_left == 1 {
+            if wput {
+                FastUart18State$(
+                    busy: true,
+                    bits_left: 20,
+                    frame: fast_uart_frame18(din),
+                )
+            } else {
+                FastUart18State$(
+                    busy: false,
+                    bits_left: 0,
+                    frame: 0,
+                )
+            }
+        } else {
+            FastUart18State$(
+                busy: true,
+                bits_left: cur.bits_left -. 1,
+                frame: cur.frame >> 1,
+            )
+        }
+    } else if wput {
+        FastUart18State$(
+            busy: true,
+            bits_left: 20,
+            frame: fast_uart_frame18(din),
+        )
+    } else {
+        cur
+    }
+}
+
+fn next_fast_uart8_state(cur: FastUart8State, din: uint<8>, wput: bool) -> FastUart8State {
+    if cur.busy {
+        if cur.bits_left == 1 {
+            if wput {
+                FastUart8State$(
+                    busy: true,
+                    bits_left: 10,
+                    frame: fast_uart_frame8(din),
+                )
+            } else {
+                FastUart8State$(
+                    busy: false,
+                    bits_left: 0,
+                    frame: 0,
+                )
+            }
+        } else {
+            FastUart8State$(
+                busy: true,
+                bits_left: cur.bits_left -. 1,
+                frame: cur.frame >> 1,
+            )
+        }
+    } else if wput {
+        FastUart8State$(
+            busy: true,
+            bits_left: 10,
+            frame: fast_uart_frame8(din),
+        )
+    } else {
+        cur
+    }
+}
+
+fn fast_uart_line18(state: FastUart18State) -> bool {
+    if state.busy {
+        state.frame.to_bits()[0]
+    } else {
+        true
+    }
+}
+
+fn fast_uart_line8(state: FastUart8State) -> bool {
+    if state.busy {
+        state.frame.to_bits()[0]
+    } else {
+        true
+    }
+}
+
+fn next_pin_debug_uart_state(
+    cur: PinDebugUartState,
+    char0: uint<8>,
+    char1: uint<8>,
+    wput: bool,
+) -> PinDebugUartState {
+    if cur.busy {
+        if cur.bits_left == 1 {
+            if wput {
+                PinDebugUartState$(
+                    busy: true,
+                    bits_left: 10,
+                    frame0: fast_uart_frame8(char0),
+                    frame1: fast_uart_frame8(char1),
+                )
+            } else {
+                PinDebugUartState$(
+                    busy: false,
+                    bits_left: 0,
+                    frame0: 0,
+                    frame1: 0,
+                )
+            }
+        } else {
+            PinDebugUartState$(
+                busy: true,
+                bits_left: cur.bits_left -. 1,
+                frame0: cur.frame0 >> 1,
+                frame1: cur.frame1 >> 1,
+            )
+        }
+    } else if wput {
+        PinDebugUartState$(
+            busy: true,
+            bits_left: 10,
+            frame0: fast_uart_frame8(char0),
+            frame1: fast_uart_frame8(char1),
+        )
+    } else {
+        cur
+    }
+}
+
+fn pin_debug_uart_line(state: PinDebugUartState, which: bool) -> bool {
+    if state.busy {
+        if !which {
+            state.frame0.to_bits()[0]
+        } else {
+            state.frame1.to_bits()[0]
+        }
+    } else {
+        true
+    }
+}
+
+fn init_pin_debug_state() -> PinDebugState {
+    PinDebugState$(
+        armed: false,
+        prev_card_ram_ce1: true,
+        prev_card_rom_ce6: true,
+        prev_oe: true,
+        prev_rw: true,
+        prev_addr: 0,
+        prev_data: 0,
+        pending_ctrl: 0,
+        pending_addr: 0,
+        pending_data: 0,
+    )
+}
+
+fn invalid_pin_debug_event() -> PinDebugEvent {
+    PinDebugEvent$(
+        valid: false,
+        char0: 0,
+        char1: 0,
+        clear_ctrl: 0,
+        clear_addr: 0,
+        clear_data: 0,
+    )
+}
+
+fn addr_pin_char(idx: uint<5>) -> uint<8> {
+    if idx < 10 {
+        b'0' +. zext(idx)
+    } else {
+        b'A' +. zext(idx -. 10)
+    }
+}
+
+fn data_pin_char(idx: uint<4>) -> uint<8> {
+    b'0' +. zext(idx)
+}
+
+fn select_pin_debug_event(
+    pending_ctrl: uint<4>,
+    pending_addr: BusAddr,
+    pending_data: CardData,
+) -> PinDebugEvent {
+    if pending_ctrl.to_bits()[0] {
+        PinDebugEvent$(valid: true, char0: b'C', char1: b'1', clear_ctrl: 1, clear_addr: 0, clear_data: 0)
+    } else if pending_ctrl.to_bits()[1] {
+        PinDebugEvent$(valid: true, char0: b'C', char1: b'6', clear_ctrl: 2, clear_addr: 0, clear_data: 0)
+    } else if pending_ctrl.to_bits()[2] {
+        PinDebugEvent$(valid: true, char0: b'O', char1: b'E', clear_ctrl: 4, clear_addr: 0, clear_data: 0)
+    } else if pending_ctrl.to_bits()[3] {
+        PinDebugEvent$(valid: true, char0: b'R', char1: b'W', clear_ctrl: 8, clear_addr: 0, clear_data: 0)
+    } else if pending_addr.to_bits()[0] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(0), clear_ctrl: 0, clear_addr: 1, clear_data: 0)
+    } else if pending_addr.to_bits()[1] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(1), clear_ctrl: 0, clear_addr: 2, clear_data: 0)
+    } else if pending_addr.to_bits()[2] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(2), clear_ctrl: 0, clear_addr: 4, clear_data: 0)
+    } else if pending_addr.to_bits()[3] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(3), clear_ctrl: 0, clear_addr: 8, clear_data: 0)
+    } else if pending_addr.to_bits()[4] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(4), clear_ctrl: 0, clear_addr: 16, clear_data: 0)
+    } else if pending_addr.to_bits()[5] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(5), clear_ctrl: 0, clear_addr: 32, clear_data: 0)
+    } else if pending_addr.to_bits()[6] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(6), clear_ctrl: 0, clear_addr: 64, clear_data: 0)
+    } else if pending_addr.to_bits()[7] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(7), clear_ctrl: 0, clear_addr: 128, clear_data: 0)
+    } else if pending_addr.to_bits()[8] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(8), clear_ctrl: 0, clear_addr: 256, clear_data: 0)
+    } else if pending_addr.to_bits()[9] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(9), clear_ctrl: 0, clear_addr: 512, clear_data: 0)
+    } else if pending_addr.to_bits()[10] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(10), clear_ctrl: 0, clear_addr: 1024, clear_data: 0)
+    } else if pending_addr.to_bits()[11] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(11), clear_ctrl: 0, clear_addr: 2048, clear_data: 0)
+    } else if pending_addr.to_bits()[12] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(12), clear_ctrl: 0, clear_addr: 4096, clear_data: 0)
+    } else if pending_addr.to_bits()[13] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(13), clear_ctrl: 0, clear_addr: 8192, clear_data: 0)
+    } else if pending_addr.to_bits()[14] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(14), clear_ctrl: 0, clear_addr: 16384, clear_data: 0)
+    } else if pending_addr.to_bits()[15] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(15), clear_ctrl: 0, clear_addr: 32768, clear_data: 0)
+    } else if pending_addr.to_bits()[16] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(16), clear_ctrl: 0, clear_addr: 65536, clear_data: 0)
+    } else if pending_addr.to_bits()[17] {
+        PinDebugEvent$(valid: true, char0: b'A', char1: addr_pin_char(17), clear_ctrl: 0, clear_addr: 131072, clear_data: 0)
+    } else if pending_data.to_bits()[0] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(0), clear_ctrl: 0, clear_addr: 0, clear_data: 1)
+    } else if pending_data.to_bits()[1] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(1), clear_ctrl: 0, clear_addr: 0, clear_data: 2)
+    } else if pending_data.to_bits()[2] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(2), clear_ctrl: 0, clear_addr: 0, clear_data: 4)
+    } else if pending_data.to_bits()[3] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(3), clear_ctrl: 0, clear_addr: 0, clear_data: 8)
+    } else if pending_data.to_bits()[4] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(4), clear_ctrl: 0, clear_addr: 0, clear_data: 16)
+    } else if pending_data.to_bits()[5] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(5), clear_ctrl: 0, clear_addr: 0, clear_data: 32)
+    } else if pending_data.to_bits()[6] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(6), clear_ctrl: 0, clear_addr: 0, clear_data: 64)
+    } else if pending_data.to_bits()[7] {
+        PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(7), clear_ctrl: 0, clear_addr: 0, clear_data: 128)
+    } else {
+        invalid_pin_debug_event()
+    }
+}
+
+fn pin_debug_step(
+    cur: PinDebugState,
+    enabled: bool,
+    card_ram_ce1: bool,
+    card_rom_ce6: bool,
+    oe: bool,
+    rw: bool,
+    addr: BusAddr,
+    data: CardData,
+    tx_ready: bool,
+) -> PinDebugStepOut {
+    if !enabled {
+        PinDebugStepOut$(
+            state: PinDebugState$(
+                armed: false,
+                prev_card_ram_ce1: card_ram_ce1,
+                prev_card_rom_ce6: card_rom_ce6,
+                prev_oe: oe,
+                prev_rw: rw,
+                prev_addr: addr,
+                prev_data: data,
+                pending_ctrl: 0,
+                pending_addr: 0,
+                pending_data: 0,
+            ),
+            event: invalid_pin_debug_event(),
+            emit: false,
+        )
+    } else if !cur.armed {
+        PinDebugStepOut$(
+            state: PinDebugState$(
+                armed: true,
+                prev_card_ram_ce1: card_ram_ce1,
+                prev_card_rom_ce6: card_rom_ce6,
+                prev_oe: oe,
+                prev_rw: rw,
+                prev_addr: addr,
+                prev_data: data,
+                pending_ctrl: 0,
+                pending_addr: 0,
+                pending_data: 0,
+            ),
+            event: invalid_pin_debug_event(),
+            emit: false,
+        )
+    } else {
+        let ctrl_changed_c1: uint<4> = if card_ram_ce1 != cur.prev_card_ram_ce1 { 1 } else { 0 };
+        let ctrl_changed_c6: uint<4> = if card_rom_ce6 != cur.prev_card_rom_ce6 { 2 } else { 0 };
+        let ctrl_changed_oe: uint<4> = if oe != cur.prev_oe { 4 } else { 0 };
+        let ctrl_changed_rw: uint<4> = if rw != cur.prev_rw { 8 } else { 0 };
+        let ctrl_changed: uint<4> =
+            ctrl_changed_c1 |
+            ctrl_changed_c6 |
+            ctrl_changed_oe |
+            ctrl_changed_rw;
+        let pending_ctrl = cur.pending_ctrl | ctrl_changed;
+        let pending_addr = cur.pending_addr | (addr ^ cur.prev_addr);
+        let pending_data = cur.pending_data | (data ^ cur.prev_data);
+        let event = select_pin_debug_event(pending_ctrl, pending_addr, pending_data);
+        let emit = tx_ready && event.valid;
+
+        PinDebugStepOut$(
+            state: PinDebugState$(
+                armed: true,
+                prev_card_ram_ce1: card_ram_ce1,
+                prev_card_rom_ce6: card_rom_ce6,
+                prev_oe: oe,
+                prev_rw: rw,
+                prev_addr: addr,
+                prev_data: data,
+                pending_ctrl: if emit { pending_ctrl ^ event.clear_ctrl } else { pending_ctrl },
+                pending_addr: if emit { pending_addr ^ event.clear_addr } else { pending_addr },
+                pending_data: if emit { pending_data ^ event.clear_data } else { pending_data },
+            ),
+            event: event,
+            emit: emit,
+        )
+    }
+}
+
+entity pin_change_debug_lines(
+    clk: clock,
+    rst: bool,
+    enabled: bool,
+    card_ram_ce1: bool,
+    card_rom_ce6: bool,
+    oe: bool,
+    rw: bool,
+    addr: BusAddr,
+    data: CardData,
+) -> [bool; 2] {
+    reg(clk) state: PinDebugMonitorState
+        reset(rst: init_pin_debug_monitor())
+        = {
+            let step = pin_debug_step(
+                state.pin,
+                enabled,
+                card_ram_ce1,
+                card_rom_ce6,
+                oe,
+                rw,
+                addr,
+                data,
+                !state.uart.busy,
+            );
+
+            PinDebugMonitorState$(
+                pin: step.state,
+                uart: next_pin_debug_uart_state(state.uart, step.event.char0, step.event.char1, step.emit),
+            )
+        };
+
+    [pin_debug_uart_line(state.uart, false), pin_debug_uart_line(state.uart, true)]
+}
+
 entity fast_uart_monitor_line18(
     clk: clock,
     rst: bool,
@@ -49,47 +467,9 @@ entity fast_uart_monitor_line18(
 ) -> bool {
     reg(clk) state: FastUart18State
         reset(rst: init_fast_uart18())
-        = {
-            let cur = state;
+        = next_fast_uart18_state(state, din, wput);
 
-            if cur.busy {
-                if cur.bits_left == 1 {
-                    if wput {
-                        FastUart18State$(
-                            busy: true,
-                            bits_left: 20,
-                            frame: fast_uart_frame18(din),
-                        )
-                    } else {
-                        FastUart18State$(
-                            busy: false,
-                            bits_left: 0,
-                            frame: 0,
-                        )
-                    }
-                } else {
-                    FastUart18State$(
-                        busy: true,
-                        bits_left: cur.bits_left -. 1,
-                        frame: cur.frame >> 1,
-                    )
-                }
-            } else if wput {
-                FastUart18State$(
-                    busy: true,
-                    bits_left: 20,
-                    frame: fast_uart_frame18(din),
-                )
-            } else {
-                cur
-            }
-        };
-
-    if state.busy {
-        state.frame.to_bits()[0]
-    } else {
-        true
-    }
+    fast_uart_line18(state)
 }
 
 entity fast_uart_monitor_line8(
@@ -100,53 +480,16 @@ entity fast_uart_monitor_line8(
 ) -> bool {
     reg(clk) state: FastUart8State
         reset(rst: init_fast_uart8())
-        = {
-            let cur = state;
+        = next_fast_uart8_state(state, din, wput);
 
-            if cur.busy {
-                if cur.bits_left == 1 {
-                    if wput {
-                        FastUart8State$(
-                            busy: true,
-                            bits_left: 10,
-                            frame: fast_uart_frame8(din),
-                        )
-                    } else {
-                        FastUart8State$(
-                            busy: false,
-                            bits_left: 0,
-                            frame: 0,
-                        )
-                    }
-                } else {
-                    FastUart8State$(
-                        busy: true,
-                        bits_left: cur.bits_left -. 1,
-                        frame: cur.frame >> 1,
-                    )
-                }
-            } else if wput {
-                FastUart8State$(
-                    busy: true,
-                    bits_left: 10,
-                    frame: fast_uart_frame8(din),
-                )
-            } else {
-                cur
-            }
-        };
-
-    if state.busy {
-        state.frame.to_bits()[0]
-    } else {
-        true
-    }
+    fast_uart_line8(state)
 }
 
 #[inline]
 pub(lib) entity card_board_outputs(
     clk: clock,
     rst: bool,
+    pin_debug_mode: bool,
     present: bool,
     bus_read_cycle: bool,
     bus_write_cycle: bool,
@@ -160,6 +503,8 @@ pub(lib) entity card_board_outputs(
     uart_writes: Counter,
     bus_reads: Counter,
     bus_writes: Counter,
+    pin_debug_addr: BusAddr,
+    pin_debug_data: CardData,
     addr_uart_sample: uint<18>,
     addr_uart_wput: bool,
     data_uart_sample: uint<8>,
@@ -179,6 +524,17 @@ pub(lib) entity card_board_outputs(
         data_uart_sample,
         data_uart_wput,
     );
+    let debug_lines = inst pin_change_debug_lines(
+        clk,
+        rst,
+        pin_debug_mode,
+        card_ram_ce1,
+        card_rom_ce6,
+        oe,
+        rw,
+        pin_debug_addr,
+        pin_debug_data,
+    );
 
     let board = render_board_outputs(
         BoardRenderInputs$(
@@ -195,8 +551,8 @@ pub(lib) entity card_board_outputs(
             uart_writes: uart_writes,
             bus_reads: bus_reads,
             bus_writes: bus_writes,
-            addr_uart_line: addr_uart_line,
-            data_uart_line: data_uart_line,
+            saleae6_line: if pin_debug_mode { debug_lines[0] } else { addr_uart_line },
+            saleae7_line: if pin_debug_mode { debug_lines[1] } else { data_uart_line },
         ),
     );
 

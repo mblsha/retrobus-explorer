@@ -1,0 +1,41 @@
+use super::message_stream::{TxReq8, tx_req_none};
+
+pub struct BootBannerState<#uint IDX_W> {
+    active: bool,
+    idx: uint<IDX_W>,
+}
+
+pub struct BootBannerOut<#uint IDX_W> {
+    state: BootBannerState<IDX_W>,
+    tx_req: TxReq8,
+}
+
+pub fn init_boot_banner<#uint IDX_W>() -> BootBannerState<IDX_W> {
+    BootBannerState$(
+        active: true,
+        idx: 0,
+    )
+}
+
+pub fn boot_banner_step<#uint IDX_W, #uint N>(
+    state: BootBannerState<IDX_W>,
+    banner: [uint<8>; N],
+    block_tx: bool,
+) -> BootBannerOut<IDX_W> {
+    if !state.active || block_tx {
+        BootBannerOut$(
+            state: state,
+            tx_req: tx_req_none(),
+        )
+    } else {
+        let last_idx: uint<IDX_W> = N - 1;
+        let done = state.idx == last_idx;
+        BootBannerOut$(
+            state: BootBannerState$(
+                active: !done,
+                idx: if done { 0 } else { state.idx +. 1 },
+            ),
+            tx_req: TxReq8$(valid: true, byte: banner[trunc(state.idx)]),
+        )
+    }
+}
