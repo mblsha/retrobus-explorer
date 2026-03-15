@@ -20,10 +20,12 @@ use self::protocol::{
     CardData,
     CardOffset,
     Counter,
+    DebugMode,
     ParserEvent,
     ParserState,
     bus_addr_in_card,
     bus_addr_offset,
+    mode_pin_debug_pair,
     host_addr_in_card,
     host_addr_offset,
     init_parser,
@@ -48,7 +50,7 @@ struct MainState {
     parser: ParserState,
     msg_stream: CardMsgStreamState,
     present: bool,
-    pin_debug_mode: bool,
+    debug_mode: DebugMode,
     bus_read_active: bool,
     bus_write_active: bool,
     bus_reads: Counter,
@@ -84,7 +86,7 @@ fn init_main_state() -> MainState {
         parser: init_parser(),
         msg_stream: init_card_msg_stream(),
         present: true,
-        pin_debug_mode: true,
+        debug_mode: mode_pin_debug_pair(),
         bus_read_active: false,
         bus_write_active: false,
         bus_reads: 0,
@@ -105,7 +107,7 @@ fn init_main_state() -> MainState {
 
 fn parser_uart_msg(
     event: ParserEvent,
-    pin_debug_mode: bool,
+    debug_mode: DebugMode,
     present: bool,
     bus_reads: Counter,
     bus_writes: Counter,
@@ -124,9 +126,9 @@ fn parser_uart_msg(
             },
         ),
         ParserEvent::Write(_, _) => CardMsg::Ok(),
-        ParserEvent::SetMode$(pin_debug) => CardMsg::Mode(pin_debug),
+        ParserEvent::SetMode$(mode) => CardMsg::Mode(mode),
         ParserEvent::SetPresent$(present) => CardMsg::Present(present),
-        ParserEvent::Status => CardMsg::Status(pin_debug_mode, present, bus_reads, bus_writes, uart_reads, uart_writes),
+        ParserEvent::Status => CardMsg::Status(debug_mode, present, bus_reads, bus_writes, uart_reads, uart_writes),
         ParserEvent::Help => CardMsg::Help(),
         ParserEvent::ParseErr => CardMsg::Err(),
     }
@@ -173,10 +175,10 @@ entity main_core(
         } else {
             state.present
         };
-        let next_pin_debug_mode = if let ParserEvent::SetMode$(pin_debug) = parse.event {
-            pin_debug
+        let next_debug_mode = if let ParserEvent::SetMode$(mode) = parse.event {
+            mode
         } else {
-            state.pin_debug_mode
+            state.debug_mode
         };
         let uart_read_event = if let ParserEvent::Read(_) = parse.event { true } else { false };
         let uart_write_event = if let ParserEvent::Write(_, _) = parse.event { true } else { false };
@@ -206,7 +208,7 @@ entity main_core(
         );
         let parser_msg = parser_uart_msg(
             parse.event,
-            next_pin_debug_mode,
+            next_debug_mode,
             next_present,
             if bus_read_event { state.bus_reads +. 1 } else { state.bus_reads },
             if bus_write_event { state.bus_writes +. 1 } else { state.bus_writes },
@@ -225,7 +227,7 @@ entity main_core(
             parser: parse.state,
             msg_stream: msg_stream.state,
             present: next_present,
-            pin_debug_mode: next_pin_debug_mode,
+            debug_mode: next_debug_mode,
             bus_read_active: bus_read_cycle,
             bus_write_active: bus_write_cycle,
             bus_reads: if bus_read_event { state.bus_reads +. 1 } else { state.bus_reads },
@@ -310,7 +312,7 @@ entity main_core(
 
     let parser_msg = parser_uart_msg(
         parse.event,
-        if let ParserEvent::SetMode$(pin_debug) = parse.event { pin_debug } else { state.pin_debug_mode },
+        if let ParserEvent::SetMode$(mode) = parse.event { mode } else { state.debug_mode },
         if let ParserEvent::SetPresent$(present) = parse.event { present } else { state.present },
         state.bus_reads,
         state.bus_writes,
@@ -383,7 +385,7 @@ entity main_core(
     let _board = inst card_board_outputs(
         clk,
         rst,
-        state.pin_debug_mode,
+        state.debug_mode,
         state.present,
         bus_read_cycle,
         bus_write_cycle,
