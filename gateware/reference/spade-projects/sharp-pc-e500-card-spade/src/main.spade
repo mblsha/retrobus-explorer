@@ -6,18 +6,25 @@ entity main(
     led: inv &[bool; 8],
     usb_rx: bool,
     usb_tx: inv &bool,
-    ffc_data: [bool; 48],
     saleae: inv &[bool; 8],
+    rw: bool,
+    addr: [bool; 18],
+    vcc2: bool,
+    data: [bool; 8],
+    ce1: bool,
+    ce6: bool,
+    nc: bool,
+    oe: bool,
 ) {
     let saleae_lines: [bool; 8] = [
-        ffc_data[0],
-        ffc_data[1],
-        ffc_data[2],
-        ffc_data[3],
-        ffc_data[4],
-        ffc_data[5],
-        ffc_data[6],
-        ffc_data[7],
+        false,
+        false,
+        rw,
+        addr[0],
+        addr[1],
+        false,
+        addr[2],
+        addr[3],
     ];
     let led_lines: [bool; 8] = [false; 8];
     let usb_tx_idle = true;
@@ -29,4 +36,10 @@ entity main(
     let _ = clk;
     let _ = rst_n;
     let _ = usb_rx;
+    let _ = vcc2;
+    let _ = data;
+    let _ = ce1;
+    let _ = ce6;
+    let _ = nc;
+    let _ = oe;
 }
