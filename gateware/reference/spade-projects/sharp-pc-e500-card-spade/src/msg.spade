@@ -2,7 +2,17 @@ use std::conv::concat_arrays;
 
 use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
 
-use super::protocol::{CardData, Counter, DebugMode, HostAddr, card_size_bytes};
+use super::protocol::{
+    CardData,
+    Counter,
+    DebugMode,
+    HostAddr,
+    PinCounter,
+    PinQuery,
+    card_size_bytes,
+    pin_query_char0,
+    pin_query_char1,
+};
 
 type CardMsgIdx = uint<9>;
 
@@ -11,8 +21,10 @@ pub enum CardMsg {
     Ok,
     Err,
     Help,
+    End,
     Mode{mode: DebugMode},
     Present{present: bool},
+    PinCount{pin: PinQuery, count: PinCounter},
     Read{addr: HostAddr, value: CardData},
     Status{
         mode: DebugMode,
@@ -43,7 +55,7 @@ fn hex_char(value: uint<4>) -> uint<8> {
     }
 }
 
-fn addr_hex_char(addr: HostAddr, idx: uint<3>) -> uint<8> {
+fn host_addr_hex_char(addr: HostAddr, idx: uint<3>) -> uint<8> {
     match idx {
         0 => hex_char(trunc(addr >> 20)),
         1 => hex_char(trunc(addr >> 16)),
@@ -71,27 +83,34 @@ fn count_hex_char(value: Counter, idx: uint<2>) -> uint<8> {
     }
 }
 
+fn pin_count_hex_char(value: PinCounter, idx: uint<3>) -> uint<8> {
+    match idx {
+        0 => hex_char(trunc(value >> 28)),
+        1 => hex_char(trunc(value >> 24)),
+        2 => hex_char(trunc(value >> 20)),
+        3 => hex_char(trunc(value >> 16)),
+        4 => hex_char(trunc(value >> 12)),
+        5 => hex_char(trunc(value >> 8)),
+        6 => hex_char(trunc(value >> 4)),
+        _ => hex_char(trunc(value)),
+    }
+}
+
 fn mode_char(mode: DebugMode) -> uint<8> {
     b'0' +. zext(mode)
 }
 
-fn help_text() -> [uint<8>; 304] {
+fn help_text() -> [uint<8>; 291] {
     concat_arrays(
         concat_arrays(
-            b"rAAAAAA wAAAAAA=BB p0|p1 m0|m1|m2 ? h\r\n",
-            b"S0=CE1_RAM# S1=CE6_ROM# S2=OE#\r\n",
+            b"rAAAAAA wAAAAAA=BB p0|p1|pPIN a c m0|m1 ? h\r\n",
+            b"pPIN reads+clears one pin counter, a dumps all pin counters\r\n",
         ),
         concat_arrays(
-            b"m0/m1:S3=R/W S4=AD_CHG S5=DATA_CHG\r\n",
+            b"c clears all pin counters, counts are sampled edge totals\r\n",
             concat_arrays(
-                b"m0:S6=ADDR18_UART100 S7=DATA8_UART100\r\n",
-                concat_arrays(
-                    b"m1:S6=PINCHR0 S7=PINCHR1 C1 C6 OE RW A0-A9 AA-AH D0-D7\r\n",
-                    concat_arrays(
-                        b"m2:S3=CTRL S4=DATACHR0 S5=DATACHR1 S6=ADDRCHR0 S7=ADDRCHR1\r\n",
-                        b"CTRL:1 6 O R DATA:D0-D7 ADDR:A0-A9 AA-AH\r\n",
-                    ),
-                ),
+                b"S0=CE1_RAM# S1=CE6_ROM# S2=OE# S3=R/W S4=AD_CHG S5=DATA_CHG\r\n",
+                b"m0:S6=ADDR18_UART100 S7=DATA8_UART100, m1:S6/S7 idle USB counts\r\n",
             ),
         ),
     )
@@ -107,9 +126,11 @@ impl CardMsg {
             Self::None => 0,
             Self::Ok => 4,
             Self::Err => 5,
-            Self::Help => 304,
+            Self::Help => 291,
+            Self::End => 5,
             Self::Mode(_) => 4,
             Self::Present(_) => 4,
+            Self::PinCount(_, _) => 14,
             Self::Read(_, _) => 11,
             Self::Status(_, _, _, _, _, _) => 41,
         }
@@ -124,6 +145,7 @@ impl CardMsg {
                 Self::Ok => b"OK\r\n"[trunc(idx)],
                 Self::Err => b"ERR\r\n"[trunc(idx)],
                 Self::Help => help_text()[trunc(idx)],
+                Self::End => b"END\r\n"[trunc(idx)],
                 Self::Mode$(mode) => match idx {
                     0 => b'M',
                     1 => mode_char(mode),
@@ -136,13 +158,29 @@ impl CardMsg {
                     2 => b'\r',
                     _ => b'\n',
                 },
+                Self::PinCount$(pin, count) => match idx {
+                    0 => b'P',
+                    1 => pin_query_char0(pin),
+                    2 => pin_query_char1(pin),
+                    3 => b'=',
+                    4 => pin_count_hex_char(count, 0),
+                    5 => pin_count_hex_char(count, 1),
+                    6 => pin_count_hex_char(count, 2),
+                    7 => pin_count_hex_char(count, 3),
+                    8 => pin_count_hex_char(count, 4),
+                    9 => pin_count_hex_char(count, 5),
+                    10 => pin_count_hex_char(count, 6),
+                    11 => pin_count_hex_char(count, 7),
+                    12 => b'\r',
+                    _ => b'\n',
+                },
                 Self::Read$(addr, value) => match idx {
-                    0 => addr_hex_char(addr, 0),
-                    1 => addr_hex_char(addr, 1),
-                    2 => addr_hex_char(addr, 2),
-                    3 => addr_hex_char(addr, 3),
-                    4 => addr_hex_char(addr, 4),
-                    5 => addr_hex_char(addr, 5),
+                    0 => host_addr_hex_char(addr, 0),
+                    1 => host_addr_hex_char(addr, 1),
+                    2 => host_addr_hex_char(addr, 2),
+                    3 => host_addr_hex_char(addr, 3),
+                    4 => host_addr_hex_char(addr, 4),
+                    5 => host_addr_hex_char(addr, 5),
                     6 => b'=',
                     7 => byte_hex_char(value, false),
                     8 => byte_hex_char(value, true),

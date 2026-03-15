@@ -11,16 +11,24 @@ from cocotb_helpers import tick
 
 USB_UART_BIT_CYCLES = 100
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_BOOT_LINE: str | None = None
 
 
 def boot_line() -> str:
-    meta = json.loads((PROJECT_ROOT / "build" / "build_info.json").read_text())
-    return meta["banner"]
+    global _BOOT_LINE
+    if _BOOT_LINE is None:
+        meta = json.loads((PROJECT_ROOT / "build" / "build_info.json").read_text())
+        _BOOT_LINE = meta["banner"]
+    return _BOOT_LINE
 
 
 def _set_data_bus_z(dut):
     dut.data_host.value = 0
     dut.data_host_drive.value = 0
+
+
+async def _settle_pins(dut, cycles: int = 6):
+    await tick(dut.clk, cycles)
 
 
 async def _init(dut):
@@ -96,13 +104,22 @@ async def _uart_recv_byte(dut, timeout_cycles: int = 12000) -> int:
     return value
 
 
-async def _uart_recv_line(dut, timeout_cycles: int = USB_UART_BIT_CYCLES * 160, max_len: int = 160) -> str:
+async def _uart_recv_line(dut, timeout_cycles: int = USB_UART_BIT_CYCLES * 200, max_len: int = 200) -> str:
     data = bytearray()
     for _ in range(max_len):
         data.append(await _uart_recv_byte(dut, timeout_cycles))
         if data[-1] == 0x0A:
             return data.decode("ascii", errors="replace")
     raise AssertionError(f"line too long without LF: {data!r}")
+
+
+async def _uart_recv_until_end(dut) -> list[str]:
+    lines: list[str] = []
+    while True:
+        line = await _uart_recv_line(dut)
+        lines.append(line)
+        if line == "END\r\n":
+            return lines
 
 
 async def _fast_uart_wait_start_fall(signal, clk, timeout_cycles: int) -> None:
@@ -211,16 +228,14 @@ async def help_status_and_parse_errors_work(dut):
 
     help_line0 = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "h\r")
-    assert await help_line0 == "rAAAAAA wAAAAAA=BB p0|p1 m0|m1|m2 ? h\r\n"
-    assert await _uart_recv_line(dut) == "S0=CE1_RAM# S1=CE6_ROM# S2=OE#\r\n"
-    assert await _uart_recv_line(dut) == "m0/m1:S3=R/W S4=AD_CHG S5=DATA_CHG\r\n"
-    assert await _uart_recv_line(dut) == "m0:S6=ADDR18_UART100 S7=DATA8_UART100\r\n"
-    assert await _uart_recv_line(dut) == "m1:S6=PINCHR0 S7=PINCHR1 C1 C6 OE RW A0-A9 AA-AH D0-D7\r\n"
-    assert await _uart_recv_line(dut) == "m2:S3=CTRL S4=DATACHR0 S5=DATACHR1 S6=ADDRCHR0 S7=ADDRCHR1\r\n"
-    assert await _uart_recv_line(dut) == "CTRL:1 6 O R DATA:D0-D7 ADDR:A0-A9 AA-AH\r\n"
+    assert await help_line0 == "rAAAAAA wAAAAAA=BB p0|p1|pPIN a c m0|m1 ? h\r\n"
+    assert await _uart_recv_line(dut) == "pPIN reads+clears one pin counter, a dumps all pin counters\r\n"
+    assert await _uart_recv_line(dut) == "c clears all pin counters, counts are sampled edge totals\r\n"
+    assert await _uart_recv_line(dut) == "S0=CE1_RAM# S1=CE6_ROM# S2=OE# S3=R/W S4=AD_CHG S5=DATA_CHG\r\n"
+    assert await _uart_recv_line(dut) == "m0:S6=ADDR18_UART100 S7=DATA8_UART100, m1:S6/S7 idle USB counts\r\n"
 
     err_line = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_text(dut, "w030000=12\r")
+    await _uart_send_text(dut, "d41\r")
     assert await err_line == "ERR\r\n"
 
     status_line = cocotb.start_soon(_uart_recv_line(dut))
@@ -229,60 +244,122 @@ async def help_status_and_parse_errors_work(dut):
 
 
 @cocotb.test()
-async def boot_probe_style_present_and_absent_behavior_matches_spec(dut):
+async def address_pin_counter_tracks_edges_and_read_clears(dut):
     await _init(dut)
 
-    await _bus_write(dut, 0x0005, 0x01)
-    assert (await _bus_read(dut, 0x0005)) & 0x01 == 0x01
+    clear_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "c\r")
+    assert await clear_line == "OK\r\n"
 
-    off_line = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_text(dut, "p0\r")
-    assert await off_line == "P0\r\n"
+    dut.addr.value = 0x00001
+    await _settle_pins(dut)
+    dut.addr.value = 0x00000
+    await _settle_pins(dut)
 
-    await _bus_write(dut, 0x0005, 0x01)
-    assert await _bus_read(dut, 0x0005) == 0x00
+    count_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pA0\r")
+    assert await count_line == "PA0=00000002\r\n"
 
-    on_line = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_text(dut, "p1\r")
-    assert await on_line == "P1\r\n"
+    cleared_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pA0\r")
+    assert await cleared_line == "PA0=00000000\r\n"
 
 
 @cocotb.test()
-async def status_counts_track_bus_and_uart_accesses(dut):
+async def data_pin_counter_tracks_edges_and_read_clears(dut):
     await _init(dut)
 
-    await _bus_write(dut, 0x0001, 0x11)
-    assert await _bus_read(dut, 0x0001) == 0x11
+    clear_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "c\r")
+    assert await clear_line == "OK\r\n"
 
-    ok_line = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_text(dut, "w040002=22\r")
-    assert await ok_line == "OK\r\n"
+    dut.data_host.value = 0x01
+    dut.data_host_drive.value = 1
+    await _settle_pins(dut)
 
-    read_line = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_text(dut, "r040002\r")
-    assert await read_line == "040002=22\r\n"
+    count_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pD0\r")
+    assert await count_line == "PD0=00000001\r\n"
 
-    status_line = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_text(dut, "?\r")
-    assert await status_line == "P1 S0800 M1 BR0001 BW0001 UR0001 UW0001\r\n"
+    cleared_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pD0\r")
+    assert await cleared_line == "PD0=00000000\r\n"
+
+    _set_data_bus_z(dut)
 
 
 @cocotb.test()
-async def pin_debug_mode_is_default_and_reports_pin_names(dut):
+async def control_pin_counter_tracks_edges_and_read_clears(dut):
     await _init(dut)
 
-    char0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
-    char1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))
+    clear_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "c\r")
+    assert await clear_line == "OK\r\n"
 
     dut.card_ram_ce1.value = 0
-    await tick(dut.clk, 2)
+    await _settle_pins(dut)
+    dut.card_ram_ce1.value = 1
+    await _settle_pins(dut)
 
-    assert await char0_task == ord("C")
-    assert await char1_task == ord("1")
+    count_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pC1\r")
+    assert await count_line == "PC1=00000002\r\n"
+
+    cleared_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pC1\r")
+    assert await cleared_line == "PC1=00000000\r\n"
 
 
 @cocotb.test()
-async def saleae_outputs_show_controls_and_monitor_uart_lines(dut):
+async def dump_all_pin_counts_lists_every_pin_without_clearing(dut):
+    await _init(dut)
+
+    clear_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "c\r")
+    assert await clear_line == "OK\r\n"
+
+    dut.addr.value = 0x00001
+    await _settle_pins(dut)
+    dut.data_host.value = 0x01
+    dut.data_host_drive.value = 1
+    await _settle_pins(dut)
+
+    dump_task = cocotb.start_soon(_uart_recv_until_end(dut))
+    await _uart_send_text(dut, "a\r")
+    lines = await dump_task
+    assert len(lines) == 31
+    assert "PA0=00000001\r\n" in lines
+    assert "PD0=00000001\r\n" in lines
+    assert "PC1=00000000\r\n" in lines
+    assert lines[-1] == "END\r\n"
+
+    count_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pA0\r")
+    assert await count_line == "PA0=00000001\r\n"
+
+    _set_data_bus_z(dut)
+
+
+@cocotb.test()
+async def clear_all_pin_counters_resets_counts(dut):
+    await _init(dut)
+
+    dut.addr.value = 0x00001
+    await _settle_pins(dut)
+    dut.addr.value = 0x00000
+    await _settle_pins(dut)
+
+    clear_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "c\r")
+    assert await clear_line == "OK\r\n"
+
+    count_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "pA0\r")
+    assert await count_line == "PA0=00000000\r\n"
+
+
+@cocotb.test()
+async def saleae_outputs_show_controls_and_flags_in_usb_count_mode(dut):
     await _init(dut)
 
     await _bus_write(dut, 0x0003, 0xAB)
@@ -301,12 +378,13 @@ async def saleae_outputs_show_controls_and_monitor_uart_lines(dut):
     assert (saleae >> 3) & 1 == 1
     assert (saleae >> 4) & 1 == 0
     assert (saleae >> 5) & 1 == 0
+    assert (saleae >> 6) & 1 == 1
+    assert (saleae >> 7) & 1 == 1
 
 
 @cocotb.test()
-async def bus_write_streams_address_and_data_over_fast_uart_saleae_lines(dut):
+async def sampled_saleae_mode_streams_address_and_data(dut):
     await _init(dut)
-
     await _set_mode(dut, 0)
 
     addr_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 18))
@@ -325,77 +403,3 @@ async def bus_write_streams_address_and_data_over_fast_uart_saleae_lines(dut):
 
     assert await addr_task == 0x00123
     assert await data_task == 0xAB
-
-
-@cocotb.test()
-async def split_pin_debug_mode_reports_control_tokens_on_saleae3(dut):
-    await _init(dut)
-    await _set_mode(dut, 2)
-
-    ctrl_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 8))
-
-    dut.card_ram_ce1.value = 0
-    await tick(dut.clk, 2)
-
-    assert await ctrl_task == ord("1")
-
-
-@cocotb.test()
-async def split_pin_debug_mode_reports_data_tags_on_saleae45(dut):
-    await _init(dut)
-    await _set_mode(dut, 2)
-
-    data0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 8))
-    data1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[5], dut.clk, 8))
-
-    dut.addr.value = 0
-    dut.rw.value = 0
-    dut.oe.value = 1
-    dut.card_ram_ce1.value = 0
-    dut.data_host.value = 0x01
-    dut.data_host_drive.value = 1
-    await tick(dut.clk, 2)
-
-    assert await data0_task == ord("D")
-    assert await data1_task == ord("0")
-
-
-@cocotb.test()
-async def split_pin_debug_mode_reports_address_tags_on_saleae67(dut):
-    await _init(dut)
-    await _set_mode(dut, 2)
-
-    addr0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
-    addr1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))
-
-    dut.addr.value = 0x00001
-    await tick(dut.clk, 2)
-
-    assert await addr0_task == ord("A")
-    assert await addr1_task == ord("0")
-
-
-@cocotb.test()
-async def split_pin_debug_mode_drains_ctrl_addr_and_data_in_parallel(dut):
-    await _init(dut)
-    await _set_mode(dut, 2)
-
-    ctrl_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 8))
-    data0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 8))
-    data1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[5], dut.clk, 8))
-    addr0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
-    addr1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))
-
-    dut.addr.value = 0x00001
-    dut.rw.value = 0
-    dut.oe.value = 1
-    dut.card_ram_ce1.value = 0
-    dut.data_host.value = 0x01
-    dut.data_host_drive.value = 1
-    await tick(dut.clk, 2)
-
-    assert await ctrl_task == ord("1")
-    assert await data0_task == ord("D")
-    assert await data1_task == ord("0")
-    assert await addr0_task == ord("A")
-    assert await addr1_task == ord("0")
