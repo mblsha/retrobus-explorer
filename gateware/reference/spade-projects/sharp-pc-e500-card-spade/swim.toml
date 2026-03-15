@@ -2,7 +2,11 @@ name = "sharp_pc_e500_card_spade"
 preprocessing = ["python3 ../tools/gen_build_info.py --project ."]
 
 [constraints]
-auto = true
+acf = [
+    "../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf",
+    "../../../shared-constraints/saleae.acf",
+    "constraints/pc-e500-ffc.acf",
+]
 
 [tooling]
 top = "main"
