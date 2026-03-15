@@ -7,7 +7,11 @@
 #   meta.description: Saleae D0-D7 mapping used by retrobus Spade projects; use minimum drive and FAST slew to help capture more 100MHz clock pulses on Logic MSO digital probes.
 #   meta.root_property.saleae.DRIVE: 4
 #   meta.root_property.saleae.SLEW: FAST
-# - ../../../pin-tester/constraint/level-shifter.acf
+# - constraints/pc-e500-ffc.acf
+#   meta.schema: 1
+#   meta.name: sharp_pc_e500_card_ffc
+#   meta.board: alchitry_au1
+#   meta.description: 48-bit FFC level-shifter mapping for the Sharp PC-E500 card adapter. Physical FPGA pin assignments intentionally match the proven pin-tester wiring.
 
 set_property PACKAGE_PIN N14 [get_ports {clk}]
 set_property IOSTANDARD LVCMOS33 [get_ports {clk}]
@@ -113,22 +117,6 @@ set_property PACKAGE_PIN R1 [get_ports {ffc_data[30]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[30]}]
 set_property PACKAGE_PIN R2 [get_ports {ffc_data[31]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[31]}]
-set_property PACKAGE_PIN T2 [get_ports {ffc_data[40]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[40]}]
-set_property PACKAGE_PIN R3 [get_ports {ffc_data[41]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[41]}]
-set_property PACKAGE_PIN T3 [get_ports {ffc_data[42]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[42]}]
-set_property PACKAGE_PIN T4 [get_ports {ffc_data[43]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[43]}]
-set_property PACKAGE_PIN R16 [get_ports {ffc_data[44]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[44]}]
-set_property PACKAGE_PIN R15 [get_ports {ffc_data[45]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[45]}]
-set_property PACKAGE_PIN T15 [get_ports {ffc_data[46]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[46]}]
-set_property PACKAGE_PIN T14 [get_ports {ffc_data[47]}]
-set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[47]}]
 set_property PACKAGE_PIN H3 [get_ports {ffc_data[32]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[32]}]
 set_property PACKAGE_PIN J3 [get_ports {ffc_data[33]}]
@@ -145,6 +133,22 @@ set_property PACKAGE_PIN A2 [get_ports {ffc_data[38]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[38]}]
 set_property PACKAGE_PIN B2 [get_ports {ffc_data[39]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[39]}]
+set_property PACKAGE_PIN T2 [get_ports {ffc_data[40]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[40]}]
+set_property PACKAGE_PIN R3 [get_ports {ffc_data[41]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[41]}]
+set_property PACKAGE_PIN T3 [get_ports {ffc_data[42]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[42]}]
+set_property PACKAGE_PIN T4 [get_ports {ffc_data[43]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[43]}]
+set_property PACKAGE_PIN R16 [get_ports {ffc_data[44]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[44]}]
+set_property PACKAGE_PIN R15 [get_ports {ffc_data[45]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[45]}]
+set_property PACKAGE_PIN T15 [get_ports {ffc_data[46]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[46]}]
+set_property PACKAGE_PIN T14 [get_ports {ffc_data[47]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {ffc_data[47]}]
 
 set_property DRIVE 4 [get_ports {saleae[0]}]
 set_property SLEW FAST [get_ports {saleae[0]}]
