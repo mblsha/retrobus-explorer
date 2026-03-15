@@ -1,149 +1,71 @@
-mod board;
 mod build_info;
 mod msg;
 mod protocol;
-mod render;
 
 use shared_components::{
-    boot_banner::{BootBannerState, boot_banner_step, init_boot_banner},
     config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
-    message_stream::TxReq8,
-    monitoring::{StableSampleState, stable_sample_step},
-    primitives::{reset_conditioner, sync_bundle},
+    primitives::reset_conditioner,
 };
 
-use self::board::card_board_outputs;
-use self::build_info::boot_banner_text;
-use self::msg::{CardMsg, CardMsgStreamOut, CardMsgStreamState, card_msg_stream_step, init_card_msg_stream};
+use self::msg::{RouterMsgStreamState, init_router_msg_stream, router_msg_stream_step};
 use self::protocol::{
     BusAddr,
     CardData,
-    CardOffset,
-    Counter,
-    DebugMode,
-    ParserEvent,
+    FfcPin,
     ParserState,
-    PinCounter,
-    PinQuery,
-    bus_addr_in_card,
-    bus_addr_offset,
-    host_addr_in_card,
-    host_addr_offset,
+    RouteEntry,
+    SaleaePin,
+    ffc_pin_value,
     init_parser,
     line_parser_step,
-    mode_usb_counts,
-    pin_query_count,
-    pin_query_from_flat_idx,
+    route_entry_none,
 };
 
-#[no_mangle(all)]
-extern entity sram_card_mem_v(
-    clk: clock,
-    rst: bool,
-    waddr: CardOffset,
-    din: CardData,
-    we: bool,
-    bus_raddr: CardOffset,
-    bus_dout: inv &CardData,
-    uart_raddr: CardOffset,
-    uart_dout: inv &CardData,
-);
+type TxQueuePtr = uint<6>;
+type TxQueueUsed = uint<7>;
 
-type PinDumpIdx = uint<5>;
-
-struct PinCounters {
-    armed: bool,
-    prev_ctrl: uint<4>,
-    prev_addr: BusAddr,
-    prev_data: CardData,
-    ctrl: [PinCounter; 4],
-    addr: [PinCounter; 18],
-    data: [PinCounter; 8],
-}
-
-struct PinDumpState {
-    active: bool,
-    idx: PinDumpIdx,
-    tail: bool,
-}
-
-struct PinDumpStepOut {
-    state: PinDumpState,
-    msg_valid: bool,
-    msg: CardMsg,
+struct TxQueueState {
+    waddr: TxQueuePtr,
+    raddr: TxQueuePtr,
+    used: TxQueueUsed,
+    storage: [uint<8>; 64],
 }
 
 struct MainState {
-    boot_banner: BootBannerState<8>,
     parser: ParserState,
-    msg_stream: CardMsgStreamState,
-    present: bool,
-    debug_mode: DebugMode,
-    bus_read_active: bool,
-    bus_write_active: bool,
-    bus_reads: Counter,
-    bus_writes: Counter,
-    uart_reads: Counter,
-    uart_writes: Counter,
-    parse_err_seen: bool,
-    last_sample_addr: BusAddr,
-    last_sample_data: CardData,
-    addr_changed: bool,
-    data_changed: bool,
-    addr_monitor: StableSampleState<18, 32>,
-    data_monitor: StableSampleState<8, 32>,
-    monitor_addr_candidate: BusAddr,
-    monitor_data_candidate: CardData,
-    pin_counters: PinCounters,
-    pin_dump: PinDumpState,
+    msg_stream: RouterMsgStreamState,
+    routes: [RouteEntry; 8],
+    tx_queue: TxQueueState,
 }
 
-fn stable_monitor_threshold() -> uint<32> {
-    5
-}
-
-fn init_stable_monitor<#uint WIDTH>() -> StableSampleState<WIDTH, 32> {
-    StableSampleState$(
-        last: 0,
-        sent: true,
-        counter: 0,
+fn init_tx_queue() -> TxQueueState {
+    TxQueueState$(
+        waddr: 0,
+        raddr: 0,
+        used: 0,
+        storage: [0; 64],
     )
 }
 
-fn max_counter() -> Counter {
-    0xFFFF
+fn init_main_state() -> MainState {
+    MainState$(
+        parser: init_parser(),
+        msg_stream: init_router_msg_stream(),
+        routes: [route_entry_none(); 8],
+        tx_queue: init_tx_queue(),
+    )
 }
 
-fn counter_inc_sat(value: Counter) -> Counter {
-    if value != max_counter() {
-        value +. 1
+fn tx_ptr_inc(ptr: TxQueuePtr) -> TxQueuePtr {
+    if ptr == 63 {
+        0
     } else {
-        value
+        ptr +. 1
     }
 }
 
-fn max_pin_counter() -> PinCounter {
-    0xFFFF_FFFF
-}
-
-fn pin_counter_inc_sat(value: PinCounter) -> PinCounter {
-    if value != max_pin_counter() {
-        value +. 1
-    } else {
-        value
-    }
-}
-
-fn ctrl_sample(card_ram_ce1: bool, card_rom_ce6: bool, oe: bool, rw: bool) -> uint<4> {
-    let c1: uint<4> = if card_ram_ce1 { 1 } else { 0 };
-    let c6: uint<4> = if card_rom_ce6 { 2 } else { 0 };
-    let oe_mask: uint<4> = if oe { 4 } else { 0 };
-    let rw_mask: uint<4> = if rw { 8 } else { 0 };
-    c1 | c6 | oe_mask | rw_mask
-}
-
-fn pin_counter_write_at<#uint N>(counters: [PinCounter; N], idx: uint<{uint_bits_to_fit(N - 1)}>, value: PinCounter) -> [PinCounter; N] {
-    counters.enumerate().map(fn |(i, cur)| {
+fn tx_queue_write_at(storage: [uint<8>; 64], idx: TxQueuePtr, value: uint<8>) -> [uint<8>; 64] {
+    storage.enumerate().map(fn |(i, cur)| {
         if i == idx {
             value
         } else {
@@ -152,255 +74,55 @@ fn pin_counter_write_at<#uint N>(counters: [PinCounter; N], idx: uint<{uint_bits
     })
 }
 
-fn pin_counter_bump_changed<#uint N>(counters: [PinCounter; N], changed: [bool; N]) -> [PinCounter; N] {
-    counters.enumerate().map(fn |(i, cur)| {
-        if changed[i] {
-            pin_counter_inc_sat(cur)
+fn tx_queue_empty(queue: TxQueueState) -> bool {
+    queue.used == 0
+}
+
+fn tx_queue_full(queue: TxQueueState) -> bool {
+    queue.used == 64
+}
+
+fn tx_queue_front(queue: TxQueueState) -> uint<8> {
+    queue.storage[queue.raddr]
+}
+
+fn tx_queue_can_write(queue: TxQueueState, do_read: bool) -> bool {
+    !tx_queue_full(queue) || (do_read && !tx_queue_empty(queue))
+}
+
+fn tx_queue_step(queue: TxQueueState, write_valid: bool, write_byte: uint<8>, read_get: bool) -> TxQueueState {
+    let do_read = read_get && !tx_queue_empty(queue);
+    let do_write = write_valid && tx_queue_can_write(queue, do_read);
+    let next_storage = if do_write {
+        tx_queue_write_at(queue.storage, queue.waddr, write_byte)
+    } else {
+        queue.storage
+    };
+    let next_waddr = if do_write { tx_ptr_inc(queue.waddr) } else { queue.waddr };
+    let next_raddr = if do_read { tx_ptr_inc(queue.raddr) } else { queue.raddr };
+    let next_used = if do_write && !do_read {
+        queue.used +. 1
+    } else if do_read && !do_write {
+        queue.used -. 1
+    } else {
+        queue.used
+    };
+    TxQueueState$(
+        waddr: next_waddr,
+        raddr: next_raddr,
+        used: next_used,
+        storage: next_storage,
+    )
+}
+
+fn route_table_write_at(routes: [RouteEntry; 8], saleae: SaleaePin, entry: RouteEntry) -> [RouteEntry; 8] {
+    routes.enumerate().map(fn |(i, cur)| {
+        if i == saleae {
+            entry
         } else {
             cur
         }
     })
-}
-
-fn init_pin_counters() -> PinCounters {
-    PinCounters$(
-        armed: false,
-        prev_ctrl: 0,
-        prev_addr: 0,
-        prev_data: 0,
-        ctrl: [0; 4],
-        addr: [0; 18],
-        data: [0; 8],
-    )
-}
-
-fn clear_pin_counters_with_sample(ctrl: uint<4>, addr: BusAddr, data: CardData) -> PinCounters {
-    PinCounters$(
-        armed: true,
-        prev_ctrl: ctrl,
-        prev_addr: addr,
-        prev_data: data,
-        ctrl: [0; 4],
-        addr: [0; 18],
-        data: [0; 8],
-    )
-}
-
-fn pin_counters_step(cur: PinCounters, ctrl: uint<4>, addr: BusAddr, data: CardData) -> PinCounters {
-    if !cur.armed {
-        PinCounters$(
-            armed: true,
-            prev_ctrl: ctrl,
-            prev_addr: addr,
-            prev_data: data,
-            ctrl: cur.ctrl,
-            addr: cur.addr,
-            data: cur.data,
-        )
-    } else {
-        let ctrl_changed = (ctrl ^ cur.prev_ctrl).to_bits();
-        let addr_changed = (addr ^ cur.prev_addr).to_bits();
-        let data_changed = (data ^ cur.prev_data).to_bits();
-        PinCounters$(
-            armed: true,
-            prev_ctrl: ctrl,
-            prev_addr: addr,
-            prev_data: data,
-            ctrl: pin_counter_bump_changed(cur.ctrl, ctrl_changed),
-            addr: pin_counter_bump_changed(cur.addr, addr_changed),
-            data: pin_counter_bump_changed(cur.data, data_changed),
-        )
-    }
-}
-
-fn pin_counter_get(counters: PinCounters, pin: PinQuery) -> PinCounter {
-    match pin {
-        PinQuery::C1 => counters.ctrl[0],
-        PinQuery::C6 => counters.ctrl[1],
-        PinQuery::OE => counters.ctrl[2],
-        PinQuery::RW => counters.ctrl[3],
-        PinQuery::Addr$(idx) => counters.addr[idx],
-        PinQuery::Data$(idx) => counters.data[idx],
-    }
-}
-
-fn pin_counters_clear_one(counters: PinCounters, pin: PinQuery) -> PinCounters {
-    match pin {
-        PinQuery::C1 => PinCounters$(
-            armed: counters.armed,
-            prev_ctrl: counters.prev_ctrl,
-            prev_addr: counters.prev_addr,
-            prev_data: counters.prev_data,
-            ctrl: pin_counter_write_at(counters.ctrl, 0, 0),
-            addr: counters.addr,
-            data: counters.data,
-        ),
-        PinQuery::C6 => PinCounters$(
-            armed: counters.armed,
-            prev_ctrl: counters.prev_ctrl,
-            prev_addr: counters.prev_addr,
-            prev_data: counters.prev_data,
-            ctrl: pin_counter_write_at(counters.ctrl, 1, 0),
-            addr: counters.addr,
-            data: counters.data,
-        ),
-        PinQuery::OE => PinCounters$(
-            armed: counters.armed,
-            prev_ctrl: counters.prev_ctrl,
-            prev_addr: counters.prev_addr,
-            prev_data: counters.prev_data,
-            ctrl: pin_counter_write_at(counters.ctrl, 2, 0),
-            addr: counters.addr,
-            data: counters.data,
-        ),
-        PinQuery::RW => PinCounters$(
-            armed: counters.armed,
-            prev_ctrl: counters.prev_ctrl,
-            prev_addr: counters.prev_addr,
-            prev_data: counters.prev_data,
-            ctrl: pin_counter_write_at(counters.ctrl, 3, 0),
-            addr: counters.addr,
-            data: counters.data,
-        ),
-        PinQuery::Addr$(idx) => PinCounters$(
-            armed: counters.armed,
-            prev_ctrl: counters.prev_ctrl,
-            prev_addr: counters.prev_addr,
-            prev_data: counters.prev_data,
-            ctrl: counters.ctrl,
-            addr: pin_counter_write_at(counters.addr, idx, 0),
-            data: counters.data,
-        ),
-        PinQuery::Data$(idx) => PinCounters$(
-            armed: counters.armed,
-            prev_ctrl: counters.prev_ctrl,
-            prev_addr: counters.prev_addr,
-            prev_data: counters.prev_data,
-            ctrl: counters.ctrl,
-            addr: counters.addr,
-            data: pin_counter_write_at(counters.data, idx, 0),
-        ),
-    }
-}
-
-fn init_pin_dump() -> PinDumpState {
-    PinDumpState$(
-        active: false,
-        idx: 0,
-        tail: false,
-    )
-}
-
-fn start_pin_dump() -> PinDumpState {
-    PinDumpState$(
-        active: true,
-        idx: 0,
-        tail: false,
-    )
-}
-
-fn pin_dump_none(state: PinDumpState) -> PinDumpStepOut {
-    PinDumpStepOut$(
-        state: state,
-        msg_valid: false,
-        msg: CardMsg::None(),
-    )
-}
-
-fn pin_dump_step(cur: PinDumpState, counters: PinCounters) -> PinDumpStepOut {
-    if cur.active {
-        let pin = pin_query_from_flat_idx(cur.idx);
-        let next_idx = cur.idx +. 1;
-        let done = next_idx == pin_query_count();
-        PinDumpStepOut$(
-            state: PinDumpState$(
-                active: !done,
-                idx: if done { 0 } else { next_idx },
-                tail: done,
-            ),
-            msg_valid: true,
-            msg: CardMsg::PinCount(pin, pin_counter_get(counters, pin)),
-        )
-    } else if cur.tail {
-        PinDumpStepOut$(
-            state: init_pin_dump(),
-            msg_valid: true,
-            msg: CardMsg::End(),
-        )
-    } else {
-        pin_dump_none(cur)
-    }
-}
-
-fn card_msg_stream_idle(state: CardMsgStreamState) -> bool {
-    state.cur_msg.is_none() && state.pending_msg.is_none()
-}
-
-fn init_main_state() -> MainState {
-    MainState$(
-        boot_banner: init_boot_banner::<8>(),
-        parser: init_parser(),
-        msg_stream: init_card_msg_stream(),
-        present: true,
-        debug_mode: mode_usb_counts(),
-        bus_read_active: false,
-        bus_write_active: false,
-        bus_reads: 0,
-        bus_writes: 0,
-        uart_reads: 0,
-        uart_writes: 0,
-        parse_err_seen: false,
-        last_sample_addr: 0,
-        last_sample_data: 0,
-        addr_changed: false,
-        data_changed: false,
-        addr_monitor: init_stable_monitor::<18>(),
-        data_monitor: init_stable_monitor::<8>(),
-        monitor_addr_candidate: 0,
-        monitor_data_candidate: 0,
-        pin_counters: init_pin_counters(),
-        pin_dump: init_pin_dump(),
-    )
-}
-
-fn parser_uart_msg(
-    event: ParserEvent,
-    debug_mode: DebugMode,
-    present: bool,
-    bus_reads: Counter,
-    bus_writes: Counter,
-    uart_reads: Counter,
-    uart_writes: Counter,
-    uart_read_value: CardData,
-    pin_read_count: PinCounter,
-) -> CardMsg {
-    match event {
-        ParserEvent::None => CardMsg::None(),
-        ParserEvent::Read$(addr) => CardMsg::Read(
-            addr,
-            if present && host_addr_in_card(addr) {
-                uart_read_value
-            } else {
-                0
-            },
-        ),
-        ParserEvent::Write(_, _) => CardMsg::Ok(),
-        ParserEvent::SetMode$(mode) => CardMsg::Mode(mode),
-        ParserEvent::SetPresent$(present) => CardMsg::Present(present),
-        ParserEvent::ReadPinCount$(pin) => CardMsg::PinCount(pin, pin_read_count),
-        ParserEvent::DumpAllPinCounts => CardMsg::None(),
-        ParserEvent::ClearPinCounts => CardMsg::Ok(),
-        ParserEvent::Status => CardMsg::Status(
-            debug_mode,
-            present,
-            bus_reads,
-            bus_writes,
-            uart_reads,
-            uart_writes,
-        ),
-        ParserEvent::Help => CardMsg::Help(),
-        ParserEvent::ParseErr => CardMsg::Err(),
-    }
 }
 
 #[no_mangle(all)]
@@ -426,338 +148,62 @@ entity main_core(
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
-    let ctrl_sync_bits = inst sync_bundle::<2, 4>(clk, [card_ram_ce1, card_rom_ce6, oe, rw]);
-    let addr_sync_bits = inst sync_bundle::<2, 18>(clk, addr.to_bits());
-    let data_sync_bits = inst sync_bundle::<2, 8>(clk, data_in.to_bits());
-
-    let ctrl_sync: uint<4> = ctrl_sync_bits.to_uint();
-    let addr_sync: BusAddr = addr_sync_bits.to_uint();
-    let data_sync: CardData = data_sync_bits.to_uint();
-
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_busy, usb_busy_w): (&bool, inv &bool) = port;
-    let (mem_bus_dout, mem_bus_dout_w): (&CardData, inv &CardData) = port;
-    let (mem_uart_dout, mem_uart_dout_w): (&CardData, inv &CardData) = port;
 
     reg(clk) state: MainState reset(rst: init_main_state()) = {
-        let boot_banner = boot_banner_step(state.boot_banner, boot_banner_text(), *usb_busy);
         let parse = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
-        let card_ram_selected = !card_ram_ce1;
-        let bus_read_cycle = card_ram_selected && !oe && rw;
-        let bus_write_cycle = card_ram_selected && !rw;
-        let bus_read_event = bus_read_cycle && !state.bus_read_active;
-        let bus_write_event = bus_write_cycle && !state.bus_write_active;
-        let next_present = if let ParserEvent::SetPresent$(present) = parse.event {
-            present
-        } else {
-            state.present
-        };
-        let next_debug_mode = if let ParserEvent::SetMode$(mode) = parse.event {
-            mode
-        } else {
-            state.debug_mode
-        };
-        let uart_read_event = if let ParserEvent::Read(_) = parse.event { true } else { false };
-        let uart_write_event = if let ParserEvent::Write(_, _) = parse.event { true } else { false };
-        let bus_data_out = if next_present && bus_addr_in_card(addr) { *mem_bus_dout } else { 0 };
-
-        let stepped_pin_counters = pin_counters_step(state.pin_counters, ctrl_sync, addr_sync, data_sync);
-        let pin_read_count = if let ParserEvent::ReadPinCount$(pin) = parse.event {
-            pin_counter_get(stepped_pin_counters, pin)
-        } else {
-            0
-        };
-        let next_pin_counters = if let ParserEvent::ClearPinCounts = parse.event {
-            clear_pin_counters_with_sample(ctrl_sync, addr_sync, data_sync)
-        } else if let ParserEvent::ReadPinCount$(pin) = parse.event {
-            pin_counters_clear_one(stepped_pin_counters, pin)
-        } else {
-            stepped_pin_counters
-        };
-
-        let sample_event = bus_read_event || bus_write_event;
-        let monitor_addr_candidate = if sample_event {
-            addr
-        } else {
-            state.monitor_addr_candidate
-        };
-        let monitor_data_candidate = if bus_write_event {
-            data_in
-        } else if bus_read_event {
-            bus_data_out
-        } else {
-            state.monitor_data_candidate
-        };
-        let addr_monitor_step = stable_sample_step(
-            state.addr_monitor,
-            monitor_addr_candidate,
-            stable_monitor_threshold(),
-        );
-        let data_monitor_step = stable_sample_step(
-            state.data_monitor,
-            monitor_data_candidate,
-            stable_monitor_threshold(),
-        );
-        let parser_msg = parser_uart_msg(
-            parse.event,
-            next_debug_mode,
-            next_present,
-            if bus_read_event { state.bus_reads +. 1 } else { state.bus_reads },
-            if bus_write_event { state.bus_writes +. 1 } else { state.bus_writes },
-            if uart_read_event { state.uart_reads +. 1 } else { state.uart_reads },
-            if uart_write_event { state.uart_writes +. 1 } else { state.uart_writes },
-            *mem_uart_dout,
-            pin_read_count,
-        );
-        let pin_dump_seed = if let ParserEvent::DumpAllPinCounts = parse.event {
-            start_pin_dump()
-        } else if let ParserEvent::ClearPinCounts = parse.event {
-            init_pin_dump()
-        } else {
-            state.pin_dump
-        };
-        let pin_dump = if parser_msg.is_none() && !state.boot_banner.active && card_msg_stream_idle(state.msg_stream) {
-            pin_dump_step(pin_dump_seed, next_pin_counters)
-        } else {
-            pin_dump_none(pin_dump_seed)
-        };
-        let outbound_msg = if !parser_msg.is_none() {
-            parser_msg
-        } else if pin_dump.msg_valid {
-            pin_dump.msg
-        } else {
-            CardMsg::None()
-        };
-        let msg_stream: CardMsgStreamOut = card_msg_stream_step(
+        let tx_start = !*usb_busy && !tx_queue_empty(state.tx_queue);
+        let msg_stream = router_msg_stream_step(
             state.msg_stream,
-            *usb_busy || state.boot_banner.active,
-            !outbound_msg.is_none(),
-            outbound_msg,
+            !tx_queue_can_write(state.tx_queue, tx_start),
+            !parse.msg.is_none(),
+            parse.msg,
         );
+        let next_routes = if parse.route_write {
+            route_table_write_at(
+                state.routes,
+                parse.route_saleae,
+                RouteEntry$(valid: true, ffc: parse.route_ffc),
+            )
+        } else {
+            state.routes
+        };
         MainState$(
-            boot_banner: boot_banner.state,
             parser: parse.state,
             msg_stream: msg_stream.state,
-            present: next_present,
-            debug_mode: next_debug_mode,
-            bus_read_active: bus_read_cycle,
-            bus_write_active: bus_write_cycle,
-            bus_reads: if bus_read_event { state.bus_reads +. 1 } else { state.bus_reads },
-            bus_writes: if bus_write_event { state.bus_writes +. 1 } else { state.bus_writes },
-            uart_reads: if uart_read_event { state.uart_reads +. 1 } else { state.uart_reads },
-            uart_writes: if uart_write_event { state.uart_writes +. 1 } else { state.uart_writes },
-            parse_err_seen: state.parse_err_seen || if let ParserEvent::ParseErr = parse.event { true } else { false },
-            last_sample_addr: if bus_read_event || bus_write_event { addr } else { state.last_sample_addr },
-            last_sample_data: if bus_write_event {
-                data_in
-            } else if bus_read_event {
-                bus_data_out
-            } else {
-                state.last_sample_data
-            },
-            addr_changed: if bus_read_event || bus_write_event { addr != state.last_sample_addr } else { state.addr_changed },
-            data_changed: if bus_write_event {
-                data_in != state.last_sample_data
-            } else if bus_read_event {
-                bus_data_out != state.last_sample_data
-            } else {
-                state.data_changed
-            },
-            addr_monitor: addr_monitor_step.next_state,
-            data_monitor: data_monitor_step.next_state,
-            monitor_addr_candidate: monitor_addr_candidate,
-            monitor_data_candidate: monitor_data_candidate,
-            pin_counters: next_pin_counters,
-            pin_dump: pin_dump.state,
+            routes: next_routes,
+            tx_queue: tx_queue_step(state.tx_queue, msg_stream.tx_req.valid, msg_stream.tx_req.byte, tx_start),
         )
     };
 
-    let parse = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
-    let boot_banner = boot_banner_step(state.boot_banner, boot_banner_text(), *usb_busy);
-    let card_ram_selected = !card_ram_ce1;
-    let bus_read_cycle = card_ram_selected && !oe && rw;
-    let bus_write_cycle = card_ram_selected && !rw;
-    let uart_write_valid = if let ParserEvent::Write(_, _) = parse.event { true } else { false };
-    let uart_write_in_range = if let ParserEvent::Write$(addr, value) = parse.event {
-        let _ = value;
-        host_addr_in_card(addr)
-    } else {
-        false
-    };
-    let uart_write_addr = if let ParserEvent::Write$(addr, value) = parse.event {
-        let _ = value;
-        host_addr_offset(addr)
-    } else {
-        0
-    };
-    let uart_write_data = if let ParserEvent::Write$(addr, value) = parse.event {
-        let _ = addr;
-        value
-    } else {
-        0
-    };
-    let mem_we = (state.present && bus_write_cycle && bus_addr_in_card(addr)) || (uart_write_valid && uart_write_in_range);
-    let mem_waddr = if state.present && bus_write_cycle {
-        bus_addr_offset(addr)
-    } else {
-        uart_write_addr
-    };
-    let mem_din = if state.present && bus_write_cycle {
-        data_in
-    } else {
-        uart_write_data
-    };
-    let uart_raddr = if let ParserEvent::Read$(addr) = parse.event {
-        host_addr_offset(addr)
-    } else {
-        0
-    };
-    let _mem = inst sram_card_mem_v(
-        clk,
-        rst,
-        mem_waddr,
-        mem_din,
-        mem_we,
-        bus_addr_offset(addr),
-        mem_bus_dout_w,
-        uart_raddr,
-        mem_uart_dout_w,
-    );
-
-    let parser_debug_mode = if let ParserEvent::SetMode$(mode) = parse.event { mode } else { state.debug_mode };
-    let parser_present = if let ParserEvent::SetPresent$(present) = parse.event { present } else { state.present };
-    let parser_bus_data_out = if parser_present && bus_addr_in_card(addr) { *mem_bus_dout } else { 0 };
-    let parser_stepped_pin_counters = pin_counters_step(state.pin_counters, ctrl_sync, addr_sync, data_sync);
-    let parser_pin_read_count = if let ParserEvent::ReadPinCount$(pin) = parse.event {
-        pin_counter_get(parser_stepped_pin_counters, pin)
-    } else {
-        0
-    };
-    let parser_pin_counters = if let ParserEvent::ClearPinCounts = parse.event {
-        clear_pin_counters_with_sample(ctrl_sync, addr_sync, data_sync)
-    } else if let ParserEvent::ReadPinCount$(pin) = parse.event {
-        pin_counters_clear_one(parser_stepped_pin_counters, pin)
-    } else {
-        parser_stepped_pin_counters
-    };
-    let parser_msg = parser_uart_msg(
-        parse.event,
-        parser_debug_mode,
-        parser_present,
-        state.bus_reads,
-        state.bus_writes,
-        state.uart_reads,
-        state.uart_writes,
-        *mem_uart_dout,
-        parser_pin_read_count,
-    );
-    let parser_pin_dump_seed = if let ParserEvent::DumpAllPinCounts = parse.event {
-        start_pin_dump()
-    } else if let ParserEvent::ClearPinCounts = parse.event {
-        init_pin_dump()
-    } else {
-        state.pin_dump
-    };
-    let parser_pin_dump = if parser_msg.is_none() && !state.boot_banner.active && card_msg_stream_idle(state.msg_stream) {
-        pin_dump_step(parser_pin_dump_seed, parser_pin_counters)
-    } else {
-        pin_dump_none(parser_pin_dump_seed)
-    };
-    let outbound_msg = if !parser_msg.is_none() {
-        parser_msg
-    } else if parser_pin_dump.msg_valid {
-        parser_pin_dump.msg
-    } else {
-        CardMsg::None()
-    };
-    let msg_stream: CardMsgStreamOut = card_msg_stream_step(
-        state.msg_stream,
-        *usb_busy || state.boot_banner.active,
-        !outbound_msg.is_none(),
-        outbound_msg,
-    );
-    let tx_req: TxReq8 = if boot_banner.tx_req.valid {
-        boot_banner.tx_req
-    } else {
-        msg_stream.tx_req
-    };
+    let tx_start = !*usb_busy && !tx_queue_empty(state.tx_queue);
+    let tx_byte = if tx_start { tx_queue_front(state.tx_queue) } else { 0 };
     let _tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
         false,
-        tx_req.byte,
-        tx_req.valid,
+        tx_byte,
+        tx_start,
         usb_tx_line_w,
         usb_busy_w,
     );
 
+    let saleae_lines: [bool; 8] = state.routes.enumerate().map(fn |(i, route)| {
+        let _ = i;
+        if route.valid {
+            ffc_pin_value(route.ffc, rw, oe, card_ram_ce1, card_rom_ce6, vcc2, nc, addr, data_in)
+        } else {
+            false
+        }
+    });
+    let led_lines: [bool; 8] = [false; 8];
+    let data_drive_value: CardData = 0;
+    let data_oe_value = false;
+
     set usb_tx = &*usb_tx_line;
-    let bus_data_out = if state.present && bus_addr_in_card(addr) { *mem_bus_dout } else { 0 };
-    let bus_drive_cycle = bus_read_cycle && state.present && bus_addr_in_card(addr);
-    let bus_read_event = bus_read_cycle && !state.bus_read_active;
-    let bus_write_event = bus_write_cycle && !state.bus_write_active;
-    let sample_event = bus_read_event || bus_write_event;
-    let monitor_addr_candidate = if sample_event {
-        addr
-    } else {
-        state.monitor_addr_candidate
-    };
-    let monitor_data_candidate = if bus_write_event {
-        data_in
-    } else if bus_read_event {
-        bus_data_out
-    } else {
-        state.monitor_data_candidate
-    };
-    let addr_monitor_step = stable_sample_step(
-        state.addr_monitor,
-        monitor_addr_candidate,
-        stable_monitor_threshold(),
-    );
-    let data_monitor_step = stable_sample_step(
-        state.data_monitor,
-        monitor_data_candidate,
-        stable_monitor_threshold(),
-    );
-    let addr_changed = if sample_event {
-        addr != state.last_sample_addr
-    } else {
-        state.addr_changed
-    };
-    let data_changed = if sample_event {
-        (if bus_write_event { data_in } else { bus_data_out }) != state.last_sample_data
-    } else {
-        state.data_changed
-    };
-
-    set data_drive = &bus_data_out;
-    set data_oe = &bus_drive_cycle;
-
-    let _board = inst card_board_outputs(
-        clk,
-        rst,
-        state.debug_mode,
-        state.present,
-        bus_read_cycle,
-        bus_write_cycle,
-        card_ram_ce1,
-        card_rom_ce6,
-        oe,
-        rw,
-        addr_changed,
-        data_changed,
-        state.parse_err_seen,
-        state.uart_writes,
-        state.bus_reads,
-        state.bus_writes,
-        monitor_addr_candidate,
-        addr_monitor_step.wput,
-        monitor_data_candidate,
-        data_monitor_step.wput,
-        led,
-        saleae,
-    );
-
-    let _ = vcc2;
-    let _ = nc;
+    set saleae = &saleae_lines;
+    set led = &led_lines;
+    set data_drive = &data_drive_value;
+    set data_oe = &data_oe_value;
 }
