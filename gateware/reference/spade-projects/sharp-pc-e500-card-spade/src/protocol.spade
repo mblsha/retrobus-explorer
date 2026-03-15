@@ -17,6 +17,7 @@ pub enum ParserEvent {
     Read{addr: HostAddr},
     Write{addr: HostAddr, value: CardData},
     SetPresent{present: bool},
+    SetMode{pin_debug: bool},
     Status,
     Help,
     ParseErr,
@@ -38,6 +39,8 @@ pub enum ParserState {
     NeedWriteLineEnd{addr: HostAddr, value: CardData},
     PresentValue,
     NeedPresentLineEnd{present: bool},
+    ModeValue,
+    NeedModeLineEnd{pin_debug: bool},
     NeedSimpleLineEnd{cmd: SimpleCmd},
     Error,
 }
@@ -133,6 +136,8 @@ pub fn line_parser_step(
                     parser_step(state, ParserState::WriteAddr(0, 0), ParserEvent::None())
                 } else if upper == b'P' {
                     parser_step(state, ParserState::PresentValue(), ParserEvent::None())
+                } else if upper == b'M' {
+                    parser_step(state, ParserState::ModeValue(), ParserEvent::None())
                 } else if upper == b'H' {
                     parser_step(state, ParserState::NeedSimpleLineEnd(SimpleCmd::Help()), ParserEvent::None())
                 } else if rx_byte == b'?' {
@@ -226,6 +231,25 @@ pub fn line_parser_step(
             ParserState::NeedPresentLineEnd$(present) => {
                 if is_line_end(rx_byte) {
                     parser_step(state, ParserState::Idle(), ParserEvent::SetPresent(present))
+                } else {
+                    parser_error(state)
+                }
+            },
+            ParserState::ModeValue => {
+                let digit: DigitDecode = rx_byte.decode_digit_max(1);
+                if digit.valid {
+                    parser_step(
+                        state,
+                        ParserState::NeedModeLineEnd(digit.value == 1),
+                        ParserEvent::None(),
+                    )
+                } else {
+                    parser_error(state)
+                }
+            },
+            ParserState::NeedModeLineEnd$(pin_debug) => {
+                if is_line_end(rx_byte) {
+                    parser_step(state, ParserState::Idle(), ParserEvent::SetMode(pin_debug))
                 } else {
                     parser_error(state)
                 }

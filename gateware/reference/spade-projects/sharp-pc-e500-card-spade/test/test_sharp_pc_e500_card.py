@@ -1,5 +1,8 @@
 # top = main
 
+import json
+from pathlib import Path
+
 import cocotb
 
 from cocotb_helpers import start_clock
@@ -7,6 +10,12 @@ from cocotb_helpers import tick
 
 
 USB_UART_BIT_CYCLES = 100
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def boot_line() -> str:
+    meta = json.loads((PROJECT_ROOT / "build" / "build_info.json").read_text())
+    return meta["banner"]
 
 
 def _set_data_bus_z(dut):
@@ -31,6 +40,7 @@ async def _init(dut):
     await tick(dut.clk, 8)
     dut.rst_n.value = 1
     await tick(dut.clk, 12)
+    assert await _uart_recv_line(dut) == boot_line()
 
 
 async def _uart_send_byte(dut, value: int):
@@ -195,9 +205,11 @@ async def help_status_and_parse_errors_work(dut):
 
     help_line0 = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "h\r")
-    assert await help_line0 == "rAAAAAA wAAAAAA=BB p0|p1 ? h\r\n"
+    assert await help_line0 == "rAAAAAA wAAAAAA=BB p0|p1 m0|m1 ? h\r\n"
     assert await _uart_recv_line(dut) == "S0=CE1_RAM# S1=CE6_ROM# S2=OE# S3=R/W\r\n"
-    assert await _uart_recv_line(dut) == "S4=AD_CHG S5=DATA_CHG S6=ADDR18_UART100 S7=DATA8_UART100\r\n"
+    assert await _uart_recv_line(dut) == "S4=AD_CHG S5=DATA_CHG\r\n"
+    assert await _uart_recv_line(dut) == "m0:S6=ADDR18_UART100 S7=DATA8_UART100\r\n"
+    assert await _uart_recv_line(dut) == "m1:S6=PINCHR0 S7=PINCHR1 C1 C6 OE RW A0-A9 AA-AH D0-D7\r\n"
 
     err_line = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "w030000=12\r")
@@ -205,7 +217,7 @@ async def help_status_and_parse_errors_work(dut):
 
     status_line = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "?\r")
-    assert await status_line == "P1 S0800 BR0000 BW0000 UR0000 UW0000\r\n"
+    assert await status_line == "P1 S0800 M1 BR0000 BW0000 UR0000 UW0000\r\n"
 
 
 @cocotb.test()
@@ -244,7 +256,21 @@ async def status_counts_track_bus_and_uart_accesses(dut):
 
     status_line = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "?\r")
-    assert await status_line == "P1 S0800 BR0001 BW0001 UR0001 UW0001\r\n"
+    assert await status_line == "P1 S0800 M1 BR0001 BW0001 UR0001 UW0001\r\n"
+
+
+@cocotb.test()
+async def pin_debug_mode_is_default_and_reports_pin_names(dut):
+    await _init(dut)
+
+    char0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
+    char1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))
+
+    dut.card_ram_ce1.value = 0
+    await tick(dut.clk, 2)
+
+    assert await char0_task == ord("C")
+    assert await char1_task == ord("1")
 
 
 @cocotb.test()
@@ -272,6 +298,10 @@ async def saleae_outputs_show_controls_and_monitor_uart_lines(dut):
 @cocotb.test()
 async def bus_write_streams_address_and_data_over_fast_uart_saleae_lines(dut):
     await _init(dut)
+
+    mode_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, "m0\r")
+    assert await mode_line == "M0\r\n"
 
     addr_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 18))
     data_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))

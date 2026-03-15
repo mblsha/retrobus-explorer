@@ -1,4 +1,5 @@
 mod board;
+mod build_info;
 mod cmd;
 mod monitor;
 mod msg;

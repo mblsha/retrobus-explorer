@@ -1,4 +1,5 @@
 name = "sharp_pc_g850_streaming_rom_spade"
+preprocessing = ["python3 ../tools/gen_build_info.py --project ."]
 
 [libraries]
 shared_components = { path = "../shared-components" }

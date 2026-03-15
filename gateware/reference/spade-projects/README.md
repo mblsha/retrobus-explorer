@@ -10,6 +10,8 @@ This directory contains Spade rewrites of the Lucid projects in `../../`:
 
 Shared logic lives in `shared-components`, shared vendor HDL lives in `shared-verilog`, and reusable scripts are in `tools`.
 
+All `*-spade` projects also generate `src/build_info.spade` during `swim` preprocessing via `tools/gen_build_info.py`. Projects that want a stamped UART boot banner can import `mod build_info;` locally and feed `build_info::boot_banner_text()` into the shared `shared_components::boot_banner` helper.
+
 ## UV Workspace
 
 `spade-projects` is a single uv umbrella workspace with `*-spade` members. Testbench Python dependencies live in one shared env at `spade-projects/.venv`.

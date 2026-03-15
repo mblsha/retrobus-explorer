@@ -1,5 +1,6 @@
 # Generated build and simulation outputs
 **/build/
+**/src/build_info.spade
 **/.venv-host/
 /.venv/
 **/.surfer/
