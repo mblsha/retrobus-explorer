@@ -1,0 +1,39 @@
+// @meta.schema: 1
+// @meta.name: sharp_pc_e500_card_ffc
+// @meta.board: alchitry_au1
+// @meta.description: Sharp PC-E500 card signal mapping. Physical FPGA pin assignments intentionally match the proven pin-tester wiring.
+STANDARD(LVCMOS33) {
+    // Verified PC-E500 bus signal mapping onto FFC.DATA[n].
+    pin rw A46
+    pin addr[0] A45
+    pin addr[1] A2
+    pin addr[2] A5
+    pin addr[3] A6
+    pin addr[4] C2
+    pin addr[5] C5
+    pin addr[6] C6
+    pin addr[7] C49
+    pin addr[8] C46
+    pin addr[9] C45
+    pin addr[10] A8
+    pin addr[11] A11
+    pin addr[12] A12
+    pin addr[13] A14
+    pin addr[14] A23
+    pin addr[15] A24
+    pin addr[16] C43
+    pin addr[17] C40
+    pin vcc2 C39
+    pin data[0] C37
+    pin data[1] C34
+    pin data[2] C33
+    pin data[3] A33
+    pin data[4] B49
+    pin data[5] B48
+    pin data[6] B3
+    pin data[7] B5
+    pin ce1 B6
+    pin ce6 R3
+    pin nc T3
+    pin oe T4
+}

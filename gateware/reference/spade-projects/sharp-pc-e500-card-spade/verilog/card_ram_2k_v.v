@@ -1,13 +1,11 @@
-module sram_card_mem_v (
+module card_ram_2k_v (
     input wire clk,
     input wire rst,
     input wire [10:0] waddr,
     input wire [7:0] din,
     input wire we,
-    input wire [10:0] bus_raddr,
-    output wire [7:0] bus_dout,
-    input wire [10:0] uart_raddr,
-    output wire [7:0] uart_dout
+    input wire [10:0] raddr,
+    output wire [7:0] dout
 );
     (* ram_style = "distributed" *) reg [7:0] mem [0:2047];
     integer i;
@@ -24,6 +22,7 @@ module sram_card_mem_v (
         end
     end
 
-    assign bus_dout = mem[bus_raddr];
-    assign uart_dout = mem[uart_raddr];
+    assign dout = mem[raddr];
+
+    wire _unused = rst;
 endmodule
