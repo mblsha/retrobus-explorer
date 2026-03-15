@@ -2,20 +2,20 @@ use std::conv::concat_arrays;
 
 use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
 
-use super::protocol::{CardData, Counter, HostAddr, card_size_bytes};
+use super::protocol::{CardData, Counter, DebugMode, HostAddr, card_size_bytes};
 
-type CardMsgIdx = uint<8>;
+type CardMsgIdx = uint<9>;
 
 pub enum CardMsg {
     None,
     Ok,
     Err,
     Help,
-    Mode{pin_debug: bool},
+    Mode{mode: DebugMode},
     Present{present: bool},
     Read{addr: HostAddr, value: CardData},
     Status{
-        pin_debug: bool,
+        mode: DebugMode,
         present: bool,
         bus_reads: Counter,
         bus_writes: Counter,
@@ -24,8 +24,8 @@ pub enum CardMsg {
     },
 }
 
-pub type CardMsgStreamState = ByteMsgStreamState<CardMsg, 8>;
-pub type CardMsgStreamOut = ByteMsgStreamOut<CardMsg, 8>;
+pub type CardMsgStreamState = ByteMsgStreamState<CardMsg, 9>;
+pub type CardMsgStreamOut = ByteMsgStreamOut<CardMsg, 9>;
 
 pub fn init_card_msg_stream() -> CardMsgStreamState {
     ByteMsgStreamState$(
@@ -71,17 +71,27 @@ fn count_hex_char(value: Counter, idx: uint<2>) -> uint<8> {
     }
 }
 
-fn help_text() -> [uint<8>; 193] {
+fn mode_char(mode: DebugMode) -> uint<8> {
+    b'0' +. zext(mode)
+}
+
+fn help_text() -> [uint<8>; 304] {
     concat_arrays(
         concat_arrays(
-            b"rAAAAAA wAAAAAA=BB p0|p1 m0|m1 ? h\r\n",
-            b"S0=CE1_RAM# S1=CE6_ROM# S2=OE# S3=R/W\r\n",
+            b"rAAAAAA wAAAAAA=BB p0|p1 m0|m1|m2 ? h\r\n",
+            b"S0=CE1_RAM# S1=CE6_ROM# S2=OE#\r\n",
         ),
         concat_arrays(
-            b"S4=AD_CHG S5=DATA_CHG\r\n",
+            b"m0/m1:S3=R/W S4=AD_CHG S5=DATA_CHG\r\n",
             concat_arrays(
                 b"m0:S6=ADDR18_UART100 S7=DATA8_UART100\r\n",
-                b"m1:S6=PINCHR0 S7=PINCHR1 C1 C6 OE RW A0-A9 AA-AH D0-D7\r\n",
+                concat_arrays(
+                    b"m1:S6=PINCHR0 S7=PINCHR1 C1 C6 OE RW A0-A9 AA-AH D0-D7\r\n",
+                    concat_arrays(
+                        b"m2:S3=CTRL S4=DATACHR0 S5=DATACHR1 S6=ADDRCHR0 S7=ADDRCHR1\r\n",
+                        b"CTRL:1 6 O R DATA:D0-D7 ADDR:A0-A9 AA-AH\r\n",
+                    ),
+                ),
             ),
         ),
     )
@@ -97,7 +107,7 @@ impl CardMsg {
             Self::None => 0,
             Self::Ok => 4,
             Self::Err => 5,
-            Self::Help => 193,
+            Self::Help => 304,
             Self::Mode(_) => 4,
             Self::Present(_) => 4,
             Self::Read(_, _) => 11,
@@ -114,9 +124,9 @@ impl CardMsg {
                 Self::Ok => b"OK\r\n"[trunc(idx)],
                 Self::Err => b"ERR\r\n"[trunc(idx)],
                 Self::Help => help_text()[trunc(idx)],
-                Self::Mode$(pin_debug) => match idx {
+                Self::Mode$(mode) => match idx {
                     0 => b'M',
-                    1 => if pin_debug { b'1' } else { b'0' },
+                    1 => mode_char(mode),
                     2 => b'\r',
                     _ => b'\n',
                 },
@@ -139,7 +149,7 @@ impl CardMsg {
                     9 => b'\r',
                     _ => b'\n',
                 },
-                Self::Status$(pin_debug, present, bus_reads, bus_writes, uart_reads, uart_writes) => match idx {
+                Self::Status$(mode, present, bus_reads, bus_writes, uart_reads, uart_writes) => match idx {
                     0 => b'P',
                     1 => if present { b'1' } else { b'0' },
                     2 => b' ',
@@ -150,7 +160,7 @@ impl CardMsg {
                     7 => hex_char(trunc(card_size_bytes())),
                     8 => b' ',
                     9 => b'M',
-                    10 => if pin_debug { b'1' } else { b'0' },
+                    10 => mode_char(mode),
                     11 => b' ',
                     12 => b'B',
                     13 => b'R',

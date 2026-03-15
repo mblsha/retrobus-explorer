@@ -77,8 +77,8 @@ def cmd_present(port: str, baud: int, enabled: bool) -> int:
     return 0
 
 
-def cmd_mode(port: str, baud: int, pin_debug: bool) -> int:
-    sys.stdout.write(send_line(port, baud, "m1" if pin_debug else "m0"))
+def cmd_mode(port: str, baud: int, mode: int) -> int:
+    sys.stdout.write(send_line(port, baud, f"m{mode}"))
     return 0
 
 
@@ -119,10 +119,10 @@ def build_parser() -> argparse.ArgumentParser:
     present_parser.add_argument("--baud", type=int, default=1_000_000)
     present_parser.add_argument("state", choices=["on", "off"])
 
-    mode_parser = sub.add_parser("mode", help="switch Saleae S6/S7 between normal and pin-debug modes")
+    mode_parser = sub.add_parser("mode", help="switch Saleae outputs between normal, pair-debug, and split-debug modes")
     mode_parser.add_argument("--port", required=True)
     mode_parser.add_argument("--baud", type=int, default=1_000_000)
-    mode_parser.add_argument("state", choices=["normal", "debug"])
+    mode_parser.add_argument("state", choices=["normal", "debug", "split"])
 
     status_parser = sub.add_parser("status", help="read bridge status counters")
     status_parser.add_argument("--port", required=True)
@@ -148,7 +148,8 @@ def main() -> int:
     if args.cmd == "present":
         return cmd_present(args.port, args.baud, args.state == "on")
     if args.cmd == "mode":
-        return cmd_mode(args.port, args.baud, args.state == "debug")
+        mode = 0 if args.state == "normal" else (1 if args.state == "debug" else 2)
+        return cmd_mode(args.port, args.baud, mode)
     if args.cmd == "status":
         return cmd_status(args.port, args.baud)
     if args.cmd == "help-cmd":

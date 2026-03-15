@@ -1,5 +1,5 @@
 use super::{
-    protocol::{BusAddr, CardData, Counter},
+    protocol::{BusAddr, CardData, Counter, DebugMode, debug_mode_is_pair, debug_mode_is_split},
     render::{BoardRenderInputs, render_board_outputs},
 };
 
@@ -25,6 +25,13 @@ struct PinDebugUartState {
 struct PinDebugMonitorState {
     pin: PinDebugState,
     uart: PinDebugUartState,
+}
+
+struct SplitPinDebugMonitorState {
+    pin: PinDebugState,
+    ctrl_uart: FastUart8State,
+    data_uart: PinDebugUartState,
+    addr_uart: PinDebugUartState,
 }
 
 struct PinDebugState {
@@ -53,6 +60,44 @@ struct PinDebugStepOut {
     state: PinDebugState,
     event: PinDebugEvent,
     emit: bool,
+}
+
+struct PinDebugCtrlEvent {
+    valid: bool,
+    ch: uint<8>,
+    clear_ctrl: uint<4>,
+}
+
+struct PinDebugAddrEvent {
+    valid: bool,
+    char0: uint<8>,
+    char1: uint<8>,
+    clear_addr: BusAddr,
+}
+
+struct PinDebugDataEvent {
+    valid: bool,
+    char0: uint<8>,
+    char1: uint<8>,
+    clear_data: CardData,
+}
+
+struct PinDebugSplitStepOut {
+    state: PinDebugState,
+    ctrl_event: PinDebugCtrlEvent,
+    ctrl_emit: bool,
+    addr_event: PinDebugAddrEvent,
+    addr_emit: bool,
+    data_event: PinDebugDataEvent,
+    data_emit: bool,
+}
+
+struct SplitPinDebugLines {
+    ctrl: bool,
+    data0: bool,
+    data1: bool,
+    addr0: bool,
+    addr1: bool,
 }
 
 fn fast_uart_frame18(data: uint<18>) -> uint<20> {
@@ -94,6 +139,15 @@ fn init_pin_debug_monitor() -> PinDebugMonitorState {
     PinDebugMonitorState$(
         pin: init_pin_debug_state(),
         uart: init_pin_debug_uart(),
+    )
+}
+
+fn init_split_pin_debug_monitor() -> SplitPinDebugMonitorState {
+    SplitPinDebugMonitorState$(
+        pin: init_pin_debug_state(),
+        ctrl_uart: init_fast_uart8(),
+        data_uart: init_pin_debug_uart(),
+        addr_uart: init_pin_debug_uart(),
     )
 }
 
@@ -262,6 +316,32 @@ fn invalid_pin_debug_event() -> PinDebugEvent {
     )
 }
 
+fn invalid_pin_debug_ctrl_event() -> PinDebugCtrlEvent {
+    PinDebugCtrlEvent$(
+        valid: false,
+        ch: 0,
+        clear_ctrl: 0,
+    )
+}
+
+fn invalid_pin_debug_addr_event() -> PinDebugAddrEvent {
+    PinDebugAddrEvent$(
+        valid: false,
+        char0: 0,
+        char1: 0,
+        clear_addr: 0,
+    )
+}
+
+fn invalid_pin_debug_data_event() -> PinDebugDataEvent {
+    PinDebugDataEvent$(
+        valid: false,
+        char0: 0,
+        char1: 0,
+        clear_data: 0,
+    )
+}
+
 fn addr_pin_char(idx: uint<5>) -> uint<8> {
     if idx < 10 {
         b'0' +. zext(idx)
@@ -272,6 +352,84 @@ fn addr_pin_char(idx: uint<5>) -> uint<8> {
 
 fn data_pin_char(idx: uint<4>) -> uint<8> {
     b'0' +. zext(idx)
+}
+
+fn select_pin_debug_ctrl_event(pending_ctrl: uint<4>) -> PinDebugCtrlEvent {
+    if pending_ctrl.to_bits()[0] {
+        PinDebugCtrlEvent$(valid: true, ch: b'1', clear_ctrl: 1)
+    } else if pending_ctrl.to_bits()[1] {
+        PinDebugCtrlEvent$(valid: true, ch: b'6', clear_ctrl: 2)
+    } else if pending_ctrl.to_bits()[2] {
+        PinDebugCtrlEvent$(valid: true, ch: b'O', clear_ctrl: 4)
+    } else if pending_ctrl.to_bits()[3] {
+        PinDebugCtrlEvent$(valid: true, ch: b'R', clear_ctrl: 8)
+    } else {
+        invalid_pin_debug_ctrl_event()
+    }
+}
+
+fn select_pin_debug_addr_event(pending_addr: BusAddr) -> PinDebugAddrEvent {
+    if pending_addr.to_bits()[0] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(0), clear_addr: 1)
+    } else if pending_addr.to_bits()[1] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(1), clear_addr: 2)
+    } else if pending_addr.to_bits()[2] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(2), clear_addr: 4)
+    } else if pending_addr.to_bits()[3] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(3), clear_addr: 8)
+    } else if pending_addr.to_bits()[4] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(4), clear_addr: 16)
+    } else if pending_addr.to_bits()[5] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(5), clear_addr: 32)
+    } else if pending_addr.to_bits()[6] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(6), clear_addr: 64)
+    } else if pending_addr.to_bits()[7] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(7), clear_addr: 128)
+    } else if pending_addr.to_bits()[8] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(8), clear_addr: 256)
+    } else if pending_addr.to_bits()[9] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(9), clear_addr: 512)
+    } else if pending_addr.to_bits()[10] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(10), clear_addr: 1024)
+    } else if pending_addr.to_bits()[11] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(11), clear_addr: 2048)
+    } else if pending_addr.to_bits()[12] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(12), clear_addr: 4096)
+    } else if pending_addr.to_bits()[13] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(13), clear_addr: 8192)
+    } else if pending_addr.to_bits()[14] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(14), clear_addr: 16384)
+    } else if pending_addr.to_bits()[15] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(15), clear_addr: 32768)
+    } else if pending_addr.to_bits()[16] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(16), clear_addr: 65536)
+    } else if pending_addr.to_bits()[17] {
+        PinDebugAddrEvent$(valid: true, char0: b'A', char1: addr_pin_char(17), clear_addr: 131072)
+    } else {
+        invalid_pin_debug_addr_event()
+    }
+}
+
+fn select_pin_debug_data_event(pending_data: CardData) -> PinDebugDataEvent {
+    if pending_data.to_bits()[0] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(0), clear_data: 1)
+    } else if pending_data.to_bits()[1] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(1), clear_data: 2)
+    } else if pending_data.to_bits()[2] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(2), clear_data: 4)
+    } else if pending_data.to_bits()[3] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(3), clear_data: 8)
+    } else if pending_data.to_bits()[4] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(4), clear_data: 16)
+    } else if pending_data.to_bits()[5] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(5), clear_data: 32)
+    } else if pending_data.to_bits()[6] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(6), clear_data: 64)
+    } else if pending_data.to_bits()[7] {
+        PinDebugDataEvent$(valid: true, char0: b'D', char1: data_pin_char(7), clear_data: 128)
+    } else {
+        invalid_pin_debug_data_event()
+    }
 }
 
 fn select_pin_debug_event(
@@ -341,6 +499,104 @@ fn select_pin_debug_event(
         PinDebugEvent$(valid: true, char0: b'D', char1: data_pin_char(7), clear_ctrl: 0, clear_addr: 0, clear_data: 128)
     } else {
         invalid_pin_debug_event()
+    }
+}
+
+fn pin_debug_split_step(
+    cur: PinDebugState,
+    enabled: bool,
+    card_ram_ce1: bool,
+    card_rom_ce6: bool,
+    oe: bool,
+    rw: bool,
+    addr: BusAddr,
+    data: CardData,
+    ctrl_tx_ready: bool,
+    addr_tx_ready: bool,
+    data_tx_ready: bool,
+) -> PinDebugSplitStepOut {
+    if !enabled {
+        PinDebugSplitStepOut$(
+            state: PinDebugState$(
+                armed: false,
+                prev_card_ram_ce1: card_ram_ce1,
+                prev_card_rom_ce6: card_rom_ce6,
+                prev_oe: oe,
+                prev_rw: rw,
+                prev_addr: addr,
+                prev_data: data,
+                pending_ctrl: 0,
+                pending_addr: 0,
+                pending_data: 0,
+            ),
+            ctrl_event: invalid_pin_debug_ctrl_event(),
+            ctrl_emit: false,
+            addr_event: invalid_pin_debug_addr_event(),
+            addr_emit: false,
+            data_event: invalid_pin_debug_data_event(),
+            data_emit: false,
+        )
+    } else if !cur.armed {
+        PinDebugSplitStepOut$(
+            state: PinDebugState$(
+                armed: true,
+                prev_card_ram_ce1: card_ram_ce1,
+                prev_card_rom_ce6: card_rom_ce6,
+                prev_oe: oe,
+                prev_rw: rw,
+                prev_addr: addr,
+                prev_data: data,
+                pending_ctrl: 0,
+                pending_addr: 0,
+                pending_data: 0,
+            ),
+            ctrl_event: invalid_pin_debug_ctrl_event(),
+            ctrl_emit: false,
+            addr_event: invalid_pin_debug_addr_event(),
+            addr_emit: false,
+            data_event: invalid_pin_debug_data_event(),
+            data_emit: false,
+        )
+    } else {
+        let ctrl_changed_c1: uint<4> = if card_ram_ce1 != cur.prev_card_ram_ce1 { 1 } else { 0 };
+        let ctrl_changed_c6: uint<4> = if card_rom_ce6 != cur.prev_card_rom_ce6 { 2 } else { 0 };
+        let ctrl_changed_oe: uint<4> = if oe != cur.prev_oe { 4 } else { 0 };
+        let ctrl_changed_rw: uint<4> = if rw != cur.prev_rw { 8 } else { 0 };
+        let ctrl_changed: uint<4> =
+            ctrl_changed_c1 |
+            ctrl_changed_c6 |
+            ctrl_changed_oe |
+            ctrl_changed_rw;
+        let pending_ctrl = cur.pending_ctrl | ctrl_changed;
+        let pending_addr = cur.pending_addr | (addr ^ cur.prev_addr);
+        let pending_data = cur.pending_data | (data ^ cur.prev_data);
+        let ctrl_event = select_pin_debug_ctrl_event(pending_ctrl);
+        let addr_event = select_pin_debug_addr_event(pending_addr);
+        let data_event = select_pin_debug_data_event(pending_data);
+        let ctrl_emit = ctrl_tx_ready && ctrl_event.valid;
+        let addr_emit = addr_tx_ready && addr_event.valid;
+        let data_emit = data_tx_ready && data_event.valid;
+
+        PinDebugSplitStepOut$(
+            state: PinDebugState$(
+                armed: true,
+                prev_card_ram_ce1: card_ram_ce1,
+                prev_card_rom_ce6: card_rom_ce6,
+                prev_oe: oe,
+                prev_rw: rw,
+                prev_addr: addr,
+                prev_data: data,
+                pending_ctrl: if ctrl_emit { pending_ctrl ^ ctrl_event.clear_ctrl } else { pending_ctrl },
+                pending_addr: if addr_emit { pending_addr ^ addr_event.clear_addr } else { pending_addr },
+                pending_data: if data_emit { pending_data ^ data_event.clear_data } else { pending_data },
+            ),
+            ctrl_event: ctrl_event,
+            ctrl_emit: ctrl_emit,
+            addr_event: addr_event,
+            addr_emit: addr_emit,
+            data_event: data_event,
+            data_emit: data_emit,
+        )
     }
 }
 
@@ -459,6 +715,51 @@ entity pin_change_debug_lines(
     [pin_debug_uart_line(state.uart, false), pin_debug_uart_line(state.uart, true)]
 }
 
+entity split_pin_change_debug_lines(
+    clk: clock,
+    rst: bool,
+    enabled: bool,
+    card_ram_ce1: bool,
+    card_rom_ce6: bool,
+    oe: bool,
+    rw: bool,
+    addr: BusAddr,
+    data: CardData,
+) -> SplitPinDebugLines {
+    reg(clk) state: SplitPinDebugMonitorState
+        reset(rst: init_split_pin_debug_monitor())
+        = {
+            let step = pin_debug_split_step(
+                state.pin,
+                enabled,
+                card_ram_ce1,
+                card_rom_ce6,
+                oe,
+                rw,
+                addr,
+                data,
+                !state.ctrl_uart.busy,
+                !state.addr_uart.busy,
+                !state.data_uart.busy,
+            );
+
+            SplitPinDebugMonitorState$(
+                pin: step.state,
+                ctrl_uart: next_fast_uart8_state(state.ctrl_uart, step.ctrl_event.ch, step.ctrl_emit),
+                data_uart: next_pin_debug_uart_state(state.data_uart, step.data_event.char0, step.data_event.char1, step.data_emit),
+                addr_uart: next_pin_debug_uart_state(state.addr_uart, step.addr_event.char0, step.addr_event.char1, step.addr_emit),
+            )
+        };
+
+    SplitPinDebugLines$(
+        ctrl: fast_uart_line8(state.ctrl_uart),
+        data0: pin_debug_uart_line(state.data_uart, false),
+        data1: pin_debug_uart_line(state.data_uart, true),
+        addr0: pin_debug_uart_line(state.addr_uart, false),
+        addr1: pin_debug_uart_line(state.addr_uart, true),
+    )
+}
+
 entity fast_uart_monitor_line18(
     clk: clock,
     rst: bool,
@@ -489,7 +790,7 @@ entity fast_uart_monitor_line8(
 pub(lib) entity card_board_outputs(
     clk: clock,
     rst: bool,
-    pin_debug_mode: bool,
+    debug_mode: DebugMode,
     present: bool,
     bus_read_cycle: bool,
     bus_write_cycle: bool,
@@ -524,10 +825,21 @@ pub(lib) entity card_board_outputs(
         data_uart_sample,
         data_uart_wput,
     );
-    let debug_lines = inst pin_change_debug_lines(
+    let pair_debug_lines = inst pin_change_debug_lines(
         clk,
         rst,
-        pin_debug_mode,
+        debug_mode_is_pair(debug_mode),
+        card_ram_ce1,
+        card_rom_ce6,
+        oe,
+        rw,
+        pin_debug_addr,
+        pin_debug_data,
+    );
+    let split_debug_lines = inst split_pin_change_debug_lines(
+        clk,
+        rst,
+        debug_mode_is_split(debug_mode),
         card_ram_ce1,
         card_rom_ce6,
         oe,
@@ -544,15 +856,27 @@ pub(lib) entity card_board_outputs(
             card_ram_ce1: card_ram_ce1,
             card_rom_ce6: card_rom_ce6,
             oe: oe,
-            rw: rw,
-            addr_changed: addr_changed,
-            data_changed: data_changed,
             parse_err_seen: parse_err_seen,
             uart_writes: uart_writes,
             bus_reads: bus_reads,
             bus_writes: bus_writes,
-            saleae6_line: if pin_debug_mode { debug_lines[0] } else { addr_uart_line },
-            saleae7_line: if pin_debug_mode { debug_lines[1] } else { data_uart_line },
+            saleae3_line: if debug_mode_is_split(debug_mode) { split_debug_lines.ctrl } else { rw },
+            saleae4_line: if debug_mode_is_split(debug_mode) { split_debug_lines.data0 } else { addr_changed },
+            saleae5_line: if debug_mode_is_split(debug_mode) { split_debug_lines.data1 } else { data_changed },
+            saleae6_line: if debug_mode_is_pair(debug_mode) {
+                pair_debug_lines[0]
+            } else if debug_mode_is_split(debug_mode) {
+                split_debug_lines.addr0
+            } else {
+                addr_uart_line
+            },
+            saleae7_line: if debug_mode_is_pair(debug_mode) {
+                pair_debug_lines[1]
+            } else if debug_mode_is_split(debug_mode) {
+                split_debug_lines.addr1
+            } else {
+                data_uart_line
+            },
         ),
     );
 

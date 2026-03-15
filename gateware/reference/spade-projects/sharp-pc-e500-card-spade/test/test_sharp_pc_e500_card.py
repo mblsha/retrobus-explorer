@@ -63,6 +63,12 @@ async def _uart_send_text(dut, text: str):
         await _uart_send_byte(dut, ch)
 
 
+async def _set_mode(dut, mode: int):
+    mode_line = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_text(dut, f"m{mode}\r")
+    assert await mode_line == f"M{mode}\r\n"
+
+
 async def _uart_wait_start_fall(dut, timeout_cycles: int) -> None:
     if int(dut.usb_tx.value) == 0:
         return
@@ -205,11 +211,13 @@ async def help_status_and_parse_errors_work(dut):
 
     help_line0 = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "h\r")
-    assert await help_line0 == "rAAAAAA wAAAAAA=BB p0|p1 m0|m1 ? h\r\n"
-    assert await _uart_recv_line(dut) == "S0=CE1_RAM# S1=CE6_ROM# S2=OE# S3=R/W\r\n"
-    assert await _uart_recv_line(dut) == "S4=AD_CHG S5=DATA_CHG\r\n"
+    assert await help_line0 == "rAAAAAA wAAAAAA=BB p0|p1 m0|m1|m2 ? h\r\n"
+    assert await _uart_recv_line(dut) == "S0=CE1_RAM# S1=CE6_ROM# S2=OE#\r\n"
+    assert await _uart_recv_line(dut) == "m0/m1:S3=R/W S4=AD_CHG S5=DATA_CHG\r\n"
     assert await _uart_recv_line(dut) == "m0:S6=ADDR18_UART100 S7=DATA8_UART100\r\n"
     assert await _uart_recv_line(dut) == "m1:S6=PINCHR0 S7=PINCHR1 C1 C6 OE RW A0-A9 AA-AH D0-D7\r\n"
+    assert await _uart_recv_line(dut) == "m2:S3=CTRL S4=DATACHR0 S5=DATACHR1 S6=ADDRCHR0 S7=ADDRCHR1\r\n"
+    assert await _uart_recv_line(dut) == "CTRL:1 6 O R DATA:D0-D7 ADDR:A0-A9 AA-AH\r\n"
 
     err_line = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "w030000=12\r")
@@ -299,9 +307,7 @@ async def saleae_outputs_show_controls_and_monitor_uart_lines(dut):
 async def bus_write_streams_address_and_data_over_fast_uart_saleae_lines(dut):
     await _init(dut)
 
-    mode_line = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_text(dut, "m0\r")
-    assert await mode_line == "M0\r\n"
+    await _set_mode(dut, 0)
 
     addr_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 18))
     data_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))
@@ -319,3 +325,77 @@ async def bus_write_streams_address_and_data_over_fast_uart_saleae_lines(dut):
 
     assert await addr_task == 0x00123
     assert await data_task == 0xAB
+
+
+@cocotb.test()
+async def split_pin_debug_mode_reports_control_tokens_on_saleae3(dut):
+    await _init(dut)
+    await _set_mode(dut, 2)
+
+    ctrl_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 8))
+
+    dut.card_ram_ce1.value = 0
+    await tick(dut.clk, 2)
+
+    assert await ctrl_task == ord("1")
+
+
+@cocotb.test()
+async def split_pin_debug_mode_reports_data_tags_on_saleae45(dut):
+    await _init(dut)
+    await _set_mode(dut, 2)
+
+    data0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 8))
+    data1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[5], dut.clk, 8))
+
+    dut.addr.value = 0
+    dut.rw.value = 0
+    dut.oe.value = 1
+    dut.card_ram_ce1.value = 0
+    dut.data_host.value = 0x01
+    dut.data_host_drive.value = 1
+    await tick(dut.clk, 2)
+
+    assert await data0_task == ord("D")
+    assert await data1_task == ord("0")
+
+
+@cocotb.test()
+async def split_pin_debug_mode_reports_address_tags_on_saleae67(dut):
+    await _init(dut)
+    await _set_mode(dut, 2)
+
+    addr0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
+    addr1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))
+
+    dut.addr.value = 0x00001
+    await tick(dut.clk, 2)
+
+    assert await addr0_task == ord("A")
+    assert await addr1_task == ord("0")
+
+
+@cocotb.test()
+async def split_pin_debug_mode_drains_ctrl_addr_and_data_in_parallel(dut):
+    await _init(dut)
+    await _set_mode(dut, 2)
+
+    ctrl_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 8))
+    data0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 8))
+    data1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[5], dut.clk, 8))
+    addr0_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
+    addr1_task = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 8))
+
+    dut.addr.value = 0x00001
+    dut.rw.value = 0
+    dut.oe.value = 1
+    dut.card_ram_ce1.value = 0
+    dut.data_host.value = 0x01
+    dut.data_host_drive.value = 1
+    await tick(dut.clk, 2)
+
+    assert await ctrl_task == ord("1")
+    assert await data0_task == ord("D")
+    assert await data1_task == ord("0")
+    assert await addr0_task == ord("A")
+    assert await addr1_task == ord("0")
