@@ -179,6 +179,22 @@ async def _bus_read(dut, addr: int) -> int:
     return value
 
 
+async def _bus_read_with_external_drive(dut, addr: int, value: int) -> int:
+    dut.data_host.value = value & 0xFF
+    dut.data_host_drive.value = 1
+    dut.addr.value = addr & 0x3FFFF
+    dut.rw.value = 1
+    dut.oe.value = 0
+    dut.card_ram_ce1.value = 0
+    await tick(dut.clk, 2)
+    observed = int(dut.data.value) & 0xFF
+    dut.card_ram_ce1.value = 1
+    dut.oe.value = 1
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+    return observed
+
+
 @cocotb.test()
 async def bus_reads_and_writes_stop_after_2k(dut):
     await _init(dut)
@@ -190,6 +206,7 @@ async def bus_reads_and_writes_stop_after_2k(dut):
     await _bus_write(dut, 0x0FFF, 0x3C)
     assert await _bus_read(dut, 0x07FF) == 0x00
     assert await _bus_read(dut, 0x0FFF) == 0x00
+    assert await _bus_read_with_external_drive(dut, 0x0805, 0x5A) == 0x5A
 
 
 @cocotb.test()
@@ -215,6 +232,7 @@ async def uart_can_read_write_memory_and_control_presence(dut):
     assert await off_line == "P0\r\n"
 
     assert await _bus_read(dut, 0x0123) == 0x00
+    assert await _bus_read_with_external_drive(dut, 0x0123, 0xA5) == 0xA5
 
     on_line = cocotb.start_soon(_uart_recv_line(dut))
     await _uart_send_text(dut, "p1\r")
