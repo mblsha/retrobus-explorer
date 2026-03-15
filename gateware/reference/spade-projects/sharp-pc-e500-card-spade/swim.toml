@@ -5,10 +5,18 @@ preprocessing = ["python3 ../tools/gen_build_info.py --project ."]
 shared_components = { path = "../shared-components" }
 
 [constraints]
+top_entity = "main_core"
 acf = [
     "../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf",
     "../../../shared-constraints/saleae.acf",
     "constraints/pc-e500-ffc.acf",
+]
+
+[verilog]
+sources = [
+    "verilog/main_wrapper.v",
+    "verilog/card_ram_2k_v.v",
+    "../shared-components/verilog/**/*.v",
 ]
 
 [tooling]
