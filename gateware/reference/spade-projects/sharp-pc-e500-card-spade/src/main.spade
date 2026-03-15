@@ -10,8 +10,12 @@ use shared_components::{
 
 type UsbMsgIdx = uint<8>;
 
-fn addr_cooldown_last() -> uint<4> { 3 }
-fn data_cooldown_default() -> uint<4> { 3 }
+fn sample_clk_hz() -> uint<32> { 100_000_000 }
+fn cooldown_ns() -> uint<32> { 50 }
+
+fn cooldown_last() -> uint<4> {
+    trunc(((cooldown_ns() * sample_clk_hz()) `std::ops::comb_div` 1_000_000_000))
+}
 
 struct PendingUartState<#uint WIDTH> {
     last_raw: uint<WIDTH>,
@@ -172,7 +176,7 @@ entity main(
     let data_sync = inst sync_bundle::<2, 8>(clk, data);
     let addr_now: uint<18> = addr_sync.to_uint();
     let data_now: uint<8> = data_sync.to_uint();
-    let addr_cooldown_last = addr_cooldown_last();
+    let cooldown_last = cooldown_last();
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
     let rx_digit: DigitDecode = rx.byte.decode_digit();
 
@@ -182,31 +186,25 @@ entity main(
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
-    reg(clk) data_cooldown_cfg: uint<4> reset(rst: data_cooldown_default()) =
-        if rx.valid && rx_digit.valid {
-            rx_digit.value
-        } else {
-            data_cooldown_cfg
-        };
     reg(clk) usb_stream: UsbMsgStreamState reset(rst: init_usb_stream()) =
         usb_stream_step(
         usb_stream,
         *usb_tx_busy,
-        rx.valid && rx_digit.valid,
-        UsbMsg::Ack(rx_digit.value),
+        false,
+        UsbMsg::None(),
     ).state;
     reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
-        pending_uart_step(addr_state, addr_now, *addr_uart_busy, addr_cooldown_last).next_state;
+        pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
     reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) =
-        pending_uart_step(data_state, data_now, *data_uart_busy, data_cooldown_cfg).next_state;
+        pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last).next_state;
     let usb_stream_out = usb_stream_step(
         usb_stream,
         *usb_tx_busy,
-        rx.valid && rx_digit.valid,
-        UsbMsg::Ack(rx_digit.value),
+        false,
+        UsbMsg::None(),
     );
-    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, addr_cooldown_last);
-    let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, data_cooldown_cfg);
+    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
+    let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,

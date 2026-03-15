@@ -104,19 +104,15 @@ async def _init(dut):
 
 
 @cocotb.test()
-async def boot_banner_and_digit_command_update_data_cooldown(dut):
+async def boot_banner_and_fixed_50ns_cooldown_delay_both_uarts(dut):
     await _init(dut)
-
-    ack_task = cocotb.start_soon(_uart_recv_line(dut))
-    await _uart_send_byte(dut, ord("5"))
-    assert await ack_task == "D=5\r\n"
 
     dut.addr.value = 0x00001
     dut.data.value = 0x01
 
     addr_start = None
     data_start = None
-    for cycle in range(16):
+    for cycle in range(20):
         v = int(dut.saleae.value)
         if addr_start is None and saleae_bit(v, 7) == 0:
             addr_start = cycle
@@ -128,14 +124,13 @@ async def boot_banner_and_digit_command_update_data_cooldown(dut):
 
     assert addr_start is not None
     assert data_start is not None
-    assert data_start - addr_start >= 2
+    assert abs(data_start - addr_start) <= 1
 
 
 @cocotb.test()
-async def non_digit_uart_input_is_ignored(dut):
+async def usb_uart_is_idle_after_boot_banner(dut):
     await _init(dut)
 
-    await _uart_send_byte(dut, ord("x"))
     await _assert_no_usb_tx_start_bit(dut, USB_UART_BIT_CYCLES * 12)
     assert int(dut.usb_tx.value) == 1
 
