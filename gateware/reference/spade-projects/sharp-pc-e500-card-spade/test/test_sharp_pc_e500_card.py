@@ -43,7 +43,7 @@ async def cooldown_delays_uart_and_busy_change_lines_pulse(dut):
     v = int(dut.saleae.value)
     assert v == 0b1010_0010
 
-    for _ in range(4):
+    for _ in range(6):
         await tick(dut.clk, 1)
         v = int(dut.saleae.value)
         assert v == 0b1010_0010
@@ -62,7 +62,7 @@ async def cooldown_delays_uart_and_busy_change_lines_pulse(dut):
     dut.addr.value = 0x00002
     dut.data.value = 0x02
     saw_busy_change = False
-    for _ in range(3):
+    for _ in range(5):
         await tick(dut.clk, 1)
         v = int(dut.saleae.value)
         if saleae_bit(v, 6) == 1 and saleae_bit(v, 4) == 1:
