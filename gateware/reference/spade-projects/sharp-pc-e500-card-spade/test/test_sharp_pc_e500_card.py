@@ -26,30 +26,50 @@ async def _init(dut):
 
 
 @cocotb.test()
-async def named_pc_e500_pins_map_directly_to_saleae(dut):
+async def changed_flags_pulse_and_uarts_emit_on_change(dut):
     await _init(dut)
 
-    dut.rw.value = 0
-    dut.addr.value = 0x00
-    await tick(dut.clk, 1)
-    assert int(dut.saleae.value) == 0x00
+    idle = int(dut.saleae.value)
+    assert idle == 0b1010_0000
 
-    dut.rw.value = 1
-    dut.addr.value = 0x01
+    dut.addr.value = 0x00001
+    dut.data.value = 0x01
     await tick(dut.clk, 1)
-    assert int(dut.saleae.value) == 0x0C
 
-    dut.addr.value = 0x0F
-    await tick(dut.clk, 1)
-    assert int(dut.saleae.value) == 0xDC
+    v = int(dut.saleae.value)
+    assert v == 0b1111_0000
 
-    dut.addr.value = 0x0A
     await tick(dut.clk, 1)
-    assert int(dut.saleae.value) == 0x94
+    v = int(dut.saleae.value)
+    assert v == 0b1010_0000
+
+    await tick(dut.clk, 1)
+    v = int(dut.saleae.value)
+    assert ((v >> 7) & 1) == 0
+    assert ((v >> 5) & 1) == 0
+
+    await tick(dut.clk, 1)
+    v = int(dut.saleae.value)
+    assert ((v >> 7) & 1) == 1
+    assert ((v >> 5) & 1) == 1
+
+    for _ in range(8):
+        await tick(dut.clk, 1)
+
+    v = int(dut.saleae.value)
+    assert ((v >> 7) & 1) == 0
+    assert ((v >> 5) & 1) == 1
+
+    for _ in range(10):
+        await tick(dut.clk, 1)
+
+    v = int(dut.saleae.value)
+    assert ((v >> 7) & 1) == 1
+    assert ((v >> 5) & 1) == 1
 
 
 @cocotb.test()
-async def unrelated_outputs_are_tied_off(dut):
+async def unchanged_inputs_keep_flags_low_and_unrelated_outputs_tied_off(dut):
     await _init(dut)
 
     dut.usb_rx.value = 0
@@ -65,3 +85,7 @@ async def unrelated_outputs_are_tied_off(dut):
 
     assert int(dut.usb_tx.value) == 1
     assert int(dut.led.value) == 0
+    assert int(dut.saleae.value) == 0b1111_0000
+
+    await tick(dut.clk, 1)
+    assert int(dut.saleae.value) == 0b1010_0000

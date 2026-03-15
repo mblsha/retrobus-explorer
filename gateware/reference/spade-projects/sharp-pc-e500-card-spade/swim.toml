@@ -1,6 +1,9 @@
 name = "sharp_pc_e500_card_spade"
 preprocessing = ["python3 ../tools/gen_build_info.py --project ."]
 
+[libraries]
+shared_components = { path = "../shared-components" }
+
 [constraints]
 acf = [
     "../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf",
