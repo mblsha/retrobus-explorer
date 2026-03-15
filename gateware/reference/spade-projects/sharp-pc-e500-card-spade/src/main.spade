@@ -1,4 +1,5 @@
 mod build_info;
+use shared_components::primitives::{sync_bundle, sync_delay};
 use shared_components::serial::uart_tx_tap;
 
 fn cooldown_last() -> uint<3> { 3 }
@@ -91,8 +92,14 @@ entity main(
     oe: bool,
 ) {
     let rst = !rst_n;
-    let addr_now: uint<18> = addr.to_uint();
-    let data_now: uint<8> = data.to_uint();
+    let ce1_sync = inst sync_delay::<2>(clk, ce1);
+    let ce6_sync = inst sync_delay::<2>(clk, ce6);
+    let rw_sync = inst sync_delay::<2>(clk, rw);
+    let oe_sync = inst sync_delay::<2>(clk, oe);
+    let addr_sync = inst sync_bundle::<2, 18>(clk, addr);
+    let data_sync = inst sync_bundle::<2, 8>(clk, data);
+    let addr_now: uint<18> = addr_sync.to_uint();
+    let data_now: uint<8> = data_sync.to_uint();
     let cooldown_last = cooldown_last();
 
     let (addr_uart_line, addr_uart_line_w): (&bool, inv &bool) = port;
@@ -144,8 +151,11 @@ entity main(
     let _ = rst_n;
     let _ = usb_rx;
     let _ = vcc2;
-    let _ = data;
     let _ = nc;
+    let _ = ce1_sync;
+    let _ = ce6_sync;
+    let _ = rw_sync;
+    let _ = oe_sync;
     let _ = *addr_uart_busy;
     let _ = *data_uart_busy;
 }
