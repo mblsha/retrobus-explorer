@@ -1,19 +1,8 @@
 name = "sharp_pc_e500_card_spade"
 preprocessing = ["python3 ../tools/gen_build_info.py --project ."]
 
-[libraries]
-shared_components = { path = "../shared-components" }
-
 [constraints]
 auto = true
-top_entity = "main_core"
-
-[verilog]
-sources = [
-    "verilog/main_wrapper.v",
-    "verilog/sram_card_mem_v.v",
-    "../shared-components/verilog/**/*.v",
-]
 
 [tooling]
 top = "main"

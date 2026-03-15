@@ -1,209 +1,32 @@
 mod build_info;
-mod msg;
-mod protocol;
-
-use shared_components::{
-    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
-    primitives::reset_conditioner,
-};
-
-use self::msg::{RouterMsgStreamState, init_router_msg_stream, router_msg_stream_step};
-use self::protocol::{
-    BusAddr,
-    CardData,
-    FfcPin,
-    ParserState,
-    RouteEntry,
-    SaleaePin,
-    ffc_pin_value,
-    init_parser,
-    line_parser_step,
-    route_entry_none,
-};
-
-type TxQueuePtr = uint<6>;
-type TxQueueUsed = uint<7>;
-
-struct TxQueueState {
-    waddr: TxQueuePtr,
-    raddr: TxQueuePtr,
-    used: TxQueueUsed,
-    storage: [uint<8>; 64],
-}
-
-struct MainState {
-    parser: ParserState,
-    msg_stream: RouterMsgStreamState,
-    routes: [RouteEntry; 8],
-    tx_queue: TxQueueState,
-}
-
-fn init_tx_queue() -> TxQueueState {
-    TxQueueState$(
-        waddr: 0,
-        raddr: 0,
-        used: 0,
-        storage: [0; 64],
-    )
-}
-
-fn init_main_state() -> MainState {
-    MainState$(
-        parser: init_parser(),
-        msg_stream: init_router_msg_stream(),
-        routes: [route_entry_none(); 8],
-        tx_queue: init_tx_queue(),
-    )
-}
-
-fn tx_ptr_inc(ptr: TxQueuePtr) -> TxQueuePtr {
-    if ptr == 63 {
-        0
-    } else {
-        ptr +. 1
-    }
-}
-
-fn tx_queue_write_at(storage: [uint<8>; 64], idx: TxQueuePtr, value: uint<8>) -> [uint<8>; 64] {
-    storage.enumerate().map(fn |(i, cur)| {
-        if i == idx {
-            value
-        } else {
-            cur
-        }
-    })
-}
-
-fn tx_queue_empty(queue: TxQueueState) -> bool {
-    queue.used == 0
-}
-
-fn tx_queue_full(queue: TxQueueState) -> bool {
-    queue.used == 64
-}
-
-fn tx_queue_front(queue: TxQueueState) -> uint<8> {
-    queue.storage[queue.raddr]
-}
-
-fn tx_queue_can_write(queue: TxQueueState, do_read: bool) -> bool {
-    !tx_queue_full(queue) || (do_read && !tx_queue_empty(queue))
-}
-
-fn tx_queue_step(queue: TxQueueState, write_valid: bool, write_byte: uint<8>, read_get: bool) -> TxQueueState {
-    let do_read = read_get && !tx_queue_empty(queue);
-    let do_write = write_valid && tx_queue_can_write(queue, do_read);
-    let next_storage = if do_write {
-        tx_queue_write_at(queue.storage, queue.waddr, write_byte)
-    } else {
-        queue.storage
-    };
-    let next_waddr = if do_write { tx_ptr_inc(queue.waddr) } else { queue.waddr };
-    let next_raddr = if do_read { tx_ptr_inc(queue.raddr) } else { queue.raddr };
-    let next_used = if do_write && !do_read {
-        queue.used +. 1
-    } else if do_read && !do_write {
-        queue.used -. 1
-    } else {
-        queue.used
-    };
-    TxQueueState$(
-        waddr: next_waddr,
-        raddr: next_raddr,
-        used: next_used,
-        storage: next_storage,
-    )
-}
-
-fn route_table_write_at(routes: [RouteEntry; 8], saleae: SaleaePin, entry: RouteEntry) -> [RouteEntry; 8] {
-    routes.enumerate().map(fn |(i, cur)| {
-        if i == saleae {
-            entry
-        } else {
-            cur
-        }
-    })
-}
-
 #[no_mangle(all)]
-entity main_core(
+entity main(
     clk: clock,
     rst_n: bool,
     led: inv &[bool; 8],
     usb_rx: bool,
     usb_tx: inv &bool,
+    ffc_data: [bool; 48],
     saleae: inv &[bool; 8],
-
-    rw: bool,
-    oe: bool,
-    card_ram_ce1: bool,
-    card_rom_ce6: bool,
-    vcc2: bool,
-    nc: bool,
-    addr: BusAddr,
-    data_in: CardData,
-    data_drive: inv &CardData,
-    data_oe: inv &bool,
 ) {
-    let rst = inst reset_conditioner::<4>(clk, !rst_n);
-    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
-
-    let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
-    let (usb_busy, usb_busy_w): (&bool, inv &bool) = port;
-
-    reg(clk) state: MainState reset(rst: init_main_state()) = {
-        let parse = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
-        let tx_start = !*usb_busy && !tx_queue_empty(state.tx_queue);
-        let msg_stream = router_msg_stream_step(
-            state.msg_stream,
-            !tx_queue_can_write(state.tx_queue, tx_start),
-            !parse.msg.is_none(),
-            parse.msg,
-        );
-        let next_routes = if parse.route_write {
-            route_table_write_at(
-                state.routes,
-                parse.route_saleae,
-                RouteEntry$(valid: true, ffc: parse.route_ffc),
-            )
-        } else {
-            state.routes
-        };
-        MainState$(
-            parser: parse.state,
-            msg_stream: msg_stream.state,
-            routes: next_routes,
-            tx_queue: tx_queue_step(state.tx_queue, msg_stream.tx_req.valid, msg_stream.tx_req.byte, tx_start),
-        )
-    };
-
-    let tx_start = !*usb_busy && !tx_queue_empty(state.tx_queue);
-    let tx_byte = if tx_start { tx_queue_front(state.tx_queue) } else { 0 };
-    let _tx = inst au_usb_uart_tx8_tap(
-        clk,
-        rst,
-        false,
-        tx_byte,
-        tx_start,
-        usb_tx_line_w,
-        usb_busy_w,
-    );
-
-    let saleae_lines: [bool; 8] = state.routes.enumerate().map(fn |(i, route)| {
-        let _ = i;
-        if route.valid {
-            ffc_pin_value(route.ffc, rw, oe, card_ram_ce1, card_rom_ce6, vcc2, nc, addr, data_in)
-        } else {
-            false
-        }
-    });
+    let saleae_lines: [bool; 8] = [
+        ffc_data[0],
+        ffc_data[1],
+        ffc_data[2],
+        ffc_data[3],
+        ffc_data[4],
+        ffc_data[5],
+        ffc_data[6],
+        ffc_data[7],
+    ];
     let led_lines: [bool; 8] = [false; 8];
-    let data_drive_value: CardData = 0;
-    let data_oe_value = false;
+    let usb_tx_idle = true;
 
-    set usb_tx = &*usb_tx_line;
     set saleae = &saleae_lines;
     set led = &led_lines;
-    set data_drive = &data_drive_value;
-    set data_oe = &data_oe_value;
+    set usb_tx = &usb_tx_idle;
+
+    let _ = clk;
+    let _ = rst_n;
+    let _ = usb_rx;
 }
