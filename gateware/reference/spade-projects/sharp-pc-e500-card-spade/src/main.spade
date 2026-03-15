@@ -1,6 +1,78 @@
 mod build_info;
 use shared_components::serial::uart_tx_tap;
 
+fn cooldown_last() -> uint<3> { 3 }
+
+struct PendingUartState<#uint WIDTH> {
+    last_raw: uint<WIDTH>,
+    pending: uint<WIDTH>,
+    pending_valid: bool,
+    settle: uint<3>,
+    sent: uint<WIDTH>,
+    missed: bool,
+}
+
+struct PendingUartOut<#uint WIDTH> {
+    next_state: PendingUartState<WIDTH>,
+    send: bool,
+    dropped: bool,
+}
+
+fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
+    PendingUartState$(
+        last_raw: 0,
+        pending: 0,
+        pending_valid: false,
+        settle: 0,
+        sent: 0,
+        missed: false,
+    )
+}
+
+fn pending_uart_step<#uint WIDTH>(
+    state: PendingUartState<WIDTH>,
+    now: uint<WIDTH>,
+    busy: bool,
+    settle_last: uint<3>,
+) -> PendingUartOut<WIDTH> {
+    let raw_changed = now != state.last_raw;
+    let send = state.pending_valid && state.settle == settle_last && state.pending != state.sent && !busy;
+    let clear_same = state.pending_valid && state.settle == settle_last && state.pending == state.sent;
+    let stale = if send || clear_same {
+        false
+    } else {
+        state.missed || (raw_changed && busy)
+    };
+
+    PendingUartOut$(
+        next_state: if raw_changed {
+            PendingUartState$(
+                last_raw: now,
+                pending: now,
+                pending_valid: true,
+                settle: 0,
+                sent: state.sent,
+                missed: state.missed || busy,
+            )
+        } else {
+            PendingUartState$(
+                last_raw: state.last_raw,
+                pending: state.pending,
+                pending_valid: if send || clear_same { false } else { state.pending_valid },
+                settle: if state.pending_valid && state.settle < settle_last {
+                    state.settle +. 1
+                } else {
+                    state.settle
+                },
+                sent: if send { state.pending } else { state.sent },
+                missed: stale,
+            )
+        },
+        send: send,
+        dropped: stale,
+    )
+}
+
 #[no_mangle(all)]
 entity main(
     clk: clock,
@@ -21,23 +93,23 @@ entity main(
     let rst = !rst_n;
     let addr_now: uint<18> = addr.to_uint();
     let data_now: uint<8> = data.to_uint();
-
-    reg(clk) addr_last: uint<18> reset(rst: 0) = addr_now;
-    reg(clk) data_last: uint<8> reset(rst: 0) = data_now;
-    reg(clk) addr_changed: bool reset(rst: false) = addr_now != addr_last;
-    reg(clk) data_changed: bool reset(rst: false) = data_now != data_last;
+    let cooldown_last = cooldown_last();
 
     let (addr_uart_line, addr_uart_line_w): (&bool, inv &bool) = port;
     let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
     let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
+    reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
+    reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last).next_state;
+    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
+    let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,
         rst,
         false,
-        addr_last,
-        addr_changed,
+        addr_state.pending,
+        addr_step.send,
         addr_uart_line_w,
         addr_uart_busy_w,
     );
@@ -45,8 +117,8 @@ entity main(
         clk,
         rst,
         false,
-        data_last,
-        data_changed,
+        data_state.pending,
+        data_step.send,
         data_uart_line_w,
         data_uart_busy_w,
     );
@@ -56,9 +128,9 @@ entity main(
         false,
         false,
         false,
-        data_changed,
+        data_step.dropped,
         if rst { true } else { *data_uart_line },
-        addr_changed,
+        addr_step.dropped,
         if rst { true } else { *addr_uart_line },
     ];
     let led_lines: [bool; 8] = [false; 8];
