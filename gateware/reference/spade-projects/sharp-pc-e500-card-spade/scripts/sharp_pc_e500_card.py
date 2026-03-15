@@ -31,6 +31,21 @@ def parse_byte(text: str) -> int:
     return int(text, 16)
 
 
+def normalize_pin(text: str) -> str:
+    pin = text.upper()
+    valid = {"C1", "C6", "OE", "RW"}
+    if pin in valid:
+        return pin
+    if len(pin) == 2 and pin[0] == "D" and pin[1].isdigit() and 0 <= int(pin[1]) <= 7:
+        return pin
+    if len(pin) == 2 and pin[0] == "A":
+        if pin[1].isdigit() and 0 <= int(pin[1]) <= 9:
+            return pin
+        if "A" <= pin[1] <= "H":
+            return pin
+    raise ValueError(f"expected pin like C1/C6/OE/RW/A0..AH/D0..D7, got {text!r}")
+
+
 def send_line(port: str, baud: int, line: str, timeout: float = 0.5) -> str:
     with serial.Serial(port, baudrate=baud, timeout=timeout) as ser:
         ser.write(line.encode("ascii") + b"\r")
@@ -47,6 +62,8 @@ def send_lines(port: str, baud: int, line: str, timeout: float = 0.2) -> str:
             if not raw:
                 break
             parts.append(raw.decode("ascii", errors="replace"))
+            if parts[-1] == "END\r\n":
+                break
     return "".join(parts)
 
 
@@ -79,6 +96,22 @@ def cmd_present(port: str, baud: int, enabled: bool) -> int:
 
 def cmd_mode(port: str, baud: int, mode: int) -> int:
     sys.stdout.write(send_line(port, baud, f"m{mode}"))
+    return 0
+
+
+def cmd_pin(port: str, baud: int, pin_text: str) -> int:
+    pin = normalize_pin(pin_text)
+    sys.stdout.write(send_line(port, baud, f"p{pin}"))
+    return 0
+
+
+def cmd_all_pins(port: str, baud: int) -> int:
+    sys.stdout.write(send_lines(port, baud, "a"))
+    return 0
+
+
+def cmd_clear_pins(port: str, baud: int) -> int:
+    sys.stdout.write(send_line(port, baud, "c"))
     return 0
 
 
@@ -119,10 +152,23 @@ def build_parser() -> argparse.ArgumentParser:
     present_parser.add_argument("--baud", type=int, default=1_000_000)
     present_parser.add_argument("state", choices=["on", "off"])
 
-    mode_parser = sub.add_parser("mode", help="switch Saleae outputs between normal, pair-debug, and split-debug modes")
+    mode_parser = sub.add_parser("mode", help="switch between sampled Saleae mode and USB counter mode")
     mode_parser.add_argument("--port", required=True)
     mode_parser.add_argument("--baud", type=int, default=1_000_000)
-    mode_parser.add_argument("state", choices=["normal", "debug", "split"])
+    mode_parser.add_argument("state", choices=["sampled", "counts"])
+
+    pin_parser = sub.add_parser("pin", help="read and clear one pin transition counter")
+    pin_parser.add_argument("--port", required=True)
+    pin_parser.add_argument("--baud", type=int, default=1_000_000)
+    pin_parser.add_argument("pin")
+
+    all_pins_parser = sub.add_parser("all-pins", help="dump all pin transition counters")
+    all_pins_parser.add_argument("--port", required=True)
+    all_pins_parser.add_argument("--baud", type=int, default=1_000_000)
+
+    clear_parser = sub.add_parser("clear-pins", help="clear all pin transition counters")
+    clear_parser.add_argument("--port", required=True)
+    clear_parser.add_argument("--baud", type=int, default=1_000_000)
 
     status_parser = sub.add_parser("status", help="read bridge status counters")
     status_parser.add_argument("--port", required=True)
@@ -148,8 +194,13 @@ def main() -> int:
     if args.cmd == "present":
         return cmd_present(args.port, args.baud, args.state == "on")
     if args.cmd == "mode":
-        mode = 0 if args.state == "normal" else (1 if args.state == "debug" else 2)
-        return cmd_mode(args.port, args.baud, mode)
+        return cmd_mode(args.port, args.baud, 0 if args.state == "sampled" else 1)
+    if args.cmd == "pin":
+        return cmd_pin(args.port, args.baud, args.pin)
+    if args.cmd == "all-pins":
+        return cmd_all_pins(args.port, args.baud)
+    if args.cmd == "clear-pins":
+        return cmd_clear_pins(args.port, args.baud)
     if args.cmd == "status":
         return cmd_status(args.port, args.baud)
     if args.cmd == "help-cmd":

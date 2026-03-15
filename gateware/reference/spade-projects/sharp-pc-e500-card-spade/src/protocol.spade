@@ -6,17 +6,89 @@ pub type HostAddr = uint<24>;
 pub type CardData = uint<8>;
 pub type CardOffset = uint<11>;
 pub type Counter = uint<16>;
-pub type DebugMode = uint<2>;
+pub type PinCounter = uint<32>;
+pub type DebugMode = uint<1>;
 
 pub fn card_size_bytes() -> HostAddr { 0x000800 }
 pub fn window_base() -> HostAddr { 0x040000 }
 pub fn window_end_excl() -> HostAddr { 0x080000 }
 pub fn card_bus_end_excl() -> BusAddr { 0x000800 }
 pub fn mode_sampled() -> DebugMode { 0 }
-pub fn mode_pin_debug_pair() -> DebugMode { 1 }
-pub fn mode_pin_debug_split() -> DebugMode { 2 }
-pub fn debug_mode_is_pair(mode: DebugMode) -> bool { mode == mode_pin_debug_pair() }
-pub fn debug_mode_is_split(mode: DebugMode) -> bool { mode == mode_pin_debug_split() }
+pub fn mode_usb_counts() -> DebugMode { 1 }
+pub fn debug_mode_is_sampled(mode: DebugMode) -> bool { mode == mode_sampled() }
+pub fn pin_query_count() -> uint<5> { 30 }
+
+pub enum PinQuery {
+    C1,
+    C6,
+    OE,
+    RW,
+    Addr{idx: uint<5>},
+    Data{idx: uint<3>},
+}
+
+pub fn pin_query_char0(pin: PinQuery) -> uint<8> {
+    match pin {
+        PinQuery::C1 => b'C',
+        PinQuery::C6 => b'C',
+        PinQuery::OE => b'O',
+        PinQuery::RW => b'R',
+        PinQuery::Addr(_) => b'A',
+        PinQuery::Data(_) => b'D',
+    }
+}
+
+pub fn pin_query_char1(pin: PinQuery) -> uint<8> {
+    match pin {
+        PinQuery::C1 => b'1',
+        PinQuery::C6 => b'6',
+        PinQuery::OE => b'E',
+        PinQuery::RW => b'W',
+        PinQuery::Addr$(idx) => {
+            if idx < 10 {
+                b'0' +. zext(idx)
+            } else {
+                b'A' +. zext(idx -. 10)
+            }
+        },
+        PinQuery::Data$(idx) => b'0' +. zext(idx),
+    }
+}
+
+pub fn pin_query_from_flat_idx(idx: uint<5>) -> PinQuery {
+    match idx {
+        0 => PinQuery::C1(),
+        1 => PinQuery::C6(),
+        2 => PinQuery::OE(),
+        3 => PinQuery::RW(),
+        4 => PinQuery::Addr(0),
+        5 => PinQuery::Addr(1),
+        6 => PinQuery::Addr(2),
+        7 => PinQuery::Addr(3),
+        8 => PinQuery::Addr(4),
+        9 => PinQuery::Addr(5),
+        10 => PinQuery::Addr(6),
+        11 => PinQuery::Addr(7),
+        12 => PinQuery::Addr(8),
+        13 => PinQuery::Addr(9),
+        14 => PinQuery::Addr(10),
+        15 => PinQuery::Addr(11),
+        16 => PinQuery::Addr(12),
+        17 => PinQuery::Addr(13),
+        18 => PinQuery::Addr(14),
+        19 => PinQuery::Addr(15),
+        20 => PinQuery::Addr(16),
+        21 => PinQuery::Addr(17),
+        22 => PinQuery::Data(0),
+        23 => PinQuery::Data(1),
+        24 => PinQuery::Data(2),
+        25 => PinQuery::Data(3),
+        26 => PinQuery::Data(4),
+        27 => PinQuery::Data(5),
+        28 => PinQuery::Data(6),
+        _ => PinQuery::Data(7),
+    }
+}
 
 pub enum ParserEvent {
     None,
@@ -24,6 +96,9 @@ pub enum ParserEvent {
     Write{addr: HostAddr, value: CardData},
     SetPresent{present: bool},
     SetMode{mode: DebugMode},
+    ReadPinCount{pin: PinQuery},
+    DumpAllPinCounts,
+    ClearPinCounts,
     Status,
     Help,
     ParseErr,
@@ -32,6 +107,8 @@ pub enum ParserEvent {
 enum SimpleCmd {
     Status,
     Help,
+    ClearPinCounts,
+    DumpAllPinCounts,
 }
 
 pub enum ParserState {
@@ -43,10 +120,16 @@ pub enum ParserState {
     WriteDataHi{addr: HostAddr},
     WriteDataLo{addr: HostAddr, hi: uint<4>},
     NeedWriteLineEnd{addr: HostAddr, value: CardData},
-    PresentValue,
+    PresentOrPin,
+    PinControlDigit,
+    PinNeedE,
+    PinNeedW,
+    PinAddr,
+    PinData,
     NeedPresentLineEnd{present: bool},
     ModeValue,
     NeedModeLineEnd{mode: DebugMode},
+    NeedPinLineEnd{pin: PinQuery},
     NeedSimpleLineEnd{cmd: SimpleCmd},
     Error,
 }
@@ -118,6 +201,27 @@ fn is_line_end(byte: uint<8>) -> bool {
     byte == b'\r' || byte == b'\n'
 }
 
+fn decode_addr_pin(byte: uint<8>) -> uint<6> {
+    let upper = byte.to_upper();
+    let valid_base: uint<6> = 32;
+    if upper.is_digit() {
+        valid_base +. zext(upper.digit_value())
+    } else if upper >= b'A' && upper <= b'H' {
+        let alpha_value: uint<5> = trunc((upper -. b'A') +. 10);
+        valid_base +. zext(alpha_value)
+    } else {
+        0
+    }
+}
+
+fn addr_pin_valid(decoded: uint<6>) -> bool {
+    decoded >= 32
+}
+
+fn addr_pin_value(decoded: uint<6>) -> uint<5> {
+    trunc(decoded - 32)
+}
+
 pub fn line_parser_step(
     state: ParserState,
     rx_valid: bool,
@@ -141,9 +245,13 @@ pub fn line_parser_step(
                 } else if upper == b'W' {
                     parser_step(state, ParserState::WriteAddr(0, 0), ParserEvent::None())
                 } else if upper == b'P' {
-                    parser_step(state, ParserState::PresentValue(), ParserEvent::None())
+                    parser_step(state, ParserState::PresentOrPin(), ParserEvent::None())
                 } else if upper == b'M' {
                     parser_step(state, ParserState::ModeValue(), ParserEvent::None())
+                } else if upper == b'A' {
+                    parser_step(state, ParserState::NeedSimpleLineEnd(SimpleCmd::DumpAllPinCounts()), ParserEvent::None())
+                } else if upper == b'C' {
+                    parser_step(state, ParserState::NeedSimpleLineEnd(SimpleCmd::ClearPinCounts()), ParserEvent::None())
                 } else if upper == b'H' {
                     parser_step(state, ParserState::NeedSimpleLineEnd(SimpleCmd::Help()), ParserEvent::None())
                 } else if rx_byte == b'?' {
@@ -222,12 +330,70 @@ pub fn line_parser_step(
                     parser_error(state)
                 }
             },
-            ParserState::PresentValue => {
+            ParserState::PresentOrPin => {
                 let digit: DigitDecode = rx_byte.decode_digit_max(1);
+                let upper = rx_byte.to_upper();
                 if digit.valid {
                     parser_step(
                         state,
                         ParserState::NeedPresentLineEnd(digit.value == 1),
+                        ParserEvent::None(),
+                    )
+                } else if upper == b'C' {
+                    parser_step(state, ParserState::PinControlDigit(), ParserEvent::None())
+                } else if upper == b'O' {
+                    parser_step(state, ParserState::PinNeedE(), ParserEvent::None())
+                } else if upper == b'R' {
+                    parser_step(state, ParserState::PinNeedW(), ParserEvent::None())
+                } else if upper == b'A' {
+                    parser_step(state, ParserState::PinAddr(), ParserEvent::None())
+                } else if upper == b'D' {
+                    parser_step(state, ParserState::PinData(), ParserEvent::None())
+                } else {
+                    parser_error(state)
+                }
+            },
+            ParserState::PinControlDigit => {
+                if rx_byte == b'1' {
+                    parser_step(state, ParserState::NeedPinLineEnd(PinQuery::C1()), ParserEvent::None())
+                } else if rx_byte == b'6' {
+                    parser_step(state, ParserState::NeedPinLineEnd(PinQuery::C6()), ParserEvent::None())
+                } else {
+                    parser_error(state)
+                }
+            },
+            ParserState::PinNeedE => {
+                if rx_byte.to_upper() == b'E' {
+                    parser_step(state, ParserState::NeedPinLineEnd(PinQuery::OE()), ParserEvent::None())
+                } else {
+                    parser_error(state)
+                }
+            },
+            ParserState::PinNeedW => {
+                if rx_byte.to_upper() == b'W' {
+                    parser_step(state, ParserState::NeedPinLineEnd(PinQuery::RW()), ParserEvent::None())
+                } else {
+                    parser_error(state)
+                }
+            },
+            ParserState::PinAddr => {
+                let addr_pin = decode_addr_pin(rx_byte);
+                if addr_pin_valid(addr_pin) {
+                    parser_step(
+                        state,
+                        ParserState::NeedPinLineEnd(PinQuery::Addr(addr_pin_value(addr_pin))),
+                        ParserEvent::None(),
+                    )
+                } else {
+                    parser_error(state)
+                }
+            },
+            ParserState::PinData => {
+                let digit: DigitDecode = rx_byte.decode_digit_max(7);
+                if digit.valid {
+                    parser_step(
+                        state,
+                        ParserState::NeedPinLineEnd(PinQuery::Data(trunc(digit.value))),
                         ParserEvent::None(),
                     )
                 } else {
@@ -242,7 +408,7 @@ pub fn line_parser_step(
                 }
             },
             ParserState::ModeValue => {
-                let digit: DigitDecode = rx_byte.decode_digit_max(2);
+                let digit: DigitDecode = rx_byte.decode_digit_max(1);
                 if digit.valid {
                     parser_step(
                         state,
@@ -260,11 +426,20 @@ pub fn line_parser_step(
                     parser_error(state)
                 }
             },
+            ParserState::NeedPinLineEnd$(pin) => {
+                if is_line_end(rx_byte) {
+                    parser_step(state, ParserState::Idle(), ParserEvent::ReadPinCount(pin))
+                } else {
+                    parser_error(state)
+                }
+            },
             ParserState::NeedSimpleLineEnd$(cmd) => {
                 if is_line_end(rx_byte) {
                     let event = match cmd {
                         SimpleCmd::Status => ParserEvent::Status(),
                         SimpleCmd::Help => ParserEvent::Help(),
+                        SimpleCmd::ClearPinCounts => ParserEvent::ClearPinCounts(),
+                        SimpleCmd::DumpAllPinCounts => ParserEvent::DumpAllPinCounts(),
                     };
                     parser_step(state, ParserState::Idle(), event)
                 } else {
