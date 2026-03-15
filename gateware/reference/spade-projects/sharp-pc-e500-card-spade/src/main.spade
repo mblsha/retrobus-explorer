@@ -124,10 +124,10 @@ entity main(
     );
 
     let saleae_lines: [bool; 8] = [
-        false,
-        false,
-        false,
-        false,
+        ce1,
+        ce6,
+        rw,
+        oe,
         data_step.dropped,
         if rst { true } else { *data_uart_line },
         addr_step.dropped,
@@ -145,11 +145,7 @@ entity main(
     let _ = usb_rx;
     let _ = vcc2;
     let _ = data;
-    let _ = ce1;
-    let _ = ce6;
     let _ = nc;
-    let _ = oe;
-    let _ = rw;
     let _ = *addr_uart_busy;
     let _ = *data_uart_busy;
 }
