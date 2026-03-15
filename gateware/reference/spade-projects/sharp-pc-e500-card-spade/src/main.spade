@@ -1,14 +1,15 @@
 mod build_info;
-use std::conv::concat_arrays;
 use shared_components::{
-    ascii::DigitDecode,
-    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
-    message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none},
-    primitives::{sync_bundle, sync_delay},
+    boot_banner::{BootBannerState, boot_banner_step, init_boot_banner},
+    config::au_usb_uart_tx8_tap,
+    primitives::{reset_conditioner, sync_bundle},
     serial::uart_tx_tap,
 };
 
-type UsbMsgIdx = uint<8>;
+type BusAddr = uint<18>;
+type CardData = uint<8>;
+type CardOffset = uint<11>;
+type EventWord = uint<16>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -16,6 +17,33 @@ fn cooldown_ns() -> uint<32> { 50 }
 fn cooldown_last() -> uint<4> {
     trunc(((cooldown_ns() * sample_clk_hz()) `std::ops::comb_div` 1_000_000_000))
 }
+
+fn card_offset(addr: BusAddr) -> CardOffset {
+    trunc(addr)
+}
+
+fn debug_event_word(prefix: uint<8>, data: CardData) -> EventWord {
+    (zext(prefix) << 8) | zext(data)
+}
+
+fn read_event_word(data: CardData) -> EventWord {
+    debug_event_word(0x52, data)
+}
+
+fn write_event_word(data: CardData) -> EventWord {
+    debug_event_word(0x57, data)
+}
+
+#[no_mangle(all)]
+extern entity card_ram_2k_v(
+    clk: clock,
+    rst: bool,
+    waddr: CardOffset,
+    din: CardData,
+    we: bool,
+    raddr: CardOffset,
+    dout: inv &CardData,
+);
 
 struct PendingUartState<#uint WIDTH> {
     last_raw: uint<WIDTH>,
@@ -32,14 +60,25 @@ struct PendingUartOut<#uint WIDTH> {
     dropped: bool,
 }
 
-enum UsbMsg {
-    None,
-    Boot,
-    Ack{cooldown: uint<4>},
+struct CardCycleState {
+    prev_ce1: bool,
+    prev_rw: bool,
+    write_seen: bool,
+    write_addr: CardOffset,
+    write_data: CardData,
+    read_data: CardData,
 }
 
-type UsbMsgStreamState = ByteMsgStreamState<UsbMsg, 8>;
-type UsbMsgStreamOut = ByteMsgStreamOut<UsbMsg, 8>;
+struct EventUartState {
+    pending: EventWord,
+    pending_valid: bool,
+}
+
+struct EventUartOut {
+    next_state: EventUartState,
+    send: bool,
+    send_word: EventWord,
+}
 
 fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
     PendingUartState$(
@@ -52,11 +91,21 @@ fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
     )
 }
 
-fn init_usb_stream() -> UsbMsgStreamState {
-    ByteMsgStreamState$(
-        cur_msg: UsbMsg::Boot(),
-        cur_idx: 0,
-        pending_msg: UsbMsg::None(),
+fn init_card_cycle_state() -> CardCycleState {
+    CardCycleState$(
+        prev_ce1: false,
+        prev_rw: true,
+        write_seen: false,
+        write_addr: 0,
+        write_data: 0,
+        read_data: 0,
+    )
+}
+
+fn init_event_uart_state() -> EventUartState {
+    EventUartState$(
+        pending: 0,
+        pending_valid: false,
     )
 }
 
@@ -104,54 +153,42 @@ fn pending_uart_step<#uint WIDTH>(
     )
 }
 
-fn text_byte<#uint N>(text: [uint<8>; N], idx: UsbMsgIdx) -> TxReq8 {
-    if idx < N {
-        TxReq8$(valid: true, byte: text[trunc(idx)])
-    } else {
-        tx_req_none()
-    }
-}
-
-fn ack_byte(cooldown: uint<4>, idx: UsbMsgIdx) -> TxReq8 {
-    let text = concat_arrays(
-        concat_arrays(b"D=", [b'0' +. zext(cooldown)]),
-        b"\r\n",
-    );
-    text_byte(text, idx)
-}
-
-impl UsbMsg {
-    fn is_none(self) -> bool {
-        if let Self::None = self { true } else { false }
-    }
-
-    fn byte(self, idx: UsbMsgIdx) -> TxReq8 {
-        match self {
-            Self::None => tx_req_none(),
-            Self::Boot => text_byte(build_info::boot_banner_text(), idx),
-            Self::Ack$(cooldown) => ack_byte(cooldown, idx),
-        }
-    }
-}
-
-fn usb_stream_step(
-    state: UsbMsgStreamState,
-    block_tx: bool,
-    msg_valid: bool,
-    msg: UsbMsg,
-) -> UsbMsgStreamOut {
-    state.step_with(
-        UsbMsg::None(),
-        fn |msg| { msg.is_none() },
-        fn |msg, idx| { msg.byte(idx) },
-        block_tx,
-        msg_valid,
-        msg,
+fn event_uart_step(
+    state: EventUartState,
+    busy: bool,
+    event_valid: bool,
+    event_word: EventWord,
+) -> EventUartOut {
+    let send_pending = state.pending_valid && !busy;
+    let send_direct = !state.pending_valid && event_valid && !busy;
+    EventUartOut$(
+        next_state: EventUartState$(
+            pending: if send_pending {
+                if event_valid { event_word } else { state.pending }
+            } else if send_direct {
+                state.pending
+            } else if event_valid {
+                event_word
+            } else {
+                state.pending
+            },
+            pending_valid: if send_pending {
+                event_valid
+            } else if send_direct {
+                false
+            } else if event_valid {
+                true
+            } else {
+                state.pending_valid
+            }
+        ),
+        send: send_pending || send_direct,
+        send_word: if send_pending { state.pending } else { event_word },
     )
 }
 
 #[no_mangle(all)]
-entity main(
+entity main_core(
     clk: clock,
     rst_n: bool,
     led: inv &[bool; 8],
@@ -159,52 +196,83 @@ entity main(
     usb_tx: inv &bool,
     saleae: inv &[bool; 8],
     rw: bool,
-    addr: [bool; 18],
+    addr: BusAddr,
     vcc2: bool,
-    data: [bool; 8],
+    data_in: CardData,
+    data_drive: inv &CardData,
+    data_oe: inv &bool,
     ce1: bool,
     ce6: bool,
     nc: bool,
     oe: bool,
 ) {
-    let rst = !rst_n;
-    let ce1_sync = inst sync_delay::<2>(clk, ce1);
-    let ce6_sync = inst sync_delay::<2>(clk, ce6);
-    let rw_sync = inst sync_delay::<2>(clk, rw);
-    let oe_sync = inst sync_delay::<2>(clk, oe);
-    let addr_sync = inst sync_bundle::<2, 18>(clk, addr);
-    let data_sync = inst sync_bundle::<2, 8>(clk, data);
-    let addr_now: uint<18> = addr_sync.to_uint();
-    let data_now: uint<8> = data_sync.to_uint();
+    let rst = inst reset_conditioner::<4>(clk, !rst_n);
     let cooldown_last = cooldown_last();
-    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
-    let rx_digit: DigitDecode = rx.byte.decode_digit();
 
+    let addr_sync_bits = inst sync_bundle::<2, 18>(clk, addr.to_bits());
+    let data_sync_bits = inst sync_bundle::<2, 8>(clk, data_in.to_bits());
+    let addr_now: BusAddr = addr_sync_bits.to_uint();
+    let data_now: CardData = data_sync_bits.to_uint();
+
+    let (mem_dout, mem_dout_w): (&CardData, inv &CardData) = port;
     let (addr_uart_line, addr_uart_line_w): (&bool, inv &bool) = port;
     let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
     let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
+    let (event_uart_line, event_uart_line_w): (&bool, inv &bool) = port;
+    let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
-    reg(clk) usb_stream: UsbMsgStreamState reset(rst: init_usb_stream()) =
-        usb_stream_step(
-        usb_stream,
-        *usb_tx_busy,
-        false,
-        UsbMsg::None(),
-    ).state;
+
+    reg(clk) boot_banner: BootBannerState<8> reset(rst: init_boot_banner()) =
+        boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy).state;
     reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
         pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
     reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) =
         pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last).next_state;
-    let usb_stream_out = usb_stream_step(
-        usb_stream,
-        *usb_tx_busy,
-        false,
-        UsbMsg::None(),
+    reg(clk) card_cycle: CardCycleState reset(rst: init_card_cycle_state()) =
+        CardCycleState$(
+            prev_ce1: ce1,
+            prev_rw: rw,
+            write_seen: if !ce1 {
+                false
+            } else if !rw {
+                true
+            } else {
+                card_cycle.write_seen
+            },
+            write_addr: if ce1 && !rw { card_offset(addr) } else { card_cycle.write_addr },
+            write_data: if ce1 && !rw { data_in } else { card_cycle.write_data },
+            read_data: if ce1 && rw && !card_cycle.write_seen { *mem_dout } else { card_cycle.read_data },
+        );
+
+    let bus_data_out = *mem_dout;
+    let bus_drive_cycle = ce1 && rw && !card_cycle.write_seen;
+    let write_commit = ce1 && rw && !card_cycle.prev_rw && card_cycle.write_seen;
+    let read_event = ce1 && !card_cycle.prev_ce1 && rw;
+    let event_valid = write_commit || read_event;
+    let event_word = if write_commit {
+        write_event_word(card_cycle.write_data)
+    } else {
+        read_event_word(bus_data_out)
+    };
+    reg(clk) event_state: EventUartState reset(rst: init_event_uart_state()) =
+        event_uart_step(event_state, *event_uart_busy, event_valid, event_word).next_state;
+
+    let _mem = inst card_ram_2k_v(
+        clk,
+        rst,
+        card_cycle.write_addr,
+        card_cycle.write_data,
+        write_commit,
+        card_offset(addr),
+        mem_dout_w,
     );
+
+    let boot_banner_out = boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy);
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
+    let event_step = event_uart_step(event_state, *event_uart_busy, event_valid, event_word);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,
@@ -224,12 +292,21 @@ entity main(
         data_uart_line_w,
         data_uart_busy_w,
     );
+    let _event_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 16>(
+        clk,
+        rst,
+        false,
+        event_step.send_word,
+        event_step.send,
+        event_uart_line_w,
+        event_uart_busy_w,
+    );
     let _usb_tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
         false,
-        usb_stream_out.tx_req.byte,
-        usb_stream_out.tx_req.valid,
+        boot_banner_out.tx_req.byte,
+        boot_banner_out.tx_req.valid,
         usb_tx_line_w,
         usb_tx_busy_w,
     );
@@ -238,7 +315,7 @@ entity main(
         ce1,
         ce6,
         rw,
-        oe,
+        if rst { true } else { *event_uart_line },
         data_step.dropped,
         if rst { true } else { *data_uart_line },
         addr_step.dropped,
@@ -249,16 +326,12 @@ entity main(
     set saleae = &saleae_lines;
     set led = &led_lines;
     set usb_tx = &*usb_tx_line;
+    set data_drive = &bus_data_out;
+    set data_oe = &bus_drive_cycle;
 
-    let _ = clk;
+    let _ = usb_rx;
     let _ = rst_n;
     let _ = vcc2;
     let _ = nc;
-    let _ = ce1_sync;
-    let _ = ce6_sync;
-    let _ = rw_sync;
-    let _ = oe_sync;
-    let _ = *addr_uart_busy;
-    let _ = *data_uart_busy;
-    let _ = usb_stream_out.msg_none;
+    let _ = oe;
 }
