@@ -1,14 +1,23 @@
 mod build_info;
-use shared_components::primitives::{sync_bundle, sync_delay};
-use shared_components::serial::uart_tx_tap;
+use std::conv::concat_arrays;
+use shared_components::{
+    ascii::DigitDecode,
+    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
+    message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none},
+    primitives::{sync_bundle, sync_delay},
+    serial::uart_tx_tap,
+};
 
-fn cooldown_last() -> uint<3> { 3 }
+type UsbMsgIdx = uint<8>;
+
+fn addr_cooldown_last() -> uint<4> { 3 }
+fn data_cooldown_default() -> uint<4> { 3 }
 
 struct PendingUartState<#uint WIDTH> {
     last_raw: uint<WIDTH>,
     pending: uint<WIDTH>,
     pending_valid: bool,
-    settle: uint<3>,
+    settle: uint<4>,
     sent: uint<WIDTH>,
     missed: bool,
 }
@@ -18,6 +27,15 @@ struct PendingUartOut<#uint WIDTH> {
     send: bool,
     dropped: bool,
 }
+
+enum UsbMsg {
+    None,
+    Boot,
+    Ack{cooldown: uint<4>},
+}
+
+type UsbMsgStreamState = ByteMsgStreamState<UsbMsg, 8>;
+type UsbMsgStreamOut = ByteMsgStreamOut<UsbMsg, 8>;
 
 fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
     PendingUartState$(
@@ -30,11 +48,19 @@ fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
     )
 }
 
+fn init_usb_stream() -> UsbMsgStreamState {
+    ByteMsgStreamState$(
+        cur_msg: UsbMsg::Boot(),
+        cur_idx: 0,
+        pending_msg: UsbMsg::None(),
+    )
+}
+
 fn pending_uart_step<#uint WIDTH>(
     state: PendingUartState<WIDTH>,
     now: uint<WIDTH>,
     busy: bool,
-    settle_last: uint<3>,
+    settle_last: uint<4>,
 ) -> PendingUartOut<WIDTH> {
     let raw_changed = now != state.last_raw;
     let send = state.pending_valid && state.settle == settle_last && state.pending != state.sent && !busy;
@@ -74,6 +100,52 @@ fn pending_uart_step<#uint WIDTH>(
     )
 }
 
+fn text_byte<#uint N>(text: [uint<8>; N], idx: UsbMsgIdx) -> TxReq8 {
+    if idx < N {
+        TxReq8$(valid: true, byte: text[trunc(idx)])
+    } else {
+        tx_req_none()
+    }
+}
+
+fn ack_byte(cooldown: uint<4>, idx: UsbMsgIdx) -> TxReq8 {
+    let text = concat_arrays(
+        concat_arrays(b"D=", [b'0' +. zext(cooldown)]),
+        b"\r\n",
+    );
+    text_byte(text, idx)
+}
+
+impl UsbMsg {
+    fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn byte(self, idx: UsbMsgIdx) -> TxReq8 {
+        match self {
+            Self::None => tx_req_none(),
+            Self::Boot => text_byte(build_info::boot_banner_text(), idx),
+            Self::Ack$(cooldown) => ack_byte(cooldown, idx),
+        }
+    }
+}
+
+fn usb_stream_step(
+    state: UsbMsgStreamState,
+    block_tx: bool,
+    msg_valid: bool,
+    msg: UsbMsg,
+) -> UsbMsgStreamOut {
+    state.step_with(
+        UsbMsg::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
+        block_tx,
+        msg_valid,
+        msg,
+    )
+}
+
 #[no_mangle(all)]
 entity main(
     clk: clock,
@@ -100,16 +172,41 @@ entity main(
     let data_sync = inst sync_bundle::<2, 8>(clk, data);
     let addr_now: uint<18> = addr_sync.to_uint();
     let data_now: uint<8> = data_sync.to_uint();
-    let cooldown_last = cooldown_last();
+    let addr_cooldown_last = addr_cooldown_last();
+    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
+    let rx_digit: DigitDecode = rx.byte.decode_digit();
 
     let (addr_uart_line, addr_uart_line_w): (&bool, inv &bool) = port;
     let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
     let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
-    reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
-    reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last).next_state;
-    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
-    let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
+    let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
+    let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
+    reg(clk) data_cooldown_cfg: uint<4> reset(rst: data_cooldown_default()) =
+        if rx.valid && rx_digit.valid {
+            rx_digit.value
+        } else {
+            data_cooldown_cfg
+        };
+    reg(clk) usb_stream: UsbMsgStreamState reset(rst: init_usb_stream()) =
+        usb_stream_step(
+        usb_stream,
+        *usb_tx_busy,
+        rx.valid && rx_digit.valid,
+        UsbMsg::Ack(rx_digit.value),
+    ).state;
+    reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
+        pending_uart_step(addr_state, addr_now, *addr_uart_busy, addr_cooldown_last).next_state;
+    reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) =
+        pending_uart_step(data_state, data_now, *data_uart_busy, data_cooldown_cfg).next_state;
+    let usb_stream_out = usb_stream_step(
+        usb_stream,
+        *usb_tx_busy,
+        rx.valid && rx_digit.valid,
+        UsbMsg::Ack(rx_digit.value),
+    );
+    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, addr_cooldown_last);
+    let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, data_cooldown_cfg);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,
@@ -129,6 +226,15 @@ entity main(
         data_uart_line_w,
         data_uart_busy_w,
     );
+    let _usb_tx = inst au_usb_uart_tx8_tap(
+        clk,
+        rst,
+        false,
+        usb_stream_out.tx_req.byte,
+        usb_stream_out.tx_req.valid,
+        usb_tx_line_w,
+        usb_tx_busy_w,
+    );
 
     let saleae_lines: [bool; 8] = [
         ce1,
@@ -141,15 +247,13 @@ entity main(
         if rst { true } else { *addr_uart_line },
     ];
     let led_lines: [bool; 8] = [false; 8];
-    let usb_tx_idle = true;
 
     set saleae = &saleae_lines;
     set led = &led_lines;
-    set usb_tx = &usb_tx_idle;
+    set usb_tx = &*usb_tx_line;
 
     let _ = clk;
     let _ = rst_n;
-    let _ = usb_rx;
     let _ = vcc2;
     let _ = nc;
     let _ = ce1_sync;
@@ -158,4 +262,5 @@ entity main(
     let _ = oe_sync;
     let _ = *addr_uart_busy;
     let _ = *data_uart_busy;
+    let _ = usb_stream_out.msg_none;
 }
