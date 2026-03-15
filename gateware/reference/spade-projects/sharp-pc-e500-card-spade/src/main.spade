@@ -693,6 +693,7 @@ entity main_core(
 
     set usb_tx = &*usb_tx_line;
     let bus_data_out = if state.present && bus_addr_in_card(addr) { *mem_bus_dout } else { 0 };
+    let bus_drive_cycle = bus_read_cycle && state.present && bus_addr_in_card(addr);
     let bus_read_event = bus_read_cycle && !state.bus_read_active;
     let bus_write_event = bus_write_cycle && !state.bus_write_active;
     let sample_event = bus_read_event || bus_write_event;
@@ -730,7 +731,7 @@ entity main_core(
     };
 
     set data_drive = &bus_data_out;
-    set data_oe = &bus_read_cycle;
+    set data_oe = &bus_drive_cycle;
 
     let _board = inst card_board_outputs(
         clk,
