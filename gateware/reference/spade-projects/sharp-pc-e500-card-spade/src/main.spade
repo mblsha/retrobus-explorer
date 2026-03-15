@@ -1,4 +1,6 @@
 mod build_info;
+use shared_components::serial::uart_tx_tap;
+
 #[no_mangle(all)]
 entity main(
     clk: clock,
@@ -16,15 +18,48 @@ entity main(
     nc: bool,
     oe: bool,
 ) {
+    let rst = !rst_n;
+    let addr_now: uint<18> = addr.to_uint();
+    let data_now: uint<8> = data.to_uint();
+
+    reg(clk) addr_last: uint<18> reset(rst: 0) = addr_now;
+    reg(clk) data_last: uint<8> reset(rst: 0) = data_now;
+    reg(clk) addr_changed: bool reset(rst: false) = addr_now != addr_last;
+    reg(clk) data_changed: bool reset(rst: false) = data_now != data_last;
+
+    let (addr_uart_line, addr_uart_line_w): (&bool, inv &bool) = port;
+    let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
+    let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
+    let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
+
+    let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
+        clk,
+        rst,
+        false,
+        addr_last,
+        addr_changed,
+        addr_uart_line_w,
+        addr_uart_busy_w,
+    );
+    let _data_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 8>(
+        clk,
+        rst,
+        false,
+        data_last,
+        data_changed,
+        data_uart_line_w,
+        data_uart_busy_w,
+    );
+
     let saleae_lines: [bool; 8] = [
         false,
         false,
-        rw,
-        addr[0],
-        addr[1],
         false,
-        addr[2],
-        addr[3],
+        false,
+        data_changed,
+        if rst { true } else { *data_uart_line },
+        addr_changed,
+        if rst { true } else { *addr_uart_line },
     ];
     let led_lines: [bool; 8] = [false; 8];
     let usb_tx_idle = true;
@@ -42,4 +77,7 @@ entity main(
     let _ = ce6;
     let _ = nc;
     let _ = oe;
+    let _ = rw;
+    let _ = *addr_uart_busy;
+    let _ = *data_uart_busy;
 }
