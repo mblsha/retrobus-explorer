@@ -1,10 +1,15 @@
 mod build_info;
+mod msg;
+mod protocol;
 use shared_components::{
     boot_banner::{BootBannerState, boot_banner_step, init_boot_banner},
-    config::au_usb_uart_tx8_tap,
+    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
+    message_stream::tx_req_arbiter,
     primitives::{reset_conditioner, sync_bundle},
     serial::uart_tx_tap,
 };
+use msg::{EchoStreamState, RespMsg, RespStreamState, echo_stream_step, init_echo_stream, init_resp_stream, resp_stream_step};
+use protocol::{EchoMsg, ParserEvent, ParserState, parser_step};
 
 type BusAddr = uint<18>;
 type CardData = uint<8>;
@@ -47,8 +52,10 @@ extern entity card_ram_2k_v(
     waddr: CardOffset,
     din: CardData,
     we: bool,
-    raddr: CardOffset,
-    dout: inv &CardData,
+    raddr_bus: CardOffset,
+    dout_bus: inv &CardData,
+    raddr_uart: CardOffset,
+    dout_uart: inv &CardData,
 );
 
 struct PendingUartState<#uint WIDTH> {
@@ -222,6 +229,7 @@ entity main_core(
     let data_now: CardData = data_sync_bits.to_uint();
 
     let (mem_dout, mem_dout_w): (&CardData, inv &CardData) = port;
+    let (uart_mem_dout, uart_mem_dout_w): (&CardData, inv &CardData) = port;
     let (addr_uart_line, addr_uart_line_w): (&bool, inv &bool) = port;
     let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
     let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
@@ -230,9 +238,63 @@ entity main_core(
     let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
+    let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
 
     reg(clk) boot_banner: BootBannerState<8> reset(rst: init_boot_banner()) =
         boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy).state;
+    let boot_banner_out = boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy);
+    reg(clk) parser: ParserState reset(rst: protocol::init_parser()) =
+        parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte).state;
+    let usb_parse = parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte);
+    let usb_read_addr = if let ParserEvent::Read$(addr) = usb_parse.event { addr } else { 0 };
+    let uart_write_valid = if let ParserEvent::Write$(addr, value) = usb_parse.event {
+        let _ = addr;
+        let _ = value;
+        true
+    } else {
+        false
+    };
+    let uart_write_addr = if let ParserEvent::Write$(addr, value) = usb_parse.event {
+        let _ = value;
+        addr
+    } else {
+        0
+    };
+    let uart_write_data = if let ParserEvent::Write$(addr, value) = usb_parse.event {
+        let _ = addr;
+        value
+    } else {
+        0
+    };
+    let echo_msg = usb_parse.echo;
+    let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
+    let resp_msg = match usb_parse.event {
+        ParserEvent::Read$(addr) => RespMsg::Read(addr, *uart_mem_dout),
+        ParserEvent::Write$(addr, value) => {
+            let _ = addr;
+            let _ = value;
+            RespMsg::Ok()
+        },
+        ParserEvent::ParseErr => RespMsg::Err(),
+        _ => RespMsg::None(),
+    };
+    let resp_msg_valid = if let RespMsg::None = resp_msg { false } else { true };
+    reg(clk) echo_state: EchoStreamState reset(rst: init_echo_stream()) =
+        echo_stream_step(echo_state, *usb_tx_busy || boot_banner_out.tx_req.valid, echo_msg_valid, echo_msg).state;
+    let echo_out = echo_stream_step(
+        echo_state,
+        *usb_tx_busy || boot_banner_out.tx_req.valid,
+        echo_msg_valid,
+        echo_msg,
+    );
+    reg(clk) resp_state: RespStreamState reset(rst: init_resp_stream()) =
+        resp_stream_step(resp_state, *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid, resp_msg_valid, resp_msg).state;
+    let resp_out = resp_stream_step(
+        resp_state,
+        *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid,
+        resp_msg_valid,
+        resp_msg,
+    );
     reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
         pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
     reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) =
@@ -293,17 +355,19 @@ entity main_core(
     let _mem = inst card_ram_2k_v(
         clk,
         rst,
-        card_offset(addr),
-        data_in,
-        write_commit,
+        if write_commit { card_offset(addr) } else { uart_write_addr },
+        if write_commit { data_in } else { uart_write_data },
+        write_commit || uart_write_valid,
         mem_addr,
         mem_dout_w,
+        usb_read_addr,
+        uart_mem_dout_w,
     );
 
-    let boot_banner_out = boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy);
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
     let event_step = event_uart_step(event_state, *event_uart_busy, event_valid, event_word);
+    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, resp_out.tx_req);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,
@@ -336,8 +400,8 @@ entity main_core(
         clk,
         rst,
         false,
-        boot_banner_out.tx_req.byte,
-        boot_banner_out.tx_req.valid,
+        usb_tx_req.byte,
+        usb_tx_req.valid,
         usb_tx_line_w,
         usb_tx_busy_w,
     );
@@ -360,7 +424,6 @@ entity main_core(
     set data_drive = &bus_data_out;
     set data_oe = &bus_drive_cycle;
 
-    let _ = usb_rx;
     let _ = rst_n;
     let _ = vcc2;
     let _ = nc;
