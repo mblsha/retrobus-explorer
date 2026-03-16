@@ -1,0 +1,147 @@
+use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
+
+use super::protocol::{CardData, CardOffset, EchoMsg};
+
+type EchoIdx = uint<2>;
+type RespIdx = uint<4>;
+
+pub enum RespMsg {
+    None,
+    Ok,
+    Err,
+    Read{addr: CardOffset, value: CardData},
+}
+
+pub type EchoStreamState = ByteMsgStreamState<EchoMsg, 2>;
+pub type EchoStreamOut = ByteMsgStreamOut<EchoMsg, 2>;
+pub type RespStreamState = ByteMsgStreamState<RespMsg, 4>;
+pub type RespStreamOut = ByteMsgStreamOut<RespMsg, 4>;
+
+pub fn init_echo_stream() -> EchoStreamState {
+    ByteMsgStreamState$(
+        cur_msg: EchoMsg::None(),
+        cur_idx: 0,
+        pending_msg: EchoMsg::None(),
+    )
+}
+
+pub fn init_resp_stream() -> RespStreamState {
+    ByteMsgStreamState$(
+        cur_msg: RespMsg::None(),
+        cur_idx: 0,
+        pending_msg: RespMsg::None(),
+    )
+}
+
+fn hex_char(value: uint<4>) -> uint<8> {
+    if value < 10 {
+        b'0' +. zext(value)
+    } else {
+        b'A' +. zext(value -. 10)
+    }
+}
+
+fn offset_hex_char(addr: CardOffset, idx: uint<2>) -> uint<8> {
+    match idx {
+        0 => hex_char(trunc(addr >> 8)),
+        1 => hex_char(trunc(addr >> 4)),
+        _ => hex_char(trunc(addr)),
+    }
+}
+
+fn byte_hex_char(value: CardData, low_nibble: bool) -> uint<8> {
+    if low_nibble {
+        hex_char(trunc(value))
+    } else {
+        hex_char(trunc(value >> 4))
+    }
+}
+
+impl EchoMsg {
+    fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn byte(self, idx: EchoIdx) -> TxReq8 {
+        let req = match self {
+            Self::None => tx_req_none(),
+            Self::Byte$(byte) => if idx == 0 {
+                TxReq8$(valid: true, byte: byte)
+            } else {
+                tx_req_none()
+            },
+            Self::CrLf => match idx {
+                0 => TxReq8$(valid: true, byte: b'\r'),
+                1 => TxReq8$(valid: true, byte: b'\n'),
+                _ => tx_req_none(),
+            },
+        };
+        req
+    }
+}
+
+impl RespMsg {
+    fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn byte(self, idx: RespIdx) -> TxReq8 {
+        let req = match self {
+            Self::None => tx_req_none(),
+            Self::Ok => if idx < 4 {
+                TxReq8$(valid: true, byte: b"OK\r\n"[trunc(idx)])
+            } else {
+                tx_req_none()
+            },
+            Self::Err => if idx < 5 {
+                TxReq8$(valid: true, byte: b"ERR\r\n"[trunc(idx)])
+            } else {
+                tx_req_none()
+            },
+            Self::Read$(addr, value) => match idx {
+                0 => TxReq8$(valid: true, byte: offset_hex_char(addr, 0)),
+                1 => TxReq8$(valid: true, byte: offset_hex_char(addr, 1)),
+                2 => TxReq8$(valid: true, byte: offset_hex_char(addr, 2)),
+                3 => TxReq8$(valid: true, byte: b'='),
+                4 => TxReq8$(valid: true, byte: byte_hex_char(value, false)),
+                5 => TxReq8$(valid: true, byte: byte_hex_char(value, true)),
+                6 => TxReq8$(valid: true, byte: b'\r'),
+                7 => TxReq8$(valid: true, byte: b'\n'),
+                _ => tx_req_none(),
+            },
+        };
+        req
+    }
+}
+
+pub fn echo_stream_step(
+    state: EchoStreamState,
+    block_tx: bool,
+    msg_valid: bool,
+    msg: EchoMsg,
+) -> EchoStreamOut {
+    state.step_with(
+        EchoMsg::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
+        block_tx,
+        msg_valid,
+        msg,
+    )
+}
+
+pub fn resp_stream_step(
+    state: RespStreamState,
+    block_tx: bool,
+    msg_valid: bool,
+    msg: RespMsg,
+) -> RespStreamOut {
+    state.step_with(
+        RespMsg::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
+        block_tx,
+        msg_valid,
+        msg,
+    )
+}

@@ -1,0 +1,207 @@
+use shared_components::ascii;
+
+pub type CardData = uint<8>;
+pub type CardOffset = uint<11>;
+
+pub enum ParserEvent {
+    None,
+    Read{addr: CardOffset},
+    Write{addr: CardOffset, value: CardData},
+    ParseErr,
+}
+
+pub enum EchoMsg {
+    None,
+    Byte{byte: uint<8>},
+    CrLf,
+}
+
+pub enum ParserState {
+    Idle,
+    ReadAddr{digits: uint<2>, value: CardOffset},
+    NeedReadLineEnd{addr: CardOffset},
+    WriteAddr{digits: uint<2>, value: CardOffset},
+    WriteEq{addr: CardOffset},
+    WriteDataHi{addr: CardOffset},
+    WriteDataLo{addr: CardOffset, hi: uint<4>},
+    NeedWriteLineEnd{addr: CardOffset, value: CardData},
+    Error,
+}
+
+pub struct ParserStepOut {
+    state: ParserState,
+    event: ParserEvent,
+    echo: EchoMsg,
+}
+
+pub fn init_parser() -> ParserState {
+    ParserState::Idle()
+}
+
+fn decode_hex_nibble(byte: uint<8>) -> uint<5> {
+    let upper = byte.to_upper();
+    let valid_base: uint<5> = 16;
+    if upper.is_digit() {
+        valid_base +. zext(upper.digit_value())
+    } else if upper >= b'A' && upper <= b'F' {
+        let alpha_value: uint<4> = trunc((upper -. b'A') +. 10);
+        valid_base +. zext(alpha_value)
+    } else {
+        0
+    }
+}
+
+fn hex_valid(decoded: uint<5>) -> bool {
+    decoded >= 16
+}
+
+fn hex_value(decoded: uint<5>) -> uint<4> {
+    trunc(decoded - 16)
+}
+
+fn is_line_end(byte: uint<8>) -> bool {
+    byte == b'\r' || byte == b'\n'
+}
+
+fn parser_out(state: ParserState, next_state: ParserState, event: ParserEvent, echo: EchoMsg) -> ParserStepOut {
+    let _ = state;
+    ParserStepOut$(state: next_state, event: event, echo: echo)
+}
+
+fn parser_error(state: ParserState, rx_byte: uint<8>) -> ParserStepOut {
+    if is_line_end(rx_byte) {
+        parser_out(state, ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
+    } else {
+        parser_out(state, ParserState::Error(), ParserEvent::None(), EchoMsg::None())
+    }
+}
+
+fn addr_accum(value: CardOffset, nibble: uint<4>) -> CardOffset {
+    trunc((value << 4) | zext(nibble))
+}
+
+pub fn parser_step(
+    state: ParserState,
+    rx_valid: bool,
+    rx_parity_error: bool,
+    rx_byte: uint<8>,
+) -> ParserStepOut {
+    if !rx_valid {
+        ParserStepOut$(state: state, event: ParserEvent::None(), echo: EchoMsg::None())
+    } else if rx_parity_error {
+        parser_error(state, rx_byte)
+    } else {
+        let decoded = decode_hex_nibble(rx_byte);
+        let nibble_ok = hex_valid(decoded);
+        let nibble = hex_value(decoded);
+        let upper = rx_byte.to_upper();
+
+        match state {
+            ParserState::Idle => {
+                if is_line_end(rx_byte) {
+                    parser_out(state, ParserState::Idle(), ParserEvent::None(), EchoMsg::None())
+                } else if upper == b'R' {
+                    parser_out(state, ParserState::ReadAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else if upper == b'W' {
+                    parser_out(state, ParserState::WriteAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::ReadAddr$(digits, value) => {
+                if !nibble_ok || (digits == 0 && nibble > 7) {
+                    parser_error(state, rx_byte)
+                } else {
+                    let next_digits = digits +. 1;
+                    let next_value = addr_accum(value, nibble);
+                    if next_digits == 3 {
+                        parser_out(
+                            state,
+                            ParserState::NeedReadLineEnd(next_value),
+                            ParserEvent::None(),
+                            EchoMsg::Byte(rx_byte),
+                        )
+                    } else {
+                        parser_out(
+                            state,
+                            ParserState::ReadAddr(next_digits, next_value),
+                            ParserEvent::None(),
+                            EchoMsg::Byte(rx_byte),
+                        )
+                    }
+                }
+            },
+            ParserState::NeedReadLineEnd$(addr) => {
+                if is_line_end(rx_byte) {
+                    parser_out(state, ParserState::Idle(), ParserEvent::Read(addr), EchoMsg::CrLf())
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::WriteAddr$(digits, value) => {
+                if !nibble_ok || (digits == 0 && nibble > 7) {
+                    parser_error(state, rx_byte)
+                } else {
+                    let next_digits = digits +. 1;
+                    let next_value = addr_accum(value, nibble);
+                    if next_digits == 3 {
+                        parser_out(
+                            state,
+                            ParserState::WriteEq(next_value),
+                            ParserEvent::None(),
+                            EchoMsg::Byte(rx_byte),
+                        )
+                    } else {
+                        parser_out(
+                            state,
+                            ParserState::WriteAddr(next_digits, next_value),
+                            ParserEvent::None(),
+                            EchoMsg::Byte(rx_byte),
+                        )
+                    }
+                }
+            },
+            ParserState::WriteEq$(addr) => {
+                if rx_byte == b'=' {
+                    parser_out(state, ParserState::WriteDataHi(addr), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::WriteDataHi$(addr) => {
+                if nibble_ok {
+                    parser_out(state, ParserState::WriteDataLo(addr, nibble), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::WriteDataLo$(addr, hi) => {
+                if nibble_ok {
+                    let value: CardData = (zext(hi) << 4) | zext(nibble);
+                    parser_out(
+                        state,
+                        ParserState::NeedWriteLineEnd(addr, value),
+                        ParserEvent::None(),
+                        EchoMsg::Byte(rx_byte),
+                    )
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::NeedWriteLineEnd$(addr, value) => {
+                if is_line_end(rx_byte) {
+                    parser_out(state, ParserState::Idle(), ParserEvent::Write(addr, value), EchoMsg::CrLf())
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::Error => {
+                if is_line_end(rx_byte) {
+                    parser_out(state, ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
+                } else {
+                    parser_out(state, ParserState::Error(), ParserEvent::None(), EchoMsg::None())
+                }
+            },
+        }
+    }
+}

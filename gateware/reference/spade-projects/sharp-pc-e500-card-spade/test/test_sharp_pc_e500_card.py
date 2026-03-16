@@ -48,6 +48,7 @@ async def _uart_recv_byte(dut, timeout_cycles: int = 12000) -> int:
 
     stop = int(dut.usb_tx.value)
     assert stop == 1, f"invalid stop bit: {stop}"
+    await tick(dut.clk, USB_UART_BIT_CYCLES // 2)
     return value
 
 
@@ -58,6 +59,28 @@ async def _uart_recv_line(dut, timeout_cycles: int = USB_UART_BIT_CYCLES * 200, 
         if data[-1] == 0x0A:
             return data.decode("ascii", errors="replace")
     raise AssertionError(f"line too long without LF: {data!r}")
+
+
+async def _uart_recv_exact(dut, nbytes: int, timeout_cycles: int = USB_UART_BIT_CYCLES * 200) -> bytes:
+    data = bytearray()
+    for _ in range(nbytes):
+        data.append(await _uart_recv_byte(dut, timeout_cycles))
+    return bytes(data)
+
+
+async def _uart_send_byte(dut, value: int):
+    dut.usb_rx.value = 0
+    await tick(dut.clk, USB_UART_BIT_CYCLES)
+    for idx in range(8):
+        dut.usb_rx.value = (value >> idx) & 1
+        await tick(dut.clk, USB_UART_BIT_CYCLES)
+    dut.usb_rx.value = 1
+    await tick(dut.clk, USB_UART_BIT_CYCLES)
+
+
+async def _uart_send_text(dut, text: str):
+    for ch in text.encode("ascii"):
+        await _uart_send_byte(dut, ch)
 
 
 async def _assert_no_usb_tx_start_bit(dut, cycles: int):
@@ -198,9 +221,35 @@ async def boot_banner_and_usb_uart_idle_after_boot(dut):
 
 
 @cocotb.test()
+async def usb_uart_echo_reads_writes_and_reports_errors(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"w005=A5\r\nOK\r\n")))
+    await _uart_send_text(dut, "w005=A5\r")
+    assert await rx == b"w005=A5\r\nOK\r\n"
+
+    assert await _bus_read(dut, 0x0005) == 0xA5
+    assert await _bus_read(dut, 0x0805) == 0xA5
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"r005\r\n005=A5\r\n")))
+    await _uart_send_text(dut, "r005\r")
+    assert await rx == b"r005\r\n005=A5\r\n"
+
+    await _bus_write(dut, 0x0005, 0x3C)
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"r005\r\n005=3C\r\n")))
+    await _uart_send_text(dut, "r005\r")
+    assert await rx == b"r005\r\n005=3C\r\n"
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"\r\nERR\r\n")))
+    await _uart_send_text(dut, "x\r")
+    assert await rx == b"\r\nERR\r\n"
+
+
+@cocotb.test()
 async def ram_card_writes_reads_and_mirrors_2k(dut):
     await _init(dut)
 
+    await _bus_write(dut, 0x0005, 0x00)
     assert await _bus_read(dut, 0x0005) == 0x00
 
     observed = await _bus_write_and_check_tail_release(dut, 0x0005, 0xA5, 0x3C)

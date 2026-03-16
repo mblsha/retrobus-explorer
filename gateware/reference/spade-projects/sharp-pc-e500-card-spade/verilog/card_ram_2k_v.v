@@ -4,8 +4,10 @@ module card_ram_2k_v (
     input wire [10:0] waddr,
     input wire [7:0] din,
     input wire we,
-    input wire [10:0] raddr,
-    output wire [7:0] dout
+    input wire [10:0] raddr_bus,
+    output wire [7:0] dout_bus,
+    input wire [10:0] raddr_uart,
+    output wire [7:0] dout_uart
 );
     (* ram_style = "distributed" *) reg [7:0] mem [0:2047];
     integer i;
@@ -22,7 +24,8 @@ module card_ram_2k_v (
         end
     end
 
-    assign dout = mem[raddr];
+    assign dout_bus = mem[raddr_bus];
+    assign dout_uart = mem[raddr_uart];
 
     wire _unused = rst;
 endmodule
