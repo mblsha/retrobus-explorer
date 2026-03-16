@@ -1,0 +1,13 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.typeCheckingMode": "standard",
+  "python.analysis.autoSearchPaths": true,
+  "python.analysis.useLibraryCodeForTypes": true,
+  "python.analysis.enableTroubleshootMissingImports": true,
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.packageIndexDepths": [
+    {"name": "jitx", "depth": 10, "includeAllSymbols": true},
+    {"name": "jitxlib", "depth": 10, "includeAllSymbols": true},
+    {"name": "jitxexamples", "depth": 10, "includeAllSymbols": true}
+  ]
+}
