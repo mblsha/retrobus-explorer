@@ -10,6 +10,8 @@ from cocotb_helpers import tick
 
 
 USB_UART_BIT_CYCLES = 100
+CLASSIFY_CYCLES = 50
+TAIL_CYCLES = 20
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -116,51 +118,75 @@ async def _init(dut):
     assert await _uart_recv_line(dut) == expected_boot_banner()
 
 
-async def _bus_write(dut, addr: int, value: int, hold_cycles: int = 12):
+async def _bus_write(dut, addr: int, value: int):
     dut.addr.value = addr & 0x3FFFF
     dut.ce1.value = 1
     dut.rw.value = 0
     dut.oe.value = 1
     dut.data_host.value = value & 0xFF
     dut.data_host_drive.value = 1
-    await tick(dut.clk, hold_cycles)
+    await tick(dut.clk, CLASSIFY_CYCLES + 2)
     dut.rw.value = 1
-    await tick(dut.clk, 2)
+    await tick(dut.clk, TAIL_CYCLES)
     dut.ce1.value = 0
     _set_data_bus_z(dut)
     await tick(dut.clk, 2)
 
 
-async def _bus_write_and_check_tail_release(dut, addr: int, value: int, tail_value: int, hold_cycles: int = 12):
+async def _bus_write_and_check_tail_release(dut, addr: int, value: int, tail_value: int):
     dut.addr.value = addr & 0x3FFFF
     dut.ce1.value = 1
     dut.rw.value = 0
     dut.oe.value = 1
     dut.data_host.value = value & 0xFF
     dut.data_host_drive.value = 1
-    await tick(dut.clk, hold_cycles)
+    await tick(dut.clk, CLASSIFY_CYCLES + 2)
     dut.data_host.value = tail_value & 0xFF
     dut.rw.value = 1
     await tick(dut.clk, 1)
     observed = int(dut.data.value) & 0xFF
+    await tick(dut.clk, TAIL_CYCLES - 1)
     dut.ce1.value = 0
     _set_data_bus_z(dut)
     await tick(dut.clk, 2)
     return observed
 
 
-async def _bus_read(dut, addr: int, hold_cycles: int = 12) -> int:
+async def _bus_read(dut, addr: int) -> int:
     _set_data_bus_z(dut)
     dut.addr.value = addr & 0x3FFFF
     dut.ce1.value = 1
     dut.rw.value = 1
     dut.oe.value = 0
-    await tick(dut.clk, hold_cycles)
+    await tick(dut.clk, CLASSIFY_CYCLES + 2)
     value = int(dut.data.value) & 0xFF
+    await tick(dut.clk, TAIL_CYCLES)
     dut.ce1.value = 0
     dut.oe.value = 1
     await tick(dut.clk, 2)
     return value
+
+
+async def _bus_read_and_check_late_drive(dut, addr: int, host_value: int):
+    dut.addr.value = addr & 0x3FFFF
+    dut.ce1.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 0
+    dut.data_host.value = host_value & 0xFF
+    dut.data_host_drive.value = 1
+
+    await tick(dut.clk, CLASSIFY_CYCLES - 5)
+    before = int(dut.data.value) & 0xFF
+
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 7)
+    after = int(dut.data.value) & 0xFF
+
+    await tick(dut.clk, TAIL_CYCLES)
+    dut.ce1.value = 0
+    dut.oe.value = 1
+    await tick(dut.clk, 2)
+    return before, after
 
 
 @cocotb.test()
@@ -185,6 +211,10 @@ async def ram_card_writes_reads_and_mirrors_2k(dut):
     await _bus_write(dut, 0x0805, 0x5A)
     assert await _bus_read(dut, 0x0005) == 0x5A
     assert await _bus_read(dut, 0x0805) == 0x5A
+
+    before, after = await _bus_read_and_check_late_drive(dut, 0x0005, 0x3C)
+    assert before == 0x3C
+    assert after == 0x5A
 
     dut.data_host.value = 0xC3
     dut.data_host_drive.value = 1
