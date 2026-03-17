@@ -7,6 +7,7 @@ pub enum ParserEvent {
     None,
     Read{addr: CardOffset},
     Write{addr: CardOffset, value: CardData},
+    SetClassifyDelay{cycles: uint<7>},
     ParseErr,
 }
 
@@ -25,6 +26,9 @@ pub enum ParserState {
     WriteDataHi{addr: CardOffset},
     WriteDataLo{addr: CardOffset, hi: uint<4>},
     NeedWriteLineEnd{addr: CardOffset, value: CardData},
+    TimingHi,
+    TimingLo{tens: uint<4>},
+    NeedTimingLineEnd{cycles: uint<7>},
     Error,
 }
 
@@ -104,6 +108,8 @@ pub fn parser_step(
                     parser_out(state, ParserState::ReadAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if upper == b'W' {
                     parser_out(state, ParserState::WriteAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else if upper == b'T' {
+                    parser_out(state, ParserState::TimingHi(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
                     parser_error(state, rx_byte)
                 }
@@ -191,6 +197,40 @@ pub fn parser_step(
             ParserState::NeedWriteLineEnd$(addr, value) => {
                 if is_line_end(rx_byte) {
                     parser_out(state, ParserState::Idle(), ParserEvent::Write(addr, value), EchoMsg::CrLf())
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::TimingHi => {
+                let digit = rx_byte.decode_digit();
+                if digit.valid {
+                    parser_out(state, ParserState::TimingLo(digit.value), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::TimingLo$(tens) => {
+                let digit = rx_byte.decode_digit();
+                if digit.valid {
+                    let tens_u8: uint<8> = zext(tens);
+                    let digit_u8: uint<8> = zext(digit.value);
+                    let ten_u8: uint<8> = 10;
+                    let tens_times_ten: uint<8> = trunc(tens_u8 * ten_u8);
+                    let cycles_u8: uint<8> = tens_times_ten +. digit_u8;
+                    let cycles: uint<7> = trunc(cycles_u8);
+                    parser_out(
+                        state,
+                        ParserState::NeedTimingLineEnd(cycles),
+                        ParserEvent::None(),
+                        EchoMsg::Byte(rx_byte),
+                    )
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::NeedTimingLineEnd$(cycles) => {
+                if is_line_end(rx_byte) {
+                    parser_out(state, ParserState::Idle(), ParserEvent::SetClassifyDelay(cycles), EchoMsg::CrLf())
                 } else {
                     parser_error(state, rx_byte)
                 }

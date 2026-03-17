@@ -10,6 +10,7 @@ pub enum RespMsg {
     Ok,
     Err,
     Read{addr: CardOffset, value: CardData},
+    Timing{cycles: uint<7>},
 }
 
 pub type EchoStreamState = ByteMsgStreamState<EchoMsg, 2>;
@@ -57,6 +58,18 @@ fn byte_hex_char(value: CardData, low_nibble: bool) -> uint<8> {
     }
 }
 
+fn dec_char(value: uint<4>) -> uint<8> {
+    b'0' +. zext(value)
+}
+
+fn timing_ns_hundreds(cycles: uint<7>) -> uint<4> {
+    trunc(cycles `std::ops::comb_div` 10)
+}
+
+fn timing_ns_tens(cycles: uint<7>) -> uint<4> {
+    trunc(cycles `std::ops::comb_mod` 10)
+}
+
 impl EchoMsg {
     fn is_none(self) -> bool {
         if let Self::None = self { true } else { false }
@@ -97,6 +110,18 @@ impl RespMsg {
                 TxReq8$(valid: true, byte: b"ERR\r\n"[trunc(idx)])
             } else {
                 tx_req_none()
+            },
+            Self::Timing$(cycles) => match idx {
+                0 => TxReq8$(valid: true, byte: b'T'),
+                1 => TxReq8$(valid: true, byte: b'='),
+                2 => TxReq8$(valid: true, byte: dec_char(timing_ns_hundreds(cycles))),
+                3 => TxReq8$(valid: true, byte: dec_char(timing_ns_tens(cycles))),
+                4 => TxReq8$(valid: true, byte: b'0'),
+                5 => TxReq8$(valid: true, byte: b'n'),
+                6 => TxReq8$(valid: true, byte: b's'),
+                7 => TxReq8$(valid: true, byte: b'\r'),
+                8 => TxReq8$(valid: true, byte: b'\n'),
+                _ => tx_req_none(),
             },
             Self::Read$(addr, value) => match idx {
                 0 => TxReq8$(valid: true, byte: offset_hex_char(addr, 0)),
