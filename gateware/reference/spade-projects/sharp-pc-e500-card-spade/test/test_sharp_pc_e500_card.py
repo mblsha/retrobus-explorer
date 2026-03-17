@@ -246,6 +246,38 @@ async def usb_uart_echo_reads_writes_and_reports_errors(dut):
 
 
 @cocotb.test()
+async def usb_uart_can_set_classify_delay(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"t20\r\nT=200ns\r\n")))
+    await _uart_send_text(dut, "t20\r")
+    assert await rx == b"t20\r\nT=200ns\r\n"
+
+    await _bus_write(dut, 0x0005, 0x5A)
+
+    dut.addr.value = 0x0005
+    dut.ce1.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 0
+    dut.data_host.value = 0x3C
+    dut.data_host_drive.value = 1
+
+    await tick(dut.clk, 15)
+    before = int(dut.data.value) & 0xFF
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 7)
+    after = int(dut.data.value) & 0xFF
+
+    await tick(dut.clk, TAIL_CYCLES)
+    dut.ce1.value = 0
+    dut.oe.value = 1
+    await tick(dut.clk, 2)
+
+    assert before == 0x3C
+    assert after == 0x5A
+
+
+@cocotb.test()
 async def ram_card_writes_reads_and_mirrors_2k(dut):
     await _init(dut)
 
