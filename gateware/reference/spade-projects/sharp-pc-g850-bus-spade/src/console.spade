@@ -66,27 +66,17 @@ impl ConsoleMsg {
 }
 
 pub(lib) fn console_cmd_from_byte(byte: uint<8>) -> ConsoleCmd {
-    let upper = byte.to_upper();
-    if upper == ConsoleCmd::Arm.key().to_upper() {
-        ConsoleCmd::Arm()
-    } else if upper == ConsoleCmd::Lock.key().to_upper() {
-        ConsoleCmd::Lock()
-    } else if upper == ConsoleCmd::RemoteOn.key().to_upper() {
-        ConsoleCmd::RemoteOn()
-    } else if upper == ConsoleCmd::RemoteOff.key().to_upper() {
-        ConsoleCmd::RemoteOff()
-    } else if upper == ConsoleCmd::FtOn.key().to_upper() {
-        ConsoleCmd::FtOn()
-    } else if upper == ConsoleCmd::FtOff.key().to_upper() {
-        ConsoleCmd::FtOff()
-    } else if upper == ConsoleCmd::Help.key().to_upper() {
-        ConsoleCmd::Help()
-    } else if upper == ConsoleCmd::Status.key().to_upper() {
-        ConsoleCmd::Status()
-    } else if upper == ConsoleCmd::PinMap.key().to_upper() {
-        ConsoleCmd::PinMap()
-    } else {
-        ConsoleCmd::Unknown()
+    match byte.to_upper() {
+        b'A' => ConsoleCmd::Arm(),
+        b'K' => ConsoleCmd::Lock(),
+        b'P' => ConsoleCmd::RemoteOn(),
+        b'O' => ConsoleCmd::RemoteOff(),
+        b'F' => ConsoleCmd::FtOn(),
+        b'X' => ConsoleCmd::FtOff(),
+        b'H' => ConsoleCmd::Help(),
+        b'Q' => ConsoleCmd::Status(),
+        b'L' => ConsoleCmd::PinMap(),
+        _ => ConsoleCmd::Unknown(),
     }
 }
 
