@@ -182,6 +182,23 @@ fn live_samples(
 }
 
 impl OrganizerMonitorState {
+    fn next_state(
+        self,
+        addr: AddrSampleState,
+        data: DataSampleState,
+        misc: MiscSampleState,
+        queued: OrganizerQueuedSamples,
+        overflow_count: OrganizerOverflowCount,
+    ) -> OrganizerMonitorState {
+        OrganizerMonitorState$(
+            addr: addr,
+            data: data,
+            misc: misc,
+            queued: queued,
+            overflow_count: overflow_count,
+        )
+    }
+
     pub fn eval(
         self,
         addr_sync: OrganizerAddr,
@@ -203,12 +220,12 @@ impl OrganizerMonitorState {
 
         if !stream_capture_enable {
             OrganizerMonitorOut$(
-                next_state: OrganizerMonitorState$(
-                    addr: addr_step.next_state,
-                    data: data_step.next_state,
-                    misc: misc_step.next_state,
-                    queued: empty_queued_samples(),
-                    overflow_count: 0,
+                next_state: self.next_state(
+                    addr_step.next_state,
+                    data_step.next_state,
+                    misc_step.next_state,
+                    empty_queued_samples(),
+                    0,
                 ),
                 samples: samples,
             )
@@ -217,12 +234,12 @@ impl OrganizerMonitorState {
             let pushed_data = queue_push(pushed_addr.queue, samples.data.valid, samples.data.sample);
             let pushed_misc = queue_push(pushed_data.queue, samples.misc.valid, samples.misc.sample);
             OrganizerMonitorOut$(
-                next_state: OrganizerMonitorState$(
-                    addr: addr_step.next_state,
-                    data: data_step.next_state,
-                    misc: misc_step.next_state,
-                    queued: pushed_misc.queue,
-                    overflow_count: self.overflow_count +. pushed_addr.dropped +. pushed_data.dropped +. pushed_misc.dropped,
+                next_state: self.next_state(
+                    addr_step.next_state,
+                    data_step.next_state,
+                    misc_step.next_state,
+                    pushed_misc.queue,
+                    self.overflow_count +. pushed_addr.dropped +. pushed_data.dropped +. pushed_misc.dropped,
                 ),
                 samples: samples,
             )
@@ -238,23 +255,23 @@ impl OrganizerMonitorState {
         } else if self.queued.first.valid {
             let popped = queue_pop(self.queued);
             OrganizerMonitorTransportOut$(
-                next_state: OrganizerMonitorState$(
-                    addr: self.addr,
-                    data: self.data,
-                    misc: self.misc,
-                    queued: popped.queue,
-                    overflow_count: self.overflow_count,
+                next_state: self.next_state(
+                    self.addr,
+                    self.data,
+                    self.misc,
+                    popped.queue,
+                    self.overflow_count,
                 ),
                 stream_event: organizer_trace_event_sample(popped.head.sample),
             )
         } else if self.overflow_count != 0 {
             OrganizerMonitorTransportOut$(
-                next_state: OrganizerMonitorState$(
-                    addr: self.addr,
-                    data: self.data,
-                    misc: self.misc,
-                    queued: self.queued,
-                    overflow_count: 0,
+                next_state: self.next_state(
+                    self.addr,
+                    self.data,
+                    self.misc,
+                    self.queued,
+                    0,
                 ),
                 stream_event: organizer_trace_event_overflow(self.overflow_count),
             )
