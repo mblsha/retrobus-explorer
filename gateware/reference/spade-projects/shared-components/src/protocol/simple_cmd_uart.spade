@@ -176,38 +176,48 @@ struct CmdDecode {
     freq_value: uint<4>,
 }
 
-fn cmd_decode_base(
-    msg: MsgKind,
-    msg_valid: bool,
-    mode_write: bool,
-    mode_value: Mode,
-    freq_write: bool,
-    freq_value: uint<4>,
-) -> CmdDecode {
+fn cmd_decode_none() -> CmdDecode {
     CmdDecode$(
-        msg: msg,
-        msg_valid: msg_valid,
-        mode_write: mode_write,
-        mode_value: mode_value,
-        freq_write: freq_write,
-        freq_value: freq_value,
+        msg: MsgKind::None(),
+        msg_valid: false,
+        mode_write: false,
+        mode_value: Mode::ClockTester(),
+        freq_write: false,
+        freq_value: 0,
     )
 }
 
-fn cmd_decode_none() -> CmdDecode {
-    cmd_decode_base(MsgKind::None(), false, false, Mode::ClockTester(), false, 0)
-}
-
 fn cmd_decode_msg(msg: MsgKind) -> CmdDecode {
-    cmd_decode_base(msg, true, false, Mode::ClockTester(), false, 0)
+    CmdDecode$(
+        msg: msg,
+        msg_valid: true,
+        mode_write: false,
+        mode_value: Mode::ClockTester(),
+        freq_write: false,
+        freq_value: 0,
+    )
 }
 
 fn cmd_decode_set_mode(mode: Mode) -> CmdDecode {
-    cmd_decode_base(MsgKind::Ok(), true, true, mode, false, 0)
+    CmdDecode$(
+        msg: MsgKind::Ok(),
+        msg_valid: true,
+        mode_write: true,
+        mode_value: mode,
+        freq_write: false,
+        freq_value: 0,
+    )
 }
 
 fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
-    cmd_decode_base(MsgKind::Ok(), true, true, Mode::ClockTester(), true, freq)
+    CmdDecode$(
+        msg: MsgKind::Ok(),
+        msg_valid: true,
+        mode_write: false,
+        mode_value: Mode::ClockTester(),
+        freq_write: true,
+        freq_value: freq,
+    )
 }
 
 fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
