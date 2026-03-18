@@ -21,16 +21,23 @@ KEY_MATRIX = [
 ]
 
 
-@dataclass
+@dataclass(frozen=True)
 class PressedKey:
     row: int
     col: int
 
-    def __hash__(self):
-        return hash((self.row, self.col))
+    SHIFT_ROW = 0xFF
+    SHIFT_COL = 0xFF
+
+    @classmethod
+    def shift(cls) -> "PressedKey":
+        return cls(row=cls.SHIFT_ROW, col=cls.SHIFT_COL)
+
+    def is_shift(self) -> bool:
+        return self.row == self.SHIFT_ROW and self.col == self.SHIFT_COL
 
     def __str__(self):
-        if self.row == 0xff and self.col == 0xff:
+        if self.is_shift():
             return "SHIFT"
         return KEY_MATRIX[self.row][self.col]
 
@@ -63,7 +70,7 @@ class KeyMatrixInterpreter:
 
     def pressed_keys(self) -> list[PressedKey]:
         if self.last_shift_state:
-            return self.last_full_state + [PressedKey(row=0xff, col=0xff)]
+            return self.last_full_state + [PressedKey.shift()]
         return self.last_full_state
 
     def __str__(self):

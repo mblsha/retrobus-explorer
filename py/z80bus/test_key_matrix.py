@@ -83,3 +83,11 @@ def test_key_matrix_equality_handles_other_types():
     interpreter = KeyMatrixInterpreter()
     assert interpreter == KeyMatrixInterpreter()
     assert interpreter != object()
+
+
+def test_pressed_key_shift_helper_is_immutable_and_readable():
+    shift = PressedKey.shift()
+
+    assert shift.is_shift()
+    assert str(shift) == "SHIFT"
+    assert {shift} == {PressedKey.shift()}
