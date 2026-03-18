@@ -67,15 +67,15 @@ impl ConsoleMsg {
 
 pub(lib) fn console_cmd_from_byte(byte: uint<8>) -> ConsoleCmd {
     match byte.to_upper() {
-        b'A' => ConsoleCmd::Arm(),
-        b'K' => ConsoleCmd::Lock(),
-        b'P' => ConsoleCmd::RemoteOn(),
-        b'O' => ConsoleCmd::RemoteOff(),
-        b'F' => ConsoleCmd::FtOn(),
-        b'X' => ConsoleCmd::FtOff(),
-        b'H' => ConsoleCmd::Help(),
-        b'Q' => ConsoleCmd::Status(),
-        b'L' => ConsoleCmd::PinMap(),
+        b if b == ConsoleCmd::Arm.key().to_upper() => ConsoleCmd::Arm(),
+        b if b == ConsoleCmd::Lock.key().to_upper() => ConsoleCmd::Lock(),
+        b if b == ConsoleCmd::RemoteOn.key().to_upper() => ConsoleCmd::RemoteOn(),
+        b if b == ConsoleCmd::RemoteOff.key().to_upper() => ConsoleCmd::RemoteOff(),
+        b if b == ConsoleCmd::FtOn.key().to_upper() => ConsoleCmd::FtOn(),
+        b if b == ConsoleCmd::FtOff.key().to_upper() => ConsoleCmd::FtOff(),
+        b if b == ConsoleCmd::Help.key().to_upper() => ConsoleCmd::Help(),
+        b if b == ConsoleCmd::Status.key().to_upper() => ConsoleCmd::Status(),
+        b if b == ConsoleCmd::PinMap.key().to_upper() => ConsoleCmd::PinMap(),
         _ => ConsoleCmd::Unknown(),
     }
 }
