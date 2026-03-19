@@ -5,6 +5,14 @@ use super::{
     message_stream::{TxReq8, tx_req_none},
 };
 
+fn tx_req_from_option(data: Option<uint<8>>) -> TxReq8 {
+    if let Some(byte) = data {
+        TxReq8$(valid: true, byte: byte)
+    } else {
+        tx_req_none()
+    }
+}
+
 pub fn tx_req_as_rv(tx: TxReq8) -> Rv<uint<8>> {
     let (ready, ready_inv) = port;
     let data = if tx.valid { Some(tx.byte) } else { None };
@@ -14,11 +22,7 @@ pub fn tx_req_as_rv(tx: TxReq8) -> Rv<uint<8>> {
 pub entity rv_peek_tx_req(rv: Rv<uint<8>>) -> TxReq8 {
     set rv.ready = &true;
 
-    if let Some(byte) = *rv.data {
-        TxReq8$(valid: true, byte: byte)
-    } else {
-        tx_req_none()
-    }
+    tx_req_from_option(*rv.data)
 }
 
 #[inline]
@@ -36,11 +40,7 @@ pub entity au_usb_uart_tx8_rv_tap(
     set tx_bytes.ready = &tx_ready;
 
     let tx_req = if tx_ready {
-        if let Some(byte) = *tx_bytes.data {
-            TxReq8$(valid: true, byte: byte)
-        } else {
-            tx_req_none()
-        }
+        tx_req_from_option(*tx_bytes.data)
     } else {
         tx_req_none()
     };
