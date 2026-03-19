@@ -7,6 +7,14 @@ pub fn tx_req_none() -> TxReq8 {
     TxReq8$(valid: false, byte: 0)
 }
 
+pub fn tx_req_from_option(byte: Option<uint<8>>) -> TxReq8 {
+    if let Some(byte) = byte {
+        TxReq8$(valid: true, byte: byte)
+    } else {
+        tx_req_none()
+    }
+}
+
 pub fn tx_req_arbiter(highest: TxReq8, high: TxReq8, low: TxReq8) -> TxReq8 {
     if highest.valid {
         highest
