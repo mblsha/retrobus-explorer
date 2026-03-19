@@ -16,6 +16,12 @@ pub struct UartRxOut<TData> {
     byte: TData,
 }
 
+struct UartRxSample<TData> {
+    valid: bool,
+    parity_error: bool,
+    byte: TData,
+}
+
 pub struct port UartLineBusyPort {
     line: &bool,
     busy: &bool,
@@ -305,6 +311,35 @@ enum RxState<#uint DATA_WIDTH> {
     WaitHigh,
 }
 
+fn uart_rx_sample_from_state<#uint DATA_WIDTH>(
+    state: RxState<DATA_WIDTH>,
+    parity: bool,
+    last: BitTime,
+    last_bit_idx: uint<16>,
+    rx_sync: bool,
+) -> UartRxSample<uint<DATA_WIDTH>> {
+    match state {
+        RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
+            let _ = odd_parity;
+            let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
+            let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
+            UartRxSample$(
+                valid: true,
+                parity_error: false,
+                byte: trunc((data >> 1) | incoming),
+            )
+        },
+        RxState::WaitParity$(time, data, odd_parity) if time == last => {
+            UartRxSample$(
+                valid: true,
+                parity_error: odd_parity ^^ rx_sync,
+                byte: data,
+            )
+        },
+        _ => UartRxSample$(valid: false, parity_error: false, byte: 0),
+    }
+}
+
 pub entity uart_rx<#uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
@@ -398,50 +433,23 @@ pub entity uart_rx<#uint DATA_WIDTH>(
         }
     };
 
-    reg(clk) out_valid: bool reset(rst: false) = {
-        match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
-                let _ = data;
-                let _ = odd_parity;
-                true
-            },
-            RxState::WaitParity$(time, data, odd_parity) if time == last => {
-                let _ = data;
-                let _ = odd_parity;
-                true
-            },
-            _ => false,
-        }
-    };
+    let sample = uart_rx_sample_from_state::<DATA_WIDTH>(state, parity, last, last_bit_idx, rx_sync);
+
+    reg(clk) out_valid: bool reset(rst: false) = sample.valid;
 
     reg(clk) out_byte: uint<DATA_WIDTH> reset(rst: 0) = {
-        match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
-                let _ = odd_parity;
-                let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
-                let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
-                trunc((data >> 1) | incoming)
-            },
-            RxState::WaitParity$(time, data, odd_parity) if time == last => {
-                let _ = odd_parity;
-                data
-            },
-            _ => out_byte,
+        if sample.valid {
+            sample.byte
+        } else {
+            out_byte
         }
     };
 
     reg(clk) out_parity_error: bool reset(rst: false) = {
-        match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
-                let _ = data;
-                let _ = odd_parity;
-                false
-            },
-            RxState::WaitParity$(time, data, odd_parity) if time == last => {
-                let _ = data;
-                odd_parity ^^ rx_sync
-            },
-            _ => out_parity_error,
+        if sample.valid {
+            sample.parity_error
+        } else {
+            out_parity_error
         }
     };
 
