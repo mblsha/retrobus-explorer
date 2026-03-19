@@ -1,4 +1,7 @@
-use super::guards::{require_at_least_two, require_positive, require_power_of_two};
+use super::{
+    guards::{require_at_least_two, require_positive, require_power_of_two},
+    primitives::sync_delay,
+};
 
 pub type BitTime = uint<15>;
 pub type StopBits = uint<3>;
@@ -347,12 +350,9 @@ pub entity uart_rx<#uint DATA_WIDTH>(
     let stops_after_first = stop_bits.extra_stop_bits();
     let last_bit_idx: uint<16> = DATA_WIDTH - 1;
 
-    // Alchitry compatibility: use a 3-stage synchronizer and sample from
-    // the oldest stage for start/bit detection.
-    reg(clk) rx_d0: bool reset(rst: true) = rx;
-    reg(clk) rx_d1: bool reset(rst: true) = rx_d0;
-    reg(clk) rx_d2: bool reset(rst: true) = rx_d1;
-    let rx_sync = rx_d2;
+    // Alchitry compatibility: use the shared 3-stage synchronizer and sample
+    // from the oldest stage for start/bit detection.
+    let rx_sync = inst sync_delay::<3>(clk, rx);
 
     reg(clk) state: RxState<DATA_WIDTH> reset(rst: RxState::Idle()) = {
         match state {
