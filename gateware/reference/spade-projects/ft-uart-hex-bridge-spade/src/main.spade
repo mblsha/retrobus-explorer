@@ -132,19 +132,9 @@ entity main_core(
         let rx_empty = state.rx_used == 0;
         let rx_full = state.rx_used == 4;
         let rx_dout = state.rx_storage[state.rx_raddr];
-        let send_word_valid = if let ParserEvent::Send(_, _) = parse.event { true } else { false };
-        let send_word = if let ParserEvent::Send$(word, be) = parse.event {
-            let _ = be;
-            word
-        } else {
-            0
-        };
-        let send_be = if let ParserEvent::Send$(word, be) = parse.event {
-            let _ = word;
-            be
-        } else {
-            0x3
-        };
+        let send_word_valid = parse.event.is_send();
+        let send_word = parse.event.send_word();
+        let send_be = parse.event.send_be();
         let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
         let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
         let parser_msg = match parse.event {
@@ -177,7 +167,7 @@ entity main_core(
             next_msg_valid,
             next_msg,
         );
-        let parse_err_event = if let ParserEvent::ParseErr = parse.event { true } else { false };
+        let parse_err_event = parse.event.is_parse_err();
         let tx_full_event = tx_queue_overflow;
         let rx_stall_now = !*ft_ui_dout_empty && rx_full;
         let rx_stall_event = rx_stall_now && !state.stall_active;
@@ -243,7 +233,7 @@ entity main_core(
     let rx_full = state.rx_used == 4;
     let rx_dout = state.rx_storage[state.rx_raddr];
     let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
-    let send_word_valid = if let ParserEvent::Send(_, _) = parse.event { true } else { false };
+    let send_word_valid = parse.event.is_send();
     let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
     let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
     let parser_msg = match parse.event {

@@ -46,8 +46,36 @@ pub fn parser_event_none() -> ParserEvent {
     ParserEvent::None()
 }
 
-pub fn parser_event_is_none(event: ParserEvent) -> bool {
-    if let ParserEvent::None = event { true } else { false }
+impl ParserEvent {
+    pub fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    pub fn is_send(self) -> bool {
+        if let Self::Send(_, _) = self { true } else { false }
+    }
+
+    pub fn send_word(self) -> FtData {
+        if let Self::Send$(word, be) = self {
+            let _ = be;
+            word
+        } else {
+            0
+        }
+    }
+
+    pub fn send_be(self) -> FtBe {
+        if let Self::Send$(word, be) = self {
+            let _ = word;
+            be
+        } else {
+            0x3
+        }
+    }
+
+    pub fn is_parse_err(self) -> bool {
+        if let Self::ParseErr = self { true } else { false }
+    }
 }
 
 fn parser_step(state: LineParserState, phase: ParserPhase, word: FtData, be: FtBe, event: ParserEvent) -> ParserStepOut {
