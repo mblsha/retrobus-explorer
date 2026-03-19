@@ -1,3 +1,4 @@
+use shared_components::ascii;
 use shared_components::serial::{FtBe, FtData};
 
 pub type BridgeCount = uint<16>;
@@ -60,41 +61,6 @@ fn parser_step(state: LineParserState, phase: ParserPhase, word: FtData, be: FtB
 fn parser_error() -> ParserStepOut {
     parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::ParseErr())
 }
-
-fn is_line_end(byte: uint<8>) -> bool {
-    byte == b'\r' || byte == b'\n'
-}
-
-fn hex_char(value: uint<4>) -> uint<8> {
-    let value_u8: uint<8> = zext(value);
-    if value < 10 {
-        b'0' +. value_u8
-    } else {
-        b'A' +. (value_u8 -. 10)
-    }
-}
-
-fn decode_hex_nibble(byte: uint<8>) -> uint<5> {
-    let upper = byte.to_upper();
-    let valid_base: uint<5> = 16;
-    if upper.is_digit() {
-        valid_base +. zext(upper.digit_value())
-    } else if upper >= b'A' && upper <= b'F' {
-        let alpha_value: uint<4> = trunc((upper -. b'A') +. 10);
-        valid_base +. zext(alpha_value)
-    } else {
-        0
-    }
-}
-
-fn hex_valid(decoded: uint<5>) -> bool {
-    decoded >= 16
-}
-
-fn hex_value(decoded: uint<5>) -> uint<4> {
-    trunc(decoded - 16)
-}
-
 pub fn line_parser_step(
     state: LineParserState,
     rx_valid: bool,
@@ -106,14 +72,14 @@ pub fn line_parser_step(
     } else if rx_parity_error {
         parser_error()
     } else {
-        let decoded = decode_hex_nibble(rx_byte);
-        let nibble_ok = hex_valid(decoded);
-        let nibble = hex_value(decoded);
+        let decoded = rx_byte.decode_hex();
+        let nibble_ok = decoded.valid;
+        let nibble = decoded.value;
         let next_word = (state.word << 4) | zext(nibble);
 
         match state.phase {
             ParserPhase::Idle => {
-                if is_line_end(rx_byte) {
+                if rx_byte.is_line_end() {
                     ParserStepOut$(state: state, event: ParserEvent::None())
                 } else if rx_byte == b'?' {
                     parser_step(state, ParserPhase::CmdStatus(), 0, 0x3, ParserEvent::None())
@@ -149,7 +115,7 @@ pub fn line_parser_step(
             ParserPhase::NeedLineEnd => {
                 if rx_byte == b'/' {
                     parser_step(state, ParserPhase::NeedBeLineEnd(), state.word, state.be, ParserEvent::None())
-                } else if is_line_end(rx_byte) {
+                } else if rx_byte.is_line_end() {
                     parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Send(state.word, state.be))
                 } else {
                     parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
@@ -170,21 +136,21 @@ pub fn line_parser_step(
                 }
             },
             ParserPhase::CmdHelp => {
-                if is_line_end(rx_byte) {
+                if rx_byte.is_line_end() {
                     parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Help())
                 } else {
                     parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
                 }
             },
             ParserPhase::CmdStatus => {
-                if is_line_end(rx_byte) {
+                if rx_byte.is_line_end() {
                     parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Status())
                 } else {
                     parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
                 }
             },
             ParserPhase::Error => {
-                if is_line_end(rx_byte) {
+                if rx_byte.is_line_end() {
                     parser_error()
                 } else {
                     parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
@@ -208,12 +174,12 @@ pub fn unpack_ft_be(packed: PackedFtWord) -> FtBe {
 
 pub fn packed_ft_byte(word: FtData, be: FtBe, idx: uint<3>) -> uint<8> {
     match idx {
-        0 => hex_char(trunc(word >> 12)),
-        1 => hex_char(trunc(word >> 8)),
-        2 => hex_char(trunc(word >> 4)),
-        3 => hex_char(trunc(word)),
+        0 => ascii::hex_char(trunc(word >> 12)),
+        1 => ascii::hex_char(trunc(word >> 8)),
+        2 => ascii::hex_char(trunc(word >> 4)),
+        3 => ascii::hex_char(trunc(word)),
         4 => b'/',
-        5 => hex_char(zext(be)),
+        5 => ascii::hex_char(zext(be)),
         6 => b'\r',
         _ => b'\n',
     }
@@ -221,10 +187,10 @@ pub fn packed_ft_byte(word: FtData, be: FtBe, idx: uint<3>) -> uint<8> {
 
 fn count_hex_char(value: BridgeCount, idx: uint<3>) -> uint<8> {
     match idx {
-        0 => hex_char(trunc(value >> 12)),
-        1 => hex_char(trunc(value >> 8)),
-        2 => hex_char(trunc(value >> 4)),
-        _ => hex_char(trunc(value)),
+        0 => ascii::hex_char(trunc(value >> 12)),
+        1 => ascii::hex_char(trunc(value >> 8)),
+        2 => ascii::hex_char(trunc(value >> 4)),
+        _ => ascii::hex_char(trunc(value)),
     }
 }
 
