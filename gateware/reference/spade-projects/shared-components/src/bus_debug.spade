@@ -159,19 +159,13 @@ pub struct SaleaeCmdDecode {
 
 impl uint<8> {
     fn decode_saleae_state(self) -> SaleaeCmdDecode {
-        let upper = self.to_upper();
-        if upper == b'S' {
-            SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals())
-        } else if upper == b'E' {
-            SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals())
-        } else if upper == b'D' {
-            SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals())
-        } else if upper == b'R' {
-            SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals())
-        } else if upper == b'C' {
-            SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter())
-        } else {
-            SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals())
+        match self.to_upper() {
+            b'S' => SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals()),
+            b'E' => SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals()),
+            b'D' => SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals()),
+            b'R' => SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals()),
+            b'C' => SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter()),
+            _ => SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals()),
         }
     }
 }
