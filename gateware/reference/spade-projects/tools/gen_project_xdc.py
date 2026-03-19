@@ -13,6 +13,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from text_filters import strip_comments
+
 DEFAULT_OUT = "constraints/pins.xdc"
 DEFAULT_TOP_FILE = "src/main.spade"
 DEFAULT_TOP_ENTITY = "main"
@@ -71,14 +73,6 @@ def ensure_positive_int(value: object, name: str) -> int:
     if not isinstance(value, int) or value <= 0:
         raise SystemExit(f"error: {name} must be a positive integer")
     return value
-
-
-def strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    lines: list[str] = []
-    for line in text.splitlines():
-        lines.append(line.split("//", 1)[0])
-    return "\n".join(lines)
 
 
 def parse_top_ports(top_file: Path, top_entity: str) -> set[str]:
