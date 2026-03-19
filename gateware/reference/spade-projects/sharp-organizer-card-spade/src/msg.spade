@@ -51,15 +51,37 @@ impl OrganizerMsg {
         if let Self::None = self { true } else { false }
     }
 
-    fn len(self) -> OrganizerMsgIdx {
+    fn first_part(self) -> OrganizerMsg {
         match self {
-            Self::None => 0,
-            Self::CounterSelected => 1,
-            Self::SyncStandardSelected => 1,
-            Self::SyncMemorySelected => 1,
-            Self::FtEnabled => 1,
-            Self::FtDisabled => 1,
-            _ => 2,
+            Self::CounterThenFtEnabled => Self::CounterSelected(),
+            Self::CounterThenFtDisabled => Self::CounterSelected(),
+            Self::SyncStandardThenFtEnabled => Self::SyncStandardSelected(),
+            Self::SyncStandardThenFtDisabled => Self::SyncStandardSelected(),
+            Self::SyncMemoryThenFtEnabled => Self::SyncMemorySelected(),
+            Self::SyncMemoryThenFtDisabled => Self::SyncMemorySelected(),
+            _ => self,
+        }
+    }
+
+    fn second_part(self) -> OrganizerMsg {
+        match self {
+            Self::CounterThenFtEnabled => Self::FtEnabled(),
+            Self::CounterThenFtDisabled => Self::FtDisabled(),
+            Self::SyncStandardThenFtEnabled => Self::FtEnabled(),
+            Self::SyncStandardThenFtDisabled => Self::FtDisabled(),
+            Self::SyncMemoryThenFtEnabled => Self::FtEnabled(),
+            Self::SyncMemoryThenFtDisabled => Self::FtDisabled(),
+            _ => Self::None(),
+        }
+    }
+
+    fn len(self) -> OrganizerMsgIdx {
+        if self.first_part().is_none() {
+            0
+        } else if self.second_part().is_none() {
+            1
+        } else {
+            2
         }
     }
 
@@ -78,21 +100,12 @@ impl OrganizerMsg {
         if idx >= self.len() {
             tx_req_none()
         } else {
-            let byte = match self {
-                Self::None => 0,
-                Self::CounterSelected => Self::CounterSelected().atom_byte(),
-                Self::SyncStandardSelected => Self::SyncStandardSelected().atom_byte(),
-                Self::SyncMemorySelected => Self::SyncMemorySelected().atom_byte(),
-                Self::FtEnabled => Self::FtEnabled().atom_byte(),
-                Self::FtDisabled => Self::FtDisabled().atom_byte(),
-                Self::CounterThenFtEnabled => if idx == 0 { Self::CounterSelected().atom_byte() } else { Self::FtEnabled().atom_byte() },
-                Self::CounterThenFtDisabled => if idx == 0 { Self::CounterSelected().atom_byte() } else { Self::FtDisabled().atom_byte() },
-                Self::SyncStandardThenFtEnabled => if idx == 0 { Self::SyncStandardSelected().atom_byte() } else { Self::FtEnabled().atom_byte() },
-                Self::SyncStandardThenFtDisabled => if idx == 0 { Self::SyncStandardSelected().atom_byte() } else { Self::FtDisabled().atom_byte() },
-                Self::SyncMemoryThenFtEnabled => if idx == 0 { Self::SyncMemorySelected().atom_byte() } else { Self::FtEnabled().atom_byte() },
-                Self::SyncMemoryThenFtDisabled => if idx == 0 { Self::SyncMemorySelected().atom_byte() } else { Self::FtDisabled().atom_byte() },
+            let part = if idx == 0 {
+                self.first_part()
+            } else {
+                self.second_part()
             };
-            TxReq8$(valid: true, byte: byte)
+            TxReq8$(valid: true, byte: part.atom_byte())
         }
     }
 }
