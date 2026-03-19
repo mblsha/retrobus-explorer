@@ -82,6 +82,25 @@ pub(lib) struct OrganizerMonitorLines {
     misc: bool,
 }
 
+#[inline]
+fn monitor_sample_uart_line<#uint WIDTH>(
+    clk: clock,
+    rst: bool,
+    clk_uart: clock,
+    value: uint<WIDTH>,
+    valid: bool,
+) -> bool {
+    let uart = inst async_uart_monitor::<WIDTH, 4, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        value,
+        valid,
+        clk_uart,
+        rst,
+    );
+    uart.line
+}
+
 pub(lib) fn stable_threshold() -> SampleCount {
     5
 }
@@ -274,34 +293,27 @@ pub(lib) entity organizer_monitor_uarts(
     clk_uart: clock,
     samples: OrganizerMonitorSamples,
 ) -> OrganizerMonitorLines {
-    let addr_uart = inst async_uart_monitor::<20, 4, 3, 400_000_000, 100_000_000>(
-        clk,
-        rst,
-        sample_addr_value(samples.addr),
-        samples.addr.valid,
-        clk_uart,
-        rst,
-    );
-    let data_uart = inst async_uart_monitor::<8, 4, 3, 400_000_000, 100_000_000>(
-        clk,
-        rst,
-        sample_data_value(samples.data),
-        samples.data.valid,
-        clk_uart,
-        rst,
-    );
-    let misc_uart = inst async_uart_monitor::<11, 4, 3, 400_000_000, 100_000_000>(
-        clk,
-        rst,
-        sample_misc_value(samples.misc),
-        samples.misc.valid,
-        clk_uart,
-        rst,
-    );
-
     OrganizerMonitorLines$(
-        addr: addr_uart.line,
-        data: data_uart.line,
-        misc: misc_uart.line,
+        addr: inst monitor_sample_uart_line(
+            clk,
+            rst,
+            clk_uart,
+            sample_addr_value(samples.addr),
+            samples.addr.valid,
+        ),
+        data: inst monitor_sample_uart_line(
+            clk,
+            rst,
+            clk_uart,
+            sample_data_value(samples.data),
+            samples.data.valid,
+        ),
+        misc: inst monitor_sample_uart_line(
+            clk,
+            rst,
+            clk_uart,
+            sample_misc_value(samples.misc),
+            samples.misc.valid,
+        ),
     )
 }
