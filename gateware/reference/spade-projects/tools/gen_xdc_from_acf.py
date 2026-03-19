@@ -9,6 +9,8 @@ import argparse
 import re
 from pathlib import Path
 
+from text_filters import strip_comments
+
 PIN_DEF_RE = re.compile(r"^\s*([A-Z0-9_]+)\(\"([A-Z0-9]+)\",\s*\d+\),?\s*$")
 PIN_LINE_RE = re.compile(
     r"\bpin\s+([A-Za-z_][A-Za-z0-9_\[\]]*)\s+([A-Za-z0-9_]+)(?:\s+FREQUENCY\(([^)]+)\))?",
@@ -37,14 +39,6 @@ def mhz_to_period_ns(freq_expr: str) -> float:
         raise ValueError(f"unsupported FREQUENCY expression: {freq_expr!r}")
     mhz = float(m.group(1))
     return 1000.0 / mhz
-
-
-def strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    out: list[str] = []
-    for line in text.splitlines():
-        out.append(line.split("//", 1)[0])
-    return "\n".join(out)
 
 
 def parse_acf_metadata(acf: Path) -> list[tuple[str, str]]:
