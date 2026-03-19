@@ -95,22 +95,24 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             self.pending_msg
         };
         let enqueue_new = next_msg_valid && !next_msg_is_none;
-        let final_cur_msg = if enqueue_new && loaded_msg_none {
+        let replace_empty_current = enqueue_new && loaded_msg_none;
+        let queue_new_pending = enqueue_new && !loaded_msg_none;
+        let final_cur_msg = if replace_empty_current {
             next_msg
         } else {
             loaded_cur_msg
         };
-        let final_cur_idx: uint<IDX_W> = if enqueue_new && loaded_msg_none {
+        let final_cur_idx: uint<IDX_W> = if replace_empty_current {
             0
         } else {
             loaded_cur_idx
         };
-        let final_pending_msg = if enqueue_new && !loaded_msg_none {
+        let final_pending_msg = if queue_new_pending {
             next_msg
         } else {
             loaded_pending_msg
         };
-        let final_msg_none = if enqueue_new && loaded_msg_none {
+        let final_msg_none = if replace_empty_current {
             false
         } else {
             loaded_msg_none
