@@ -290,8 +290,10 @@ pub entity simple_cmd_uart_core(
     tx_busy: bool,
 ) -> SimpleCmdUartOut {
     let rx_decoded = inst decode_rx_byte(clk, rx_valid, rx_parity_error, rx_byte);
-    let rx_ok = rx_decoded.is_some();
-    let rx_decode = rx_decoded.unwrap_or(default_rx_byte_decode());
+    let (rx_ok, rx_decode) = match rx_decoded {
+        Some(decoded) => (true, decoded),
+        None => (false, default_rx_byte_decode()),
+    };
 
     reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
         next_cmd_state(cmd_state, rx_ok, rx_decode.byte, rx_decode.upper)
