@@ -1,6 +1,20 @@
+pub struct HexDecode {
+    valid: bool,
+    value: uint<4>,
+}
+
 pub struct DigitDecode {
     valid: bool,
     value: uint<4>,
+}
+
+pub fn hex_char(value: uint<4>) -> uint<8> {
+    let value_u8: uint<8> = zext(value);
+    if value < 10 {
+        b'0' +. value_u8
+    } else {
+        b'A' +. (value_u8 -. 10)
+    }
 }
 
 impl uint<8> {
@@ -35,6 +49,22 @@ impl uint<8> {
             decoded
         } else {
             DigitDecode$(valid: false, value: 0)
+        }
+    }
+
+    pub fn is_line_end(self) -> bool {
+        self == b'\r' || self == b'\n'
+    }
+
+    pub fn decode_hex(self) -> HexDecode {
+        let upper = self.to_upper();
+        if upper.is_digit() {
+            HexDecode$(valid: true, value: upper.digit_value())
+        } else if upper >= b'A' && upper <= b'F' {
+            let alpha_value: uint<4> = trunc((upper -. b'A') +. 10);
+            HexDecode$(valid: true, value: alpha_value)
+        } else {
+            HexDecode$(valid: false, value: 0)
         }
     }
 }

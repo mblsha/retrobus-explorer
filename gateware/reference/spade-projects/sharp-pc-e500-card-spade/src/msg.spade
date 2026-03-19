@@ -1,3 +1,4 @@
+use shared_components::ascii;
 use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
 
 use super::protocol::{CardData, CardOffset, EchoMsg};
@@ -34,27 +35,20 @@ pub fn init_resp_stream() -> RespStreamState {
     )
 }
 
-fn hex_char(value: uint<4>) -> uint<8> {
-    if value < 10 {
-        b'0' +. zext(value)
-    } else {
-        b'A' +. zext(value -. 10)
-    }
-}
 
 fn offset_hex_char(addr: CardOffset, idx: uint<2>) -> uint<8> {
     match idx {
-        0 => hex_char(trunc(addr >> 8)),
-        1 => hex_char(trunc(addr >> 4)),
-        _ => hex_char(trunc(addr)),
+        0 => ascii::hex_char(trunc(addr >> 8)),
+        1 => ascii::hex_char(trunc(addr >> 4)),
+        _ => ascii::hex_char(trunc(addr)),
     }
 }
 
 fn byte_hex_char(value: CardData, low_nibble: bool) -> uint<8> {
     if low_nibble {
-        hex_char(trunc(value))
+        ascii::hex_char(trunc(value))
     } else {
-        hex_char(trunc(value >> 4))
+        ascii::hex_char(trunc(value >> 4))
     }
 }
 
