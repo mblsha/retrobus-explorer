@@ -240,9 +240,8 @@ entity main_core(
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
     let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
 
-    reg(clk) boot_banner: BootBannerState<8> reset(rst: init_boot_banner()) =
-        boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy).state;
     let boot_banner_out = boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy);
+    reg(clk) boot_banner: BootBannerState<8> reset(rst: init_boot_banner()) = boot_banner_out.state;
     reg(clk) parser: ParserState reset(rst: protocol::init_parser()) =
         parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte).state;
     let usb_parse = parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte);
