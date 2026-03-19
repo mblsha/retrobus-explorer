@@ -305,6 +305,33 @@ enum RxState<#uint DATA_WIDTH> {
     WaitHigh,
 }
 
+fn uart_rx_shift_in<#uint DATA_WIDTH>(data: uint<DATA_WIDTH>, rx_sync: bool) -> uint<DATA_WIDTH> {
+    let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
+    let incoming = incoming_base << (DATA_WIDTH - 1);
+    trunc((data >> 1) | incoming)
+}
+
+fn uart_rx_after_stop_bits<#uint DATA_WIDTH>(stops_after_first: StopBits) -> RxState<DATA_WIDTH> {
+    if stops_after_first == 0 {
+        RxState::WaitHigh()
+    } else {
+        RxState::WaitExtraStop(0, stops_after_first)
+    }
+}
+
+fn uart_rx_after_data<#uint DATA_WIDTH>(
+    parity: bool,
+    stops_after_first: StopBits,
+    data: uint<DATA_WIDTH>,
+    odd_parity: bool,
+) -> RxState<DATA_WIDTH> {
+    if parity {
+        RxState::WaitParity(0, data, odd_parity)
+    } else {
+        uart_rx_after_stop_bits::<DATA_WIDTH>(stops_after_first)
+    }
+}
+
 pub entity uart_rx<#uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
@@ -344,21 +371,11 @@ pub entity uart_rx<#uint DATA_WIDTH>(
                 }
             },
             RxState::WaitData$(time, bit_idx, data, odd_parity) => {
-                let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
-                let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
-                let next_data = trunc((data >> 1) | incoming);
+                let next_data = uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync);
                 let next_odd = odd_parity ^^ rx_sync;
                 if time == last {
                     if bit_idx == last_bit_idx {
-                        if parity {
-                            RxState::WaitParity(0, next_data, next_odd)
-                        } else {
-                            if stops_after_first == 0 {
-                                RxState::WaitHigh()
-                            } else {
-                                RxState::WaitExtraStop(0, stops_after_first)
-                            }
-                        }
+                        uart_rx_after_data::<DATA_WIDTH>(parity, stops_after_first, next_data, next_odd)
                     } else {
                         RxState::WaitData(0, bit_idx +. 1, next_data, next_odd)
                     }
@@ -368,11 +385,7 @@ pub entity uart_rx<#uint DATA_WIDTH>(
             },
             RxState::WaitParity$(time, data, odd_parity) => {
                 if time == last {
-                    if stops_after_first == 0 {
-                        RxState::WaitHigh()
-                    } else {
-                        RxState::WaitExtraStop(0, stops_after_first)
-                    }
+                    uart_rx_after_stop_bits::<DATA_WIDTH>(stops_after_first)
                 } else {
                     RxState::WaitParity(time +. 1, data, odd_parity)
                 }
@@ -418,9 +431,7 @@ pub entity uart_rx<#uint DATA_WIDTH>(
         match state {
             RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
                 let _ = odd_parity;
-                let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
-                let incoming: uint<DATA_WIDTH> = incoming_base << (DATA_WIDTH - 1);
-                trunc((data >> 1) | incoming)
+                uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync)
             },
             RxState::WaitParity$(time, data, odd_parity) if time == last => {
                 let _ = odd_parity;
