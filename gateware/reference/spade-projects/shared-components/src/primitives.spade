@@ -1,4 +1,4 @@
-use super::guards::require_positive_int;
+use super::guards::{require_positive, require_positive_int};
 
 pipeline(STAGES) sync_delay_pipe<#int STAGES>(
     clk: clock,
@@ -96,6 +96,8 @@ pub entity reset_conditioner<#uint STAGES>(
     clk: clock,
     in_reset: bool,
 ) -> bool {
+    let _ = require_positive::<STAGES>();
+
     // DRY generic implementation of Alchitry-style conditioner:
     // assert immediately via `in_reset`, release after STAGES clocks.
     reg(clk) stages: [bool; STAGES] reset(in_reset: [true; STAGES]) =
