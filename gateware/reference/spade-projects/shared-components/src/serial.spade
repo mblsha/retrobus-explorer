@@ -19,6 +19,12 @@ pub struct UartRxOut<TData> {
     byte: TData,
 }
 
+struct UartRxCapture<#uint DATA_WIDTH> {
+    valid: bool,
+    byte: uint<DATA_WIDTH>,
+    parity_error: bool,
+}
+
 pub struct port UartLineBusyPort {
     line: &bool,
     busy: &bool,
@@ -411,50 +417,36 @@ pub entity uart_rx<#uint DATA_WIDTH>(
         }
     };
 
-    reg(clk) out_valid: bool reset(rst: false) = {
+    reg(clk) capture: UartRxCapture<DATA_WIDTH>
+        reset(rst: UartRxCapture$(valid: false, byte: 0, parity_error: false))
+        = {
         match state {
             RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
-                let _ = data;
                 let _ = odd_parity;
-                true
+                UartRxCapture$(
+                    valid: true,
+                    byte: uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync),
+                    parity_error: false,
+                )
             },
             RxState::WaitParity$(time, data, odd_parity) if time == last => {
-                let _ = data;
-                let _ = odd_parity;
-                true
+                UartRxCapture$(
+                    valid: true,
+                    byte: data,
+                    parity_error: odd_parity ^^ rx_sync,
+                )
             },
-            _ => false,
+            _ => UartRxCapture$(
+                valid: false,
+                byte: capture.byte,
+                parity_error: capture.parity_error,
+            ),
         }
     };
 
-    reg(clk) out_byte: uint<DATA_WIDTH> reset(rst: 0) = {
-        match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
-                let _ = odd_parity;
-                uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync)
-            },
-            RxState::WaitParity$(time, data, odd_parity) if time == last => {
-                let _ = odd_parity;
-                data
-            },
-            _ => out_byte,
-        }
-    };
-
-    reg(clk) out_parity_error: bool reset(rst: false) = {
-        match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
-                let _ = data;
-                let _ = odd_parity;
-                false
-            },
-            RxState::WaitParity$(time, data, odd_parity) if time == last => {
-                let _ = data;
-                odd_parity ^^ rx_sync
-            },
-            _ => out_parity_error,
-        }
-    };
+    let out_valid = capture.valid;
+    let out_byte = capture.byte;
+    let out_parity_error = capture.parity_error;
 
     UartRxOut$(
         valid: out_valid,
