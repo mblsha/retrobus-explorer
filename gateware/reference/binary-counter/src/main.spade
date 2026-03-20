@@ -83,9 +83,7 @@ entity main(
     };
 
     reg(clk) counter: uint<8> reset(rst: 0) = {
-        if accepted_digit {
-            counter
-        } else if prescaler == last {
+        if !accepted_digit && prescaler == last {
             counter +. 1
         } else {
             counter
