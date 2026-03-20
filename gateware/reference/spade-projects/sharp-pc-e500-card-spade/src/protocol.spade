@@ -43,16 +43,15 @@ pub fn init_parser() -> ParserState {
 }
 
 
-fn parser_out(state: ParserState, next_state: ParserState, event: ParserEvent, echo: EchoMsg) -> ParserStepOut {
-    let _ = state;
+fn parser_out(next_state: ParserState, event: ParserEvent, echo: EchoMsg) -> ParserStepOut {
     ParserStepOut$(state: next_state, event: event, echo: echo)
 }
 
 fn parser_error(state: ParserState, rx_byte: uint<8>) -> ParserStepOut {
     if rx_byte.is_line_end() {
-        parser_out(state, ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
+        parser_out(ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
     } else {
-        parser_out(state, ParserState::Error(), ParserEvent::None(), EchoMsg::None())
+        parser_out(ParserState::Error(), ParserEvent::None(), EchoMsg::None())
     }
 }
 
@@ -79,13 +78,13 @@ pub fn parser_step(
         match state {
             ParserState::Idle => {
                 if rx_byte.is_line_end() {
-                    parser_out(state, ParserState::Idle(), ParserEvent::None(), EchoMsg::None())
+                    parser_out(ParserState::Idle(), ParserEvent::None(), EchoMsg::None())
                 } else if upper == b'R' {
-                    parser_out(state, ParserState::ReadAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::ReadAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if upper == b'W' {
-                    parser_out(state, ParserState::WriteAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::WriteAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if upper == b'T' {
-                    parser_out(state, ParserState::TimingHi(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::TimingHi(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
                     parser_error(state, rx_byte)
                 }
@@ -98,14 +97,12 @@ pub fn parser_step(
                     let next_value = addr_accum(value, nibble);
                     if next_digits == 3 {
                         parser_out(
-                            state,
                             ParserState::NeedReadLineEnd(next_value),
                             ParserEvent::None(),
                             EchoMsg::Byte(rx_byte),
                         )
                     } else {
                         parser_out(
-                            state,
                             ParserState::ReadAddr(next_digits, next_value),
                             ParserEvent::None(),
                             EchoMsg::Byte(rx_byte),
@@ -115,7 +112,7 @@ pub fn parser_step(
             },
             ParserState::NeedReadLineEnd$(addr) => {
                 if rx_byte.is_line_end() {
-                    parser_out(state, ParserState::Idle(), ParserEvent::Read(addr), EchoMsg::CrLf())
+                    parser_out(ParserState::Idle(), ParserEvent::Read(addr), EchoMsg::CrLf())
                 } else {
                     parser_error(state, rx_byte)
                 }
@@ -128,14 +125,12 @@ pub fn parser_step(
                     let next_value = addr_accum(value, nibble);
                     if next_digits == 3 {
                         parser_out(
-                            state,
                             ParserState::WriteEq(next_value),
                             ParserEvent::None(),
                             EchoMsg::Byte(rx_byte),
                         )
                     } else {
                         parser_out(
-                            state,
                             ParserState::WriteAddr(next_digits, next_value),
                             ParserEvent::None(),
                             EchoMsg::Byte(rx_byte),
@@ -145,14 +140,14 @@ pub fn parser_step(
             },
             ParserState::WriteEq$(addr) => {
                 if rx_byte == b'=' {
-                    parser_out(state, ParserState::WriteDataHi(addr), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::WriteDataHi(addr), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
                     parser_error(state, rx_byte)
                 }
             },
             ParserState::WriteDataHi$(addr) => {
                 if nibble_ok {
-                    parser_out(state, ParserState::WriteDataLo(addr, nibble), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::WriteDataLo(addr, nibble), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
                     parser_error(state, rx_byte)
                 }
@@ -161,7 +156,6 @@ pub fn parser_step(
                 if nibble_ok {
                     let value: CardData = (zext(hi) << 4) | zext(nibble);
                     parser_out(
-                        state,
                         ParserState::NeedWriteLineEnd(addr, value),
                         ParserEvent::None(),
                         EchoMsg::Byte(rx_byte),
@@ -172,7 +166,7 @@ pub fn parser_step(
             },
             ParserState::NeedWriteLineEnd$(addr, value) => {
                 if rx_byte.is_line_end() {
-                    parser_out(state, ParserState::Idle(), ParserEvent::Write(addr, value), EchoMsg::CrLf())
+                    parser_out(ParserState::Idle(), ParserEvent::Write(addr, value), EchoMsg::CrLf())
                 } else {
                     parser_error(state, rx_byte)
                 }
@@ -180,7 +174,7 @@ pub fn parser_step(
             ParserState::TimingHi => {
                 let digit = rx_byte.decode_digit();
                 if digit.valid {
-                    parser_out(state, ParserState::TimingLo(digit.value), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::TimingLo(digit.value), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
                     parser_error(state, rx_byte)
                 }
@@ -195,7 +189,6 @@ pub fn parser_step(
                     let cycles_u8: uint<8> = tens_times_ten +. digit_u8;
                     let cycles: uint<7> = trunc(cycles_u8);
                     parser_out(
-                        state,
                         ParserState::NeedTimingLineEnd(cycles),
                         ParserEvent::None(),
                         EchoMsg::Byte(rx_byte),
@@ -206,16 +199,16 @@ pub fn parser_step(
             },
             ParserState::NeedTimingLineEnd$(cycles) => {
                 if rx_byte.is_line_end() {
-                    parser_out(state, ParserState::Idle(), ParserEvent::SetClassifyDelay(cycles), EchoMsg::CrLf())
+                    parser_out(ParserState::Idle(), ParserEvent::SetClassifyDelay(cycles), EchoMsg::CrLf())
                 } else {
                     parser_error(state, rx_byte)
                 }
             },
             ParserState::Error => {
                 if rx_byte.is_line_end() {
-                    parser_out(state, ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
+                    parser_out(ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
                 } else {
-                    parser_out(state, ParserState::Error(), ParserEvent::None(), EchoMsg::None())
+                    parser_out(ParserState::Error(), ParserEvent::None(), EchoMsg::None())
                 }
             },
         }
