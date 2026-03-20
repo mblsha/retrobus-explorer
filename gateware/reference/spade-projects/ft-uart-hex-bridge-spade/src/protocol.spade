@@ -3,6 +3,7 @@ use shared_components::serial::{FtBe, FtData};
 
 pub type BridgeCount = uint<16>;
 pub type PackedFtWord = uint<18>;
+const DEFAULT_FT_BE: FtBe = 0x3;
 
 pub enum ParserPhase {
     Idle,
@@ -39,7 +40,7 @@ pub fn init_line_parser() -> LineParserState {
     LineParserState$(
         phase: ParserPhase::Idle(),
         word: 0,
-        be: 0x3,
+        be: DEFAULT_FT_BE,
     )
 }
 
@@ -70,7 +71,7 @@ impl ParserEvent {
             let _ = word;
             be
         } else {
-            0x3
+            DEFAULT_FT_BE
         }
     }
 
@@ -87,7 +88,7 @@ fn parser_step(state: LineParserState, phase: ParserPhase, word: FtData, be: FtB
 }
 
 fn parser_error() -> ParserStepOut {
-    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::ParseErr())
+    ParserStepOut$(state: init_line_parser(), event: ParserEvent::ParseErr())
 }
 pub fn line_parser_step(
     state: LineParserState,
@@ -110,13 +111,13 @@ pub fn line_parser_step(
                 if rx_byte.is_line_end() {
                     ParserStepOut$(state: state, event: ParserEvent::None())
                 } else if rx_byte == b'?' {
-                    parser_step(state, ParserPhase::CmdStatus(), 0, 0x3, ParserEvent::None())
+                    parser_step(state, ParserPhase::CmdStatus(), 0, DEFAULT_FT_BE, ParserEvent::None())
                 } else if rx_byte.to_upper() == b'H' {
-                    parser_step(state, ParserPhase::CmdHelp(), 0, 0x3, ParserEvent::None())
+                    parser_step(state, ParserPhase::CmdHelp(), 0, DEFAULT_FT_BE, ParserEvent::None())
                 } else if nibble_ok {
-                    parser_step(state, ParserPhase::NeedHex1(), zext(nibble), 0x3, ParserEvent::None())
+                    parser_step(state, ParserPhase::NeedHex1(), zext(nibble), DEFAULT_FT_BE, ParserEvent::None())
                 } else {
-                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                    parser_step(state, ParserPhase::Error(), 0, DEFAULT_FT_BE, ParserEvent::None())
                 }
             },
             ParserPhase::NeedHex1 => {
@@ -144,7 +145,7 @@ pub fn line_parser_step(
                 if rx_byte == b'/' {
                     parser_step(state, ParserPhase::NeedBeLineEnd(), state.word, state.be, ParserEvent::None())
                 } else if rx_byte.is_line_end() {
-                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Send(state.word, state.be))
+                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, DEFAULT_FT_BE, ParserEvent::Send(state.word, state.be))
                 } else {
                     parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
@@ -165,16 +166,16 @@ pub fn line_parser_step(
             },
             ParserPhase::CmdHelp => {
                 if rx_byte.is_line_end() {
-                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Help())
+                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, DEFAULT_FT_BE, ParserEvent::Help())
                 } else {
-                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                    parser_step(state, ParserPhase::Error(), 0, DEFAULT_FT_BE, ParserEvent::None())
                 }
             },
             ParserPhase::CmdStatus => {
                 if rx_byte.is_line_end() {
-                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Status())
+                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, DEFAULT_FT_BE, ParserEvent::Status())
                 } else {
-                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                    parser_step(state, ParserPhase::Error(), 0, DEFAULT_FT_BE, ParserEvent::None())
                 }
             },
             ParserPhase::Error => {
