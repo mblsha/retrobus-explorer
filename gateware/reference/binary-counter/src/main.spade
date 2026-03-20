@@ -12,8 +12,7 @@ entity decode_rx_digit(
 ) -> Option<DigitDecode> {
     let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
 
-    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
-        let _ = clk;
+    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |_, byte| {
         let digit_valid = byte.is_digit();
         DigitDecode$(
             valid: digit_valid,
@@ -83,9 +82,7 @@ entity main(
     };
 
     reg(clk) counter: uint<8> reset(rst: 0) = {
-        if accepted_digit {
-            counter
-        } else if prescaler == last {
+        if !accepted_digit && prescaler == last {
             counter +. 1
         } else {
             counter
