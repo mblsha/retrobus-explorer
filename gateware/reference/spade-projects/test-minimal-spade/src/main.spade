@@ -1,6 +1,9 @@
 mod build_info;
 use shared_components::primitives::counter;
 
+const COUNTER_WIDTH: uint = 26;
+const LED_SHIFT: uint = 18;
+
 #[no_mangle(all)]
 entity main(
     clk: clock,
@@ -8,8 +11,8 @@ entity main(
     led: inv &[bool; 8],
 ) {
     let rst = !rst_n;
-    let counter = inst counter::<26>(clk, rst);
-    let led_counter: uint<8> = trunc(counter >> 18);
+    let counter = inst counter::<COUNTER_WIDTH>(clk, rst);
+    let led_counter: uint<8> = trunc(counter >> LED_SHIFT);
 
     set led = &led_counter.to_bits();
 }
