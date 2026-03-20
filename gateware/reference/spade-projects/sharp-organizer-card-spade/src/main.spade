@@ -144,9 +144,9 @@ impl MainState {
             !ui.msg.is_none(),
             ui.msg,
         );
-        let stream_word_valid = monitor_transport.stream_event.valid;
-        let stream_word = if monitor_transport.stream_event.valid {
-            pack_trace_event_word(monitor_transport.stream_event.event)
+        let stream_event = monitor_transport.stream_event;
+        let stream_word = if stream_event.valid {
+            pack_trace_event_word(stream_event.event)
         } else {
             0
         };
@@ -172,7 +172,7 @@ impl MainState {
             ),
             tx_req: msg_stream.tx_req,
             monitor_samples: monitor.samples,
-            stream_word_valid: stream_word_valid,
+            stream_word_valid: stream_event.valid,
             stream_word: stream_word,
             ft_stream: ft_stream,
             board_state: current_board_state(self),
