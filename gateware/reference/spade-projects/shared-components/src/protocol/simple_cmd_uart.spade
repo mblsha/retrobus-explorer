@@ -41,6 +41,10 @@ struct RxByteDecode {
     digit: DigitDecode,
 }
 
+fn max_supported_freq_code() -> uint<4> {
+    5
+}
+
 fn default_rx_byte_decode() -> RxByteDecode {
     RxByteDecode$(
         byte: 0,
@@ -55,7 +59,7 @@ entity decode_rx_byte(
     rx_parity_error: bool,
     rx_byte: uint<8>,
 ) -> Option<RxByteDecode> {
-    let max_freq_code: uint<4> = 5;
+    let max_freq_code = max_supported_freq_code();
     let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
 
     maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
@@ -145,7 +149,7 @@ pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk4
         clk200,
         clk400,
     ];
-    let idx_u4: uint<4> = if freq_code > 5 { 0 } else { freq_code };
+    let idx_u4: uint<4> = if freq_code > max_supported_freq_code() { 0 } else { freq_code };
     let idx: uint<3> = trunc(idx_u4);
     sources[idx]
 }
