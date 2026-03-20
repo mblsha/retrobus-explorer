@@ -28,20 +28,16 @@ pub fn stable_sample_step<#uint WIDTH, #uint COUNT_W>(
     threshold: uint<COUNT_W>,
 ) -> StableSampleOut<WIDTH, COUNT_W> {
     let changed = state.last != current;
-    let wput = !changed && !state.sent && state.counter > threshold;
+    let stable = !changed;
+    let has_waited_long_enough = state.counter > threshold;
+    let should_send = stable && !state.sent && has_waited_long_enough;
     StableSampleOut$(
         next_state: StableSampleState$(
             last: if changed { current } else { state.last },
-            sent: if changed {
-                false
-            } else if wput {
-                true
-            } else {
-                state.sent
-            },
+            sent: if changed { false } else { state.sent || should_send },
             counter: if changed { 0 } else { state.counter +. 1 },
         ),
-        wput: wput,
+        wput: should_send,
     )
 }
 
