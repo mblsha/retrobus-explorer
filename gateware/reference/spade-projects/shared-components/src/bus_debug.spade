@@ -321,6 +321,8 @@ fn run_ft_stream_mux(
     let ft_get_fifo = if let FtState::GetFifo = ft_state { true } else { false };
     let ft_stream = if let FtState::Stream = ft_state { true } else { false };
     let ft_can_push = !ft_ui_din_full;
+    let should_fetch_word = ft_get_fifo && ft_can_push && !stream_fifo_empty;
+    let should_stream_word = ft_stream && ft_can_push;
     let next_ft_enabled = if ft_cmd.enable {
         true
     } else if ft_cmd.disable {
@@ -333,21 +335,21 @@ fn run_ft_stream_mux(
         FtState::Stream if ft_can_push => FtState::GetFifo(),
         _ => ft_state,
     };
-    let next_ft_cur_value = if ft_get_fifo && ft_can_push && !stream_fifo_empty {
+    let next_ft_cur_value = if should_fetch_word {
         stream_fifo_dout
     } else {
         ft_cur_value
     };
-    let ft_ui_din_valid = (ft_get_fifo && ft_can_push && !stream_fifo_empty) || (ft_stream && ft_can_push);
-    let ft_ui_din: uint<16> = if ft_get_fifo && ft_can_push && !stream_fifo_empty {
+    let ft_ui_din_valid = should_fetch_word || should_stream_word;
+    let ft_ui_din: uint<16> = if should_fetch_word {
         trunc(stream_fifo_dout)
-    } else if ft_stream && ft_can_push {
+    } else if should_stream_word {
         trunc(ft_cur_value >> 16)
     } else {
         0
     };
     let stream_fifo_rget = if ft_get_fifo {
-        ft_can_push && !stream_fifo_empty
+        should_fetch_word
     } else if ft_stream {
         ft_can_push
     } else {
