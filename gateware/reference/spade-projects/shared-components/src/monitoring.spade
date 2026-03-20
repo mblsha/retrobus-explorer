@@ -32,13 +32,7 @@ pub fn stable_sample_step<#uint WIDTH, #uint COUNT_W>(
     StableSampleOut$(
         next_state: StableSampleState$(
             last: if changed { current } else { state.last },
-            sent: if changed {
-                false
-            } else if wput {
-                true
-            } else {
-                state.sent
-            },
+            sent: if changed { false } else { wput || state.sent },
             counter: if changed { 0 } else { state.counter +. 1 },
         ),
         wput: wput,
