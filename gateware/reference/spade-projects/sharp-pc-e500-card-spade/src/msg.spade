@@ -12,6 +12,7 @@ pub enum RespMsg {
     Err,
     Read{addr: CardOffset, value: CardData},
     Timing{cycles: uint<7>},
+    Ft{enabled: bool},
 }
 
 pub type EchoStreamState = ByteMsgStreamState<EchoMsg, 2>;
@@ -115,6 +116,14 @@ impl RespMsg {
                 6 => TxReq8$(valid: true, byte: b's'),
                 7 => TxReq8$(valid: true, byte: b'\r'),
                 8 => TxReq8$(valid: true, byte: b'\n'),
+                _ => tx_req_none(),
+            },
+            Self::Ft$(enabled) => match idx {
+                0 => TxReq8$(valid: true, byte: b'F'),
+                1 => TxReq8$(valid: true, byte: b'='),
+                2 => TxReq8$(valid: true, byte: if enabled { b'1' } else { b'0' }),
+                3 => TxReq8$(valid: true, byte: b'\r'),
+                4 => TxReq8$(valid: true, byte: b'\n'),
                 _ => tx_req_none(),
             },
             Self::Read$(addr, value) => match idx {

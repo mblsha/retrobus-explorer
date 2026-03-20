@@ -8,6 +8,7 @@ pub enum ParserEvent {
     Read{addr: CardOffset},
     Write{addr: CardOffset, value: CardData},
     SetClassifyDelay{cycles: uint<7>},
+    SetFtStreaming{enabled: bool},
     ParseErr,
 }
 
@@ -29,6 +30,8 @@ pub enum ParserState {
     TimingHi,
     TimingLo{tens: uint<4>},
     NeedTimingLineEnd{cycles: uint<7>},
+    FtEnable,
+    NeedFtLineEnd{enabled: bool},
     Error,
 }
 
@@ -85,6 +88,8 @@ pub fn parser_step(
                     parser_out(ParserState::WriteAddr(0, 0), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if upper == b'T' {
                     parser_out(ParserState::TimingHi(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else if upper == b'F' {
+                    parser_out(ParserState::FtEnable(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
                     parser_error(state, rx_byte)
                 }
@@ -200,6 +205,22 @@ pub fn parser_step(
             ParserState::NeedTimingLineEnd$(cycles) => {
                 if rx_byte.is_line_end() {
                     parser_out(ParserState::Idle(), ParserEvent::SetClassifyDelay(cycles), EchoMsg::CrLf())
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::FtEnable => {
+                if rx_byte == b'0' {
+                    parser_out(ParserState::NeedFtLineEnd(false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else if rx_byte == b'1' {
+                    parser_out(ParserState::NeedFtLineEnd(true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else {
+                    parser_error(state, rx_byte)
+                }
+            },
+            ParserState::NeedFtLineEnd$(enabled) => {
+                if rx_byte.is_line_end() {
+                    parser_out(ParserState::Idle(), ParserEvent::SetFtStreaming(enabled), EchoMsg::CrLf())
                 } else {
                     parser_error(state, rx_byte)
                 }
