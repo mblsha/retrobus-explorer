@@ -4,15 +4,24 @@ import json
 from pathlib import Path
 
 import cocotb
+from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 from cocotb_helpers import start_clock
 from cocotb_helpers import tick
 
 
 USB_UART_BIT_CYCLES = 100
-CLASSIFY_CYCLES = 50
+DEFAULT_CLASSIFY_CYCLES = 50
 TAIL_CYCLES = 20
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+FT_KIND_CE1_READ = 0x01
+FT_KIND_CE1_WRITE = 0x02
+FT_KIND_CE6_READ = 0x03
+FT_KIND_CE6_WRITE_ATTEMPT = 0x04
+FT_KIND_SYNC = 0xF0
+FT_KIND_OVERFLOW = 0xF1
+FT_KIND_CONFIG = 0xF2
 
 
 def saleae_bit(value, idx):
@@ -22,6 +31,51 @@ def saleae_bit(value, idx):
 def expected_boot_banner() -> str:
     info = json.loads((PROJECT_ROOT / "build" / "build_info.json").read_text())
     return info["banner"]
+
+
+def _bit(signal) -> int:
+    value = signal.value
+    if not value.is_resolvable:
+        raise AssertionError(f"unresolved signal: {signal._name}={value}")
+    return int(value) & 1
+
+
+def _u16(signal) -> int:
+    value = signal.value
+    if not value.is_resolvable:
+        raise AssertionError(f"unresolved signal: {signal._name}={value}")
+    return int(value) & 0xFFFF
+
+
+def _u2(signal) -> int:
+    value = signal.value
+    if not value.is_resolvable:
+        raise AssertionError(f"unresolved signal: {signal._name}={value}")
+    return int(value) & 0x3
+
+
+def _ft_kind(record: int) -> int:
+    return (record >> 72) & 0xFF
+
+
+def _ft_delta(record: int) -> int:
+    return (record >> 40) & 0xFFFFFFFF
+
+
+def _ft_addr(record: int) -> int:
+    return (record >> 22) & 0x3FFFF
+
+
+def _ft_data(record: int) -> int:
+    return (record >> 14) & 0xFF
+
+
+def _ft_aux(record: int) -> int:
+    return record & 0x3FFF
+
+
+def _ft_overflow_count(record: int) -> int:
+    return _ft_addr(record) | (_ft_data(record) << 18)
 
 
 async def _uart_wait_start_fall(dut, timeout_cycles: int) -> None:
@@ -116,13 +170,60 @@ async def _fast_uart_recv_word(signal, clk, width: int, timeout_cycles: int = 12
     return value
 
 
+async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 4000) -> list[tuple[int, int]]:
+    observed: list[tuple[int, int]] = []
+    for _ in range(timeout_cycles):
+        await FallingEdge(dut.ft_clk)
+        will_write = _bit(dut.ft_oe) == 1 and _bit(dut.ft_wr) == 0 and _bit(dut.ft_txe) == 0
+        sampled_word = (_u16(dut.ft_data), _u2(dut.ft_be))
+        await RisingEdge(dut.ft_clk)
+        await Timer(1, units="ps")
+        if will_write:
+            observed.append(sampled_word)
+            if len(observed) == count:
+                return observed
+    raise AssertionError(f"timed out waiting for {count} FT writes")
+
+
+async def _assert_no_ft_write(dut, cycles: int = 800):
+    for _ in range(cycles):
+        await FallingEdge(dut.ft_clk)
+        will_write = _bit(dut.ft_oe) == 1 and _bit(dut.ft_wr) == 0 and _bit(dut.ft_txe) == 0
+        await RisingEdge(dut.ft_clk)
+        await Timer(1, units="ps")
+        assert not will_write, "unexpected FT write while streaming should be idle"
+
+
+async def _ft_recv_record(dut, timeout_cycles: int = 12000) -> int:
+    words = await _collect_ft_writes(dut, 5, timeout_cycles)
+    record = 0
+    for idx, (word, be) in enumerate(words):
+        assert be == 0x3, f"expected FT byte-enable 0x3, got {be:#x}"
+        record |= word << (16 * idx)
+    return record
+
+
+async def _ft_recv_records(dut, count: int, timeout_cycles: int = 12000) -> list[int]:
+    out: list[int] = []
+    for _ in range(count):
+        out.append(await _ft_recv_record(dut, timeout_cycles))
+    return out
+
+
 def _set_data_bus_z(dut):
     dut.data_host.value = 0
     dut.data_host_drive.value = 0
 
 
+def _set_ft_bus_z(dut):
+    dut.ft_data_host.value = 0
+    dut.ft_be_host.value = 0
+    dut.ft_host_drive.value = 0
+
+
 async def _init(dut):
     start_clock(dut.clk)
+    start_clock(dut.ft_clk)
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1
@@ -133,7 +234,10 @@ async def _init(dut):
     dut.vcc2.value = 0
     dut.nc.value = 0
     dut.addr.value = 0
+    dut.ft_rxf.value = 1
+    dut.ft_txe.value = 0
     _set_data_bus_z(dut)
+    _set_ft_bus_z(dut)
 
     await tick(dut.clk, 8)
     dut.rst_n.value = 1
@@ -141,14 +245,29 @@ async def _init(dut):
     assert await _uart_recv_line(dut) == expected_boot_banner()
 
 
-async def _bus_write(dut, addr: int, value: int):
+async def _enable_ft(dut):
+    ft_records = cocotb.start_soon(_ft_recv_records(dut, 2))
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f1\r\nF=1\r\n")))
+    await _uart_send_text(dut, "f1\r")
+    assert await rx == b"f1\r\nF=1\r\n"
+    sync, config = await ft_records
+    return sync, config
+
+
+async def _disable_ft(dut):
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f0\r\nF=0\r\n")))
+    await _uart_send_text(dut, "f0\r")
+    assert await rx == b"f0\r\nF=0\r\n"
+
+
+async def _bus_write(dut, addr: int, value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
     dut.addr.value = addr & 0x3FFFF
     dut.ce1.value = 1
     dut.rw.value = 0
     dut.oe.value = 1
     dut.data_host.value = value & 0xFF
     dut.data_host_drive.value = 1
-    await tick(dut.clk, CLASSIFY_CYCLES + 2)
+    await tick(dut.clk, classify_cycles + 2)
     dut.rw.value = 1
     await tick(dut.clk, TAIL_CYCLES)
     dut.ce1.value = 0
@@ -156,14 +275,14 @@ async def _bus_write(dut, addr: int, value: int):
     await tick(dut.clk, 2)
 
 
-async def _bus_write_and_check_tail_release(dut, addr: int, value: int, tail_value: int):
+async def _bus_write_and_check_tail_release(dut, addr: int, value: int, tail_value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
     dut.addr.value = addr & 0x3FFFF
     dut.ce1.value = 1
     dut.rw.value = 0
     dut.oe.value = 1
     dut.data_host.value = value & 0xFF
     dut.data_host_drive.value = 1
-    await tick(dut.clk, CLASSIFY_CYCLES + 2)
+    await tick(dut.clk, classify_cycles + 2)
     dut.data_host.value = tail_value & 0xFF
     dut.rw.value = 1
     await tick(dut.clk, 1)
@@ -175,13 +294,13 @@ async def _bus_write_and_check_tail_release(dut, addr: int, value: int, tail_val
     return observed
 
 
-async def _bus_read(dut, addr: int) -> int:
+async def _bus_read(dut, addr: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES) -> int:
     _set_data_bus_z(dut)
     dut.addr.value = addr & 0x3FFFF
     dut.ce1.value = 1
     dut.rw.value = 1
     dut.oe.value = 0
-    await tick(dut.clk, CLASSIFY_CYCLES + 2)
+    await tick(dut.clk, classify_cycles + 2)
     value = int(dut.data.value) & 0xFF
     await tick(dut.clk, TAIL_CYCLES)
     dut.ce1.value = 0
@@ -190,7 +309,7 @@ async def _bus_read(dut, addr: int) -> int:
     return value
 
 
-async def _bus_read_and_check_late_drive(dut, addr: int, host_value: int):
+async def _bus_read_and_check_late_drive(dut, addr: int, host_value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
     dut.addr.value = addr & 0x3FFFF
     dut.ce1.value = 1
     dut.rw.value = 1
@@ -198,7 +317,7 @@ async def _bus_read_and_check_late_drive(dut, addr: int, host_value: int):
     dut.data_host.value = host_value & 0xFF
     dut.data_host_drive.value = 1
 
-    await tick(dut.clk, CLASSIFY_CYCLES - 5)
+    await tick(dut.clk, classify_cycles - 5)
     before = int(dut.data.value) & 0xFF
 
     _set_data_bus_z(dut)
@@ -212,16 +331,54 @@ async def _bus_read_and_check_late_drive(dut, addr: int, host_value: int):
     return before, after
 
 
+async def _ce6_read(dut, addr: int, value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
+    dut.addr.value = addr & 0x3FFFF
+    dut.ce6.value = 1
+    dut.ce1.value = 0
+    dut.rw.value = 1
+    dut.oe.value = 0
+    dut.data_host.value = value & 0xFF
+    dut.data_host_drive.value = 1
+    await tick(dut.clk, classify_cycles + 2)
+    observed = int(dut.data.value) & 0xFF
+    drive = int(dut.data_oe.value)
+    await tick(dut.clk, TAIL_CYCLES)
+    dut.ce6.value = 0
+    dut.oe.value = 1
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+    return observed, drive
+
+
+async def _ce6_write(dut, addr: int, value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
+    dut.addr.value = addr & 0x3FFFF
+    dut.ce6.value = 1
+    dut.ce1.value = 0
+    dut.rw.value = 0
+    dut.oe.value = 1
+    dut.data_host.value = value & 0xFF
+    dut.data_host_drive.value = 1
+    await tick(dut.clk, classify_cycles + 2)
+    drive = int(dut.data_oe.value)
+    dut.rw.value = 1
+    await tick(dut.clk, TAIL_CYCLES)
+    dut.ce6.value = 0
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+    return drive
+
+
 @cocotb.test()
-async def boot_banner_and_usb_uart_idle_after_boot(dut):
+async def boot_banner_and_uart_ft_idle_after_boot(dut):
     await _init(dut)
 
     await _assert_no_usb_tx_start_bit(dut, USB_UART_BIT_CYCLES * 12)
+    await _assert_no_ft_write(dut, 400)
     assert int(dut.usb_tx.value) == 1
 
 
 @cocotb.test()
-async def usb_uart_echo_reads_writes_and_reports_errors(dut):
+async def usb_uart_echo_reads_writes_ft_toggle_and_reports_errors(dut):
     await _init(dut)
 
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"w005=A5\r\nOK\r\n")))
@@ -244,16 +401,28 @@ async def usb_uart_echo_reads_writes_and_reports_errors(dut):
     await _uart_send_text(dut, "x\r")
     assert await rx == b"\r\nERR\r\n"
 
+    await _disable_ft(dut)
+    sync, config = await _enable_ft(dut)
+    assert _ft_kind(sync) == FT_KIND_SYNC
+    assert _ft_kind(config) == FT_KIND_CONFIG
+
 
 @cocotb.test()
-async def usb_uart_can_set_classify_delay(dut):
+async def usb_uart_can_set_classify_delay_and_emit_ft_config(dut):
     await _init(dut)
+    await _enable_ft(dut)
 
+    ft_config = cocotb.start_soon(_ft_recv_record(dut))
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"t20\r\nT=200ns\r\n")))
     await _uart_send_text(dut, "t20\r")
     assert await rx == b"t20\r\nT=200ns\r\n"
 
-    await _bus_write(dut, 0x0005, 0x5A)
+    config = await ft_config
+    assert _ft_kind(config) == FT_KIND_CONFIG
+    assert _ft_addr(config) == 20
+    assert (_ft_aux(config) & 0x1) == 1
+
+    await _bus_write(dut, 0x0005, 0x5A, classify_cycles=20)
 
     dut.addr.value = 0x0005
     dut.ce1.value = 1
@@ -307,8 +476,9 @@ async def ram_card_writes_reads_and_mirrors_2k(dut):
 
 
 @cocotb.test()
-async def sniffer_uarts_and_ram_event_uart_report_bus_activity(dut):
+async def saleae_sniffers_and_ft_records_report_bus_activity(dut):
     await _init(dut)
+    await _enable_ft(dut)
 
     dut.ce1.value = 1
     dut.ce6.value = 1
@@ -326,17 +496,80 @@ async def sniffer_uarts_and_ram_event_uart_report_bus_activity(dut):
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
     data_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[5], dut.clk, 8))
     addr_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 18))
+    ft_write = cocotb.start_soon(_ft_recv_record(dut))
 
     await _bus_write(dut, 0x0012, 0x5A)
 
     assert await event_write == 0x575A
     assert await data_uart == 0x5A
     assert await addr_uart == 0x0012
-
-    v = int(dut.saleae.value)
-    assert saleae_bit(v, 4) == 0
-    assert saleae_bit(v, 6) == 0
+    rec = await ft_write
+    assert _ft_kind(rec) == FT_KIND_CE1_WRITE
+    assert _ft_addr(rec) == 0x0012
+    assert _ft_data(rec) == 0x5A
 
     event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    ft_reads = cocotb.start_soon(_ft_recv_records(dut, 2))
     assert await _bus_read(dut, 0x0012) == 0x5A
     assert await event_read == 0x525A
+    assert await _bus_read(dut, 0x0012) == 0x5A
+    reads = await ft_reads
+    assert _ft_kind(reads[0]) == FT_KIND_CE1_READ
+    assert _ft_kind(reads[1]) == FT_KIND_CE1_READ
+    assert _ft_addr(reads[0]) == 0x0012
+    assert _ft_addr(reads[1]) == 0x0012
+    assert _ft_data(reads[0]) == 0x5A
+    assert _ft_data(reads[1]) == 0x5A
+    assert (_ft_aux(reads[1]) >> 4) & 0x1 == 1
+    assert (_ft_aux(reads[1]) >> 5) & 0x1 == 1
+
+
+@cocotb.test()
+async def ce6_events_are_logged_but_never_drive_bus(dut):
+    await _init(dut)
+    await _enable_ft(dut)
+
+    ft_read = cocotb.start_soon(_ft_recv_record(dut))
+    observed, drive = await _ce6_read(dut, 0x0021, 0xA7)
+    assert observed == 0xA7
+    assert drive == 0
+    rec = await ft_read
+    assert _ft_kind(rec) == FT_KIND_CE6_READ
+    assert _ft_addr(rec) == 0x0021
+    assert _ft_data(rec) == 0xA7
+
+    ft_write = cocotb.start_soon(_ft_recv_record(dut))
+    drive = await _ce6_write(dut, 0x0021, 0x3C)
+    assert drive == 0
+    rec = await ft_write
+    assert _ft_kind(rec) == FT_KIND_CE6_WRITE_ATTEMPT
+    assert _ft_addr(rec) == 0x0021
+    assert _ft_data(rec) == 0x3C
+    assert await _bus_read(dut, 0x0021) == 0x00
+
+
+@cocotb.test()
+async def ft_overflow_reports_dropped_accesses_after_host_stall(dut):
+    await _init(dut)
+    await _enable_ft(dut)
+
+    dut.ft_txe.value = 1
+    # au_ft_tap_u16 has an 8192-word TX FIFO, so this needs to exceed
+    # roughly 1638 full 5-word FT records before overflow can occur.
+    for _ in range(2000):
+        await _bus_read(dut, 0x0000)
+
+    dut.ft_txe.value = 0
+    records = []
+    for _ in range(2100):
+        rec = await _ft_recv_record(dut, timeout_cycles=60000)
+        records.append(rec)
+        if _ft_kind(rec) == FT_KIND_OVERFLOW:
+            break
+
+    assert records, 'expected at least one FT record after stall'
+    assert _ft_kind(records[0]) == FT_KIND_CE1_READ
+    assert _ft_kind(records[-1]) == FT_KIND_OVERFLOW
+    for rec in records[:-1]:
+        assert _ft_kind(rec) == FT_KIND_CE1_READ
+    assert _ft_overflow_count(records[-1]) > 0
