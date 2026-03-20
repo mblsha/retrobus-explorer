@@ -23,27 +23,9 @@ entity decode_rx_digit(
 }
 
 fn divider_last(slow_factor: uint<4>) -> uint<10> {
-    if slow_factor == 0 {
-        0
-    } else if slow_factor == 1 {
-        1
-    } else if slow_factor == 2 {
-        3
-    } else if slow_factor == 3 {
-        7
-    } else if slow_factor == 4 {
-        15
-    } else if slow_factor == 5 {
-        31
-    } else if slow_factor == 6 {
-        63
-    } else if slow_factor == 7 {
-        127
-    } else if slow_factor == 8 {
-        255
-    } else {
-        511
-    }
+    let clamped_shift = if slow_factor > 9 { 9 } else { slow_factor };
+    let base: uint<10> = 1;
+    (base << clamped_shift) -. 1
 }
 
 #[no_mangle(all)]
