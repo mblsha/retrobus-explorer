@@ -97,6 +97,24 @@ fn rx_queue_write_at(storage: [PackedFtWord; 4], idx: uint<2>, value: PackedFtWo
     })
 }
 
+
+fn parser_event_to_ctrl_msg(
+    event: ParserEvent,
+    tx_queue_overflow: bool,
+    rx_count: BridgeCount,
+    tx_count: BridgeCount,
+    err_count: BridgeCount,
+    stall_count: BridgeCount,
+) -> BridgeMsg {
+    match event {
+        ParserEvent::Help => BridgeMsg::Help(),
+        ParserEvent::Status => BridgeMsg::Status(rx_count, tx_count, err_count, stall_count),
+        ParserEvent::ParseErr => BridgeMsg::ParseErr(),
+        ParserEvent::Send(_, _) if tx_queue_overflow => BridgeMsg::TxFull(),
+        _ => BridgeMsg::None(),
+    }
+}
+
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -137,18 +155,14 @@ entity main_core(
         let send_be = parse.event.send_be();
         let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
         let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
-        let parser_msg = match parse.event {
-            ParserEvent::Help => BridgeMsg::Help(),
-            ParserEvent::Status => BridgeMsg::Status(
-                state.rx_count,
-                state.tx_count,
-                state.err_count,
-                state.stall_count,
-            ),
-            ParserEvent::ParseErr => BridgeMsg::ParseErr(),
-            ParserEvent::Send(_, _) if tx_queue_overflow => BridgeMsg::TxFull(),
-            _ => BridgeMsg::None(),
-        };
+        let parser_msg = parser_event_to_ctrl_msg(
+            parse.event,
+            tx_queue_overflow,
+            state.rx_count,
+            state.tx_count,
+            state.err_count,
+            state.stall_count,
+        );
         let ctrl_msg = choose_ctrl_msg(state.pending_ctrl_msg, parser_msg);
         let can_offer_msg = state.msg_stream.pending_msg.is_none();
         let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
@@ -236,18 +250,14 @@ entity main_core(
     let send_word_valid = parse.event.is_send();
     let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
     let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
-    let parser_msg = match parse.event {
-        ParserEvent::Help => BridgeMsg::Help(),
-        ParserEvent::Status => BridgeMsg::Status(
-            state.rx_count,
-            state.tx_count,
-            state.err_count,
-            state.stall_count,
-        ),
-        ParserEvent::ParseErr => BridgeMsg::ParseErr(),
-        ParserEvent::Send(_, _) if tx_queue_overflow => BridgeMsg::TxFull(),
-        _ => BridgeMsg::None(),
-    };
+    let parser_msg = parser_event_to_ctrl_msg(
+        parse.event,
+        tx_queue_overflow,
+        state.rx_count,
+        state.tx_count,
+        state.err_count,
+        state.stall_count,
+    );
     let ctrl_msg = choose_ctrl_msg(state.pending_ctrl_msg, parser_msg);
     let can_offer_msg = state.msg_stream.pending_msg.is_none();
     let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
