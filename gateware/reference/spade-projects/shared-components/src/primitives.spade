@@ -102,7 +102,7 @@ pub entity reset_conditioner<#uint STAGES>(
     // assert immediately via `in_reset`, release after STAGES clocks.
     reg(clk) stages: [bool; STAGES] reset(in_reset: [true; STAGES]) =
         std::conv::concat_arrays([false], stages[0..STAGES - 1]);
-    let top = stages[STAGES - 1..STAGES][0];
+    let top = stages[STAGES - 1];
     in_reset || top
 }
 
