@@ -1,11 +1,13 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyftdi>=0.56"]
+# dependencies = []
 # ///
 from __future__ import annotations
 
 import argparse
+import ctypes
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,20 +34,55 @@ class CaptureStats:
     chunks: int
 
 
-class PyFtdiReader:
-    def __init__(self, url: str) -> None:
-        from pyftdi.ftdi import Ftdi
+def find_repo_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "py" / "d3xx").exists() and (parent / "gateware" / "reference").exists():
+            return parent
+    raise RuntimeError("failed to locate retrobus-explorer repo root")
 
-        self._ftdi = Ftdi()
-        self._ftdi.open_from_url(url=url)
-        if hasattr(self._ftdi, "purge_buffers"):
-            self._ftdi.purge_buffers()
+
+def load_d3xx_modules() -> tuple[object, object]:
+    d3xx_dir = find_repo_root() / "py" / "d3xx"
+    if str(d3xx_dir) not in sys.path:
+        sys.path.append(str(d3xx_dir))
+    try:
+        import _ftd3xx_linux as mft  # type: ignore
+        import ftd3xx  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(f"failed to import D3XX modules from {d3xx_dir}") from exc
+    return mft, ftd3xx
+
+
+class D3xxReader:
+    def __init__(self, device_index: int, channel: int, timeout_ms: int) -> None:
+        mft, ftd3xx = load_d3xx_modules()
+        self._mft = mft
+        self._ftd3xx = ftd3xx
+        self._channel = channel
+        self._timeout_ms = timeout_ms
+        self._dev = ftd3xx.create(device_index, mft.FT_OPEN_BY_INDEX)
+        if self._dev is None:
+            raise RuntimeError("failed to open FT600 device via D3XX")
 
     def read(self, size: int) -> bytes:
-        return bytes(self._ftdi.read_data(size))
+        bytes_transferred = self._mft.ULONG()
+        data = ctypes.create_string_buffer(size)
+        self._ftd3xx.call_ft(
+            self._mft.FT_ReadPipeEx,
+            self._dev.handle,
+            self._mft.UCHAR(self._channel),
+            data,
+            self._mft.ULONG(size),
+            ctypes.byref(bytes_transferred),
+            self._timeout_ms,
+        )
+        return data.raw[:bytes_transferred.value]
 
     def close(self) -> None:
-        self._ftdi.close()
+        if getattr(self, "_dev", None) is not None:
+            self._dev.close()
+            self._dev = None
 
 
 def _truncate_to_ft_records(path: Path, raw_bytes: int, chunks: int) -> CaptureStats:
@@ -144,20 +181,26 @@ def capture_to_vcd(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Capture PC-E500 FT stream to .ft16 and optional .vcd")
-    parser.add_argument("--url", required=True, help="pyftdi URL, for example ftdi://ftdi:2232h/2")
+    parser = argparse.ArgumentParser(description="Capture PC-E500 FT600 stream to .ft16 and optional .vcd")
+    parser.add_argument("--device-index", type=int, default=0, help="FT600 device index for D3XX open")
+    parser.add_argument("--channel", type=int, default=0, help="FT600 FIFO channel")
+    parser.add_argument("--read-timeout-ms", type=int, default=100, help="D3XX read timeout in milliseconds")
     parser.add_argument("--raw-out", type=Path, required=True, help="output .ft16 capture path")
     parser.add_argument("--vcd-out", type=Path, help="optional output VCD path")
     parser.add_argument("--duration", type=float, default=5.0, help="capture duration in seconds")
     parser.add_argument("--idle-timeout", type=float, default=0.25, help="stop after this many idle seconds")
-    parser.add_argument("--chunk-size", type=int, default=4096, help="host read chunk size in bytes")
+    parser.add_argument("--chunk-size", type=int, default=32768, help="host read chunk size in bytes")
     parser.add_argument("--max-bytes", type=int, help="optional hard cap on captured bytes")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    reader = PyFtdiReader(args.url)
+    reader = D3xxReader(
+        device_index=args.device_index,
+        channel=args.channel,
+        timeout_ms=args.read_timeout_ms,
+    )
     try:
         stats = capture_to_vcd(
             reader,

@@ -12,6 +12,7 @@
 - For CLI workflows, use `alchitry`/`alchitry-loader` equivalents if installed, pointing to the `.alp`; export bitstreams into the project’s `build/` folder.
 - Update constraint files under `constraint/` before compiling, and keep connector naming aligned with the ports in `source/`.
 - Use `pin-tester` first to validate pin mappings and level shifters before running other designs on new hardware.
+- Streaming capture designs are expected to use the Alchitry Ft Element USB3 FIFO interface for bulk data capture; use the Au board's USB-UART only for console/control traffic.
 
 ## Coding Style & Naming Conventions
 - Lucid: four-space indentation, `snake_case` signals, `ALL_CAPS` enums/constants; default combinational outputs to avoid unintended latches; align port names with connector labels in constraint files.
@@ -21,6 +22,7 @@
 - Maintain lightweight Lucid testbenches alongside designs (see `test-minimal/` for structure); simulate in Alchitry Designer or an HDL simulator before synthesis.
 - For hardware validation, start with `pin-tester` bitstreams to confirm pin mappings and bank selections.
 - Rebuild after any constraint, clock, or I/O width change to catch timing or mapping regressions early.
+- Host-side USB3 capture tooling should target the FT600/D3XX path used by the Ft Element board when validating streaming interfaces.
 
 ## Commit & Pull Request Guidelines
 - Follow existing history: short, imperative commit titles (e.g., `Fix parse thread status reporting`), one functional change per commit.

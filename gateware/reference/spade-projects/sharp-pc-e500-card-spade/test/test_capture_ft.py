@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 import unittest
+import ctypes
 from pathlib import Path
 
 
@@ -13,7 +14,7 @@ FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from capture_ft import FT_RECORD_BYTES, PyFtdiReader, capture_stream, capture_to_vcd  # noqa: E402
+from capture_ft import D3xxReader, FT_RECORD_BYTES, capture_stream, capture_to_vcd  # noqa: E402
 
 
 class FakeByteReader:
@@ -28,50 +29,55 @@ class FakeByteReader:
         self.closed = True
 
 class FtCaptureTests(unittest.TestCase):
-    def test_pyftdi_reader_opens_reads_and_closes(self) -> None:
+    def test_d3xx_reader_opens_reads_and_closes(self) -> None:
         events: list[tuple[str, object]] = []
 
-        class FakeFtdi:
-            def open_from_url(self, *, url: str) -> None:
-                events.append(("open", url))
-
-            def purge_buffers(self) -> None:
-                events.append(("purge", None))
-
-            def read_data(self, size: int) -> bytes:
-                events.append(("read", size))
-                return b"\x34\x12"
-
+        class FakeDevice:
+            handle = 99
             def close(self) -> None:
                 events.append(("close", None))
 
-        fake_pkg = types.ModuleType("pyftdi")
-        fake_mod = types.ModuleType("pyftdi.ftdi")
-        fake_mod.Ftdi = FakeFtdi
-        prev_pkg = sys.modules.get("pyftdi")
-        prev_mod = sys.modules.get("pyftdi.ftdi")
-        sys.modules["pyftdi"] = fake_pkg
-        sys.modules["pyftdi.ftdi"] = fake_mod
+        def fake_create(index: int, flag: int):
+            events.append(("open", (index, flag)))
+            return FakeDevice()
+
+        def fake_call_ft(func, handle, channel, data, datalen, bytes_transferred, timeout_ms):
+            events.append(("read", (func, handle, int(channel.value), int(datalen.value), timeout_ms)))
+            payload = b"\x34\x12"
+            ctypes.memmove(data, payload, len(payload))
+            bytes_transferred._obj.value = len(payload)
+
+        fake_mft = types.ModuleType("_ftd3xx_linux")
+        fake_mft.FT_OPEN_BY_INDEX = 7
+        fake_mft.FT_ReadPipeEx = object()
+        fake_mft.ULONG = ctypes.c_ulong
+        fake_mft.UCHAR = ctypes.c_ubyte
+        fake_ftd3xx = types.ModuleType("ftd3xx")
+        fake_ftd3xx.create = fake_create
+        fake_ftd3xx.call_ft = fake_call_ft
+        prev_mft = sys.modules.get("_ftd3xx_linux")
+        prev_ftd3xx = sys.modules.get("ftd3xx")
+        sys.modules["_ftd3xx_linux"] = fake_mft
+        sys.modules["ftd3xx"] = fake_ftd3xx
         try:
-            reader = PyFtdiReader("ftdi://ftdi:2232h/2")
+            reader = D3xxReader(device_index=2, channel=1, timeout_ms=250)
             self.assertEqual(reader.read(16), b"\x34\x12")
             reader.close()
         finally:
-            if prev_pkg is None:
-                sys.modules.pop("pyftdi", None)
+            if prev_mft is None:
+                sys.modules.pop("_ftd3xx_linux", None)
             else:
-                sys.modules["pyftdi"] = prev_pkg
-            if prev_mod is None:
-                sys.modules.pop("pyftdi.ftdi", None)
+                sys.modules["_ftd3xx_linux"] = prev_mft
+            if prev_ftd3xx is None:
+                sys.modules.pop("ftd3xx", None)
             else:
-                sys.modules["pyftdi.ftdi"] = prev_mod
+                sys.modules["ftd3xx"] = prev_ftd3xx
 
         self.assertEqual(
             events,
             [
-                ("open", "ftdi://ftdi:2232h/2"),
-                ("purge", None),
-                ("read", 16),
+                ("open", (2, 7)),
+                ("read", (fake_mft.FT_ReadPipeEx, 99, 1, 16, 250)),
                 ("close", None),
             ],
         )

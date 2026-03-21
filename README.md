@@ -36,6 +36,12 @@ analytics via a Marimo Notebook interface in the browser.
 Project is built on top of [Alchitry Au FPGA board](https://www.sparkfun.com/alchitry-au-fpga-development-board-xilinx-artix-7.html) and [Ft Element board](https://www.sparkfun.com/alchitry-ft-element-board.html).
 To interface with the 5V bus, a Level Shifter Element board is used.
 
+For streaming capture projects such as the SHARP PC-G850 bus monitor and the
+SHARP PC-E500 card monitor, the expected host data path is the Alchitry Ft
+Element USB3 FIFO interface (FT600-class device) driven through the repository's
+`py/d3xx` wrapper. The Au board's onboard USB-UART remains the control/console
+path and is not the expected bulk capture interface.
+
 Hardware adapters connect the Level Shifter Element board to the target system.
 Up to 48 signals can be captured simultaneously.
 
