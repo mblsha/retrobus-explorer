@@ -186,14 +186,6 @@ async def _fast_uart_recv_bytes(signal, clk, count: int, timeout_cycles: int = 1
     return data
 
 
-async def _wait_signal_high(signal, clk, timeout_cycles: int = 128) -> None:
-    for _ in range(timeout_cycles):
-        if int(signal.value) == 1:
-            return
-        await tick(clk, 1)
-    raise AssertionError(f"timeout waiting for {signal._name} to go high")
-
-
 async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 4000) -> list[tuple[int, int]]:
     observed: list[tuple[int, int]] = []
     for _ in range(timeout_cycles):
@@ -751,6 +743,7 @@ async def saleae_control_outputs_and_write_ft_records_report_bus_activity(dut):
 
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
     ft_debug_write = cocotb.start_soon(_fast_uart_recv_bytes(dut.saleae[4], dut.clk, 2))
+    queue_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[5], dut.clk, 16, timeout_cycles=512))
     data_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
     addr_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 18))
     ft_write = cocotb.start_soon(_ft_recv_records(dut, 2))
@@ -759,10 +752,10 @@ async def saleae_control_outputs_and_write_ft_records_report_bus_activity(dut):
 
     assert await event_write == 0x575A
     assert await ft_debug_write == [ord("W"), ord("W")]
+    assert await queue_uart > 0
     assert await data_uart == 0x5A
     assert await addr_uart == 0x0012
     write_records = await ft_write
-    assert int(dut.saleae[5].value) == 0
     assert [_ft_kind(rec) for rec in write_records] == [FT_KIND_CE1_WRITE, FT_KIND_CE1_WRITE]
     assert _ft_addr(write_records[-1]) == 0x0012
     assert _ft_data(write_records[-1]) == 0x5A
@@ -844,3 +837,5 @@ async def ft_overflow_reports_dropped_accesses_after_host_stall(dut):
     assert _ft_kind(records[0]) in (FT_KIND_CE1_READ, FT_KIND_CE1_WRITE, FT_KIND_BUS_CHANGE)
     assert _ft_kind(records[-1]) == FT_KIND_OVERFLOW
     assert _ft_overflow_count(records[-1]) > 0
+    stats = await _disable_ft(dut)
+    assert stats["QMX"] <= FT_RECORD_FIFO_RECORDS, stats
