@@ -18,10 +18,12 @@ if str(SCRIPTS_DIR) not in sys.path:
 from e500_ft import (  # noqa: E402
     FT_STREAM_VERSION,
     FT_DATA_SHIFT,
+    FT_KIND_SHIFT,
     FtKind,
     FtStreamVersionError,
     config_delay_ticks,
     config_enabled,
+    decode_ft_record,
     ft_record_from_words,
     iter_ft_records_from_bytes,
     iter_ft_words_from_bytes,
@@ -54,6 +56,16 @@ def mutate_first_record_version(raw: bytes, version: int) -> bytes:
 
 
 class FtDecodeTests(unittest.TestCase):
+    def test_decode_unknown_kind_is_tolerated(self) -> None:
+        raw = (0x05 << FT_KIND_SHIFT) | (17 << 40) | (0x123 << 22) | (0x5A << FT_DATA_SHIFT) | 0x79
+        record = decode_ft_record(raw)
+
+        self.assertEqual(int(record.kind), 0x05)
+        self.assertEqual(record.kind.name, "UNKNOWN_05")
+        self.assertEqual(record.delta_ticks, 17)
+        self.assertEqual(record.addr, 0x123)
+        self.assertEqual(record.data, 0x5A)
+
     def test_decode_sync_record(self) -> None:
         record = load_fixture_records()[0]
         self.assertEqual(record.kind, FtKind.SYNC)
@@ -198,6 +210,17 @@ class FtVcdTests(unittest.TestCase):
 
         self.assertIn("#70110", vcd)
         self.assertIn("#70120", vcd)
+
+    def test_build_vcd_allows_unknown_access_kind(self) -> None:
+        records = load_fixture_records()
+        unknown_record = decode_ft_record(
+            (0x05 << FT_KIND_SHIFT) | (5 << 40) | (0x123 << 22) | (0x5A << FT_DATA_SHIFT) | 0x79
+        )
+
+        vcd = build_vcd(records[:2] + [unknown_record])
+
+        self.assertIn("event_bus_change", vcd)
+        self.assertIn("#60", vcd)
 
 
 if __name__ == "__main__":

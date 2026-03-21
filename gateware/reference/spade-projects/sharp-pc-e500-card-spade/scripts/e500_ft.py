@@ -32,6 +32,13 @@ class FtKind(IntEnum):
     OVERFLOW = 0xF1
     CONFIG = 0xF2
 
+    @classmethod
+    def _missing_(cls, value: int) -> "FtKind":
+        member = int.__new__(cls, value)
+        member._name_ = f"UNKNOWN_{value:02X}"
+        member._value_ = value
+        return member
+
 
 class FtStreamVersionError(ValueError):
     pass
