@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -255,4 +256,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if os.environ.get("RETROBUS_E500_USE_PYTHON") == "1":
+        raise SystemExit(main())
+    from cpp_tooling import exec_cpp_tool
+
+    exec_cpp_tool("capture_ft_cpp", sys.argv[1:])

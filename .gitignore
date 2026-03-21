@@ -40,3 +40,6 @@ __pycache__/
 *.tmp
 *.bak
 *~
+
+# Local C++ host-tool build output
+gateware/reference/spade-projects/sharp-pc-e500-card-spade/.cpp-build/

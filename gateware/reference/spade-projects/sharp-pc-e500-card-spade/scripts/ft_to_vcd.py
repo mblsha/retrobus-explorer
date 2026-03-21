@@ -8,7 +8,9 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from itertools import groupby
+import os
 from pathlib import Path
+import sys
 from typing import Iterable, TextIO
 
 from e500_ft import (
@@ -246,4 +248,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if os.environ.get("RETROBUS_E500_USE_PYTHON") == "1":
+        raise SystemExit(main())
+    from cpp_tooling import exec_cpp_tool
+
+    exec_cpp_tool("ft_to_vcd_cpp", sys.argv[1:])
