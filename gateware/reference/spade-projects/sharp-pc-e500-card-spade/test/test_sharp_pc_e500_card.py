@@ -25,6 +25,12 @@ FT_KIND_CE6_WRITE_ATTEMPT = 0x04
 FT_KIND_SYNC = 0xF0
 FT_KIND_OVERFLOW = 0xF1
 FT_KIND_CONFIG = 0xF2
+FT_RECORD_WORDS = 5
+FT_RECORD_FIFO_RECORDS = 8192
+FT_TAP_TX_FIFO_WORDS = 8192
+FT_TAP_TX_FIFO_RECORDS = FT_TAP_TX_FIFO_WORDS // FT_RECORD_WORDS
+FT_OVERFLOW_DROP_COUNT = 298
+FT_OVERFLOW_TRIGGER_READS = FT_RECORD_FIFO_RECORDS + FT_TAP_TX_FIFO_RECORDS + FT_OVERFLOW_DROP_COUNT
 
 
 def saleae_bit(value, idx):
@@ -664,12 +670,12 @@ async def ft_overflow_record_fixture_matches_hdl_bytes(dut):
     await _enable_ft(dut)
 
     dut.ft_txe.value = 1
-    for _ in range(2000):
+    for _ in range(FT_OVERFLOW_TRIGGER_READS):
         await _bus_read(dut, 0x0000)
 
     dut.ft_txe.value = 0
     overflow = None
-    for _ in range(2100):
+    for _ in range(FT_OVERFLOW_TRIGGER_READS + 128):
         rec = await _ft_recv_record(dut, timeout_cycles=60000)
         if _ft_kind(rec) == FT_KIND_OVERFLOW:
             overflow = rec
@@ -789,14 +795,14 @@ async def ft_overflow_reports_dropped_accesses_after_host_stall(dut):
     await _enable_ft(dut)
 
     dut.ft_txe.value = 1
-    # au_ft_tap_u16 has an 8192-word TX FIFO, so this needs to exceed
-    # roughly 1638 full 5-word FT records before overflow can occur.
-    for _ in range(2000):
+    # E500 now has an 8192-record pre-FT FIFO plus the shared FT tap's
+    # 8192-word TX FIFO, which can hold 1638 more full 5-word records.
+    for _ in range(FT_OVERFLOW_TRIGGER_READS):
         await _bus_read(dut, 0x0000)
 
     dut.ft_txe.value = 0
     records = []
-    for _ in range(2100):
+    for _ in range(FT_OVERFLOW_TRIGGER_READS + 128):
         rec = await _ft_recv_record(dut, timeout_cycles=60000)
         records.append(rec)
         if _ft_kind(rec) == FT_KIND_OVERFLOW:
