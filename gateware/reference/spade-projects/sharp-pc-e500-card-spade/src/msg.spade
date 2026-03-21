@@ -9,6 +9,7 @@ type RespIdx = uint<4>;
 pub enum RespMsg {
     None,
     Ok,
+    Busy,
     Err,
     Read{addr: CardOffset, value: CardData},
     Timing{cycles: uint<7>},
@@ -98,6 +99,11 @@ impl RespMsg {
             Self::None => tx_req_none(),
             Self::Ok => if idx < 4 {
                 TxReq8$(valid: true, byte: b"OK\r\n"[trunc(idx)])
+            } else {
+                tx_req_none()
+            },
+            Self::Busy => if idx < 6 {
+                TxReq8$(valid: true, byte: b"BUSY\r\n"[trunc(idx)])
             } else {
                 tx_req_none()
             },

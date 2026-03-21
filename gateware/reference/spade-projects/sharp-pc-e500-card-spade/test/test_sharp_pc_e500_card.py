@@ -14,6 +14,7 @@ USB_UART_BIT_CYCLES = 100
 DEFAULT_CLASSIFY_CYCLES = 50
 TAIL_CYCLES = 20
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FT_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
 
 FT_KIND_CE1_READ = 0x01
 FT_KIND_CE1_WRITE = 0x02
@@ -210,6 +211,13 @@ async def _ft_recv_records(dut, count: int, timeout_cycles: int = 12000) -> list
     return out
 
 
+def _ft_records_to_bytes(records: list[int]) -> bytes:
+    out = bytearray()
+    for record in records:
+        out.extend(int(record).to_bytes(10, "little"))
+    return bytes(out)
+
+
 def _set_data_bus_z(dut):
     dut.data_host.value = 0
     dut.data_host_drive.value = 0
@@ -258,6 +266,41 @@ async def _disable_ft(dut):
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f0\r\nF=0\r\n")))
     await _uart_send_text(dut, "f0\r")
     assert await rx == b"f0\r\nF=0\r\n"
+
+
+async def _find_uart_write_collision_phase(
+    dut,
+    cmd: str,
+    *,
+    search_start: int = 7800,
+    search_span: int = 500,
+    classify_cycles: int = DEFAULT_CLASSIFY_CYCLES,
+) -> int:
+    echo = cmd.replace("\r", "\r\n").encode()
+    for phase in range(search_start, search_start + search_span):
+        dut.rst_n.value = 0
+        dut.usb_rx.value = 1
+        dut.rw.value = 1
+        dut.oe.value = 1
+        dut.ce1.value = 0
+        dut.ce6.value = 0
+        dut.addr.value = 0
+        _set_data_bus_z(dut)
+        await tick(dut.clk, 8)
+        dut.rst_n.value = 1
+        await tick(dut.clk, 12)
+        assert await _uart_recv_line(dut) == expected_boot_banner()
+
+        echo_rx = cocotb.start_soon(_uart_recv_exact(dut, len(echo)))
+        tx = cocotb.start_soon(_uart_send_text(dut, cmd))
+        await tick(dut.clk, phase)
+        await _bus_write(dut, 0x0012, 0x5A, classify_cycles=classify_cycles)
+        await tx
+        if await echo_rx != echo:
+            continue
+        if await _uart_recv_line(dut, timeout_cycles=USB_UART_BIT_CYCLES * 40) == "BUSY\r\n":
+            return phase
+    raise AssertionError("failed to find a same-cycle UART write collision phase")
 
 
 async def _bus_write(dut, addr: int, value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
@@ -408,6 +451,37 @@ async def usb_uart_echo_reads_writes_ft_toggle_and_reports_errors(dut):
 
 
 @cocotb.test()
+async def usb_uart_write_collisions_return_busy_and_do_not_commit_uart_write(dut):
+    await _init(dut)
+
+    phase = await _find_uart_write_collision_phase(dut, "w005=A5\r")
+
+    dut.rst_n.value = 0
+    dut.usb_rx.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.ce1.value = 0
+    dut.ce6.value = 0
+    dut.addr.value = 0
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 8)
+    dut.rst_n.value = 1
+    await tick(dut.clk, 12)
+    assert await _uart_recv_line(dut) == expected_boot_banner()
+    await _bus_write(dut, 0x0005, 0x00)
+    await _bus_write(dut, 0x0012, 0x00)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"w005=A5\r\nBUSY\r\n")))
+    tx = cocotb.start_soon(_uart_send_text(dut, "w005=A5\r"))
+    await tick(dut.clk, phase)
+    await _bus_write(dut, 0x0012, 0x5A)
+    await tx
+    assert await rx == b"w005=A5\r\nBUSY\r\n"
+    assert await _bus_read(dut, 0x0012) == 0x5A
+    assert await _bus_read(dut, 0x0005) == 0x00
+
+
+@cocotb.test()
 async def usb_uart_can_set_classify_delay_and_emit_ft_config(dut):
     await _init(dut)
     await _enable_ft(dut)
@@ -444,6 +518,21 @@ async def usb_uart_can_set_classify_delay_and_emit_ft_config(dut):
 
     assert before == 0x3C
     assert after == 0x5A
+
+
+@cocotb.test()
+async def ft_access_fixture_matches_hdl_bytes(dut):
+    await _init(dut)
+
+    sync, config = await _enable_ft(dut)
+    records = cocotb.start_soon(_ft_recv_records(dut, 3))
+    await _bus_write(dut, 0x0123, 0x5A)
+    assert await _bus_read(dut, 0x0123) == 0x5A
+    assert await _bus_read(dut, 0x0123) == 0x5A
+
+    expected = FT_FIXTURE_PATH.read_bytes()[: 5 * 10]
+    actual = _ft_records_to_bytes([sync, config] + await records)
+    assert actual == expected, f"actual={actual.hex()} expected={expected.hex()}"
 
 
 @cocotb.test()
