@@ -35,6 +35,7 @@ type FtOverflowCount = uint<26>;
 type FtCount = uint<32>;
 type FtQueueLevel = uint<14>;
 type FtBusSample = uint<30>;
+type QueueUartWord = uint<16>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -122,6 +123,8 @@ fn settled_value<#uint WIDTH>(state: PendingUartState<WIDTH>, settle_last: uint<
         state.sent
     }
 }
+
+fn ft_queue_level_max() -> FtQueueLevel { 8192 }
 
 fn ft_bus_sample_data(sample: FtBusSample) -> CardData {
     trunc(sample)
@@ -469,9 +472,17 @@ impl FtState {
         let queue_inc: FtQueueLevel = if fifo_wput { 1 } else { 0 };
         let queue_dec: FtQueueLevel = if stream.stream_fifo_rget { 1 } else { 0 };
         let next_queue_level = if queue_inc > queue_dec {
-            self.queue_level +. (queue_inc -. queue_dec)
+            if self.queue_level < ft_queue_level_max() {
+                self.queue_level +. (queue_inc -. queue_dec)
+            } else {
+                ft_queue_level_max()
+            }
         } else if queue_dec > queue_inc {
-            self.queue_level -. (queue_dec -. queue_inc)
+            if self.queue_level > 0 {
+                self.queue_level -. (queue_dec -. queue_inc)
+            } else {
+                0
+            }
         } else {
             self.queue_level
         };
@@ -843,6 +854,8 @@ entity main_core(
     let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
     let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
+    let (queue_uart_line, queue_uart_line_w): (&bool, inv &bool) = port;
+    let (queue_uart_busy, queue_uart_busy_w): (&bool, inv &bool) = port;
     let (event_uart_line, event_uart_line_w): (&bool, inv &bool) = port;
     let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
     let (ft_debug_uart_line, ft_debug_uart_line_w): (&bool, inv &bool) = port;
@@ -1025,6 +1038,9 @@ entity main_core(
     );
     reg(clk) ft: FtState reset(rst: init_ft_state()) = ft.eval(ft_inputs).next_state;
     let ft_eval = ft.eval(ft_inputs);
+    let queue_level_now: uint<16> = zext(ft_eval.next_state.queue_level);
+    reg(clk) queue_state: PendingUartState<16> reset(rst: init_pending_uart_state()) =
+        pending_uart_step(queue_state, queue_level_now, *queue_uart_busy, 0).next_state;
     reg(clk) ft_debug_state: FtDebugUartState reset(rst: init_ft_debug_uart_state()) =
         ft_debug_uart_step(
             ft_debug_state,
@@ -1032,12 +1048,6 @@ entity main_core(
             ft_eval.fifo_wput,
             ft_debug_char(trunc(ft_eval.fifo_din >> 72)),
         ).next_state;
-    reg(clk) ft_queue_problem_seen: bool reset(rst: false) =
-        if ft_enable_update_valid && !ft_enable_update {
-            false
-        } else {
-            ft_queue_problem_seen || *ft_fifo_full || ft_eval.next_state.dropped_total > 0
-        };
     let ft_fifo_rst = rst || (ft_enable_update_valid && !ft_enable_update);
     let ft_fifo = inst sync_fifo::<80, 8192>(
         clk,
@@ -1092,6 +1102,7 @@ entity main_core(
 
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
+    let queue_step = pending_uart_step(queue_state, queue_level_now, *queue_uart_busy, 0);
     let event_step = event_uart_step(event_state, *event_uart_busy, event_valid, event_word);
     let ft_debug_step = ft_debug_uart_step(
         ft_debug_state,
@@ -1118,6 +1129,15 @@ entity main_core(
         data_step.send,
         data_uart_line_w,
         data_uart_busy_w,
+    );
+    let _queue_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 16>(
+        clk,
+        rst,
+        false,
+        queue_state.pending,
+        queue_step.send,
+        queue_uart_line_w,
+        queue_uart_busy_w,
     );
     let _event_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 16>(
         clk,
@@ -1169,14 +1189,13 @@ entity main_core(
         ft_ui_dout_empty_w,
     );
 
-    let ft_queue_problem = *ft_fifo_full || ft_queue_problem_seen;
     let saleae_lines: [bool; 8] = [
         ce1,
         ce6,
         rw,
         if rst { true } else { *event_uart_line },
         if rst { true } else { *ft_debug_uart_line },
-        ft_queue_problem,
+        if rst { true } else { *queue_uart_line },
         if rst { true } else { *data_uart_line },
         if rst { true } else { *addr_uart_line },
     ];
