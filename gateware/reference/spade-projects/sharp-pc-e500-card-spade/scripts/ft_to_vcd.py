@@ -21,6 +21,7 @@ from e500_ft import (
     overflow_count,
     read_ft_records,
     sync_version,
+    validate_ft_records,
 )
 
 
@@ -90,6 +91,7 @@ class VcdWriter:
 
 
 def build_vcd(records: Iterable[FtRecord]) -> str:
+    records = validate_ft_records(records)
     writer = VcdWriter(timescale="1ns")
     for name, width in (
         ("meta_ft_enabled", 1),

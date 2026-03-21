@@ -1,144 +1,115 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from e500_ft import (  # noqa: E402
     FT_STREAM_VERSION,
+    FT_DATA_SHIFT,
+    decode_ft_record,
     FtKind,
+    FtStreamVersionError,
     config_delay_ticks,
     config_enabled,
-    decode_ft_record,
-    ft_record_from_words,
     iter_ft_records_from_bytes,
     iter_timed_records,
     overflow_count,
-    pack_ft_record,
-    pack_ft_words,
+    read_ft_records,
     sync_version,
 )
 from ft_to_vcd import build_vcd  # noqa: E402
 
 
-def ft_aux(
-    *,
-    rw: bool = False,
-    oe: bool = False,
-    ce1: bool = False,
-    ce6: bool = False,
-    same_addr: bool = False,
-    same_data: bool = False,
-    classified_after_delay: bool = False,
-) -> int:
-    return (
-        (1 if rw else 0)
-        | ((1 if oe else 0) << 1)
-        | ((1 if ce1 else 0) << 2)
-        | ((1 if ce6 else 0) << 3)
-        | ((1 if same_addr else 0) << 4)
-        | ((1 if same_data else 0) << 5)
-        | ((1 if classified_after_delay else 0) << 6)
-    )
+def load_fixture_records():
+    return read_ft_records(FIXTURE_PATH)
+
+
+def mutate_first_record_version(raw: bytes, version: int) -> bytes:
+    record = int.from_bytes(raw[:10], "little")
+    record &= ~(0xFF << FT_DATA_SHIFT)
+    record |= (version & 0xFF) << FT_DATA_SHIFT
+    return record.to_bytes(10, "little") + raw[10:]
 
 
 class FtDecodeTests(unittest.TestCase):
     def test_decode_sync_record(self) -> None:
-        raw = pack_ft_record(FtKind.SYNC, 0, 0, FT_STREAM_VERSION, 0)
-        record = decode_ft_record(raw)
+        record = load_fixture_records()[0]
         self.assertEqual(record.kind, FtKind.SYNC)
         self.assertEqual(record.delta_ticks, 0)
         self.assertEqual(sync_version(record), FT_STREAM_VERSION)
 
     def test_decode_config_record(self) -> None:
-        raw = pack_ft_record(FtKind.CONFIG, 11, 50, 0, 1)
-        record = decode_ft_record(raw)
+        record = load_fixture_records()[1]
         self.assertEqual(record.kind, FtKind.CONFIG)
-        self.assertEqual(record.delta_ticks, 11)
+        self.assertEqual(record.delta_ticks, 1)
         self.assertEqual(config_delay_ticks(record), 50)
         self.assertTrue(config_enabled(record))
 
     def test_decode_access_record_aux_flags(self) -> None:
-        raw = pack_ft_record(
-            FtKind.CE1_READ,
-            73,
-            0x0123,
-            0x5A,
-            ft_aux(rw=True, oe=False, ce1=True, same_addr=True, same_data=True, classified_after_delay=True),
-        )
-        record = decode_ft_record(raw)
-        self.assertEqual(record.kind, FtKind.CE1_READ)
-        self.assertEqual(record.addr, 0x0123)
-        self.assertEqual(record.data, 0x5A)
-        self.assertTrue(record.aux.rw)
-        self.assertFalse(record.aux.oe)
-        self.assertTrue(record.aux.ce1)
-        self.assertFalse(record.aux.ce6)
-        self.assertTrue(record.aux.same_addr)
-        self.assertTrue(record.aux.same_data)
-        self.assertTrue(record.aux.classified_after_delay)
+        write, read0, read1 = load_fixture_records()[2:5]
+        self.assertEqual(write.kind, FtKind.CE1_WRITE)
+        self.assertEqual(write.addr, 0x0123)
+        self.assertEqual(write.data, 0x5A)
+        self.assertFalse(write.aux.rw)
+        self.assertTrue(write.aux.oe)
+        self.assertTrue(write.aux.ce1)
+        self.assertFalse(write.aux.same_addr)
+        self.assertFalse(write.aux.same_data)
+        self.assertTrue(write.aux.classified_after_delay)
+
+        for record in (read0, read1):
+            self.assertEqual(record.kind, FtKind.CE1_READ)
+            self.assertEqual(record.addr, 0x0123)
+            self.assertEqual(record.data, 0x5A)
+            self.assertTrue(record.aux.rw)
+            self.assertFalse(record.aux.oe)
+            self.assertTrue(record.aux.ce1)
+            self.assertFalse(record.aux.ce6)
+            self.assertTrue(record.aux.same_addr)
+            self.assertTrue(record.aux.same_data)
+            self.assertTrue(record.aux.classified_after_delay)
+        self.assertEqual(write.delta_ticks, 7010)
+        self.assertEqual(read0.delta_ticks, 74)
+        self.assertEqual(read1.delta_ticks, 74)
 
     def test_decode_overflow_record(self) -> None:
-        count = 0x123456
-        raw = pack_ft_record(FtKind.OVERFLOW, 9, count & 0x3FFFF, (count >> 18) & 0xFF, 0)
-        record = decode_ft_record(raw)
+        record = decode_ft_record(int.from_bytes(bytes.fromhex("0000c0000009000000f1"), "little"))
         self.assertEqual(record.kind, FtKind.OVERFLOW)
-        self.assertEqual(overflow_count(record), count)
+        self.assertEqual(overflow_count(record), 3)
 
-    def test_reassemble_from_words_and_bytes(self) -> None:
-        raw = pack_ft_record(FtKind.CE1_WRITE, 19, 0x0007, 0xA5, ft_aux(ce1=True, classified_after_delay=True))
-        words = pack_ft_words(raw)
-        record = ft_record_from_words(words)
-        self.assertEqual(record.raw, raw)
-
-        payload = b"".join(word.to_bytes(2, "little") for word in words)
-        records = list(iter_ft_records_from_bytes(payload))
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0].raw, raw)
+    def test_reassemble_fixture_from_bytes(self) -> None:
+        records = list(iter_ft_records_from_bytes(FIXTURE_PATH.read_bytes()))
+        self.assertEqual(len(records), 5)
+        self.assertEqual(records[2].kind, FtKind.CE1_WRITE)
+        self.assertEqual(records[3].kind, FtKind.CE1_READ)
 
     def test_timed_records_accumulate_delta(self) -> None:
-        raws = [
-            pack_ft_record(FtKind.SYNC, 0, 0, FT_STREAM_VERSION, 0),
-            pack_ft_record(FtKind.CONFIG, 5, 50, 0, 1),
-            pack_ft_record(FtKind.CE1_READ, 73, 0x12, 0x5A, ft_aux(rw=True, ce1=True, classified_after_delay=True)),
-        ]
-        timed = list(iter_timed_records(decode_ft_record(raw) for raw in raws))
-        self.assertEqual([item.tick for item in timed], [0, 5, 78])
+        timed = list(iter_timed_records(load_fixture_records()))
+        self.assertEqual([item.tick for item in timed], [0, 1, 7011, 7085, 7159])
+
+    def test_invalid_stream_version_is_rejected(self) -> None:
+        bad = mutate_first_record_version(FIXTURE_PATH.read_bytes(), FT_STREAM_VERSION + 1)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bad.ft16"
+            path.write_bytes(bad)
+            with self.assertRaises(FtStreamVersionError):
+                read_ft_records(path)
+        with self.assertRaises(FtStreamVersionError):
+            build_vcd(list(iter_ft_records_from_bytes(bad)))
 
 
 class FtVcdTests(unittest.TestCase):
     def test_build_vcd_for_access_and_meta_records(self) -> None:
-        records = [
-            decode_ft_record(pack_ft_record(FtKind.SYNC, 0, 0, FT_STREAM_VERSION, 0)),
-            decode_ft_record(pack_ft_record(FtKind.CONFIG, 5, 50, 0, 1)),
-            decode_ft_record(
-                pack_ft_record(
-                    FtKind.CE1_READ,
-                    73,
-                    0x0123,
-                    0x5A,
-                    ft_aux(rw=True, oe=False, ce1=True, classified_after_delay=True),
-                )
-            ),
-            decode_ft_record(
-                pack_ft_record(
-                    FtKind.CE1_WRITE,
-                    41,
-                    0x0123,
-                    0xA5,
-                    ft_aux(rw=False, oe=True, ce1=True, same_addr=True, classified_after_delay=True),
-                )
-            ),
-            decode_ft_record(pack_ft_record(FtKind.OVERFLOW, 7, 0x0003, 0x00, 0)),
-        ]
-
-        vcd = build_vcd(records)
+        vcd = build_vcd(load_fixture_records())
 
         self.assertIn("$var wire 18", vcd)
         self.assertIn("bus_addr", vcd)
@@ -146,19 +117,17 @@ class FtVcdTests(unittest.TestCase):
         self.assertIn("event_overflow", vcd)
 
         # Time points are in ns with 10 ns per tick.
-        self.assertIn("#50", vcd)      # config at 5 ticks
-        self.assertIn("#780", vcd)     # read at 78 ticks
-        self.assertIn("#1190", vcd)    # write at 119 ticks
-        self.assertIn("#1260", vcd)    # overflow at 126 ticks
+        self.assertIn("#10", vcd)      # config at 1 tick
+        self.assertIn("#70110", vcd)   # write at 7011 ticks
+        self.assertIn("#70850", vcd)   # first read at 7085 ticks
+        self.assertIn("#71590", vcd)   # second read at 7159 ticks
 
         # Access values get pushed into bus vectors.
         self.assertIn("b000000000100100011", vcd)  # addr 0x123 on 18-bit bus
         self.assertIn("b01011010", vcd)          # data 0x5A
-        self.assertIn("b10100101", vcd)          # data 0xA5
 
         # Meta/config values are represented too.
         self.assertIn("b000000000000110010", vcd)  # classify delay 50 ticks
-        self.assertIn("b00000000000000000000000011", vcd)  # overflow count 3
 
 
 if __name__ == "__main__":

@@ -8,11 +8,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from capture_ft import FT_RECORD_BYTES, capture_stream, capture_to_vcd  # noqa: E402
-from e500_ft import FT_STREAM_VERSION, FtKind, pack_ft_record, pack_ft_words  # noqa: E402
 
 
 class FakeByteReader:
@@ -26,19 +26,10 @@ class FakeByteReader:
     def close(self) -> None:
         self.closed = True
 
-
-def raw_record_bytes(*records: int) -> bytes:
-    payload = bytearray()
-    for record in records:
-        for word in pack_ft_words(record):
-            payload.extend(word.to_bytes(2, "little"))
-    return bytes(payload)
-
-
 class FtCaptureTests(unittest.TestCase):
     def test_capture_stream_trims_partial_record_tail(self) -> None:
-        sync = pack_ft_record(FtKind.SYNC, 0, 0, FT_STREAM_VERSION, 0)
-        chunks = [raw_record_bytes(sync) + b"\xAA\xBB\xCC"]
+        fixture = FIXTURE_PATH.read_bytes()
+        chunks = [fixture + b"\xAA\xBB\xCC"]
         reader = FakeByteReader(chunks)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -52,15 +43,13 @@ class FtCaptureTests(unittest.TestCase):
                 sleep=lambda _seconds: None,
             )
 
-            self.assertEqual(stats.raw_bytes, FT_RECORD_BYTES + 3)
-            self.assertEqual(stats.aligned_bytes, FT_RECORD_BYTES)
+            self.assertEqual(stats.raw_bytes, len(fixture) + 3)
+            self.assertEqual(stats.aligned_bytes, len(fixture))
             self.assertEqual(stats.trimmed_bytes, 3)
-            self.assertEqual(raw_out.read_bytes(), raw_record_bytes(sync))
+            self.assertEqual(raw_out.read_bytes(), fixture)
 
     def test_capture_stream_preserves_complete_records(self) -> None:
-        sync = pack_ft_record(FtKind.SYNC, 0, 0, FT_STREAM_VERSION, 0)
-        config = pack_ft_record(FtKind.CONFIG, 5, 50, 0, 1)
-        payload = raw_record_bytes(sync, config)
+        payload = FIXTURE_PATH.read_bytes()
         reader = FakeByteReader([payload[:7], payload[7:]])
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -79,10 +68,7 @@ class FtCaptureTests(unittest.TestCase):
             self.assertEqual(raw_out.read_bytes(), payload)
 
     def test_capture_to_vcd_writes_both_outputs(self) -> None:
-        sync = pack_ft_record(FtKind.SYNC, 0, 0, FT_STREAM_VERSION, 0)
-        config = pack_ft_record(FtKind.CONFIG, 5, 50, 0, 1)
-        access = pack_ft_record(FtKind.CE1_READ, 73, 0x0123, 0x5A, 0b1000101)
-        reader = FakeByteReader([raw_record_bytes(sync, config, access)])
+        reader = FakeByteReader([FIXTURE_PATH.read_bytes()])
 
         with tempfile.TemporaryDirectory() as tmpdir:
             raw_out = Path(tmpdir) / "capture.ft16"
@@ -104,7 +90,7 @@ class FtCaptureTests(unittest.TestCase):
             self.assertIn("event_sync", vcd)
             self.assertIn("event_config", vcd)
             self.assertIn("event_ce1_read", vcd)
-            self.assertIn("#780", vcd)
+            self.assertIn("#70850", vcd)
             self.assertIn("b01011010", vcd)
 
 

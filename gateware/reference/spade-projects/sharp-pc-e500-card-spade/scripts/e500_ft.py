@@ -32,6 +32,10 @@ class FtKind(IntEnum):
     CONFIG = 0xF2
 
 
+class FtStreamVersionError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class FtAux:
     rw: bool
@@ -145,8 +149,21 @@ def sync_version(record: FtRecord) -> int:
     return record.data
 
 
+def validate_ft_records(records: Iterable[FtRecord]) -> list[FtRecord]:
+    records_list = list(records)
+    if not records_list:
+        raise FtStreamVersionError("empty FT capture")
+    first = records_list[0]
+    if first.kind != FtKind.SYNC:
+        raise FtStreamVersionError(f"expected first FT record to be SYNC, got {first.kind.name}")
+    version = sync_version(first)
+    if version != FT_STREAM_VERSION:
+        raise FtStreamVersionError(f"unsupported FT stream version {version}, expected {FT_STREAM_VERSION}")
+    return records_list
+
+
 def read_ft_records(path: str | Path) -> list[FtRecord]:
-    return list(iter_ft_records_from_bytes(Path(path).read_bytes()))
+    return validate_ft_records(iter_ft_records_from_bytes(Path(path).read_bytes()))
 
 
 def pack_ft_record(kind: FtKind, delta_ticks: int, addr: int, data: int, aux_raw: int) -> int:
@@ -161,4 +178,3 @@ def pack_ft_record(kind: FtKind, delta_ticks: int, addr: int, data: int, aux_raw
 
 def pack_ft_words(record: int) -> list[int]:
     return [(record >> (16 * idx)) & FT_WORD_MASK for idx in range(FT_RECORD_WORDS)]
-
