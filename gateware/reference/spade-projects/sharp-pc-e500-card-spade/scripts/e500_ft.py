@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import BinaryIO, Iterable, Iterator
 
 
 FT_RECORD_WORDS = 5
@@ -103,6 +103,25 @@ def iter_ft_words_from_bytes(raw: bytes) -> Iterator[int]:
         yield int.from_bytes(raw[idx:idx + 2], "little")
 
 
+def iter_ft_words_from_stream(stream: BinaryIO, chunk_bytes: int = 8192) -> Iterator[int]:
+    if chunk_bytes <= 0 or chunk_bytes % 2 != 0:
+        raise ValueError(f"chunk_bytes must be a positive even number, got {chunk_bytes}")
+    trailing = b""
+    while True:
+        chunk = stream.read(chunk_bytes)
+        if not chunk:
+            break
+        data = trailing + chunk
+        if len(data) % 2 != 0:
+            trailing = data[-1:]
+            data = data[:-1]
+        else:
+            trailing = b""
+        yield from iter_ft_words_from_bytes(data)
+    if trailing:
+        raise ValueError("expected even number of bytes at end of FT stream")
+
+
 def iter_ft_records_from_words(words: Iterable[int]) -> Iterator[FtRecord]:
     chunk: list[int] = []
     for word in words:
@@ -116,6 +135,11 @@ def iter_ft_records_from_words(words: Iterable[int]) -> Iterator[FtRecord]:
 
 def iter_ft_records_from_bytes(raw: bytes) -> Iterator[FtRecord]:
     yield from iter_ft_records_from_words(iter_ft_words_from_bytes(raw))
+
+
+def iter_ft_records_from_path(path: str | Path) -> Iterator[FtRecord]:
+    with Path(path).open("rb") as handle:
+        yield from iter_ft_records_from_words(iter_ft_words_from_stream(handle))
 
 
 def iter_timed_records(records: Iterable[FtRecord]) -> Iterator[TimedFtRecord]:
@@ -149,21 +173,30 @@ def sync_version(record: FtRecord) -> int:
     return record.data
 
 
-def validate_ft_records(records: Iterable[FtRecord]) -> list[FtRecord]:
-    records_list = list(records)
-    if not records_list:
-        raise FtStreamVersionError("empty FT capture")
-    first = records_list[0]
+def iter_validated_ft_records(records: Iterable[FtRecord]) -> Iterator[FtRecord]:
+    records_iter = iter(records)
+    try:
+        first = next(records_iter)
+    except StopIteration as exc:
+        raise FtStreamVersionError("empty FT capture") from exc
     if first.kind != FtKind.SYNC:
         raise FtStreamVersionError(f"expected first FT record to be SYNC, got {first.kind.name}")
     version = sync_version(first)
     if version != FT_STREAM_VERSION:
         raise FtStreamVersionError(f"unsupported FT stream version {version}, expected {FT_STREAM_VERSION}")
+    yield first
+    yield from records_iter
+
+
+def validate_ft_records(records: Iterable[FtRecord]) -> list[FtRecord]:
+    records_list = list(iter_validated_ft_records(records))
+    if not records_list:
+        raise FtStreamVersionError("empty FT capture")
     return records_list
 
 
 def read_ft_records(path: str | Path) -> list[FtRecord]:
-    return validate_ft_records(iter_ft_records_from_bytes(Path(path).read_bytes()))
+    return validate_ft_records(iter_ft_records_from_path(path))
 
 
 def pack_ft_record(kind: FtKind, delta_ticks: int, addr: int, data: int, aux_raw: int) -> int:

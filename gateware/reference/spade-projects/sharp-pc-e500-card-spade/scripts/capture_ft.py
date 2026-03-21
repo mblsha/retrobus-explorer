@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from e500_ft import FT_RECORD_WORDS, read_ft_records
-from ft_to_vcd import build_vcd
+from e500_ft import FT_RECORD_WORDS, iter_ft_records_from_path
+from ft_to_vcd import write_vcd
 
 
 FT_RECORD_BYTES = FT_RECORD_WORDS * 2
@@ -110,8 +110,8 @@ def capture_stream(
 
 
 def write_vcd_from_capture(raw_path: Path, vcd_path: Path) -> None:
-    records = read_ft_records(raw_path)
-    vcd_path.write_text(build_vcd(records))
+    with vcd_path.open("w") as handle:
+        write_vcd(iter_ft_records_from_path(raw_path), handle)
 
 
 def capture_to_vcd(

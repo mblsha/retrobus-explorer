@@ -9,6 +9,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
+CE6_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden_ce6.ft16"
+OVERFLOW_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden_overflow_record.ft16"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -23,6 +25,8 @@ from e500_ft import (  # noqa: E402
     iter_ft_records_from_bytes,
     iter_timed_records,
     overflow_count,
+    ft_record_from_words,
+    iter_ft_words_from_bytes,
     read_ft_records,
     sync_version,
 )
@@ -31,6 +35,15 @@ from ft_to_vcd import build_vcd  # noqa: E402
 
 def load_fixture_records():
     return read_ft_records(FIXTURE_PATH)
+
+
+def load_ce6_fixture_records():
+    return read_ft_records(CE6_FIXTURE_PATH)
+
+
+def load_overflow_fixture_record():
+    words = list(iter_ft_words_from_bytes(OVERFLOW_FIXTURE_PATH.read_bytes()))
+    return ft_record_from_words(words)
 
 
 def mutate_first_record_version(raw: bytes, version: int) -> bytes:
@@ -82,9 +95,28 @@ class FtDecodeTests(unittest.TestCase):
         self.assertEqual(read1.delta_ticks, 74)
 
     def test_decode_overflow_record(self) -> None:
-        record = decode_ft_record(int.from_bytes(bytes.fromhex("0000c0000009000000f1"), "little"))
+        record = load_overflow_fixture_record()
         self.assertEqual(record.kind, FtKind.OVERFLOW)
-        self.assertEqual(overflow_count(record), 3)
+        self.assertEqual(overflow_count(record), 298)
+
+    def test_decode_ce6_records_aux_flags(self) -> None:
+        ce6_read, ce6_write_attempt = load_ce6_fixture_records()[2:4]
+
+        self.assertEqual(ce6_read.kind, FtKind.CE6_READ)
+        self.assertEqual(ce6_read.addr, 0x0021)
+        self.assertEqual(ce6_read.data, 0xA7)
+        self.assertTrue(ce6_read.aux.rw)
+        self.assertFalse(ce6_read.aux.oe)
+        self.assertFalse(ce6_read.aux.ce1)
+        self.assertTrue(ce6_read.aux.ce6)
+
+        self.assertEqual(ce6_write_attempt.kind, FtKind.CE6_WRITE_ATTEMPT)
+        self.assertEqual(ce6_write_attempt.addr, 0x0021)
+        self.assertEqual(ce6_write_attempt.data, 0x3C)
+        self.assertFalse(ce6_write_attempt.aux.rw)
+        self.assertTrue(ce6_write_attempt.aux.oe)
+        self.assertFalse(ce6_write_attempt.aux.ce1)
+        self.assertTrue(ce6_write_attempt.aux.ce6)
 
     def test_reassemble_fixture_from_bytes(self) -> None:
         records = list(iter_ft_records_from_bytes(FIXTURE_PATH.read_bytes()))
@@ -109,12 +141,15 @@ class FtDecodeTests(unittest.TestCase):
 
 class FtVcdTests(unittest.TestCase):
     def test_build_vcd_for_access_and_meta_records(self) -> None:
-        vcd = build_vcd(load_fixture_records())
+        records = load_fixture_records() + load_ce6_fixture_records()[2:4] + [load_overflow_fixture_record()]
+        vcd = build_vcd(records)
 
         self.assertIn("$var wire 18", vcd)
         self.assertIn("bus_addr", vcd)
         self.assertIn("event_ce1_read", vcd)
         self.assertIn("event_overflow", vcd)
+        self.assertIn("event_ce6_read", vcd)
+        self.assertIn("event_ce6_write_attempt", vcd)
 
         # Time points are in ns with 10 ns per tick.
         self.assertIn("#10", vcd)      # config at 1 tick
@@ -125,9 +160,13 @@ class FtVcdTests(unittest.TestCase):
         # Access values get pushed into bus vectors.
         self.assertIn("b000000000100100011", vcd)  # addr 0x123 on 18-bit bus
         self.assertIn("b01011010", vcd)          # data 0x5A
+        self.assertIn("b000000000000100001", vcd)  # addr 0x021 on 18-bit bus
+        self.assertIn("b10100111", vcd)            # data 0xA7
+        self.assertIn("b00111100", vcd)            # data 0x3C
 
         # Meta/config values are represented too.
         self.assertIn("b000000000000110010", vcd)  # classify delay 50 ticks
+        self.assertIn(f"b{298:026b}", vcd)
 
 
 if __name__ == "__main__":
