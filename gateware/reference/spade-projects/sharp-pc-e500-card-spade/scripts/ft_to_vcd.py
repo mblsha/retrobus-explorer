@@ -116,8 +116,9 @@ def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
         ("bus_ce6", 1),
         ("bus_same_addr", 1),
         ("bus_same_data", 1),
-        ("bus_classified_after_delay", 1),
-        ("event_access", 1),
+        ("bus_change_record", 1),
+        ("event_bus_change", 1),
+        ("event_idle_change", 1),
         ("event_ce1_read", 1),
         ("event_ce1_write", 1),
         ("event_ce6_read", 1),
@@ -145,8 +146,9 @@ def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
         ("bus_ce6", 1),
         ("bus_same_addr", 1),
         ("bus_same_data", 1),
-        ("bus_classified_after_delay", 1),
-        ("event_access", 1),
+        ("bus_change_record", 1),
+        ("event_bus_change", 1),
+        ("event_idle_change", 1),
         ("event_ce1_read", 1),
         ("event_ce1_write", 1),
         ("event_ce6_read", 1),
@@ -170,10 +172,11 @@ def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
         writer.change(time_ns, "bus_ce6", int(record.aux.ce6))
         writer.change(time_ns, "bus_same_addr", int(record.aux.same_addr))
         writer.change(time_ns, "bus_same_data", int(record.aux.same_data))
-        writer.change(time_ns, "bus_classified_after_delay", int(record.aux.classified_after_delay))
+        writer.change(time_ns, "bus_change_record", int(record.aux.change_record))
 
         pulse_names = [
-            "event_access",
+            "event_bus_change",
+            "event_idle_change",
             "event_ce1_read",
             "event_ce1_write",
             "event_ce6_read",
@@ -199,8 +202,10 @@ def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
             writer.change(time_ns, "event_overflow", 1)
             writer.change(time_ns + TICK_NS, "event_overflow", 0)
         else:
-            writer.change(time_ns, "event_access", 1)
-            if record.kind == FtKind.CE1_READ:
+            writer.change(time_ns, "event_bus_change", 1)
+            if record.kind == FtKind.BUS_CHANGE:
+                writer.change(time_ns, "event_idle_change", 1)
+            elif record.kind == FtKind.CE1_READ:
                 writer.change(time_ns, "event_ce1_read", 1)
             elif record.kind == FtKind.CE1_WRITE:
                 writer.change(time_ns, "event_ce1_write", 1)
@@ -209,7 +214,8 @@ def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
             elif record.kind == FtKind.CE6_WRITE_ATTEMPT:
                 writer.change(time_ns, "event_ce6_write_attempt", 1)
 
-            writer.change(time_ns + TICK_NS, "event_access", 0)
+            writer.change(time_ns + TICK_NS, "event_bus_change", 0)
+            writer.change(time_ns + TICK_NS, "event_idle_change", 0)
             writer.change(time_ns + TICK_NS, "event_ce1_read", 0)
             writer.change(time_ns + TICK_NS, "event_ce1_write", 0)
             writer.change(time_ns + TICK_NS, "event_ce6_read", 0)

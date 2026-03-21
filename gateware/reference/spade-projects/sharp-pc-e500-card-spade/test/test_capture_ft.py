@@ -139,7 +139,8 @@ class FtCaptureTests(unittest.TestCase):
             self.assertIn("event_sync", vcd)
             self.assertIn("event_config", vcd)
             self.assertIn("event_ce1_read", vcd)
-            self.assertIn("#70850", vcd)
+            self.assertIn("event_bus_change", vcd)
+            self.assertIn("#70630", vcd)
             self.assertIn("b01011010", vcd)
 
 
