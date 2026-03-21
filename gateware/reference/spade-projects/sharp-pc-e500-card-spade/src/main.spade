@@ -126,7 +126,6 @@ fn ft_record_word(record: FtRecord, idx: uint<3>) -> FtData {
 #[no_mangle(all)]
 extern entity card_ram_2k_v(
     clk: clock,
-    rst: bool,
     waddr: CardOffset,
     din: CardData,
     we: bool,
@@ -173,6 +172,11 @@ struct AccessCycleStep {
 struct EventUartState {
     pending: EventWord,
     pending_valid: bool,
+}
+
+struct MemClearState {
+    active: bool,
+    addr: CardOffset,
 }
 
 struct EventUartOut {
@@ -265,6 +269,13 @@ fn init_event_uart_state() -> EventUartState {
     EventUartState$(
         pending: 0,
         pending_valid: false,
+    )
+}
+
+fn init_mem_clear_state() -> MemClearState {
+    MemClearState$(
+        active: true,
+        addr: 0,
     )
 }
 
@@ -748,23 +759,40 @@ entity main_core(
     reg(clk) classify_delay: ClassifyCtr reset(rst: default_classify_last) =
         if classify_delay_update_valid { classify_delay_update } else { classify_delay };
     reg(clk) tick: FtDelta reset(rst: 0) = tick +. 1;
+    reg(clk) mem_clear: MemClearState reset(rst: init_mem_clear_state()) =
+        // Scrub card RAM after runtime reset so reset behavior is deterministic.
+        if mem_clear.active {
+            MemClearState$(
+                active: mem_clear.addr != 0x7FF,
+                addr: if mem_clear.addr == 0x7FF { 0 } else { mem_clear.addr +. 1 },
+            )
+        } else {
+            mem_clear
+        };
 
     reg(clk) ce1_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
-        access_cycle_step(ce1_cycle, ce1, rw, addr, data_in, tick, classify_delay).next_state;
+        access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
     reg(clk) ce6_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
-        access_cycle_step(ce6_cycle, ce6, rw, addr, data_in, tick, classify_delay).next_state;
-    let ce1_step = access_cycle_step(ce1_cycle, ce1, rw, addr, data_in, tick, classify_delay);
-    let ce6_step = access_cycle_step(ce6_cycle, ce6, rw, addr, data_in, tick, classify_delay);
+        access_cycle_step(ce6_cycle, ce6 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
+    let ce1_step = access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
+    let ce6_step = access_cycle_step(ce6_cycle, ce6 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
 
     let classify_now_ce1 = ce1_step.classify_now;
     let classify_now_ce6 = ce6_step.classify_now;
     let read_start = classify_now_ce1 && ce1_step.kind_read;
     let write_commit = classify_now_ce1 && !ce1_step.kind_read;
-    let uart_write_collision = uart_write_valid && write_commit;
-    let uart_write_fire = uart_write_valid && !write_commit;
+    let uart_read_valid = if let ParserEvent::Read$(addr) = usb_parse.event {
+        let _ = addr;
+        true
+    } else {
+        false
+    };
+    let uart_read_collision = uart_read_valid && write_commit && card_offset(ce1_step.addr) == usb_read_addr;
+    let uart_write_busy = uart_write_valid && (write_commit || mem_clear.active);
+    let uart_write_fire = uart_write_valid && !write_commit && !mem_clear.active;
     let mem_addr = if ce1_cycle.classified { card_offset(ce1_cycle.latched_addr) } else { card_offset(addr) };
     let bus_data_out = *mem_dout;
-    let bus_drive_cycle = ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read));
+    let bus_drive_cycle = !mem_clear.active && ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read));
     let event_valid = classify_now_ce1;
     let event_word = if write_commit {
         write_event_word(ce1_step.data)
@@ -778,11 +806,17 @@ entity main_core(
     let echo_msg = usb_parse.echo;
     let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
     let resp_msg = match usb_parse.event {
-        ParserEvent::Read$(addr) => RespMsg::Read(addr, *uart_mem_dout),
+        ParserEvent::Read$(addr) => {
+            if mem_clear.active || uart_read_collision {
+                RespMsg::Busy()
+            } else {
+                RespMsg::Read(addr, *uart_mem_dout)
+            }
+        },
         ParserEvent::Write$(addr, value) => {
             let _ = addr;
             let _ = value;
-            if uart_write_collision { RespMsg::Busy() } else { RespMsg::Ok() }
+            if uart_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
         },
         ParserEvent::SetClassifyDelay$(cycles) => RespMsg::Timing(cycles),
         ParserEvent::SetFtStreaming$(enabled) => RespMsg::Ft(enabled),
@@ -811,10 +845,21 @@ entity main_core(
 
     let _mem = inst card_ram_2k_v(
         clk,
-        rst,
-        if write_commit { card_offset(ce1_step.addr) } else { uart_write_addr },
-        if write_commit { ce1_step.data } else { uart_write_data },
-        write_commit || uart_write_fire,
+        if mem_clear.active {
+            mem_clear.addr
+        } else if write_commit {
+            card_offset(ce1_step.addr)
+        } else {
+            uart_write_addr
+        },
+        if mem_clear.active {
+            0
+        } else if write_commit {
+            ce1_step.data
+        } else {
+            uart_write_data
+        },
+        mem_clear.active || write_commit || uart_write_fire,
         mem_addr,
         mem_dout_w,
         usb_read_addr,

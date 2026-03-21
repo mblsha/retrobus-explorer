@@ -1,6 +1,5 @@
 module card_ram_2k_v (
     input wire clk,
-    input wire rst,
     input wire [10:0] waddr,
     input wire [7:0] din,
     input wire we,
@@ -26,6 +25,4 @@ module card_ram_2k_v (
 
     assign dout_bus = mem[raddr_bus];
     assign dout_uart = mem[raddr_uart];
-
-    wire _unused = rst;
 endmodule

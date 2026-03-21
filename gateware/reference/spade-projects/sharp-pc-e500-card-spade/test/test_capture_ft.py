@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -12,7 +13,7 @@ FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from capture_ft import FT_RECORD_BYTES, capture_stream, capture_to_vcd  # noqa: E402
+from capture_ft import FT_RECORD_BYTES, PyFtdiReader, capture_stream, capture_to_vcd  # noqa: E402
 
 
 class FakeByteReader:
@@ -27,6 +28,54 @@ class FakeByteReader:
         self.closed = True
 
 class FtCaptureTests(unittest.TestCase):
+    def test_pyftdi_reader_opens_reads_and_closes(self) -> None:
+        events: list[tuple[str, object]] = []
+
+        class FakeFtdi:
+            def open_from_url(self, *, url: str) -> None:
+                events.append(("open", url))
+
+            def purge_buffers(self) -> None:
+                events.append(("purge", None))
+
+            def read_data(self, size: int) -> bytes:
+                events.append(("read", size))
+                return b"\x34\x12"
+
+            def close(self) -> None:
+                events.append(("close", None))
+
+        fake_pkg = types.ModuleType("pyftdi")
+        fake_mod = types.ModuleType("pyftdi.ftdi")
+        fake_mod.Ftdi = FakeFtdi
+        prev_pkg = sys.modules.get("pyftdi")
+        prev_mod = sys.modules.get("pyftdi.ftdi")
+        sys.modules["pyftdi"] = fake_pkg
+        sys.modules["pyftdi.ftdi"] = fake_mod
+        try:
+            reader = PyFtdiReader("ftdi://ftdi:2232h/2")
+            self.assertEqual(reader.read(16), b"\x34\x12")
+            reader.close()
+        finally:
+            if prev_pkg is None:
+                sys.modules.pop("pyftdi", None)
+            else:
+                sys.modules["pyftdi"] = prev_pkg
+            if prev_mod is None:
+                sys.modules.pop("pyftdi.ftdi", None)
+            else:
+                sys.modules["pyftdi.ftdi"] = prev_mod
+
+        self.assertEqual(
+            events,
+            [
+                ("open", "ftdi://ftdi:2232h/2"),
+                ("purge", None),
+                ("read", 16),
+                ("close", None),
+            ],
+        )
+
     def test_capture_stream_trims_partial_record_tail(self) -> None:
         fixture = FIXTURE_PATH.read_bytes()
         chunks = [fixture + b"\xAA\xBB\xCC"]
