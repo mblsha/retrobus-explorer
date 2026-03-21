@@ -4,7 +4,14 @@ use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, Tx
 use super::protocol::{CardData, CardOffset, EchoMsg};
 
 type EchoIdx = uint<2>;
-type RespIdx = uint<4>;
+type RespIdx = uint<6>;
+
+pub struct FtStats {
+    records: uint<32>,
+    dropped: uint<32>,
+    words: uint<32>,
+    qmax: uint<32>,
+}
 
 pub enum RespMsg {
     None,
@@ -14,12 +21,13 @@ pub enum RespMsg {
     Read{addr: CardOffset, value: CardData},
     Timing{cycles: uint<7>},
     Ft{enabled: bool},
+    FtStats{stats: FtStats},
 }
 
 pub type EchoStreamState = ByteMsgStreamState<EchoMsg, 2>;
 pub type EchoStreamOut = ByteMsgStreamOut<EchoMsg, 2>;
-pub type RespStreamState = ByteMsgStreamState<RespMsg, 4>;
-pub type RespStreamOut = ByteMsgStreamOut<RespMsg, 4>;
+pub type RespStreamState = ByteMsgStreamState<RespMsg, 6>;
+pub type RespStreamOut = ByteMsgStreamOut<RespMsg, 6>;
 
 pub fn init_echo_stream() -> EchoStreamState {
     ByteMsgStreamState$(
@@ -56,6 +64,20 @@ fn byte_hex_char(value: CardData, low_nibble: bool) -> uint<8> {
 
 fn dec_char(value: uint<4>) -> uint<8> {
     b'0' +. zext(value)
+}
+
+fn u32_hex_char(value: uint<32>, idx: uint<3>) -> uint<8> {
+    let nibble: uint<4> = match idx {
+        0 => trunc(value >> 28),
+        1 => trunc(value >> 24),
+        2 => trunc(value >> 20),
+        3 => trunc(value >> 16),
+        4 => trunc(value >> 12),
+        5 => trunc(value >> 8),
+        6 => trunc(value >> 4),
+        _ => trunc(value),
+    };
+    ascii::hex_char(nibble)
 }
 
 fn timing_ns_hundreds(cycles: uint<7>) -> uint<4> {
@@ -131,6 +153,37 @@ impl RespMsg {
                 3 => TxReq8$(valid: true, byte: b'\r'),
                 4 => TxReq8$(valid: true, byte: b'\n'),
                 _ => tx_req_none(),
+            },
+            Self::FtStats$(stats) => if idx < 4 {
+                TxReq8$(valid: true, byte: b"F=0 "[trunc(idx)])
+            } else if idx < 8 {
+                TxReq8$(valid: true, byte: b"REC="[trunc(idx -. 4)])
+            } else if idx < 16 {
+                TxReq8$(valid: true, byte: u32_hex_char(stats.records, trunc(idx -. 8)))
+            } else if idx == 16 {
+                TxReq8$(valid: true, byte: b' ')
+            } else if idx < 21 {
+                TxReq8$(valid: true, byte: b"DRP="[trunc(idx -. 17)])
+            } else if idx < 29 {
+                TxReq8$(valid: true, byte: u32_hex_char(stats.dropped, trunc(idx -. 21)))
+            } else if idx == 29 {
+                TxReq8$(valid: true, byte: b' ')
+            } else if idx < 34 {
+                TxReq8$(valid: true, byte: b"WRD="[trunc(idx -. 30)])
+            } else if idx < 42 {
+                TxReq8$(valid: true, byte: u32_hex_char(stats.words, trunc(idx -. 34)))
+            } else if idx == 42 {
+                TxReq8$(valid: true, byte: b' ')
+            } else if idx < 47 {
+                TxReq8$(valid: true, byte: b"QMX="[trunc(idx -. 43)])
+            } else if idx < 55 {
+                TxReq8$(valid: true, byte: u32_hex_char(stats.qmax, trunc(idx -. 47)))
+            } else if idx == 55 {
+                TxReq8$(valid: true, byte: b'\r')
+            } else if idx == 56 {
+                TxReq8$(valid: true, byte: b'\n')
+            } else {
+                tx_req_none()
             },
             Self::Read$(addr, value) => match idx {
                 0 => TxReq8$(valid: true, byte: offset_hex_char(addr, 0)),
