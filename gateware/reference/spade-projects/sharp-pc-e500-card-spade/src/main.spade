@@ -35,7 +35,6 @@ type FtOverflowCount = uint<26>;
 type FtCount = uint<32>;
 type FtQueueLevel = uint<14>;
 type FtBusSample = uint<30>;
-type QueueUartWord = uint<16>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -284,6 +283,7 @@ struct FtState {
     records_total: FtCount,
     dropped_total: FtCount,
     words_total: FtCount,
+    tx_full_cycles: FtCount,
     queue_level: FtQueueLevel,
     queue_high_water: FtQueueLevel,
     prev_sample_valid: bool,
@@ -375,6 +375,7 @@ fn init_ft_state() -> FtState {
         records_total: 0,
         dropped_total: 0,
         words_total: 0,
+        tx_full_cycles: 0,
         queue_level: 0,
         queue_high_water: 0,
         prev_sample_valid: false,
@@ -500,6 +501,7 @@ impl FtState {
                 records_total: 0,
                 dropped_total: 0,
                 words_total: 0,
+                tx_full_cycles: 0,
                 queue_level: 0,
                 queue_high_water: 0,
                 prev_sample_valid: false,
@@ -547,6 +549,13 @@ impl FtState {
                     self.words_total +. 1
                 } else {
                     self.words_total
+                },
+                tx_full_cycles: if !ft_active {
+                    0
+                } else if inputs.ft_ui_din_full {
+                    self.tx_full_cycles +. 1
+                } else {
+                    self.tx_full_cycles
                 },
                 queue_level: if !ft_active { 0 } else { next_queue_level },
                 queue_high_water: if !ft_active { 0 } else { next_queue_high_water },
@@ -847,6 +856,7 @@ entity main_core(
     let data_sync_bits = inst sync_bundle::<2, 8>(clk, data_in.to_bits());
     let addr_now: BusAddr = addr_sync_bits.to_uint();
     let data_now: CardData = data_sync_bits.to_uint();
+    let data_uart_now: CardData = data_in;
 
     let (mem_dout, mem_dout_w): (&CardData, inv &CardData) = port;
     let (uart_mem_dout, uart_mem_dout_w): (&CardData, inv &CardData) = port;
@@ -854,8 +864,6 @@ entity main_core(
     let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
     let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
-    let (queue_uart_line, queue_uart_line_w): (&bool, inv &bool) = port;
-    let (queue_uart_busy, queue_uart_busy_w): (&bool, inv &bool) = port;
     let (event_uart_line, event_uart_line_w): (&bool, inv &bool) = port;
     let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
     let (ft_debug_uart_line, ft_debug_uart_line_w): (&bool, inv &bool) = port;
@@ -931,7 +939,9 @@ entity main_core(
     reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
         pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
     reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) =
-        pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last).next_state;
+        pending_uart_step(data_state, data_now, false, cooldown_last).next_state;
+    reg(clk) data_uart_last: CardData reset(rst: 0) = data_uart_now;
+    reg(clk) data_uart_changed: bool reset(rst: false) = data_uart_now != data_uart_last;
     reg(clk) classify_delay: ClassifyCtr reset(rst: default_classify_last) =
         if classify_delay_update_valid { classify_delay_update } else { classify_delay };
     reg(clk) tick: FtDelta reset(rst: 0) = tick +. 1;
@@ -1038,9 +1048,6 @@ entity main_core(
     );
     reg(clk) ft: FtState reset(rst: init_ft_state()) = ft.eval(ft_inputs).next_state;
     let ft_eval = ft.eval(ft_inputs);
-    let queue_level_now: uint<16> = zext(ft_eval.next_state.queue_level);
-    reg(clk) queue_state: PendingUartState<16> reset(rst: init_pending_uart_state()) =
-        pending_uart_step(queue_state, queue_level_now, *queue_uart_busy, 0).next_state;
     reg(clk) ft_debug_state: FtDebugUartState reset(rst: init_ft_debug_uart_state()) =
         ft_debug_uart_step(
             ft_debug_state,
@@ -1082,6 +1089,7 @@ entity main_core(
                     records: ft.records_total,
                     dropped: ft.dropped_total,
                     words: ft.words_total,
+                    tx_full_cycles: ft.tx_full_cycles,
                     qmax: zext(ft.queue_high_water),
                 ))
             }
@@ -1101,8 +1109,6 @@ entity main_core(
     );
 
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
-    let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
-    let queue_step = pending_uart_step(queue_state, queue_level_now, *queue_uart_busy, 0);
     let event_step = event_uart_step(event_state, *event_uart_busy, event_valid, event_word);
     let ft_debug_step = ft_debug_uart_step(
         ft_debug_state,
@@ -1125,19 +1131,10 @@ entity main_core(
         clk,
         rst,
         false,
-        data_state.pending,
-        data_step.send,
+        data_uart_last,
+        data_uart_changed,
         data_uart_line_w,
         data_uart_busy_w,
-    );
-    let _queue_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 16>(
-        clk,
-        rst,
-        false,
-        queue_state.pending,
-        queue_step.send,
-        queue_uart_line_w,
-        queue_uart_busy_w,
     );
     let _event_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 16>(
         clk,
@@ -1189,13 +1186,21 @@ entity main_core(
         ft_ui_dout_empty_w,
     );
 
+    // Sticky FT pressure indicator for Saleae: rises on downstream backpressure
+    // or any dropped FT records, and clears when FT is disabled with f0.
+    let ft_overflow_seen =
+        *ft_ui_din_full ||
+        ft_fifo.full ||
+        ft.tx_full_cycles != 0 ||
+        ft.dropped_total != 0;
+
     let saleae_lines: [bool; 8] = [
         ce1,
         ce6,
         rw,
         if rst { true } else { *event_uart_line },
         if rst { true } else { *ft_debug_uart_line },
-        if rst { true } else { *queue_uart_line },
+        if rst { false } else { ft_overflow_seen },
         if rst { true } else { *data_uart_line },
         if rst { true } else { *addr_uart_line },
     ];

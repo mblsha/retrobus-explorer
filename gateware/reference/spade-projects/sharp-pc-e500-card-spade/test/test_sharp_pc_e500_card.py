@@ -508,6 +508,7 @@ async def usb_uart_echo_reads_writes_ft_toggle_and_reports_errors(dut):
     assert stats["DRP"] == 0x0, stats
     assert stats["WRD"] == 0x0, stats
     assert stats["QMX"] == 0x0, stats
+    assert stats["TFF"] == 0x0, stats
     sync, config = await _enable_ft(dut, drain_debug_cycles=0)
     assert _ft_kind(sync) == FT_KIND_SYNC
     assert _ft_kind(config) == FT_KIND_CONFIG
@@ -528,12 +529,14 @@ async def ft_disable_reports_stats_and_clears_counters(dut):
     assert stats["DRP"] == 0x0, stats
     assert stats["WRD"] == stats["REC"] * FT_RECORD_WORDS, stats
     assert stats["QMX"] > 0, stats
+    assert stats["TFF"] == 0x0, stats
 
     stats = await _disable_ft(dut)
     assert stats["REC"] == 0x0, stats
     assert stats["DRP"] == 0x0, stats
     assert stats["WRD"] == 0x0, stats
     assert stats["QMX"] == 0x0, stats
+    assert stats["TFF"] == 0x0, stats
 
 
 @cocotb.test()
@@ -743,7 +746,6 @@ async def saleae_control_outputs_and_write_ft_records_report_bus_activity(dut):
 
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
     ft_debug_write = cocotb.start_soon(_fast_uart_recv_bytes(dut.saleae[4], dut.clk, 2))
-    queue_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[5], dut.clk, 16, timeout_cycles=512))
     data_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
     addr_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 18))
     ft_write = cocotb.start_soon(_ft_recv_records(dut, 2))
@@ -752,9 +754,9 @@ async def saleae_control_outputs_and_write_ft_records_report_bus_activity(dut):
 
     assert await event_write == 0x575A
     assert await ft_debug_write == [ord("W"), ord("W")]
-    assert await queue_uart > 0
     assert await data_uart == 0x5A
     assert await addr_uart == 0x0012
+    assert saleae_bit(int(dut.saleae.value), 5) == 0
     write_records = await ft_write
     assert [_ft_kind(rec) for rec in write_records] == [FT_KIND_CE1_WRITE, FT_KIND_CE1_WRITE]
     assert _ft_addr(write_records[-1]) == 0x0012
@@ -837,5 +839,7 @@ async def ft_overflow_reports_dropped_accesses_after_host_stall(dut):
     assert _ft_kind(records[0]) in (FT_KIND_CE1_READ, FT_KIND_CE1_WRITE, FT_KIND_BUS_CHANGE)
     assert _ft_kind(records[-1]) == FT_KIND_OVERFLOW
     assert _ft_overflow_count(records[-1]) > 0
+    assert saleae_bit(int(dut.saleae.value), 5) == 1
     stats = await _disable_ft(dut)
     assert stats["QMX"] <= FT_RECORD_FIFO_RECORDS, stats
+    assert stats["TFF"] > 0, stats

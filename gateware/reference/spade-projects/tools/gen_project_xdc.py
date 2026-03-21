@@ -168,6 +168,8 @@ def load_constraint_config(project: Path) -> tuple[str, str, list[str], set[str]
     top_entity_default = config.get("tooling", {}).get("top", DEFAULT_TOP_ENTITY)
     top_entity = ensure_str(constraints.get("top_entity", top_entity_default), "[constraints].top_entity")
     top_ports = parse_top_ports(project / top_file, top_entity)
+    if "extra_signals" in constraints:
+        top_ports |= set(ensure_str_list(constraints.get("extra_signals"), "[constraints].extra_signals"))
     root_props = parse_root_properties(constraints, top_ports)
 
     if acf is not None and not auto:
