@@ -6,6 +6,7 @@ import types
 import unittest
 import ctypes
 from pathlib import Path
+from unittest import mock
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +15,7 @@ FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from capture_ft import D3xxReader, FT_RECORD_BYTES, capture_stream, capture_to_vcd  # noqa: E402
+from capture_ft import D3xxReader, FT_RECORD_BYTES, capture_stream, capture_to_vcd, format_capture_start, parse_args  # noqa: E402
 
 
 class FakeByteReader:
@@ -29,6 +30,25 @@ class FakeByteReader:
         self.closed = True
 
 class FtCaptureTests(unittest.TestCase):
+    def test_format_capture_start_includes_duration(self) -> None:
+        self.assertEqual(
+            format_capture_start(
+                raw_out=Path("/tmp/capture.ft16"),
+                vcd_out=Path("/tmp/capture.vcd"),
+                duration_s=60.0,
+                idle_timeout_s=None,
+                max_bytes=None,
+            ),
+            "starting FT capture: raw=/tmp/capture.ft16, vcd=/tmp/capture.vcd, duration=60s",
+        )
+
+    def test_parse_args_defaults_duration_to_60_seconds(self) -> None:
+        with mock.patch.object(sys, "argv", ["capture_ft.py", "--raw-out", "/tmp/capture.ft16"]):
+            args = parse_args()
+
+        self.assertEqual(args.duration, 60.0)
+        self.assertIsNone(args.idle_timeout)
+
     def test_d3xx_reader_opens_reads_and_closes(self) -> None:
         events: list[tuple[str, object]] = []
 

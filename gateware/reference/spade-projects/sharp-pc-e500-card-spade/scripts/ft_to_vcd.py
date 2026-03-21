@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from itertools import groupby
 from pathlib import Path
 from typing import Iterable, TextIO
 
@@ -100,6 +101,69 @@ class VcdWriter:
         return "\n".join(self._lines) + "\n"
 
 
+PULSE_NAMES = (
+    "event_bus_change",
+    "event_idle_change",
+    "event_ce1_read",
+    "event_ce1_write",
+    "event_ce6_read",
+    "event_ce6_write_attempt",
+    "event_sync",
+    "event_config",
+    "event_overflow",
+)
+
+
+def _group_records_by_time(records: Iterable[FtRecord]) -> Iterable[tuple[int, list[FtRecord]]]:
+    for tick, group in groupby(iter_timed_records(records), key=lambda timed: timed.tick):
+        yield tick * TICK_NS, [timed.record for timed in group]
+
+
+def _write_record_group(time_ns: int, records: list[FtRecord], writer: VcdWriter) -> list[str]:
+    active_pulses = {name: 0 for name in PULSE_NAMES}
+
+    for record in records:
+        writer.change(time_ns, "meta_kind", int(record.kind))
+        writer.change(time_ns, "meta_delta_ticks", record.delta_ticks)
+        writer.change(time_ns, "bus_addr", record.addr)
+        writer.change(time_ns, "bus_data", record.data)
+        writer.change(time_ns, "bus_rw", int(record.aux.rw))
+        writer.change(time_ns, "bus_oe", int(record.aux.oe))
+        writer.change(time_ns, "bus_ce1", int(record.aux.ce1))
+        writer.change(time_ns, "bus_ce6", int(record.aux.ce6))
+        writer.change(time_ns, "bus_same_addr", int(record.aux.same_addr))
+        writer.change(time_ns, "bus_same_data", int(record.aux.same_data))
+        writer.change(time_ns, "bus_change_record", int(record.aux.change_record))
+
+        if record.kind == FtKind.SYNC:
+            writer.change(time_ns, "meta_stream_version", sync_version(record))
+            active_pulses["event_sync"] = 1
+        elif record.kind == FtKind.CONFIG:
+            writer.change(time_ns, "meta_classify_delay_ticks", config_delay_ticks(record))
+            writer.change(time_ns, "meta_ft_enabled", int(config_enabled(record)))
+            active_pulses["event_config"] = 1
+        elif record.kind == FtKind.OVERFLOW:
+            writer.change(time_ns, "meta_overflow_count", overflow_count(record))
+            active_pulses["event_overflow"] = 1
+        else:
+            active_pulses["event_bus_change"] = 1
+            if record.kind == FtKind.BUS_CHANGE:
+                active_pulses["event_idle_change"] = 1
+            elif record.kind == FtKind.CE1_READ:
+                active_pulses["event_ce1_read"] = 1
+            elif record.kind == FtKind.CE1_WRITE:
+                active_pulses["event_ce1_write"] = 1
+            elif record.kind == FtKind.CE6_READ:
+                active_pulses["event_ce6_read"] = 1
+            elif record.kind == FtKind.CE6_WRITE_ATTEMPT:
+                active_pulses["event_ce6_write_attempt"] = 1
+
+    for pulse in PULSE_NAMES:
+        writer.change(time_ns, pulse, active_pulses[pulse])
+
+    return [pulse for pulse, active in active_pulses.items() if active]
+
+
 def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
     for name, width in (
         ("meta_ft_enabled", 1),
@@ -117,15 +181,7 @@ def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
         ("bus_same_addr", 1),
         ("bus_same_data", 1),
         ("bus_change_record", 1),
-        ("event_bus_change", 1),
-        ("event_idle_change", 1),
-        ("event_ce1_read", 1),
-        ("event_ce1_write", 1),
-        ("event_ce6_read", 1),
-        ("event_ce6_write_attempt", 1),
-        ("event_sync", 1),
-        ("event_config", 1),
-        ("event_overflow", 1),
+        *[(name, 1) for name in PULSE_NAMES],
     ):
         writer.add_signal(name, width)
     writer.header()
@@ -147,79 +203,21 @@ def _write_vcd_records(records: Iterable[FtRecord], writer: VcdWriter) -> None:
         ("bus_same_addr", 1),
         ("bus_same_data", 1),
         ("bus_change_record", 1),
-        ("event_bus_change", 1),
-        ("event_idle_change", 1),
-        ("event_ce1_read", 1),
-        ("event_ce1_write", 1),
-        ("event_ce6_read", 1),
-        ("event_ce6_write_attempt", 1),
-        ("event_sync", 1),
-        ("event_config", 1),
-        ("event_overflow", 1),
+        *[(name, 1) for name in PULSE_NAMES],
     ):
         writer.change(0, signal, 0)
 
-    for timed in iter_timed_records(records):
-        time_ns = timed.tick * TICK_NS
-        record = timed.record
-        writer.change(time_ns, "meta_kind", int(record.kind))
-        writer.change(time_ns, "meta_delta_ticks", record.delta_ticks)
-        writer.change(time_ns, "bus_addr", record.addr)
-        writer.change(time_ns, "bus_data", record.data)
-        writer.change(time_ns, "bus_rw", int(record.aux.rw))
-        writer.change(time_ns, "bus_oe", int(record.aux.oe))
-        writer.change(time_ns, "bus_ce1", int(record.aux.ce1))
-        writer.change(time_ns, "bus_ce6", int(record.aux.ce6))
-        writer.change(time_ns, "bus_same_addr", int(record.aux.same_addr))
-        writer.change(time_ns, "bus_same_data", int(record.aux.same_data))
-        writer.change(time_ns, "bus_change_record", int(record.aux.change_record))
-
-        pulse_names = [
-            "event_bus_change",
-            "event_idle_change",
-            "event_ce1_read",
-            "event_ce1_write",
-            "event_ce6_read",
-            "event_ce6_write_attempt",
-            "event_sync",
-            "event_config",
-            "event_overflow",
-        ]
-        for pulse in pulse_names:
+    active_pulses: list[str] = []
+    last_time_ns: int | None = None
+    for time_ns, record_group in _group_records_by_time(records):
+        for pulse in active_pulses:
             writer.change(time_ns, pulse, 0)
+        active_pulses = _write_record_group(time_ns, record_group, writer)
+        last_time_ns = time_ns
 
-        if record.kind == FtKind.SYNC:
-            writer.change(time_ns, "meta_stream_version", sync_version(record))
-            writer.change(time_ns, "event_sync", 1)
-            writer.change(time_ns + TICK_NS, "event_sync", 0)
-        elif record.kind == FtKind.CONFIG:
-            writer.change(time_ns, "meta_classify_delay_ticks", config_delay_ticks(record))
-            writer.change(time_ns, "meta_ft_enabled", int(config_enabled(record)))
-            writer.change(time_ns, "event_config", 1)
-            writer.change(time_ns + TICK_NS, "event_config", 0)
-        elif record.kind == FtKind.OVERFLOW:
-            writer.change(time_ns, "meta_overflow_count", overflow_count(record))
-            writer.change(time_ns, "event_overflow", 1)
-            writer.change(time_ns + TICK_NS, "event_overflow", 0)
-        else:
-            writer.change(time_ns, "event_bus_change", 1)
-            if record.kind == FtKind.BUS_CHANGE:
-                writer.change(time_ns, "event_idle_change", 1)
-            elif record.kind == FtKind.CE1_READ:
-                writer.change(time_ns, "event_ce1_read", 1)
-            elif record.kind == FtKind.CE1_WRITE:
-                writer.change(time_ns, "event_ce1_write", 1)
-            elif record.kind == FtKind.CE6_READ:
-                writer.change(time_ns, "event_ce6_read", 1)
-            elif record.kind == FtKind.CE6_WRITE_ATTEMPT:
-                writer.change(time_ns, "event_ce6_write_attempt", 1)
-
-            writer.change(time_ns + TICK_NS, "event_bus_change", 0)
-            writer.change(time_ns + TICK_NS, "event_idle_change", 0)
-            writer.change(time_ns + TICK_NS, "event_ce1_read", 0)
-            writer.change(time_ns + TICK_NS, "event_ce1_write", 0)
-            writer.change(time_ns + TICK_NS, "event_ce6_read", 0)
-            writer.change(time_ns + TICK_NS, "event_ce6_write_attempt", 0)
+    if last_time_ns is not None:
+        for pulse in active_pulses:
+            writer.change(last_time_ns + TICK_NS, pulse, 0)
 
 
 def build_vcd(records: Iterable[FtRecord]) -> str:

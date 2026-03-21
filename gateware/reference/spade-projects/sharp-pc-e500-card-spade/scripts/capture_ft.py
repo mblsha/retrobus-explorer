@@ -104,7 +104,7 @@ def capture_stream(
     raw_out: Path,
     *,
     chunk_size: int = 4096,
-    duration_s: float | None = 5.0,
+    duration_s: float | None = 60.0,
     idle_timeout_s: float | None = 0.25,
     max_bytes: int | None = None,
     poll_interval_s: float = 0.01,
@@ -157,7 +157,7 @@ def capture_to_vcd(
     raw_out: Path,
     vcd_out: Path | None,
     chunk_size: int = 4096,
-    duration_s: float | None = 5.0,
+    duration_s: float | None = 60.0,
     idle_timeout_s: float | None = 0.25,
     max_bytes: int | None = None,
     poll_interval_s: float = 0.01,
@@ -180,6 +180,26 @@ def capture_to_vcd(
     return stats
 
 
+def format_capture_start(
+    *,
+    raw_out: Path,
+    vcd_out: Path | None,
+    duration_s: float | None,
+    idle_timeout_s: float | None,
+    max_bytes: int | None,
+) -> str:
+    parts = [f"raw={raw_out}"]
+    if vcd_out is not None:
+        parts.append(f"vcd={vcd_out}")
+    if duration_s is not None:
+        parts.append(f"duration={duration_s:g}s")
+    if idle_timeout_s is not None:
+        parts.append(f"idle_timeout={idle_timeout_s:g}s")
+    if max_bytes is not None:
+        parts.append(f"max_bytes={max_bytes}")
+    return "starting FT capture: " + ", ".join(parts)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Capture PC-E500 FT600 stream to .ft16 and optional .vcd")
     parser.add_argument("--device-index", type=int, default=0, help="FT600 device index for D3XX open")
@@ -187,8 +207,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--read-timeout-ms", type=int, default=100, help="D3XX read timeout in milliseconds")
     parser.add_argument("--raw-out", type=Path, required=True, help="output .ft16 capture path")
     parser.add_argument("--vcd-out", type=Path, help="optional output VCD path")
-    parser.add_argument("--duration", type=float, default=5.0, help="capture duration in seconds")
-    parser.add_argument("--idle-timeout", type=float, default=0.25, help="stop after this many idle seconds")
+    parser.add_argument("--duration", type=float, default=60.0, help="capture duration in seconds")
+    parser.add_argument("--idle-timeout", type=float, help="optional stop after this many idle seconds")
     parser.add_argument("--chunk-size", type=int, default=32768, help="host read chunk size in bytes")
     parser.add_argument("--max-bytes", type=int, help="optional hard cap on captured bytes")
     return parser.parse_args()
@@ -202,6 +222,16 @@ def main() -> int:
         timeout_ms=args.read_timeout_ms,
     )
     try:
+        print(
+            format_capture_start(
+                raw_out=args.raw_out,
+                vcd_out=args.vcd_out,
+                duration_s=args.duration,
+                idle_timeout_s=args.idle_timeout,
+                max_bytes=args.max_bytes,
+            ),
+            flush=True,
+        )
         stats = capture_to_vcd(
             reader,
             raw_out=args.raw_out,

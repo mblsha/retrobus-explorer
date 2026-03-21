@@ -1,6 +1,6 @@
 __pycache__
 d3xx/libftd3xx.dylib
+d3xx/libftd3xx.*.dylib
 *.pb
 bin/
 g850-roms/
-
