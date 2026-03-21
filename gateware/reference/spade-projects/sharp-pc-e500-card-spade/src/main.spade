@@ -13,6 +13,7 @@ use shared_components::{
 };
 use msg::{
     EchoStreamState,
+    FtStats,
     RespMsg,
     RespStreamState,
     echo_stream_step,
@@ -31,6 +32,8 @@ type FtRecord = uint<80>;
 type FtDelta = uint<32>;
 type FtAux = uint<14>;
 type FtOverflowCount = uint<26>;
+type FtCount = uint<32>;
+type FtQueueLevel = uint<7>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -204,6 +207,11 @@ struct FtState {
     enabled: bool,
     last_tick: FtDelta,
     drop_count: FtOverflowCount,
+    records_total: FtCount,
+    dropped_total: FtCount,
+    words_total: FtCount,
+    queue_level: FtQueueLevel,
+    queue_high_water: FtQueueLevel,
     prev_access_valid: bool,
     prev_access_addr: BusAddr,
     prev_access_data: CardData,
@@ -292,6 +300,11 @@ fn init_ft_state() -> FtState {
         enabled: false,
         last_tick: 0,
         drop_count: 0,
+        records_total: 0,
+        dropped_total: 0,
+        words_total: 0,
+        queue_level: 0,
+        queue_high_water: 0,
         prev_access_valid: false,
         prev_access_addr: 0,
         prev_access_data: 0,
@@ -384,12 +397,31 @@ impl FtState {
             inputs.ft_fifo_dout,
         );
         let fifo_wput = record_valid && !inputs.ft_fifo_full;
+        let queue_inc: FtQueueLevel = if fifo_wput { 1 } else { 0 };
+        let queue_dec: FtQueueLevel = if stream.stream_fifo_rget { 1 } else { 0 };
+        let next_queue_level = if queue_inc > queue_dec {
+            self.queue_level +. (queue_inc -. queue_dec)
+        } else if queue_dec > queue_inc {
+            self.queue_level -. (queue_dec -. queue_inc)
+        } else {
+            self.queue_level
+        };
+        let next_queue_high_water = if next_queue_level > self.queue_high_water {
+            next_queue_level
+        } else {
+            self.queue_high_water
+        };
 
         let next_state = if ft_disable_now {
             FtState$(
                 enabled: false,
                 last_tick: inputs.tick +. 1,
                 drop_count: 0,
+                records_total: 0,
+                dropped_total: 0,
+                words_total: 0,
+                queue_level: 0,
+                queue_high_water: 0,
                 prev_access_valid: false,
                 prev_access_addr: 0,
                 prev_access_data: 0,
@@ -420,6 +452,29 @@ impl FtState {
                 } else {
                     self.drop_count
                 },
+                records_total: if !ft_active {
+                    0
+                } else if fifo_wput {
+                    self.records_total +. 1
+                } else {
+                    self.records_total
+                },
+                dropped_total: if !ft_active {
+                    0
+                } else if inputs.access_valid && inputs.ft_fifo_full {
+                    self.dropped_total +. 1
+                } else {
+                    self.dropped_total
+                },
+                words_total: if !ft_active {
+                    0
+                } else if stream.ui_din_valid {
+                    self.words_total +. 1
+                } else {
+                    self.words_total
+                },
+                queue_level: if !ft_active { 0 } else { next_queue_level },
+                queue_high_water: if !ft_active { 0 } else { next_queue_high_water },
                 prev_access_valid: if record_is_access && fifo_wput {
                     true
                 } else if ft_enable_now {
@@ -805,25 +860,6 @@ entity main_core(
 
     let echo_msg = usb_parse.echo;
     let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
-    let resp_msg = match usb_parse.event {
-        ParserEvent::Read$(addr) => {
-            if mem_clear.active || uart_read_collision {
-                RespMsg::Busy()
-            } else {
-                RespMsg::Read(addr, *uart_mem_dout)
-            }
-        },
-        ParserEvent::Write$(addr, value) => {
-            let _ = addr;
-            let _ = value;
-            if uart_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
-        },
-        ParserEvent::SetClassifyDelay$(cycles) => RespMsg::Timing(cycles),
-        ParserEvent::SetFtStreaming$(enabled) => RespMsg::Ft(enabled),
-        ParserEvent::ParseErr => RespMsg::Err(),
-        _ => RespMsg::None(),
-    };
-    let resp_msg_valid = if let RespMsg::None = resp_msg { false } else { true };
 
     reg(clk) echo_state: EchoStreamState reset(rst: init_echo_stream()) =
         echo_stream_step(echo_state, *usb_tx_busy || boot_banner_out.tx_req.valid, echo_msg_valid, echo_msg).state;
@@ -832,15 +868,6 @@ entity main_core(
         *usb_tx_busy || boot_banner_out.tx_req.valid,
         echo_msg_valid,
         echo_msg,
-    );
-
-    reg(clk) resp_state: RespStreamState reset(rst: init_resp_stream()) =
-        resp_stream_step(resp_state, *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid, resp_msg_valid, resp_msg).state;
-    let resp_out = resp_stream_step(
-        resp_state,
-        *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid,
-        resp_msg_valid,
-        resp_msg,
     );
 
     let _mem = inst card_ram_2k_v(
@@ -916,6 +943,46 @@ entity main_core(
     set ft_fifo_full_w = &ft_fifo.full;
     set ft_fifo_empty_w = &ft_fifo.empty;
     set ft_fifo_dout_w = &ft_fifo.dout;
+
+    let resp_msg = match usb_parse.event {
+        ParserEvent::Read$(addr) => {
+            if mem_clear.active || uart_read_collision {
+                RespMsg::Busy()
+            } else {
+                RespMsg::Read(addr, *uart_mem_dout)
+            }
+        },
+        ParserEvent::Write$(addr, value) => {
+            let _ = addr;
+            let _ = value;
+            if uart_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
+        },
+        ParserEvent::SetClassifyDelay$(cycles) => RespMsg::Timing(cycles),
+        ParserEvent::SetFtStreaming$(enabled) => {
+            if enabled {
+                RespMsg::Ft(enabled)
+            } else {
+                RespMsg::FtStats(FtStats$(
+                    records: ft.records_total,
+                    dropped: ft.dropped_total,
+                    words: ft.words_total,
+                    qmax: zext(ft.queue_high_water),
+                ))
+            }
+        },
+        ParserEvent::ParseErr => RespMsg::Err(),
+        _ => RespMsg::None(),
+    };
+    let resp_msg_valid = if let RespMsg::None = resp_msg { false } else { true };
+
+    reg(clk) resp_state: RespStreamState reset(rst: init_resp_stream()) =
+        resp_stream_step(resp_state, *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid, resp_msg_valid, resp_msg).state;
+    let resp_out = resp_stream_step(
+        resp_state,
+        *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid,
+        resp_msg_valid,
+        resp_msg,
+    );
 
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);

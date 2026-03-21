@@ -264,10 +264,26 @@ async def _enable_ft(dut):
     return sync, config
 
 
+def _parse_ft_stats_line(line: str) -> dict[str, int]:
+    parts = line.strip().split()
+    stats: dict[str, int] = {}
+    for part in parts:
+        key, value = part.split("=", 1)
+        if key == "F":
+            stats[key] = int(value, 10)
+        else:
+            stats[key] = int(value, 16)
+    return stats
+
+
 async def _disable_ft(dut):
-    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f0\r\nF=0\r\n")))
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f0\r\n")))
     await _uart_send_text(dut, "f0\r")
-    assert await rx == b"f0\r\nF=0\r\n"
+    assert await rx == b"f0\r\n"
+    line = await _uart_recv_line(dut, max_len=160)
+    stats = _parse_ft_stats_line(line)
+    assert stats["F"] == 0
+    return stats
 
 
 async def _find_uart_write_collision_phase(
@@ -472,10 +488,37 @@ async def usb_uart_echo_reads_writes_ft_toggle_and_reports_errors(dut):
     await _uart_send_text(dut, "x\r")
     assert await rx == b"\r\nERR\r\n"
 
-    await _disable_ft(dut)
+    stats = await _disable_ft(dut)
+    assert stats["REC"] == 0x0, stats
+    assert stats["DRP"] == 0x0, stats
+    assert stats["WRD"] == 0x0, stats
+    assert stats["QMX"] == 0x0, stats
     sync, config = await _enable_ft(dut)
     assert _ft_kind(sync) == FT_KIND_SYNC
     assert _ft_kind(config) == FT_KIND_CONFIG
+
+
+@cocotb.test()
+async def ft_disable_reports_stats_and_clears_counters(dut):
+    await _init(dut)
+
+    await _enable_ft(dut)
+    records = cocotb.start_soon(_ft_recv_records(dut, 2))
+    await _bus_write(dut, 0x0005, 0xA5)
+    assert await _bus_read(dut, 0x0005) == 0xA5
+    await records
+
+    stats = await _disable_ft(dut)
+    assert stats["REC"] == 0x4, stats
+    assert stats["DRP"] == 0x0, stats
+    assert stats["WRD"] == 0x14, stats
+    assert stats["QMX"] > 0, stats
+
+    stats = await _disable_ft(dut)
+    assert stats["REC"] == 0x0, stats
+    assert stats["DRP"] == 0x0, stats
+    assert stats["WRD"] == 0x0, stats
+    assert stats["QMX"] == 0x0, stats
 
 
 @cocotb.test()
