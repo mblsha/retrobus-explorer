@@ -33,7 +33,7 @@ type FtDelta = uint<32>;
 type FtAux = uint<14>;
 type FtOverflowCount = uint<26>;
 type FtCount = uint<32>;
-type FtQueueLevel = uint<7>;
+type FtQueueLevel = uint<14>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -933,7 +933,7 @@ entity main_core(
     reg(clk) ft: FtState reset(rst: init_ft_state()) = ft.eval(ft_inputs).next_state;
     let ft_eval = ft.eval(ft_inputs);
     let ft_fifo_rst = rst || (ft_enable_update_valid && !ft_enable_update);
-    let ft_fifo = inst sync_fifo::<80, 64>(
+    let ft_fifo = inst sync_fifo::<80, 8192>(
         clk,
         ft_fifo_rst,
         ft_eval.fifo_din,
