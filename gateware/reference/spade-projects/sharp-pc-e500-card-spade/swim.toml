@@ -6,6 +6,7 @@ shared_components = { path = "../shared-components" }
 
 [constraints]
 top_entity = "main_core"
+extra_signals = ["data"]
 acf = [
     "../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf",
     "../../../shared-constraints/saleae.acf",
