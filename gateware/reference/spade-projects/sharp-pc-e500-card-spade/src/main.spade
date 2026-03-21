@@ -34,6 +34,7 @@ type FtAux = uint<14>;
 type FtOverflowCount = uint<26>;
 type FtCount = uint<32>;
 type FtQueueLevel = uint<14>;
+type FtBusSample = uint<30>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -64,6 +65,7 @@ fn write_event_word(data: CardData) -> EventWord {
     debug_event_word(0x57, data)
 }
 
+fn ft_kind_bus_change() -> uint<8> { 0x00 }
 fn ft_kind_ce1_read() -> uint<8> { 0x01 }
 fn ft_kind_ce1_write() -> uint<8> { 0x02 }
 fn ft_kind_ce6_read() -> uint<8> { 0x03 }
@@ -95,6 +97,64 @@ fn ft_access_aux(
     (same_addr_bit << 4) |
     (same_data_bit << 5) |
     (delayed_bit << 6)
+}
+
+fn ft_bus_sample(
+    rw_sample: bool,
+    oe_sample: bool,
+    ce1_sample: bool,
+    ce6_sample: bool,
+    addr: BusAddr,
+    data: CardData,
+) -> FtBusSample {
+    zext(data) |
+    (zext(addr) << 8) |
+    ((if oe_sample { 1 } else { 0 }) << 26) |
+    ((if rw_sample { 1 } else { 0 }) << 27) |
+    ((if ce6_sample { 1 } else { 0 }) << 28) |
+    ((if ce1_sample { 1 } else { 0 }) << 29)
+}
+
+fn settled_value<#uint WIDTH>(state: PendingUartState<WIDTH>, settle_last: uint<4>) -> uint<WIDTH> {
+    if state.pending_valid && state.settle == settle_last {
+        state.pending
+    } else {
+        state.sent
+    }
+}
+
+fn ft_bus_sample_data(sample: FtBusSample) -> CardData {
+    trunc(sample)
+}
+
+fn ft_bus_sample_addr(sample: FtBusSample) -> BusAddr {
+    trunc(sample >> 8)
+}
+
+fn ft_bus_sample_oe(sample: FtBusSample) -> bool {
+    ((sample >> 26) & 1) == 1
+}
+
+fn ft_bus_sample_rw(sample: FtBusSample) -> bool {
+    ((sample >> 27) & 1) == 1
+}
+
+fn ft_bus_sample_ce6(sample: FtBusSample) -> bool {
+    ((sample >> 28) & 1) == 1
+}
+
+fn ft_bus_sample_ce1(sample: FtBusSample) -> bool {
+    ((sample >> 29) & 1) == 1
+}
+
+fn ft_kind_from_bus_sample(sample: FtBusSample) -> uint<8> {
+    if ft_bus_sample_ce1(sample) {
+        if ft_bus_sample_rw(sample) { ft_kind_ce1_read() } else { ft_kind_ce1_write() }
+    } else if ft_bus_sample_ce6(sample) {
+        if ft_bus_sample_rw(sample) { ft_kind_ce6_read() } else { ft_kind_ce6_write_attempt() }
+    } else {
+        ft_kind_bus_change()
+    }
 }
 
 fn pack_ft_record(kind: uint<8>, delta: FtDelta, addr: BusAddr, data: CardData, aux: FtAux) -> FtRecord {
@@ -177,6 +237,11 @@ struct EventUartState {
     pending_valid: bool,
 }
 
+struct FtDebugUartState {
+    pending: CardData,
+    pending_valid: bool,
+}
+
 struct MemClearState {
     active: bool,
     addr: CardOffset,
@@ -186,6 +251,12 @@ struct EventUartOut {
     next_state: EventUartState,
     send: bool,
     send_word: EventWord,
+}
+
+struct FtDebugUartOut {
+    next_state: FtDebugUartState,
+    send: bool,
+    send_byte: CardData,
 }
 
 struct FtRecordStreamState {
@@ -212,9 +283,8 @@ struct FtState {
     words_total: FtCount,
     queue_level: FtQueueLevel,
     queue_high_water: FtQueueLevel,
-    prev_access_valid: bool,
-    prev_access_addr: BusAddr,
-    prev_access_data: CardData,
+    prev_sample_valid: bool,
+    prev_sample: FtBusSample,
     pending_sync: bool,
     pending_config: bool,
     stream: FtRecordStreamState,
@@ -227,15 +297,7 @@ struct FtInputs {
     ft_fifo_full: bool,
     ft_fifo_empty: bool,
     ft_fifo_dout: FtRecord,
-    access_valid: bool,
-    access_kind: uint<8>,
-    access_start: FtDelta,
-    access_addr: BusAddr,
-    access_data: CardData,
-    rw_sample: bool,
-    oe_sample: bool,
-    ce1_sample: bool,
-    ce6_sample: bool,
+    bus_sample: FtBusSample,
     classify_delay_update_valid: bool,
     classify_delay_update: ClassifyCtr,
     ft_enable_update_valid: bool,
@@ -280,6 +342,13 @@ fn init_event_uart_state() -> EventUartState {
     )
 }
 
+fn init_ft_debug_uart_state() -> FtDebugUartState {
+    FtDebugUartState$(
+        pending: 0,
+        pending_valid: false,
+    )
+}
+
 fn init_mem_clear_state() -> MemClearState {
     MemClearState$(
         active: true,
@@ -305,9 +374,8 @@ fn init_ft_state() -> FtState {
         words_total: 0,
         queue_level: 0,
         queue_high_water: 0,
-        prev_access_valid: false,
-        prev_access_addr: 0,
-        prev_access_data: 0,
+        prev_sample_valid: false,
+        prev_sample: 0,
         pending_sync: false,
         pending_config: false,
         stream: init_ft_record_stream_state(),
@@ -338,27 +406,28 @@ impl FtState {
             ft_active,
         );
         let overflow_record = pack_ft_overflow_record(inputs.tick -. self.last_tick, self.drop_count);
-        let same_addr = self.prev_access_valid && self.prev_access_addr == inputs.access_addr;
-        let same_data = self.prev_access_valid && self.prev_access_data == inputs.access_data;
+        let sample_changed = ft_active && self.prev_sample_valid && inputs.bus_sample != self.prev_sample;
+        let same_addr = self.prev_sample_valid && ft_bus_sample_addr(self.prev_sample) == ft_bus_sample_addr(inputs.bus_sample);
+        let same_data = self.prev_sample_valid && ft_bus_sample_data(self.prev_sample) == ft_bus_sample_data(inputs.bus_sample);
         let access_aux = ft_access_aux(
-            inputs.rw_sample,
-            inputs.oe_sample,
-            inputs.ce1_sample,
-            inputs.ce6_sample,
+            ft_bus_sample_rw(inputs.bus_sample),
+            ft_bus_sample_oe(inputs.bus_sample),
+            ft_bus_sample_ce1(inputs.bus_sample),
+            ft_bus_sample_ce6(inputs.bus_sample),
             same_addr,
             same_data,
             true,
         );
         let access_record = pack_ft_record(
-            inputs.access_kind,
-            inputs.access_start -. self.last_tick,
-            inputs.access_addr,
-            inputs.access_data,
+            ft_kind_from_bus_sample(inputs.bus_sample),
+            inputs.tick -. self.last_tick,
+            ft_bus_sample_addr(inputs.bus_sample),
+            ft_bus_sample_data(inputs.bus_sample),
             access_aux,
         );
 
         let record_valid = if ft_active {
-            if inputs.access_valid {
+            if sample_changed {
                 true
             } else if sync_valid_now {
                 true
@@ -370,12 +439,12 @@ impl FtState {
         } else {
             false
         };
-        let record_is_access = ft_active && inputs.access_valid;
-        let record_is_sync = ft_active && !inputs.access_valid && sync_valid_now;
-        let record_is_config = ft_active && !inputs.access_valid && !sync_valid_now && config_valid_now;
+        let record_is_access = ft_active && sample_changed;
+        let record_is_sync = ft_active && !sample_changed && sync_valid_now;
+        let record_is_config = ft_active && !sample_changed && !sync_valid_now && config_valid_now;
         let record_is_overflow =
             ft_active &&
-            !inputs.access_valid &&
+            !sample_changed &&
             !sync_valid_now &&
             !config_valid_now &&
             overflow_valid_now;
@@ -422,9 +491,8 @@ impl FtState {
                 words_total: 0,
                 queue_level: 0,
                 queue_high_water: 0,
-                prev_access_valid: false,
-                prev_access_addr: 0,
-                prev_access_data: 0,
+                prev_sample_valid: false,
+                prev_sample: 0,
                 pending_sync: false,
                 pending_config: false,
                 stream: init_ft_record_stream_state(),
@@ -433,11 +501,7 @@ impl FtState {
             FtState$(
                 enabled: ft_active,
                 last_tick: if fifo_wput {
-                    if record_is_access {
-                        inputs.access_start
-                    } else {
-                        inputs.tick
-                    }
+                    inputs.tick
                 } else if ft_enable_now {
                     inputs.tick
                 } else {
@@ -447,7 +511,7 @@ impl FtState {
                     0
                 } else if record_is_overflow && fifo_wput {
                     0
-                } else if inputs.access_valid && inputs.ft_fifo_full {
+                } else if sample_changed && inputs.ft_fifo_full {
                     self.drop_count +. 1
                 } else {
                     self.drop_count
@@ -461,7 +525,7 @@ impl FtState {
                 },
                 dropped_total: if !ft_active {
                     0
-                } else if inputs.access_valid && inputs.ft_fifo_full {
+                } else if sample_changed && inputs.ft_fifo_full {
                     self.dropped_total +. 1
                 } else {
                     self.dropped_total
@@ -475,22 +539,17 @@ impl FtState {
                 },
                 queue_level: if !ft_active { 0 } else { next_queue_level },
                 queue_high_water: if !ft_active { 0 } else { next_queue_high_water },
-                prev_access_valid: if record_is_access && fifo_wput {
-                    true
-                } else if ft_enable_now {
+                prev_sample_valid: if !ft_active {
                     false
+                } else if ft_enable_now {
+                    true
                 } else {
-                    self.prev_access_valid
+                    self.prev_sample_valid
                 },
-                prev_access_addr: if record_is_access && fifo_wput {
-                    inputs.access_addr
+                prev_sample: if !ft_active {
+                    0
                 } else {
-                    self.prev_access_addr
-                },
-                prev_access_data: if record_is_access && fifo_wput {
-                    inputs.access_data
-                } else {
-                    self.prev_access_data
+                    inputs.bus_sample
                 },
                 pending_sync: if record_is_sync && fifo_wput {
                     false
@@ -644,6 +703,53 @@ fn event_uart_step(
     )
 }
 
+fn ft_debug_char(kind: uint<8>) -> CardData {
+    match kind {
+        0x00 => 0x42,
+        0x01 => 0x52,
+        0x02 => 0x57,
+        0x03 => 0x72,
+        0x04 => 0x77,
+        0xF0 => 0x53,
+        0xF1 => 0x45,
+        _ => 0x43,
+    }
+}
+
+fn ft_debug_uart_step(
+    state: FtDebugUartState,
+    busy: bool,
+    event_valid: bool,
+    event_byte: CardData,
+) -> FtDebugUartOut {
+    let send_pending = state.pending_valid && !busy;
+    let send_direct = !state.pending_valid && event_valid && !busy;
+    FtDebugUartOut$(
+        next_state: FtDebugUartState$(
+            pending: if send_pending {
+                if event_valid { event_byte } else { state.pending }
+            } else if send_direct {
+                state.pending
+            } else if event_valid {
+                event_byte
+            } else {
+                state.pending
+            },
+            pending_valid: if send_pending {
+                event_valid
+            } else if send_direct {
+                false
+            } else if event_valid {
+                true
+            } else {
+                state.pending_valid
+            }
+        ),
+        send: send_pending || send_direct,
+        send_byte: if send_pending { state.pending } else { event_byte },
+    )
+}
+
 fn ft_record_stream_step(
     state: FtRecordStreamState,
     ui_din_full: bool,
@@ -739,6 +845,8 @@ entity main_core(
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
     let (event_uart_line, event_uart_line_w): (&bool, inv &bool) = port;
     let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
+    let (ft_debug_uart_line, ft_debug_uart_line_w): (&bool, inv &bool) = port;
+    let (ft_debug_uart_busy, ft_debug_uart_busy_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
     let (ft_data_out, ft_data_out_w): (&FtData, inv &FtData) = port;
@@ -893,21 +1001,14 @@ entity main_core(
         uart_mem_dout_w,
     );
 
-    let ft_access_valid = classify_now_ce1 || (!classify_now_ce1 && classify_now_ce6);
-    let ft_access_kind = if classify_now_ce1 {
-        if ce1_step.kind_read { ft_kind_ce1_read() } else { ft_kind_ce1_write() }
-    } else if ce6_step.kind_read {
-        ft_kind_ce6_read()
-    } else {
-        ft_kind_ce6_write_attempt()
-    };
-    let ft_access_addr = if classify_now_ce1 { ce1_step.addr } else { ce6_step.addr };
-    let ft_access_data = if classify_now_ce1 {
-        if ce1_step.kind_read { bus_data_out } else { ce1_step.data }
-    } else {
-        ce6_step.data
-    };
-    let ft_access_start = if classify_now_ce1 { ce1_step.start_tick } else { ce6_step.start_tick };
+    let ft_bus_sample_now = ft_bus_sample(
+        rw,
+        oe,
+        ce1,
+        ce6,
+        settled_value(addr_state, cooldown_last),
+        settled_value(data_state, cooldown_last),
+    );
     let ft_inputs = FtInputs$(
         tick: tick,
         ft_ui_din_full: *ft_ui_din_full,
@@ -915,15 +1016,7 @@ entity main_core(
         ft_fifo_full: *ft_fifo_full,
         ft_fifo_empty: *ft_fifo_empty,
         ft_fifo_dout: *ft_fifo_dout,
-        access_valid: ft_access_valid,
-        access_kind: ft_access_kind,
-        access_start: ft_access_start,
-        access_addr: ft_access_addr,
-        access_data: ft_access_data,
-        rw_sample: rw,
-        oe_sample: oe,
-        ce1_sample: ce1,
-        ce6_sample: ce6,
+        bus_sample: ft_bus_sample_now,
         classify_delay_update_valid: classify_delay_update_valid,
         classify_delay_update: classify_delay_update,
         ft_enable_update_valid: ft_enable_update_valid,
@@ -932,6 +1025,19 @@ entity main_core(
     );
     reg(clk) ft: FtState reset(rst: init_ft_state()) = ft.eval(ft_inputs).next_state;
     let ft_eval = ft.eval(ft_inputs);
+    reg(clk) ft_debug_state: FtDebugUartState reset(rst: init_ft_debug_uart_state()) =
+        ft_debug_uart_step(
+            ft_debug_state,
+            *ft_debug_uart_busy,
+            ft_eval.fifo_wput,
+            ft_debug_char(trunc(ft_eval.fifo_din >> 72)),
+        ).next_state;
+    reg(clk) ft_queue_problem_seen: bool reset(rst: false) =
+        if ft_enable_update_valid && !ft_enable_update {
+            false
+        } else {
+            ft_queue_problem_seen || *ft_fifo_full || ft_eval.next_state.dropped_total > 0
+        };
     let ft_fifo_rst = rst || (ft_enable_update_valid && !ft_enable_update);
     let ft_fifo = inst sync_fifo::<80, 8192>(
         clk,
@@ -987,6 +1093,12 @@ entity main_core(
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let data_step = pending_uart_step(data_state, data_now, *data_uart_busy, cooldown_last);
     let event_step = event_uart_step(event_state, *event_uart_busy, event_valid, event_word);
+    let ft_debug_step = ft_debug_uart_step(
+        ft_debug_state,
+        *ft_debug_uart_busy,
+        ft_eval.fifo_wput,
+        ft_debug_char(trunc(ft_eval.fifo_din >> 72)),
+    );
     let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, resp_out.tx_req);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
@@ -1015,6 +1127,15 @@ entity main_core(
         event_step.send,
         event_uart_line_w,
         event_uart_busy_w,
+    );
+    let _ft_debug_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 8>(
+        clk,
+        rst,
+        false,
+        ft_debug_step.send_byte,
+        ft_debug_step.send,
+        ft_debug_uart_line_w,
+        ft_debug_uart_busy_w,
     );
     let _usb_tx = inst au_usb_uart_tx8_tap(
         clk,
@@ -1048,14 +1169,15 @@ entity main_core(
         ft_ui_dout_empty_w,
     );
 
+    let ft_queue_problem = *ft_fifo_full || ft_queue_problem_seen;
     let saleae_lines: [bool; 8] = [
         ce1,
         ce6,
         rw,
         if rst { true } else { *event_uart_line },
-        data_step.dropped,
+        if rst { true } else { *ft_debug_uart_line },
+        ft_queue_problem,
         if rst { true } else { *data_uart_line },
-        addr_step.dropped,
         if rst { true } else { *addr_uart_line },
     ];
     let led_lines: [bool; 8] = [

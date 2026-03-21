@@ -23,6 +23,7 @@ TICK_NS = 10
 
 
 class FtKind(IntEnum):
+    BUS_CHANGE = 0x00
     CE1_READ = 0x01
     CE1_WRITE = 0x02
     CE6_READ = 0x03
@@ -44,7 +45,7 @@ class FtAux:
     ce6: bool
     same_addr: bool
     same_data: bool
-    classified_after_delay: bool
+    change_record: bool
     raw: int
 
 
@@ -72,7 +73,7 @@ def decode_ft_aux(raw: int) -> FtAux:
         ce6=bool(raw & (1 << 3)),
         same_addr=bool(raw & (1 << 4)),
         same_data=bool(raw & (1 << 5)),
-        classified_after_delay=bool(raw & (1 << 6)),
+        change_record=bool(raw & (1 << 6)),
         raw=raw & FT_AUX_MASK,
     )
 
