@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import sys
 import tempfile
 import unittest
@@ -183,6 +184,20 @@ class FtVcdTests(unittest.TestCase):
         # Meta/config values are represented too.
         self.assertIn("b000000000000110010", vcd)  # classify delay 50 ticks
         self.assertIn(f"b{298:026b}", vcd)
+
+    def test_build_vcd_allows_zero_delta_records(self) -> None:
+        records = load_fixture_records()
+        same_time_records = [
+            records[0],
+            records[1],
+            records[2],
+            replace(records[3], delta_ticks=0),
+        ]
+
+        vcd = build_vcd(same_time_records)
+
+        self.assertIn("#70110", vcd)
+        self.assertIn("#70120", vcd)
 
 
 if __name__ == "__main__":
