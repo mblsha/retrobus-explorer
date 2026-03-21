@@ -103,7 +103,7 @@ def capture_stream(
     reader: ByteReader,
     raw_out: Path,
     *,
-    chunk_size: int = 4096,
+    chunk_size: int = 1024 * 1024,
     duration_s: float | None = 60.0,
     idle_timeout_s: float | None = 0.25,
     max_bytes: int | None = None,
@@ -156,7 +156,7 @@ def capture_to_vcd(
     *,
     raw_out: Path,
     vcd_out: Path | None,
-    chunk_size: int = 4096,
+    chunk_size: int = 1024 * 1024,
     duration_s: float | None = 60.0,
     idle_timeout_s: float | None = 0.25,
     max_bytes: int | None = None,
@@ -209,7 +209,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vcd-out", type=Path, help="optional output VCD path")
     parser.add_argument("--duration", type=float, default=60.0, help="capture duration in seconds")
     parser.add_argument("--idle-timeout", type=float, help="optional stop after this many idle seconds")
-    parser.add_argument("--chunk-size", type=int, default=32768, help="host read chunk size in bytes")
+    parser.add_argument("--chunk-size", type=int, default=1024 * 1024, help="host read chunk size in bytes")
     parser.add_argument("--max-bytes", type=int, help="optional hard cap on captured bytes")
     return parser.parse_args()
 
