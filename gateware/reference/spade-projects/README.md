@@ -12,6 +12,15 @@ Shared logic lives in `shared-components`, shared vendor HDL lives in `shared-ve
 
 All `*-spade` projects also generate `src/build_info.spade` during `swim` preprocessing via `tools/gen_build_info.py`. Projects that want a stamped UART boot banner can import `mod build_info;` locally and feed `build_info::boot_banner_text()` into the shared `shared_components::boot_banner` helper.
 
+## FT Streaming Hardware
+
+Streaming projects in this workspace target the same hardware path used by the
+original PC-G850 tooling: Alchitry Au + Alchitry Ft Element, with bulk capture
+moving over the FT600-class USB3 FIFO interface. Host capture scripts are
+expected to use the repository's `py/d3xx` driver wrapper for that FT board.
+The Au board's USB-UART is still useful for boot banners, command/control, and
+arming stream capture, but it is not the intended high-rate capture interface.
+
 ## UV Workspace
 
 `spade-projects` is a single uv umbrella workspace with `*-spade` members. Testbench Python dependencies live in one shared env at `spade-projects/.venv`.

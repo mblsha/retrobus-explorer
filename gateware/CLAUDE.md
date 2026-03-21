@@ -83,6 +83,7 @@ project-name/
 - 48-pin FFC connector through level shifters (6 banks of 8 pins)
 - FT600 FTDI chip for USB3 data streaming (up to 200MB/s)
 - Multiple constraint files map logical signals to physical pins
+- The expected bulk capture interface is the Alchitry Ft Element USB3 FIFO path via the repo's `d3xx` wrapper; the Au onboard USB-UART is a separate low-bandwidth console/control path.
 
 ## Critical Implementation Details
 
@@ -93,6 +94,7 @@ project-name/
 3. **Data Flow**: 
    - FPGA captures bus signals → FIFOs buffer data → FT600 streams to PC
    - Python tools parse the stream and provide real-time visualization
+   - For PC-E500 and PC-G850 capture flows, host scripts should use the FT600/D3XX interface rather than `pyftdi` against the Au board's FT2232 USB-UART bridge
 
 4. **Alchitry Components**: Projects reuse standard components like reset_conditioner, uart_rx/tx, and various FIFO implementations from Alchitry's library.
 
