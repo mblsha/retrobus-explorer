@@ -74,6 +74,14 @@ fn write_event_word(data: CardData) -> EventWord {
     debug_event_word(0x57, data)
 }
 
+fn ce6_read_event_word(data: CardData) -> EventWord {
+    debug_event_word(0x72, data)
+}
+
+fn ce6_write_event_word(data: CardData) -> EventWord {
+    debug_event_word(0x77, data)
+}
+
 fn ft_kind_bus_change() -> uint<8> { 0x00 }
 fn ft_kind_ce1_read() -> uint<8> { 0x01 }
 fn ft_kind_ce1_write() -> uint<8> { 0x02 }
@@ -967,10 +975,11 @@ entity main_core(
 
     reg(clk) ce1_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
         access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
+    let ce6_active = !ce6 && !mem_clear.active;
     reg(clk) ce6_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
-        access_cycle_step(ce6_cycle, ce6 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
+        access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay).next_state;
     let ce1_step = access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
-    let ce6_step = access_cycle_step(ce6_cycle, ce6 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
+    let ce6_step = access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay);
 
     let classify_now_ce1 = ce1_step.classify_now;
     let classify_now_ce6 = ce6_step.classify_now;
@@ -988,11 +997,17 @@ entity main_core(
     let mem_addr = if ce1_cycle.classified { card_offset(ce1_cycle.latched_addr) } else { card_offset(addr) };
     let bus_data_out = *mem_dout;
     let bus_drive_cycle = !mem_clear.active && ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read));
-    let event_valid = classify_now_ce1;
+    let ce6_read_event = classify_now_ce6 && ce6_step.kind_read;
+    let ce6_write_event = classify_now_ce6 && !ce6_step.kind_read;
+    let event_valid = classify_now_ce1 || classify_now_ce6;
     let event_word = if write_commit {
         write_event_word(ce1_step.data)
-    } else {
+    } else if read_start {
         read_event_word(bus_data_out)
+    } else if ce6_write_event {
+        ce6_write_event_word(ce6_step.data)
+    } else {
+        ce6_read_event_word(ce6_step.data)
     };
 
     reg(clk) event_state: EventUartState reset(rst: init_event_uart_state()) =
@@ -1039,7 +1054,7 @@ entity main_core(
         rw,
         oe,
         ce1,
-        ce6,
+        ce6_active,
         settled_value(addr_state, cooldown_last),
         settled_value(data_state, cooldown_last),
     );

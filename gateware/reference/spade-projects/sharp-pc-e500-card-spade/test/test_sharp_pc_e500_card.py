@@ -253,7 +253,7 @@ async def _init(dut):
     dut.rw.value = 1
     dut.oe.value = 1
     dut.ce1.value = 0
-    dut.ce6.value = 0
+    dut.ce6.value = 1
     dut.vcc2.value = 0
     dut.nc.value = 0
     dut.addr.value = 0
@@ -316,7 +316,7 @@ async def _find_uart_write_collision_phase(
         dut.rw.value = 1
         dut.oe.value = 1
         dut.ce1.value = 0
-        dut.ce6.value = 0
+        dut.ce6.value = 1
         dut.addr.value = 0
         _set_data_bus_z(dut)
         await tick(dut.clk, 8)
@@ -435,7 +435,7 @@ async def _bus_read_and_check_late_drive(dut, addr: int, host_value: int, classi
 
 async def _ce6_read(dut, addr: int, value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
     dut.addr.value = addr & 0x3FFFF
-    dut.ce6.value = 1
+    dut.ce6.value = 0
     dut.ce1.value = 0
     dut.rw.value = 1
     dut.oe.value = 0
@@ -445,7 +445,7 @@ async def _ce6_read(dut, addr: int, value: int, classify_cycles: int = DEFAULT_C
     observed = int(dut.data.value) & 0xFF
     drive = int(dut.data_oe.value)
     await tick(dut.clk, TAIL_CYCLES)
-    dut.ce6.value = 0
+    dut.ce6.value = 1
     dut.oe.value = 1
     _set_data_bus_z(dut)
     await tick(dut.clk, 2)
@@ -454,7 +454,7 @@ async def _ce6_read(dut, addr: int, value: int, classify_cycles: int = DEFAULT_C
 
 async def _ce6_write(dut, addr: int, value: int, classify_cycles: int = DEFAULT_CLASSIFY_CYCLES):
     dut.addr.value = addr & 0x3FFFF
-    dut.ce6.value = 1
+    dut.ce6.value = 0
     dut.ce1.value = 0
     dut.rw.value = 0
     dut.oe.value = 1
@@ -464,7 +464,7 @@ async def _ce6_write(dut, addr: int, value: int, classify_cycles: int = DEFAULT_
     drive = int(dut.data_oe.value)
     dut.rw.value = 1
     await tick(dut.clk, TAIL_CYCLES)
-    dut.ce6.value = 0
+    dut.ce6.value = 1
     _set_data_bus_z(dut)
     await tick(dut.clk, 2)
     return drive
@@ -550,7 +550,7 @@ async def usb_uart_write_collisions_return_busy_and_do_not_commit_uart_write(dut
     dut.rw.value = 1
     dut.oe.value = 1
     dut.ce1.value = 0
-    dut.ce6.value = 0
+    dut.ce6.value = 1
     dut.addr.value = 0
     _set_data_bus_z(dut)
     await tick(dut.clk, 8)
@@ -597,7 +597,7 @@ async def runtime_reset_scrubs_ram_contents(dut):
     dut.rw.value = 1
     dut.oe.value = 1
     dut.ce1.value = 0
-    dut.ce6.value = 0
+    dut.ce6.value = 1
     dut.addr.value = 0
     _set_data_bus_z(dut)
     await tick(dut.clk, 8)
@@ -791,10 +791,12 @@ async def ce6_read_events_are_logged_but_never_drive_bus(dut):
     await _init(dut)
     await _enable_ft(dut)
 
+    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
     ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
     observed, drive = await _ce6_read(dut, 0x0021, 0xA7)
     assert observed == 0xA7
     assert drive == 0
+    assert await event_read == 0x72A7
     read_records = await ft_read
     assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
     assert _ft_addr(read_records[-1]) == 0x0021
@@ -806,9 +808,11 @@ async def ce6_write_attempts_are_logged_but_never_drive_bus(dut):
     await _init(dut)
     await _enable_ft(dut)
 
+    event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
     ft_write = cocotb.start_soon(_ft_recv_records(dut, 2))
     drive = await _ce6_write(dut, 0x0021, 0x3C)
     assert drive == 0
+    assert await event_write == 0x773C
     write_records = await ft_write
     assert [_ft_kind(rec) for rec in write_records] == [FT_KIND_CE6_WRITE_ATTEMPT, FT_KIND_CE6_WRITE_ATTEMPT]
     assert _ft_addr(write_records[-1]) == 0x0021
