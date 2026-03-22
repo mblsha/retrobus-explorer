@@ -168,6 +168,15 @@ async def _fast_uart_wait_start_fall(signal, clk, timeout_cycles: int) -> None:
     raise AssertionError("timeout waiting for fast UART start bit")
 
 
+async def _assert_no_fast_uart_start_fall(signal, clk, cycles: int) -> None:
+    prev = int(signal.value)
+    for _ in range(cycles):
+        cur = int(signal.value)
+        assert not (prev == 1 and cur == 0), "unexpected fast UART transmission"
+        prev = cur
+        await tick(clk, 1)
+
+
 async def _fast_uart_recv_word(signal, clk, width: int, timeout_cycles: int = 128) -> int:
     await _fast_uart_wait_start_fall(signal, clk, timeout_cycles)
     value = 0
@@ -470,7 +479,7 @@ async def _ce6_write(dut, addr: int, value: int, classify_cycles: int = DEFAULT_
     return drive
 
 
-async def _ce6_ctrl_short_write(dut, addr: int, value: int, low_cycles: int = 1):
+async def _ce6_ctrl_short_write(dut, addr: int, value: int, pre_low_cycles: int = 1, low_cycles: int = 1):
     dut.addr.value = addr & 0x3FFFF
     dut.ce6.value = 0
     dut.ce1.value = 0
@@ -478,7 +487,7 @@ async def _ce6_ctrl_short_write(dut, addr: int, value: int, low_cycles: int = 1)
     dut.oe.value = 1
     dut.data_host.value = value & 0xFF
     dut.data_host_drive.value = 1
-    await tick(dut.clk, 1)
+    await tick(dut.clk, pre_low_cycles)
     dut.rw.value = 0
     await tick(dut.clk, low_cycles)
     drive = int(dut.data_oe.value)
@@ -926,12 +935,11 @@ async def ce6_control_page_reads_remain_passive_and_are_logged(dut):
     await _init(dut)
     await _enable_ft(dut)
 
-    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
     ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
     observed, drive = await _ce6_read(dut, 0x1FFF1, 0x5E)
     assert observed == 0x5E
     assert drive == 0
-    assert await event_read == 0x725E
+    await _assert_no_fast_uart_start_fall(dut.saleae[3], dut.clk, 128)
     read_records = await ft_read
     assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
     assert _ft_addr(read_records[-1]) == 0x1FFF1
@@ -948,7 +956,7 @@ async def ce6_control_page_writes_bypass_classify_delay(dut):
 
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    drive = await _ce6_ctrl_short_write(dut, 0x1FFF1, ord("Z"))
+    drive = await _ce6_ctrl_short_write(dut, 0x1FFF1, ord("Z"), pre_low_cycles=DEFAULT_CLASSIFY_CYCLES + 4)
     assert drive == 0
     assert await usb_char == b"Z"
     assert await event_write == 0x775A
