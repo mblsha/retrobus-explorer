@@ -3,7 +3,7 @@ use shared_components::serial::{FtBe, FtData};
 
 pub type BridgeCount = uint<16>;
 pub type PackedFtWord = uint<18>;
-const DEFAULT_FT_BE: FtBe = 0x3;
+pub const DEFAULT_FT_BE: FtBe = 0x3;
 
 pub enum ParserPhase {
     Idle,

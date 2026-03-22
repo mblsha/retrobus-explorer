@@ -12,6 +12,7 @@ use shared_components::{
 use self::msg::{BridgeMsg, BridgeMsgStreamState, bridge_msg_stream_step, init_bridge_msg_stream};
 use self::protocol::{
     BridgeCount,
+    DEFAULT_FT_BE,
     LineParserState,
     PackedFtWord,
     ParserEvent,
@@ -49,7 +50,7 @@ fn init_main_state() -> MainState {
         msg_stream: init_bridge_msg_stream(),
         pending_ctrl_msg: BridgeMsg::None(),
         pending_tx_word: 0,
-        pending_tx_be: 0x3,
+        pending_tx_be: DEFAULT_FT_BE,
         pending_tx_valid: false,
         rx_waddr: 0,
         rx_raddr: 0,
