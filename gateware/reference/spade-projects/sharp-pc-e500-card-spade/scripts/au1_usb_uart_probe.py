@@ -20,6 +20,7 @@ DEFAULT_BAUD = 1_000_000
 DEFAULT_TIMEOUT = 1.0
 DEFAULT_COMMAND = "a"
 DEFAULT_EXPECT = "ERR"
+LISTEN_CHUNK_SIZE = 256
 CARD_ROM_BASE = 0x10000
 CARD_ROM_SIZE = 0x800
 CARD_ROM_LAST = CARD_ROM_BASE + CARD_ROM_SIZE - 1
@@ -113,6 +114,26 @@ def parse_args() -> argparse.Namespace:
         "cycles",
         type=int,
         help="timing value in 10 ns units; 20 means 200 ns",
+    )
+
+    listen_parser = subparsers.add_parser(
+        "listen",
+        help="listen for raw bytes on the USB-UART and optionally verify an expected string",
+    )
+    listen_parser.add_argument(
+        "--expect",
+        help="ASCII string expected from the device; succeeds once received",
+    )
+    listen_parser.add_argument(
+        "--duration",
+        type=float,
+        default=10.0,
+        help="maximum seconds to listen before timing out (default: 10)",
+    )
+    listen_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="do not print captured bytes to stdout while listening",
     )
 
     read_parser = subparsers.add_parser(
@@ -278,6 +299,22 @@ def print_reply(reply: bytes) -> None:
     sys.stdout.flush()
 
 
+def render_terminal_bytes(data: bytes) -> str:
+    rendered: list[str] = []
+    for byte in data:
+        if 0x20 <= byte <= 0x7E:
+            rendered.append(chr(byte))
+        elif byte == 0x0A:
+            rendered.append("\n")
+        elif byte == 0x0D:
+            rendered.append("\r")
+        elif byte == 0x09:
+            rendered.append("\t")
+        else:
+            rendered.append(f"\\x{byte:02X}")
+    return "".join(rendered)
+
+
 def exchange(ser: serial.Serial, command: str, timeout: float) -> bytes:
     payload = command.encode("ascii") + b"\r"
     ser.reset_input_buffer()
@@ -320,6 +357,41 @@ def run_timing(ser: serial.Serial, *, cycles: int, timeout: float) -> int:
     command = f"t{cycles}"
     expect = f"T={cycles * 10}ns"
     return run_raw(ser, command=command, timeout=timeout, expect=expect)
+
+
+def listen_for_bytes(
+    ser: serial.Serial,
+    *,
+    duration: float,
+    expect: bytes | None = None,
+    quiet: bool = False,
+) -> int:
+    ser.reset_input_buffer()
+    deadline = time.monotonic() + duration
+    captured = bytearray()
+
+    while time.monotonic() < deadline:
+        chunk = ser.read(LISTEN_CHUNK_SIZE)
+        if not chunk:
+            continue
+        captured.extend(chunk)
+        if not quiet:
+            sys.stdout.write(render_terminal_bytes(chunk))
+            sys.stdout.flush()
+        if expect is not None and expect in captured:
+            print(f"received expected byte sequence {expect!r}", file=sys.stderr)
+            return 0
+
+    if expect is None:
+        print(f"listen timed out after {duration:.1f}s", file=sys.stderr)
+        return 0
+
+    print(
+        f"timed out after {duration:.1f}s waiting for {expect!r}; "
+        f"captured {render_terminal_bytes(bytes(captured))!r}",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def read_byte(ser: serial.Serial, offset: int, timeout: float, *, echo: bool = True) -> int:
@@ -662,6 +734,17 @@ def main() -> int:
             cycles = getattr(args, "cycles")
             print(f"setting read timing to {cycles * 10} ns", file=sys.stderr)
             return run_timing(ser, cycles=cycles, timeout=args.timeout)
+
+        if command == "listen":
+            expect = getattr(args, "expect", None)
+            expect_bytes = expect.encode("ascii") if expect is not None else None
+            print(f"listening for raw UART bytes for {args.duration:.1f}s", file=sys.stderr)
+            return listen_for_bytes(
+                ser,
+                duration=args.duration,
+                expect=expect_bytes,
+                quiet=args.quiet,
+            )
 
         if command == "read":
             offset = rom_offset_from_address(args.address)
