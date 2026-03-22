@@ -95,6 +95,26 @@ def parse_args() -> argparse.Namespace:
         help=f"substring expected in the reply (default: {DEFAULT_EXPECT!r})",
     )
 
+    raw_parser = subparsers.add_parser(
+        "raw",
+        help="send an arbitrary UART command terminated by carriage return",
+    )
+    raw_parser.add_argument("text", help="command text to send before carriage return")
+    raw_parser.add_argument(
+        "--expect",
+        help="optional substring expected in the reply",
+    )
+
+    timing_parser = subparsers.add_parser(
+        "timing",
+        help="set the FPGA read timing with tNN, where NN is in 10 ns units",
+    )
+    timing_parser.add_argument(
+        "cycles",
+        type=int,
+        help="timing value in 10 ns units; 20 means 200 ns",
+    )
+
     read_parser = subparsers.add_parser(
         "read",
         help="read one byte from the FPGA card-ROM window using Rxxx",
@@ -274,6 +294,32 @@ def run_probe(ser: serial.Serial, *, command: str, expect: str, timeout: float) 
         return 1
     print(f"received expected reply {expect!r}", file=sys.stderr)
     return 0
+
+
+def run_raw(
+    ser: serial.Serial,
+    *,
+    command: str,
+    timeout: float,
+    expect: str | None = None,
+) -> int:
+    reply = exchange(ser, command, timeout)
+    print_reply(reply)
+    if expect is None:
+        return 0
+    if expect.encode("ascii") not in reply:
+        print(f"did not receive expected reply {expect!r}", file=sys.stderr)
+        return 1
+    print(f"received expected reply {expect!r}", file=sys.stderr)
+    return 0
+
+
+def run_timing(ser: serial.Serial, *, cycles: int, timeout: float) -> int:
+    if not 0 <= cycles <= 99:
+        raise SystemExit("timing cycles must be in the range 0..99")
+    command = f"t{cycles}"
+    expect = f"T={cycles * 10}ns"
+    return run_raw(ser, command=command, timeout=timeout, expect=expect)
 
 
 def read_byte(ser: serial.Serial, offset: int, timeout: float, *, echo: bool = True) -> int:
@@ -606,6 +652,16 @@ def main() -> int:
             probe_command = getattr(args, "probe_command", DEFAULT_COMMAND)
             print(f"sending {probe_command.encode('ascii') + b'\\r'!r}", file=sys.stderr)
             return run_probe(ser, command=probe_command, expect=args.expect, timeout=args.timeout)
+
+        if command == "raw":
+            raw_text = getattr(args, "text")
+            print(f"sending {raw_text.encode('ascii') + b'\\r'!r}", file=sys.stderr)
+            return run_raw(ser, command=raw_text, expect=args.expect, timeout=args.timeout)
+
+        if command == "timing":
+            cycles = getattr(args, "cycles")
+            print(f"setting read timing to {cycles * 10} ns", file=sys.stderr)
+            return run_timing(ser, cycles=cycles, timeout=args.timeout)
 
         if command == "read":
             offset = rom_offset_from_address(args.address)
