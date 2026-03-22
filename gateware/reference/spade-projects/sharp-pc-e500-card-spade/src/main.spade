@@ -7,18 +7,22 @@ use shared_components::{
     clocking::sampled_bool_clock,
     config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
     memory::sync_fifo,
-    message_stream::tx_req_arbiter,
+    message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
     primitives::{reset_conditioner, sync_bundle},
     serial::{FtBe, FtData, uart_tx_tap},
 };
 use msg::{
     EchoStreamState,
     FtStats,
+    PortMsg,
+    PortStreamState,
     RespMsg,
     RespStreamState,
     echo_stream_step,
     init_echo_stream,
+    init_port_stream,
     init_resp_stream,
+    port_stream_step,
     resp_stream_step,
 };
 use protocol::{EchoMsg, ParserEvent, ParserState, parser_step};
@@ -51,6 +55,11 @@ fn default_classify_last() -> ClassifyCtr {
 
 fn card_offset(addr: BusAddr) -> CardOffset {
     trunc(addr)
+}
+
+fn ce6_uart_port_addr_match(addr: BusAddr) -> bool {
+    let low16: uint<16> = trunc(addr);
+    low16 == 0xFFF1
 }
 
 fn debug_event_word(prefix: uint<8>, data: CardData) -> EventWord {
@@ -1000,6 +1009,8 @@ entity main_core(
         echo_msg_valid,
         echo_msg,
     );
+    let ce6_port_write_valid = classify_now_ce6 && !ce6_step.kind_read && ce6_uart_port_addr_match(ce6_step.addr);
+    let ce6_port_write_byte = ce6_step.data;
 
     let _mem = inst card_ram_2k_v(
         clk,
@@ -1107,6 +1118,38 @@ entity main_core(
         resp_msg_valid,
         resp_msg,
     );
+    let port_char_blocked =
+        *usb_tx_busy ||
+        boot_banner_out.tx_req.valid ||
+        echo_out.tx_req.valid ||
+        resp_out.tx_req.valid;
+    let port_char_tx_req = if ce6_port_write_valid && !port_char_blocked {
+        TxReq8$(valid: true, byte: ce6_port_write_byte)
+    } else {
+        tx_req_none()
+    };
+    let port_overrun_valid = ce6_port_write_valid && port_char_blocked;
+    reg(clk) port_state: PortStreamState reset(rst: init_port_stream()) =
+        port_stream_step(
+            port_state,
+            *usb_tx_busy ||
+            boot_banner_out.tx_req.valid ||
+            echo_out.tx_req.valid ||
+            resp_out.tx_req.valid ||
+            port_char_tx_req.valid,
+            port_overrun_valid,
+            PortMsg::Overrun(),
+        ).state;
+    let port_out = port_stream_step(
+        port_state,
+        *usb_tx_busy ||
+        boot_banner_out.tx_req.valid ||
+        echo_out.tx_req.valid ||
+        resp_out.tx_req.valid ||
+        port_char_tx_req.valid,
+        port_overrun_valid,
+        PortMsg::Overrun(),
+    );
 
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let event_step = event_uart_step(event_state, *event_uart_busy, event_valid, event_word);
@@ -1116,7 +1159,8 @@ entity main_core(
         ft_eval.fifo_wput,
         ft_debug_char(trunc(ft_eval.fifo_din >> 72)),
     );
-    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, resp_out.tx_req);
+    let usb_tx_low_req = tx_req_arbiter(resp_out.tx_req, port_char_tx_req, port_out.tx_req);
+    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, usb_tx_low_req);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,

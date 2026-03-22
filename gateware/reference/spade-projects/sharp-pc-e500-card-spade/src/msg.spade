@@ -14,6 +14,11 @@ pub struct FtStats {
     qmax: uint<32>,
 }
 
+pub enum PortMsg {
+    None,
+    Overrun,
+}
+
 pub enum RespMsg {
     None,
     Ok,
@@ -27,6 +32,8 @@ pub enum RespMsg {
 
 pub type EchoStreamState = ByteMsgStreamState<EchoMsg, 2>;
 pub type EchoStreamOut = ByteMsgStreamOut<EchoMsg, 2>;
+pub type PortStreamState = ByteMsgStreamState<PortMsg, 4>;
+pub type PortStreamOut = ByteMsgStreamOut<PortMsg, 4>;
 pub type RespStreamState = ByteMsgStreamState<RespMsg, 7>;
 pub type RespStreamOut = ByteMsgStreamOut<RespMsg, 7>;
 
@@ -35,6 +42,14 @@ pub fn init_echo_stream() -> EchoStreamState {
         cur_msg: EchoMsg::None(),
         cur_idx: 0,
         pending_msg: EchoMsg::None(),
+    )
+}
+
+pub fn init_port_stream() -> PortStreamState {
+    ByteMsgStreamState$(
+        cur_msg: PortMsg::None(),
+        cur_idx: 0,
+        pending_msg: PortMsg::None(),
     )
 }
 
@@ -106,6 +121,24 @@ impl EchoMsg {
                 0 => TxReq8$(valid: true, byte: b'\r'),
                 1 => TxReq8$(valid: true, byte: b'\n'),
                 _ => tx_req_none(),
+            },
+        };
+        req
+    }
+}
+
+impl PortMsg {
+    fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn byte(self, idx: uint<4>) -> TxReq8 {
+        let req = match self {
+            Self::None => tx_req_none(),
+            Self::Overrun => if idx < 10 {
+                TxReq8$(valid: true, byte: b"!OVERRUN\r\n"[trunc(idx)])
+            } else {
+                tx_req_none()
             },
         };
         req
@@ -216,6 +249,22 @@ pub fn echo_stream_step(
 ) -> EchoStreamOut {
     state.step_with(
         EchoMsg::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx) },
+        block_tx,
+        msg_valid,
+        msg,
+    )
+}
+
+pub fn port_stream_step(
+    state: PortStreamState,
+    block_tx: bool,
+    msg_valid: bool,
+    msg: PortMsg,
+) -> PortStreamOut {
+    state.step_with(
+        PortMsg::None(),
         fn |msg| { msg.is_none() },
         fn |msg, idx| { msg.byte(idx) },
         block_tx,
