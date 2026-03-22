@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["tqdm>=4.66,<5"]
 # ///
 from __future__ import annotations
 
@@ -10,12 +10,17 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+
+from tqdm import tqdm
 
 
 DEFAULT_GLASGOW_DIR = Path.home() / "src" / "github" / "glasgow" / "software"
 DEFAULT_BAUD = 1200
 DEFAULT_VOLTAGE = 5.0
+BITS_PER_BYTE = 10
+PROGRESS_UPDATES_PER_SECOND = 8
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,6 +120,52 @@ def build_subprocess_env() -> dict[str, str]:
     return env
 
 
+def chunk_size_for_baud(baud: int) -> int:
+    return max(1, baud // (BITS_PER_BYTE * PROGRESS_UPDATES_PER_SECOND))
+
+
+def send_with_progress(command: list[str], payload: bytes, *, env: dict[str, str], baud: int) -> int:
+    seconds_per_byte = BITS_PER_BYTE / baud
+    chunk_size = chunk_size_for_baud(baud)
+    process = subprocess.Popen(
+        command,
+        env=env,
+        stdin=subprocess.PIPE,
+        bufsize=0,
+    )
+
+    try:
+        assert process.stdin is not None
+        with tqdm(
+            total=len(payload),
+            desc="Sending",
+            unit="B",
+            unit_scale=True,
+            unit_divisor=1024,
+            file=sys.stderr,
+            disable=not sys.stderr.isatty(),
+        ) as progress:
+            for offset in range(0, len(payload), chunk_size):
+                chunk = payload[offset:offset + chunk_size]
+                if process.poll() is not None:
+                    break
+
+                try:
+                    process.stdin.write(chunk)
+                    process.stdin.flush()
+                except BrokenPipeError:
+                    break
+                progress.update(len(chunk))
+
+                if offset + len(chunk) < len(payload):
+                    time.sleep(len(chunk) * seconds_per_byte)
+    finally:
+        if process.stdin is not None:
+            process.stdin.close()
+
+    return process.wait()
+
+
 def main() -> int:
     args = parse_args()
     if shutil.which("uv") is None:
@@ -127,12 +178,12 @@ def main() -> int:
         print(f"Sending {len(payload)} bytes including the final 0x1A marker.", file=sys.stderr)
 
     command = build_command(args, glasgow_dir)
-    return subprocess.run(
+    return send_with_progress(
         command,
-        input=payload,
+        payload,
         env=build_subprocess_env(),
-        check=False,
-    ).returncode
+        baud=args.baud,
+    )
 
 
 if __name__ == "__main__":
