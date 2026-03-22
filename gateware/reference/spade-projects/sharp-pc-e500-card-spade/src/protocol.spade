@@ -10,6 +10,7 @@ pub enum ParserEvent {
     ReadRom{addr: CardOffset},
     WriteRom{addr: CardOffset, value: CardData},
     SetClassifyDelay{cycles: uint<7>},
+    SetCtrlWriteDelay{cycles: uint<7>},
     SetFtStreaming{enabled: bool},
     ParseErr,
 }
@@ -29,9 +30,9 @@ pub enum ParserState {
     WriteDataHi{addr: CardOffset, rom: bool},
     WriteDataLo{addr: CardOffset, hi: uint<4>, rom: bool},
     NeedWriteLineEnd{addr: CardOffset, value: CardData, rom: bool},
-    TimingHi,
-    TimingLo{tens: uint<4>},
-    NeedTimingLineEnd{cycles: uint<7>},
+    TimingHi{control: bool},
+    TimingLo{tens: uint<4>, control: bool},
+    NeedTimingLineEnd{cycles: uint<7>, control: bool},
     FtEnable,
     NeedFtLineEnd{enabled: bool},
     Error,
@@ -107,7 +108,9 @@ pub fn parser_step(
                 } else if rx_byte == b'W' {
                     parser_out(ParserState::WriteAddr(0, 0, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if rx_byte.to_upper() == b'T' {
-                    parser_out(ParserState::TimingHi(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::TimingHi(false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                } else if rx_byte.to_upper() == b'C' {
+                    parser_out(ParserState::TimingHi(true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if rx_byte.to_upper() == b'F' {
                     parser_out(ParserState::FtEnable(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
@@ -196,15 +199,15 @@ pub fn parser_step(
                     parser_error(state, rx_byte)
                 }
             },
-            ParserState::TimingHi => {
+            ParserState::TimingHi$(control) => {
                 let digit = rx_byte.decode_digit();
                 if digit.valid {
-                    parser_out(ParserState::TimingLo(digit.value), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+                    parser_out(ParserState::TimingLo(digit.value, control), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
                     parser_error(state, rx_byte)
                 }
             },
-            ParserState::TimingLo$(tens) => {
+            ParserState::TimingLo$(tens, control) => {
                 let digit = rx_byte.decode_digit();
                 if digit.valid {
                     let tens_u8: uint<8> = zext(tens);
@@ -214,7 +217,7 @@ pub fn parser_step(
                     let cycles_u8: uint<8> = tens_times_ten +. digit_u8;
                     let cycles: uint<7> = trunc(cycles_u8);
                     parser_out(
-                        ParserState::NeedTimingLineEnd(cycles),
+                        ParserState::NeedTimingLineEnd(cycles, control),
                         ParserEvent::None(),
                         EchoMsg::Byte(rx_byte),
                     )
@@ -222,9 +225,17 @@ pub fn parser_step(
                     parser_error(state, rx_byte)
                 }
             },
-            ParserState::NeedTimingLineEnd$(cycles) => {
+            ParserState::NeedTimingLineEnd$(cycles, control) => {
                 if rx_byte.is_line_end() {
-                    parser_out(ParserState::Idle(), ParserEvent::SetClassifyDelay(cycles), EchoMsg::CrLf())
+                    parser_out(
+                        ParserState::Idle(),
+                        if control {
+                            ParserEvent::SetCtrlWriteDelay(cycles)
+                        } else {
+                            ParserEvent::SetClassifyDelay(cycles)
+                        },
+                        EchoMsg::CrLf(),
+                    )
                 } else {
                     parser_error(state, rx_byte)
                 }

@@ -12,6 +12,7 @@ from cocotb_helpers import tick
 
 USB_UART_BIT_CYCLES = 100
 DEFAULT_CLASSIFY_CYCLES = 45
+DEFAULT_CTRL_WRITE_DELAY_CYCLES = 3
 TAIL_CYCLES = 20
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FT_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
@@ -688,6 +689,15 @@ async def usb_uart_can_set_classify_delay_and_emit_ft_config(dut):
 
 
 @cocotb.test()
+async def usb_uart_can_set_control_write_delay(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"c08\r\nC=080ns\r\n")))
+    await _uart_send_text(dut, "c08\r")
+    assert await rx == b"c08\r\nC=080ns\r\n"
+
+
+@cocotb.test()
 async def ft_access_fixture_matches_hdl_bytes(dut):
     await _init(dut)
 
@@ -947,16 +957,37 @@ async def ce6_control_page_reads_remain_passive_and_are_logged(dut):
 
 
 @cocotb.test()
-async def ce6_control_page_writes_bypass_classify_delay(dut):
+async def ce6_control_page_writes_use_separate_control_delay(dut):
     await _init(dut)
 
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"t99\r\nT=990ns\r\n")))
     await _uart_send_text(dut, "t99\r")
     assert await rx == b"t99\r\nT=990ns\r\n"
 
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"c20\r\nC=200ns\r\n")))
+    await _uart_send_text(dut, "c20\r")
+    assert await rx == b"c20\r\nC=200ns\r\n"
+
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    drive = await _ce6_ctrl_short_write(dut, 0x1FFF1, ord("Z"), pre_low_cycles=DEFAULT_CLASSIFY_CYCLES + 4)
+
+    dut.addr.value = 0x1FFF1
+    dut.ce6.value = 0
+    dut.ce1.value = 0
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = ord("Z")
+    dut.data_host_drive.value = 1
+    await tick(dut.clk, 1)
+    dut.rw.value = 0
+    await _assert_no_fast_uart_start_fall(dut.saleae[3], dut.clk, 10)
+    await _assert_no_usb_tx_start_bit(dut, 10)
+    await tick(dut.clk, 1)
+    drive = int(dut.data_oe.value)
+    dut.rw.value = 1
+    dut.ce6.value = 1
+    _set_data_bus_z(dut)
+
     assert drive == 0
     assert await usb_char == b"Z"
     assert await event_write == 0x775A

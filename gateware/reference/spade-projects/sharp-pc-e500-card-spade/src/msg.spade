@@ -26,6 +26,7 @@ pub enum RespMsg {
     Err,
     Read{addr: CardOffset, value: CardData},
     Timing{cycles: uint<7>},
+    CtrlTiming{cycles: uint<7>},
     Ft{enabled: bool},
     FtStats{stats: FtStats},
 }
@@ -170,6 +171,18 @@ impl RespMsg {
             },
             Self::Timing$(cycles) => match idx {
                 0 => TxReq8$(valid: true, byte: b'T'),
+                1 => TxReq8$(valid: true, byte: b'='),
+                2 => TxReq8$(valid: true, byte: dec_char(timing_ns_hundreds(cycles))),
+                3 => TxReq8$(valid: true, byte: dec_char(timing_ns_tens(cycles))),
+                4 => TxReq8$(valid: true, byte: b'0'),
+                5 => TxReq8$(valid: true, byte: b'n'),
+                6 => TxReq8$(valid: true, byte: b's'),
+                7 => TxReq8$(valid: true, byte: b'\r'),
+                8 => TxReq8$(valid: true, byte: b'\n'),
+                _ => tx_req_none(),
+            },
+            Self::CtrlTiming$(cycles) => match idx {
+                0 => TxReq8$(valid: true, byte: b'C'),
                 1 => TxReq8$(valid: true, byte: b'='),
                 2 => TxReq8$(valid: true, byte: dec_char(timing_ns_hundreds(cycles))),
                 3 => TxReq8$(valid: true, byte: dec_char(timing_ns_tens(cycles))),
