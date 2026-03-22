@@ -11,7 +11,7 @@ from cocotb_helpers import tick
 
 
 USB_UART_BIT_CYCLES = 100
-DEFAULT_CLASSIFY_CYCLES = 50
+DEFAULT_CLASSIFY_CYCLES = 45
 TAIL_CYCLES = 20
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FT_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
@@ -494,6 +494,18 @@ async def usb_uart_echo_reads_writes_ft_toggle_and_reports_errors(dut):
     await _uart_send_text(dut, "r005\r")
     assert await rx == b"r005\r\n005=A5\r\n"
 
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"W021=A7\r\nOK\r\n")))
+    await _uart_send_text(dut, "W021=A7\r")
+    assert await rx == b"W021=A7\r\nOK\r\n"
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"R021\r\n021=A7\r\n")))
+    await _uart_send_text(dut, "R021\r")
+    assert await rx == b"R021\r\n021=A7\r\n"
+
+    observed, drive = await _ce6_read(dut, 0x0021, 0x11)
+    assert observed == 0xA7
+    assert drive == 1
+
     await _bus_write(dut, 0x0005, 0x3C)
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"r005\r\n005=3C\r\n")))
     await _uart_send_text(dut, "r005\r")
@@ -666,9 +678,15 @@ async def ft_access_fixture_matches_hdl_bytes(dut):
 async def ft_ce6_fixture_matches_hdl_bytes(dut):
     await _init(dut)
 
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"W021=A7\r\nOK\r\n")))
+    await _uart_send_text(dut, "W021=A7\r")
+    assert await rx == b"W021=A7\r\nOK\r\n"
+
     sync, config = await _enable_ft(dut, drain_debug_cycles=0)
     records = cocotb.start_soon(_ft_recv_records(dut, 2))
-    await _ce6_read(dut, 0x0021, 0xA7)
+    observed, drive = await _ce6_read(dut, 0x0021, 0xA7)
+    assert observed == 0xA7
+    assert drive == 1
 
     expected = FT_CE6_FIXTURE_PATH.read_bytes()
     actual = _ft_records_to_bytes([sync, config] + await records)
@@ -741,6 +759,8 @@ async def saleae_control_outputs_and_write_ft_records_report_bus_activity(dut):
     dut.ce6.value = 0
     dut.rw.value = 1
     await tick(dut.clk, 1)
+    dut.ce6.value = 1
+    await tick(dut.clk, 1)
 
     await _enable_ft(dut)
 
@@ -787,25 +807,72 @@ async def saleae_read_ft_records_report_bus_activity(dut):
 
 
 @cocotb.test()
-async def ce6_read_events_are_logged_but_never_drive_bus(dut):
+async def ce6_low_range_rom_reads_drive_backed_bytes_and_are_logged(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"W021=A7\r\nOK\r\n")))
+    await _uart_send_text(dut, "W021=A7\r")
+    assert await rx == b"W021=A7\r\nOK\r\n"
+
+    await _enable_ft(dut)
+
+    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
+    observed, drive = await _ce6_read(dut, 0x0021, 0x11)
+    assert observed == 0xA7
+    assert drive == 1
+    assert await event_read == 0x72A7
+    read_records = await ft_read
+    assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
+    assert _ft_addr(read_records[-1]) == 0x0021
+
+
+@cocotb.test()
+async def ce6_reads_alias_on_low16_bits(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"W021=A7\r\nOK\r\n")))
+    await _uart_send_text(dut, "W021=A7\r")
+    assert await rx == b"W021=A7\r\nOK\r\n"
+
+    await _enable_ft(dut)
+
+    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
+    observed, drive = await _ce6_read(dut, 0x10021, 0x11)
+    assert observed == 0xA7
+    assert drive == 1
+    assert await event_read == 0x72A7
+    read_records = await ft_read
+    assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
+    assert _ft_addr(read_records[-1]) == 0x10021
+
+
+@cocotb.test()
+async def ce6_high_range_reads_remain_passive_and_are_logged(dut):
     await _init(dut)
     await _enable_ft(dut)
 
     event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
     ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
-    observed, drive = await _ce6_read(dut, 0x0021, 0xA7)
+    observed, drive = await _ce6_read(dut, 0x0821, 0xA7)
     assert observed == 0xA7
     assert drive == 0
     assert await event_read == 0x72A7
     read_records = await ft_read
     assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
-    assert _ft_addr(read_records[-1]) == 0x0021
+    assert _ft_addr(read_records[-1]) == 0x0821
     assert _ft_data(read_records[-1]) == 0xA7
 
 
 @cocotb.test()
 async def ce6_write_attempts_are_logged_but_never_drive_bus(dut):
     await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"W021=A7\r\nOK\r\n")))
+    await _uart_send_text(dut, "W021=A7\r")
+    assert await rx == b"W021=A7\r\nOK\r\n"
+
     await _enable_ft(dut)
 
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
@@ -817,7 +884,9 @@ async def ce6_write_attempts_are_logged_but_never_drive_bus(dut):
     assert [_ft_kind(rec) for rec in write_records] == [FT_KIND_CE6_WRITE_ATTEMPT, FT_KIND_CE6_WRITE_ATTEMPT]
     assert _ft_addr(write_records[-1]) == 0x0021
     assert _ft_data(write_records[-1]) == 0x3C
-    assert await _bus_read(dut, 0x0021) == 0x00
+    observed, read_drive = await _ce6_read(dut, 0x0021, 0x11)
+    assert observed == 0xA7
+    assert read_drive == 1
 
 
 @cocotb.test()
