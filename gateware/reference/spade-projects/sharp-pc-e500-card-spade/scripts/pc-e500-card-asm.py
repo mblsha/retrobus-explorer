@@ -21,7 +21,8 @@ CARD_ROM_BASE = 0x10000
 CARD_ROM_SIZE = 0x800
 CARD_ROM_LAST = CARD_ROM_BASE + CARD_ROM_SIZE - 1
 DEFAULT_FILL_BYTE = 0xFF
-DEFAULT_TIMING = 20
+DEFAULT_TIMING = 5
+DEFAULT_CONTROL_TIMING = 10
 
 ASSEMBLER_SNIPPET = """
 import json
@@ -102,7 +103,10 @@ def parse_args() -> argparse.Namespace:
         "--timing",
         type=int,
         default=DEFAULT_TIMING,
-        help=f"set FPGA read timing to this many 10 ns units before programming (default: {DEFAULT_TIMING})",
+        help=(
+            "set normal CE1/CE6 memory timing to this many 10 ns units before "
+            f"programming (default: {DEFAULT_TIMING})"
+        ),
     )
     parser.add_argument(
         "--no-timing",
@@ -110,6 +114,22 @@ def parse_args() -> argparse.Namespace:
         const=None,
         dest="timing",
         help="do not issue a timing command before programming",
+    )
+    parser.add_argument(
+        "--control-timing",
+        type=int,
+        default=DEFAULT_CONTROL_TIMING,
+        help=(
+            "set CE6 control-page write timing to this many 10 ns units before "
+            f"programming (default: {DEFAULT_CONTROL_TIMING})"
+        ),
+    )
+    parser.add_argument(
+        "--no-control-timing",
+        action="store_const",
+        const=None,
+        dest="control_timing",
+        help="do not issue a control-timing command before programming",
     )
     parser.add_argument("--port", help="serial port to forward to au1_usb_uart_probe.py")
     parser.add_argument(
@@ -260,6 +280,12 @@ def main() -> int:
 
     if args.timing is not None:
         run_au1_subcommand(au1_script, args, ["timing", str(args.timing)])
+    if args.control_timing is not None:
+        run_au1_subcommand(
+            au1_script,
+            args,
+            ["control-timing", str(args.control_timing)],
+        )
 
     program_command = [
         "program",

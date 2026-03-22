@@ -22,7 +22,7 @@ emit_done:
     POPU X
     POPU A
     POPU F
-    RET
+    RETF
 
 message:
     defm "HELLO FROM CE6"

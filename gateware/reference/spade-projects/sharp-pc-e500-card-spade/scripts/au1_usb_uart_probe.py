@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pyserial>=3.5"]
+# dependencies = ["pyserial>=3.5", "tqdm>=4.66"]
 # ///
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import serial
+from tqdm import tqdm
 
 
 DEFAULT_BAUD = 1_000_000
@@ -108,12 +109,25 @@ def parse_args() -> argparse.Namespace:
 
     timing_parser = subparsers.add_parser(
         "timing",
-        help="set the FPGA read timing with tNN, where NN is in 10 ns units",
+        help="set normal CE1/CE6 memory timing with tNN, where NN is in 10 ns units",
     )
     timing_parser.add_argument(
         "cycles",
         type=int,
         help="timing value in 10 ns units; 20 means 200 ns",
+    )
+
+    control_timing_parser = subparsers.add_parser(
+        "control-timing",
+        help=(
+            "set CE6 control-page write timing with cNN for 0x1FFF0..0x1FFFF, "
+            "where NN is in 10 ns units"
+        ),
+    )
+    control_timing_parser.add_argument(
+        "cycles",
+        type=int,
+        help="control-write timing value in 10 ns units; 10 means 100 ns",
     )
 
     listen_parser = subparsers.add_parser(
@@ -354,9 +368,33 @@ def run_raw(
 def run_timing(ser: serial.Serial, *, cycles: int, timeout: float) -> int:
     if not 0 <= cycles <= 99:
         raise SystemExit("timing cycles must be in the range 0..99")
-    command = f"t{cycles}"
-    expect = f"T={cycles * 10}ns"
+    command = f"t{cycles:02d}"
+    expect = f"T={cycles * 10:03d}ns"
     return run_raw(ser, command=command, timeout=timeout, expect=expect)
+
+
+def run_control_timing(ser: serial.Serial, *, cycles: int, timeout: float) -> int:
+    if not 0 <= cycles <= 99:
+        raise SystemExit("control timing cycles must be in the range 0..99")
+    command = f"c{cycles:02d}"
+    reply = exchange(ser, command, timeout)
+    print_reply(reply)
+
+    expected_replies = (
+        f"C={cycles * 10:03d}ns",
+        f"C={cycles * 10}ns",
+    )
+    for expect in expected_replies:
+        if expect.encode("ascii") in reply:
+            print(f"received expected reply {expect!r}", file=sys.stderr)
+            return 0
+
+    print(
+        "did not receive expected control timing reply "
+        + " or ".join(repr(expect) for expect in expected_replies),
+        file=sys.stderr,
+    )
+    return 1
 
 
 def listen_for_bytes(
@@ -394,7 +432,14 @@ def listen_for_bytes(
     return 1
 
 
-def read_byte(ser: serial.Serial, offset: int, timeout: float, *, echo: bool = True) -> int:
+def read_byte(
+    ser: serial.Serial,
+    offset: int,
+    timeout: float,
+    *,
+    echo: bool = True,
+    report: bool = True,
+) -> int:
     command = f"R{offset:03X}"
     reply = exchange(ser, command, timeout)
     if echo:
@@ -415,10 +460,11 @@ def read_byte(ser: serial.Serial, offset: int, timeout: float, *, echo: bool = T
         )
 
     value = int(match.group(2), 16)
-    print(
-        f"read {absolute_address(offset):05X} (offset {offset:03X}) = {value:02X}",
-        file=sys.stderr,
-    )
+    if report:
+        print(
+            f"read {absolute_address(offset):05X} (offset {offset:03X}) = {value:02X}",
+            file=sys.stderr,
+        )
     return value
 
 
@@ -522,13 +568,40 @@ def write_range_fast(
 
     return elapsed, wire_seconds
 
-
-def read_range(ser: serial.Serial, start_offset: int, length: int, timeout: float) -> bytes:
+def read_range(
+    ser: serial.Serial,
+    start_offset: int,
+    length: int,
+    timeout: float,
+    *,
+    progress_label: str = "read",
+) -> bytes:
     data = bytearray()
-    for index in range(length):
-        data.append(read_byte(ser, start_offset + index, timeout, echo=False))
-        if (index + 1) % 64 == 0 or index + 1 == length:
-            print(f"read {index + 1}/{length} bytes", file=sys.stderr)
+    show_progress = sys.stderr.isatty()
+    with tqdm(
+        total=length,
+        unit="B",
+        desc=progress_label,
+        disable=not show_progress,
+        file=sys.stderr,
+        leave=False,
+    ) as progress:
+        for index in range(length):
+            data.append(
+                read_byte(
+                    ser,
+                    start_offset + index,
+                    timeout,
+                    echo=False,
+                    report=False,
+                )
+            )
+            progress.update(1)
+            if not show_progress and ((index + 1) % 64 == 0 or index + 1 == length):
+                print(
+                    f"{progress_label} {index + 1}/{length} bytes",
+                    file=sys.stderr,
+                )
     return bytes(data)
 
 
@@ -601,7 +674,19 @@ def program_image(
             file=sys.stderr,
         )
         if verify:
-            verify_data = read_range(ser, start_offset, len(data), timeout)
+            verify_start = time.perf_counter()
+            verify_data = read_range(
+                ser,
+                start_offset,
+                len(data),
+                timeout,
+                progress_label="verify",
+            )
+            verify_elapsed = time.perf_counter() - verify_start
+            print(
+                f"verify complete: {len(data)} bytes in {verify_elapsed:.3f}s",
+                file=sys.stderr,
+            )
             if verify_data != data:
                 raise SystemExit("verification failed after fast write")
     else:
@@ -632,7 +717,13 @@ def benchmark_random_write(
     original = b""
     if not keep_random:
         print(f"reading existing {count} byte(s) for backup", file=sys.stderr)
-        original = read_range(ser, start_offset, count, timeout)
+        original = read_range(
+            ser,
+            start_offset,
+            count,
+            timeout,
+            progress_label="backup",
+        )
 
     random_data = os.urandom(count)
 
@@ -676,7 +767,19 @@ def benchmark_random_write(
 
     if verify:
         print("verifying random image", file=sys.stderr)
-        verify_data = read_range(ser, start_offset, count, timeout)
+        verify_start = time.perf_counter()
+        verify_data = read_range(
+            ser,
+            start_offset,
+            count,
+            timeout,
+            progress_label="verify",
+        )
+        verify_elapsed = time.perf_counter() - verify_start
+        print(
+            f"verify complete: {count} bytes in {verify_elapsed:.3f}s",
+            file=sys.stderr,
+        )
         if verify_data != random_data:
             raise SystemExit("verification failed: ROM contents do not match written random data")
         print("verification passed", file=sys.stderr)
@@ -734,6 +837,14 @@ def main() -> int:
             cycles = getattr(args, "cycles")
             print(f"setting read timing to {cycles * 10} ns", file=sys.stderr)
             return run_timing(ser, cycles=cycles, timeout=args.timeout)
+
+        if command == "control-timing":
+            cycles = getattr(args, "cycles")
+            print(
+                f"setting control-write timing to {cycles * 10} ns",
+                file=sys.stderr,
+            )
+            return run_control_timing(ser, cycles=cycles, timeout=args.timeout)
 
         if command == "listen":
             expect = getattr(args, "expect", None)

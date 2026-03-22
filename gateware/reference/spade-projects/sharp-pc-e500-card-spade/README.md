@@ -44,7 +44,8 @@ From `gateware/reference`:
 
 ```sh
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py probe
-uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py timing 20
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py timing 5
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py control-timing 10
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py read 0x10000
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py write 0x10000 0x5A
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py \
@@ -62,12 +63,16 @@ UART payload. On the current Au1 build this gets the write-only path to roughly
 the full 1,000,000 baud wire rate; use `--verify` only when you need readback
 validation in the same session.
 
-Before executing code directly from the FPGA-backed card ROM, set the read
-timing to 200 ns:
+Before executing code directly from the FPGA-backed card ROM, set the normal
+read/classify timing and the CE6 control-page write timing explicitly:
 
 ```sh
-uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py timing 20
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py timing 5
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py control-timing 10
 ```
+
+`tNN` controls normal CE1/CE6 memory classify timing, while `cNN` controls only
+CE6 control-page writes in `0x1FFF0..0x1FFFF`.
 
 ## Card-ROM Assembly
 
@@ -83,9 +88,9 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-card-asm.py \
   --program
 ```
 
-That helper emits a binary image, sets `t20` by default when programming, and
-prints the calculator entry point. The smoke payload lives at `0x10000`, so the
-PC-E500 command to execute it is:
+That helper emits a binary image, sets `t05` and `c10` by default when
+programming, and prints the calculator entry point. The smoke payload lives at
+`0x10000`, so the PC-E500 command to execute it is:
 
 ```basic
 CALL &10000
