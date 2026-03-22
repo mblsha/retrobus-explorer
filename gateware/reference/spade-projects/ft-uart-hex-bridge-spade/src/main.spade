@@ -23,6 +23,9 @@ use self::protocol::{
     unpack_ft_word,
 };
 
+const FT_WORD_QUEUE_DEPTH: uint<3> = 4;
+const FT_DEFAULT_BE: FtBe = 0x3;
+
 struct MainState {
     parser: LineParserState,
     msg_stream: BridgeMsgStreamState,
@@ -33,7 +36,7 @@ struct MainState {
     rx_waddr: uint<2>,
     rx_raddr: uint<2>,
     rx_used: uint<3>,
-    rx_storage: [PackedFtWord; 4],
+    rx_storage: [PackedFtWord; FT_WORD_QUEUE_DEPTH],
     rx_count: BridgeCount,
     tx_count: BridgeCount,
     err_count: BridgeCount,
@@ -49,12 +52,12 @@ fn init_main_state() -> MainState {
         msg_stream: init_bridge_msg_stream(),
         pending_ctrl_msg: BridgeMsg::None(),
         pending_tx_word: 0,
-        pending_tx_be: 0x3,
+        pending_tx_be: FT_DEFAULT_BE,
         pending_tx_valid: false,
         rx_waddr: 0,
         rx_raddr: 0,
         rx_used: 0,
-        rx_storage: [0; 4],
+        rx_storage: [0; FT_WORD_QUEUE_DEPTH],
         rx_count: 0,
         tx_count: 0,
         err_count: 0,
@@ -87,7 +90,11 @@ fn next_pending_ctrl(existing: BridgeMsg, candidate: BridgeMsg, offered: bool) -
     }
 }
 
-fn rx_queue_write_at(storage: [PackedFtWord; 4], idx: uint<2>, value: PackedFtWord) -> [PackedFtWord; 4] {
+fn rx_queue_write_at(
+    storage: [PackedFtWord; FT_WORD_QUEUE_DEPTH],
+    idx: uint<2>,
+    value: PackedFtWord,
+) -> [PackedFtWord; FT_WORD_QUEUE_DEPTH] {
     storage.enumerate().map(fn |(i, item)| {
         if i == idx {
             value
@@ -148,7 +155,7 @@ entity main_core(
     reg(clk) state: MainState reset(rst: init_main_state()) = {
         let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
         let rx_empty = state.rx_used == 0;
-        let rx_full = state.rx_used == 4;
+        let rx_full = state.rx_used == FT_WORD_QUEUE_DEPTH;
         let rx_dout = state.rx_storage[state.rx_raddr];
         let send_word_valid = parse.event.is_send();
         let send_word = parse.event.send_word();
@@ -244,7 +251,7 @@ entity main_core(
     };
 
     let rx_empty = state.rx_used == 0;
-    let rx_full = state.rx_used == 4;
+    let rx_full = state.rx_used == FT_WORD_QUEUE_DEPTH;
     let rx_dout = state.rx_storage[state.rx_raddr];
     let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
     let send_word_valid = parse.event.is_send();
