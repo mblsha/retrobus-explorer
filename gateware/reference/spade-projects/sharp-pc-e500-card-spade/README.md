@@ -33,6 +33,34 @@ Use the USB-UART console to send `f1` when you want to enable FT streaming, and
 then decode the capture with `scripts/e500_ft.py` or convert it to VCD with
 `scripts/ft_to_vcd.py`.
 
+## Au1 USB-UART
+
+The Alchitry Au1 exposes two macOS serial ports. The slow control UART for this
+project is the second `/dev/cu.usbserial-*` device, which
+`sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py` auto-selects by
+default.
+
+From `gateware/reference`:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py probe
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py read 0x10000
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py write 0x10000 0x5A
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py \
+  program rom.bin --start 0x10000
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py \
+  program rom.bin --start 0x10000 --fast
+```
+
+Read and write commands target the 2 KiB FPGA-emulated card-ROM window. The
+window starts at calculator address `0x10000` and maps to UART offsets
+`000..7FF`, so `read 0x10000` and `read 000` address the same byte.
+
+For bulk ROM programming, `--fast` concatenates all `Wxxx=xx` commands into one
+UART payload. On the current Au1 build this gets the write-only path to roughly
+the full 1,000,000 baud wire rate; use `--verify` only when you need readback
+validation in the same session.
+
 ## Glasgow UART
 
 The Glasgow wrappers in `sharp-pc-e500-card-spade/scripts/` call the local
