@@ -817,6 +817,31 @@ async def ce6_write_attempts_are_logged_but_never_drive_bus(dut):
 
 
 @cocotb.test()
+async def ce6_magic_uart_port_writes_stream_bytes_for_both_aliases(dut):
+    await _init(dut)
+
+    rx0 = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    assert await _ce6_write(dut, 0x0FFF1, ord("H")) == 0
+    assert await rx0 == b"H"
+
+    rx1 = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    assert await _ce6_write(dut, 0x1FFF1, ord("i")) == 0
+    assert await rx1 == b"i"
+
+
+@cocotb.test()
+async def ce6_magic_uart_port_overrun_reports_error(dut):
+    await _init(dut)
+
+    first_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    assert await _ce6_write(dut, 0x0FFF1, ord("A")) == 0
+    assert await _ce6_write(dut, 0x1FFF1, ord("B")) == 0
+
+    assert await first_char == b"A"
+    assert await _uart_recv_exact(dut, len(b"!OVERRUN\r\n")) == b"!OVERRUN\r\n"
+
+
+@cocotb.test()
 async def ft_overflow_reports_dropped_accesses_after_host_stall(dut):
     await _init(dut)
     await _enable_ft(dut)
