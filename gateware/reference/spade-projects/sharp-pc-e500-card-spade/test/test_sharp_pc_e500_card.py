@@ -470,6 +470,25 @@ async def _ce6_write(dut, addr: int, value: int, classify_cycles: int = DEFAULT_
     return drive
 
 
+async def _ce6_ctrl_short_write(dut, addr: int, value: int, low_cycles: int = 1):
+    dut.addr.value = addr & 0x3FFFF
+    dut.ce6.value = 0
+    dut.ce1.value = 0
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = value & 0xFF
+    dut.data_host_drive.value = 1
+    await tick(dut.clk, 1)
+    dut.rw.value = 0
+    await tick(dut.clk, low_cycles)
+    drive = int(dut.data_oe.value)
+    dut.rw.value = 1
+    dut.ce6.value = 1
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+    return drive
+
+
 @cocotb.test()
 async def boot_banner_and_uart_ft_idle_after_boot(dut):
     await _init(dut)
@@ -900,6 +919,39 @@ async def ce6_magic_uart_port_writes_stream_bytes_for_both_aliases(dut):
     rx1 = cocotb.start_soon(_uart_recv_exact(dut, 1))
     assert await _ce6_write(dut, 0x1FFF1, ord("i")) == 0
     assert await rx1 == b"i"
+
+
+@cocotb.test()
+async def ce6_control_page_reads_remain_passive_and_are_logged(dut):
+    await _init(dut)
+    await _enable_ft(dut)
+
+    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
+    observed, drive = await _ce6_read(dut, 0x1FFF1, 0x5E)
+    assert observed == 0x5E
+    assert drive == 0
+    assert await event_read == 0x725E
+    read_records = await ft_read
+    assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
+    assert _ft_addr(read_records[-1]) == 0x1FFF1
+    assert _ft_data(read_records[-1]) == 0x5E
+
+
+@cocotb.test()
+async def ce6_control_page_writes_bypass_classify_delay(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"t99\r\nT=990ns\r\n")))
+    await _uart_send_text(dut, "t99\r")
+    assert await rx == b"t99\r\nT=990ns\r\n"
+
+    usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    drive = await _ce6_ctrl_short_write(dut, 0x1FFF1, ord("Z"))
+    assert drive == 0
+    assert await usb_char == b"Z"
+    assert await event_write == 0x775A
 
 
 @cocotb.test()
