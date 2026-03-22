@@ -44,6 +44,7 @@ From `gateware/reference`:
 
 ```sh
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py probe
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py timing 20
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py read 0x10000
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py write 0x10000 0x5A
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py \
@@ -60,6 +61,44 @@ For bulk ROM programming, `--fast` concatenates all `Wxxx=xx` commands into one
 UART payload. On the current Au1 build this gets the write-only path to roughly
 the full 1,000,000 baud wire rate; use `--verify` only when you need readback
 validation in the same session.
+
+Before executing code directly from the FPGA-backed card ROM, set the read
+timing to 200 ns:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py timing 20
+```
+
+## Card-ROM Assembly
+
+The helper below assembles SC62015 code through the local
+`~/src/github/binja-esr-tests/public-src` checkout and can program the result
+into the FPGA-backed card ROM.
+
+Smoke test:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-card-asm.py \
+  ./spade-projects/sharp-pc-e500-card-spade/asm/card_rom_smoke_sentinel.asm \
+  --program
+```
+
+That helper emits a binary image, sets `t20` by default when programming, and
+prints the calculator entry point. The smoke payload lives at `0x10000`, so the
+PC-E500 command to execute it is:
+
+```basic
+CALL &10000
+```
+
+The current bitstream aliases CE1 card accesses into the 2 KiB ROM window, so
+the smoke test uses a sentinel byte inside that window instead of a special
+print-char register. Right after programming, `0x107F1` is initialized to
+`0x00`. After `CALL &10000`, it should read back as `0xA5`:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py read 0x107F1
+```
 
 ## Glasgow UART
 
