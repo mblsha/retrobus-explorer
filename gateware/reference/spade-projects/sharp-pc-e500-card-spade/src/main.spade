@@ -998,6 +998,8 @@ entity main_core(
     reg(clk) classify_delay: ClassifyCtr reset(rst: default_classify_last) =
         if classify_delay_update_valid { classify_delay_update } else { classify_delay };
     reg(clk) prev_rw: bool reset(rst: true) = rw;
+    reg(clk) ctrl_addr_shadow: BusAddr reset(rst: 0) = addr;
+    reg(clk) ctrl_data_shadow: CardData reset(rst: 0) = data_in;
     reg(clk) tick: FtDelta reset(rst: 0) = tick +. 1;
     reg(clk) mem_clear: MemClearState reset(rst: init_mem_clear_state()) =
         // Scrub card RAM after runtime reset so reset behavior is deterministic.
@@ -1013,6 +1015,8 @@ entity main_core(
     reg(clk) ce1_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
         access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
     let ce6_active = !ce6 && !mem_clear.active;
+    reg(clk) ce6_ctrl_write_pending: bool reset(rst: false) =
+        ce6_active && ce6_ctrl_addr_in_range(addr) && prev_rw && !rw;
     reg(clk) ce6_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
         access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay).next_state;
     let ce1_step = access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
@@ -1031,8 +1035,8 @@ entity main_core(
     let uart_ram_read_collision = usb_ram_read_valid && write_commit && card_offset(ce1_step.addr) == usb_ram_read_addr;
     let uart_ram_write_busy = uart_ram_write_valid && (write_commit || mem_clear.active);
     let uart_ram_write_fire = uart_ram_write_valid && !write_commit && !mem_clear.active;
-    let ce6_read_event = classify_now_ce6 && ce6_step.kind_read;
-    let ce6_ctrl_write_event = ce6_active && ce6_ctrl_addr_in_range(addr) && prev_rw && !rw;
+    let ce6_read_event = classify_now_ce6 && ce6_step.kind_read && !ce6_ctrl_addr_in_range(ce6_step.addr);
+    let ce6_ctrl_write_event = ce6_ctrl_write_pending;
     let ce6_write_event = classify_now_ce6 && !ce6_step.kind_read && !ce6_ctrl_addr_in_range(ce6_step.addr);
     let mem_addr = if ce1_cycle.classified { card_offset(ce1_cycle.latched_addr) } else { card_offset(addr) };
     let ce6_rom_bus_addr = if ce6_cycle.classified {
@@ -1054,7 +1058,7 @@ entity main_core(
     } else if read_start {
         read_event_word(bus_data_out)
     } else if ce6_ctrl_write_event {
-        ce6_write_event_word(data_in)
+        ce6_write_event_word(ctrl_data_shadow)
     } else if ce6_write_event {
         ce6_write_event_word(ce6_step.data)
     } else {
@@ -1075,8 +1079,8 @@ entity main_core(
         echo_msg_valid,
         echo_msg,
     );
-    let ce6_port_write_valid = ce6_ctrl_write_event && ce6_uart_port_addr_match(addr);
-    let ce6_port_write_byte = data_in;
+    let ce6_port_write_valid = ce6_ctrl_write_event && ce6_uart_port_addr_match(ctrl_addr_shadow);
+    let ce6_port_write_byte = ctrl_data_shadow;
 
     let _mem = inst card_ram_2k_v(
         clk,
