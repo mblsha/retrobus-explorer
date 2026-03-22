@@ -33,6 +33,52 @@ Use the USB-UART console to send `f1` when you want to enable FT streaming, and
 then decode the capture with `scripts/e500_ft.py` or convert it to VCD with
 `scripts/ft_to_vcd.py`.
 
+## Glasgow UART
+
+The Glasgow wrappers in `sharp-pc-e500-card-spade/scripts/` call the local
+Glasgow checkout via `uv run --directory ~/src/github/glasgow/software`.
+
+From `gateware/reference/spade-projects`:
+
+Port-B wiring:
+
+- `B0`: device-ready-to-receive, mapped to `--cts B0#`
+- `B1`: host-ready-to-receive, mapped to `--rts B1#`
+- `B2`: device TX, mapped to `--rx B2#`
+- `B3`: host TX, mapped to `--tx B3#`
+
+The `#` suffix inverts the signal, which matches the PC-E500 wiring here.
+
+Receive a BASIC listing from the calculator:
+
+```sh
+uv run ./sharp-pc-e500-card-spade/scripts/pc-e500-get.py
+```
+
+Then run this on the PC-E500:
+
+```basic
+SAVE"COM:1200,N,8,1,A,L,&1A,X,N"
+```
+
+The receiver stops automatically when the calculator sends the configured
+`0x1A` terminator byte.
+
+Send a BASIC listing to the calculator:
+
+```sh
+uv run ./sharp-pc-e500-card-spade/scripts/pc-e500-send.py path/to/program.bas
+```
+
+If no path is given, the sender reads the listing from stdin. It normalizes line
+endings to CRLF and appends `0x1A` at the end of the transfer.
+
+Then run this on the PC-E500:
+
+```basic
+LOAD"COM:"
+```
+
 ## Host Implementation
 
 The `scripts/capture_ft.py` and `scripts/ft_to_vcd.py` entrypoints now build
