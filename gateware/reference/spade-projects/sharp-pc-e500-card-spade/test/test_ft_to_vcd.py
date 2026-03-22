@@ -76,7 +76,7 @@ class FtDecodeTests(unittest.TestCase):
         record = load_fixture_records()[1]
         self.assertEqual(record.kind, FtKind.CONFIG)
         self.assertEqual(record.delta_ticks, 1)
-        self.assertEqual(config_delay_ticks(record), 50)
+        self.assertEqual(config_delay_ticks(record), 45)
         self.assertTrue(config_enabled(record))
 
     def test_decode_raw_bus_change_records(self) -> None:
@@ -194,7 +194,7 @@ class FtVcdTests(unittest.TestCase):
         self.assertIn("b10100111", vcd)            # data 0xA7
 
         # Meta/config values are represented too.
-        self.assertIn("b000000000000110010", vcd)  # classify delay 50 ticks
+        self.assertIn("b000000000000101101", vcd)  # classify delay 45 ticks
         self.assertIn(f"b{298:026b}", vcd)
 
     def test_build_vcd_allows_zero_delta_records(self) -> None:

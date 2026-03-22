@@ -42,7 +42,7 @@ type FtBusSample = uint<30>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
-fn classify_ns() -> uint<32> { 500 }
+fn classify_ns() -> uint<32> { 450 }
 fn ft_stream_version() -> uint<8> { 1 }
 
 fn cooldown_last() -> uint<4> {
@@ -54,6 +54,15 @@ fn default_classify_last() -> ClassifyCtr {
 }
 
 fn card_offset(addr: BusAddr) -> CardOffset {
+    trunc(addr)
+}
+
+fn ce6_rom_addr_in_range(addr: BusAddr) -> bool {
+    let low16: uint<16> = trunc(addr);
+    low16 < 0x0800
+}
+
+fn ce6_rom_offset(addr: BusAddr) -> CardOffset {
     trunc(addr)
 }
 
@@ -877,6 +886,8 @@ entity main_core(
 
     let (mem_dout, mem_dout_w): (&CardData, inv &CardData) = port;
     let (uart_mem_dout, uart_mem_dout_w): (&CardData, inv &CardData) = port;
+    let (rom_dout, rom_dout_w): (&CardData, inv &CardData) = port;
+    let (rom_uart_mem_dout, rom_uart_mem_dout_w): (&CardData, inv &CardData) = port;
     let (addr_uart_line, addr_uart_line_w): (&bool, inv &bool) = port;
     let (addr_uart_busy, addr_uart_busy_w): (&bool, inv &bool) = port;
     let (data_uart_line, data_uart_line_w): (&bool, inv &bool) = port;
@@ -910,21 +921,41 @@ entity main_core(
         parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte).state;
     let usb_parse = parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte);
 
-    let usb_read_addr = if let ParserEvent::Read$(addr) = usb_parse.event { addr } else { 0 };
-    let uart_write_valid = if let ParserEvent::Write$(addr, value) = usb_parse.event {
+    let usb_ram_read_addr = if let ParserEvent::ReadRam$(addr) = usb_parse.event { addr } else { 0 };
+    let usb_rom_read_addr = if let ParserEvent::ReadRom$(addr) = usb_parse.event { addr } else { 0 };
+    let uart_ram_write_valid = if let ParserEvent::WriteRam$(addr, value) = usb_parse.event {
         let _ = addr;
         let _ = value;
         true
     } else {
         false
     };
-    let uart_write_addr = if let ParserEvent::Write$(addr, value) = usb_parse.event {
+    let uart_ram_write_addr = if let ParserEvent::WriteRam$(addr, value) = usb_parse.event {
         let _ = value;
         addr
     } else {
         0
     };
-    let uart_write_data = if let ParserEvent::Write$(addr, value) = usb_parse.event {
+    let uart_ram_write_data = if let ParserEvent::WriteRam$(addr, value) = usb_parse.event {
+        let _ = addr;
+        value
+    } else {
+        0
+    };
+    let uart_rom_write_valid = if let ParserEvent::WriteRom$(addr, value) = usb_parse.event {
+        let _ = addr;
+        let _ = value;
+        true
+    } else {
+        false
+    };
+    let uart_rom_write_addr = if let ParserEvent::WriteRom$(addr, value) = usb_parse.event {
+        let _ = value;
+        addr
+    } else {
+        0
+    };
+    let uart_rom_write_data = if let ParserEvent::WriteRom$(addr, value) = usb_parse.event {
         let _ = addr;
         value
     } else {
@@ -985,20 +1016,31 @@ entity main_core(
     let classify_now_ce6 = ce6_step.classify_now;
     let read_start = classify_now_ce1 && ce1_step.kind_read;
     let write_commit = classify_now_ce1 && !ce1_step.kind_read;
-    let uart_read_valid = if let ParserEvent::Read$(addr) = usb_parse.event {
+    let usb_ram_read_valid = if let ParserEvent::ReadRam$(addr) = usb_parse.event {
         let _ = addr;
         true
     } else {
         false
     };
-    let uart_read_collision = uart_read_valid && write_commit && card_offset(ce1_step.addr) == usb_read_addr;
-    let uart_write_busy = uart_write_valid && (write_commit || mem_clear.active);
-    let uart_write_fire = uart_write_valid && !write_commit && !mem_clear.active;
-    let mem_addr = if ce1_cycle.classified { card_offset(ce1_cycle.latched_addr) } else { card_offset(addr) };
-    let bus_data_out = *mem_dout;
-    let bus_drive_cycle = !mem_clear.active && ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read));
+    let uart_ram_read_collision = usb_ram_read_valid && write_commit && card_offset(ce1_step.addr) == usb_ram_read_addr;
+    let uart_ram_write_busy = uart_ram_write_valid && (write_commit || mem_clear.active);
+    let uart_ram_write_fire = uart_ram_write_valid && !write_commit && !mem_clear.active;
     let ce6_read_event = classify_now_ce6 && ce6_step.kind_read;
     let ce6_write_event = classify_now_ce6 && !ce6_step.kind_read;
+    let mem_addr = if ce1_cycle.classified { card_offset(ce1_cycle.latched_addr) } else { card_offset(addr) };
+    let ce6_rom_bus_addr = if ce6_cycle.classified {
+        ce6_rom_offset(ce6_cycle.latched_addr)
+    } else {
+        ce6_rom_offset(addr)
+    };
+    let ce6_rom_drive_cycle =
+        ce6_active &&
+        ce6_rom_addr_in_range(if ce6_cycle.classified { ce6_cycle.latched_addr } else { addr }) &&
+        (ce6_read_event || (ce6_cycle.classified && ce6_cycle.is_read));
+    let bus_data_out = if ce6_rom_drive_cycle { *rom_dout } else { *mem_dout };
+    let bus_drive_cycle =
+        ce6_rom_drive_cycle ||
+        (!mem_clear.active && ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read)));
     let event_valid = classify_now_ce1 || classify_now_ce6;
     let event_word = if write_commit {
         write_event_word(ce1_step.data)
@@ -1007,7 +1049,7 @@ entity main_core(
     } else if ce6_write_event {
         ce6_write_event_word(ce6_step.data)
     } else {
-        ce6_read_event_word(ce6_step.data)
+        ce6_read_event_word(if ce6_rom_addr_in_range(ce6_step.addr) { *rom_dout } else { ce6_step.data })
     };
 
     reg(clk) event_state: EventUartState reset(rst: init_event_uart_state()) =
@@ -1034,20 +1076,30 @@ entity main_core(
         } else if write_commit {
             card_offset(ce1_step.addr)
         } else {
-            uart_write_addr
+            uart_ram_write_addr
         },
         if mem_clear.active {
             0
         } else if write_commit {
             ce1_step.data
         } else {
-            uart_write_data
+            uart_ram_write_data
         },
-        mem_clear.active || write_commit || uart_write_fire,
+        mem_clear.active || write_commit || uart_ram_write_fire,
         mem_addr,
         mem_dout_w,
-        usb_read_addr,
+        usb_ram_read_addr,
         uart_mem_dout_w,
+    );
+    let _rom = inst card_ram_2k_v(
+        clk,
+        uart_rom_write_addr,
+        uart_rom_write_data,
+        uart_rom_write_valid,
+        ce6_rom_bus_addr,
+        rom_dout_w,
+        usb_rom_read_addr,
+        rom_uart_mem_dout_w,
     );
 
     let ft_bus_sample_now = ft_bus_sample(
@@ -1094,17 +1146,23 @@ entity main_core(
     set ft_fifo_dout_w = &ft_fifo.dout;
 
     let resp_msg = match usb_parse.event {
-        ParserEvent::Read$(addr) => {
-            if mem_clear.active || uart_read_collision {
+        ParserEvent::ReadRam$(addr) => {
+            if mem_clear.active || uart_ram_read_collision {
                 RespMsg::Busy()
             } else {
                 RespMsg::Read(addr, *uart_mem_dout)
             }
         },
-        ParserEvent::Write$(addr, value) => {
+        ParserEvent::WriteRam$(addr, value) => {
             let _ = addr;
             let _ = value;
-            if uart_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
+            if uart_ram_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
+        },
+        ParserEvent::ReadRom$(addr) => RespMsg::Read(addr, *rom_uart_mem_dout),
+        ParserEvent::WriteRom$(addr, value) => {
+            let _ = addr;
+            let _ = value;
+            RespMsg::Ok()
         },
         ParserEvent::SetClassifyDelay$(cycles) => RespMsg::Timing(cycles),
         ParserEvent::SetFtStreaming$(enabled) => {
