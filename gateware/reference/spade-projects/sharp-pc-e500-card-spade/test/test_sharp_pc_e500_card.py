@@ -196,6 +196,13 @@ async def _fast_uart_recv_bytes(signal, clk, count: int, timeout_cycles: int = 1
     return data
 
 
+async def _fast_uart_recv_words(signal, clk, width: int, count: int, timeout_cycles: int = 128) -> list[int]:
+    data = []
+    for _ in range(count):
+        data.append(await _fast_uart_recv_word(signal, clk, width, timeout_cycles))
+    return data
+
+
 async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 4000) -> list[tuple[int, int]]:
     observed: list[tuple[int, int]] = []
     for _ in range(timeout_cycles):
@@ -491,6 +498,46 @@ async def _ce6_ctrl_short_write(dut, addr: int, value: int, pre_low_cycles: int 
     await tick(dut.clk, pre_low_cycles)
     dut.rw.value = 0
     await tick(dut.clk, low_cycles)
+    drive = int(dut.data_oe.value)
+    dut.rw.value = 1
+    dut.ce6.value = 1
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+    return drive
+
+
+async def _ce6_ctrl_async_write_phase(
+    dut,
+    addr: int,
+    value: int,
+    *,
+    ce6_phase_ns: int,
+    rw_phase_ns: int,
+    hold_low_ns: int = 120,
+):
+    assert 0 <= ce6_phase_ns < 10
+    assert 0 <= rw_phase_ns < 10
+
+    dut.addr.value = addr & 0x3FFFF
+    dut.ce6.value = 1
+    dut.ce1.value = 0
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = value & 0xFF
+    dut.data_host_drive.value = 1
+
+    await RisingEdge(dut.clk)
+    await Timer(1, units="ps")
+
+    current_ns = 0
+    if ce6_phase_ns > 0:
+        await Timer(ce6_phase_ns, units="ns")
+    dut.ce6.value = 0
+    current_ns = ce6_phase_ns
+    if rw_phase_ns > current_ns:
+        await Timer(rw_phase_ns - current_ns, units="ns")
+    dut.rw.value = 0
+    await Timer(hold_low_ns, units="ns")
     drive = int(dut.data_oe.value)
     dut.rw.value = 1
     dut.ce6.value = 1
@@ -994,15 +1041,157 @@ async def ce6_control_page_writes_use_separate_control_delay(dut):
 
 
 @cocotb.test()
+async def ce6_control_page_phase_sweep_detects_async_echo_writes(dut):
+    await _init(dut)
+
+    cases = [
+        (0, 1, ord("A")),
+        (1, 3, ord("B")),
+        (2, 5, ord("C")),
+        (4, 6, ord("D")),
+        (5, 8, ord("E")),
+        (7, 9, ord("F")),
+    ]
+
+    for ce6_phase_ns, rw_phase_ns, value in cases:
+        usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+        event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+        drive = await _ce6_ctrl_async_write_phase(
+            dut,
+            0x1FFF1,
+            value,
+            ce6_phase_ns=ce6_phase_ns,
+            rw_phase_ns=rw_phase_ns,
+        )
+        assert drive == 0
+        assert await usb_char == bytes([value])
+        assert await event_write == (0x7700 | value)
+
+
+@cocotb.test()
+async def ce6_control_page_write_can_start_after_addr_enters_range(dut):
+    await _init(dut)
+
+    usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+
+    dut.addr.value = 0x1F000
+    dut.ce6.value = 1
+    dut.ce1.value = 0
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = ord("L")
+    dut.data_host_drive.value = 1
+
+    await RisingEdge(dut.clk)
+    await Timer(1, units="ps")
+    await Timer(1, units="ns")
+    dut.ce6.value = 0
+    await Timer(2, units="ns")
+    dut.rw.value = 0
+    await Timer(25, units="ns")
+    dut.addr.value = 0x1FFF1
+    await Timer(120, units="ns")
+    drive = int(dut.data_oe.value)
+    dut.rw.value = 1
+    dut.ce6.value = 1
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+
+    assert drive == 0
+    assert await usb_char == b"L"
+    assert await event_write == 0x774C
+
+
+@cocotb.test()
+async def ce6_control_page_aborted_write_does_not_fire_late(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"c20\r\nC=200ns\r\n")))
+    await _uart_send_text(dut, "c20\r")
+    assert await rx == b"c20\r\nC=200ns\r\n"
+
+    dut.addr.value = 0x1FFF1
+    dut.ce6.value = 1
+    dut.ce1.value = 0
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = ord("Q")
+    dut.data_host_drive.value = 1
+
+    await RisingEdge(dut.clk)
+    await Timer(1, units="ps")
+    await Timer(1, units="ns")
+    dut.ce6.value = 0
+    await Timer(2, units="ns")
+    dut.rw.value = 0
+    await Timer(50, units="ns")
+    dut.rw.value = 1
+    dut.ce6.value = 1
+    _set_data_bus_z(dut)
+
+    await _assert_no_fast_uart_start_fall(dut.saleae[3], dut.clk, 40)
+    await _assert_no_usb_tx_start_bit(dut, 40)
+
+
+@cocotb.test()
+async def ce6_control_page_c00_and_c01_use_current_cycle_data(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"c00\r\nC=000ns\r\n")))
+    await _uart_send_text(dut, "c00\r")
+    assert await rx == b"c00\r\nC=000ns\r\n"
+
+    usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("A"), ce6_phase_ns=1, rw_phase_ns=3) == 0
+    assert await usb_char == b"A"
+    assert await event_word == 0x7741
+
+    usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("B"), ce6_phase_ns=2, rw_phase_ns=5) == 0
+    assert await usb_char == b"B"
+    assert await event_word == 0x7742
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"c01\r\nC=010ns\r\n")))
+    await _uart_send_text(dut, "c01\r")
+    assert await rx == b"c01\r\nC=010ns\r\n"
+
+    usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("C"), ce6_phase_ns=0, rw_phase_ns=2) == 0
+    assert await usb_char == b"C"
+    assert await event_word == 0x7743
+
+    usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("D"), ce6_phase_ns=3, rw_phase_ns=6) == 0
+    assert await usb_char == b"D"
+    assert await event_word == 0x7744
+
+
+@cocotb.test()
+async def ce6_control_page_back_to_back_event_words_are_queued(dut):
+    await _init(dut)
+
+    event_words = cocotb.start_soon(_fast_uart_recv_words(dut.saleae[3], dut.clk, 16, 2))
+    assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF0, 0x11, ce6_phase_ns=1, rw_phase_ns=3, hold_low_ns=60) == 0
+    assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF2, 0x22, ce6_phase_ns=2, rw_phase_ns=4, hold_low_ns=60) == 0
+    assert await event_words == [0x7711, 0x7722]
+
+
+@cocotb.test()
 async def ce6_magic_uart_port_overrun_reports_error(dut):
     await _init(dut)
 
     first_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
     assert await _ce6_write(dut, 0x0FFF1, ord("A")) == 0
     assert await _ce6_write(dut, 0x1FFF1, ord("B")) == 0
+    assert await _ce6_write(dut, 0x1FFF1, ord("C")) == 0
 
     assert await first_char == b"A"
-    assert await _uart_recv_exact(dut, len(b"!OVERRUN\r\n")) == b"!OVERRUN\r\n"
+    assert await _uart_recv_exact(dut, len(b"!OVERRUN\r\n!OVERRUN\r\n")) == b"!OVERRUN\r\n!OVERRUN\r\n"
 
 
 @cocotb.test()

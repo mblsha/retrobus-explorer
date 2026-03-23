@@ -14,15 +14,11 @@ use shared_components::{
 use msg::{
     EchoStreamState,
     FtStats,
-    PortMsg,
-    PortStreamState,
     RespMsg,
     RespStreamState,
     echo_stream_step,
     init_echo_stream,
-    init_port_stream,
     init_resp_stream,
-    port_stream_step,
     resp_stream_step,
 };
 use protocol::{EchoMsg, ParserEvent, ParserState, parser_step};
@@ -224,6 +220,10 @@ fn ft_record_word(record: FtRecord, idx: uint<3>) -> FtData {
     }
 }
 
+fn saturating_inc_u8(value: uint<8>) -> uint<8> {
+    if value == 0xFF { value } else { value +. 1 }
+}
+
 #[no_mangle(all)]
 extern entity card_ram_2k_v(
     clk: clock,
@@ -272,9 +272,8 @@ struct AccessCycleStep {
 
 struct CtrlWriteState {
     active: bool,
+    fired: bool,
     wait_ctr: ClassifyCtr,
-    latched_addr: BusAddr,
-    latched_data: CardData,
 }
 
 struct CtrlWriteStep {
@@ -294,6 +293,11 @@ struct FtDebugUartState {
     pending_valid: bool,
 }
 
+struct PortOverrunState {
+    pending_count: uint<8>,
+    idx: uint<4>,
+}
+
 struct MemClearState {
     active: bool,
     addr: CardOffset,
@@ -309,6 +313,11 @@ struct FtDebugUartOut {
     next_state: FtDebugUartState,
     send: bool,
     send_byte: CardData,
+}
+
+struct PortOverrunOut {
+    next_state: PortOverrunState,
+    tx_req: TxReq8,
 }
 
 struct FtRecordStreamState {
@@ -398,9 +407,8 @@ fn init_event_uart_state() -> EventUartState {
 fn init_ctrl_write_state() -> CtrlWriteState {
     CtrlWriteState$(
         active: false,
+        fired: false,
         wait_ctr: 0,
-        latched_addr: 0,
-        latched_data: 0,
     )
 }
 
@@ -408,6 +416,13 @@ fn init_ft_debug_uart_state() -> FtDebugUartState {
     FtDebugUartState$(
         pending: 0,
         pending_valid: false,
+    )
+}
+
+fn init_port_overrun_state() -> PortOverrunState {
+    PortOverrunState$(
+        pending_count: 0,
+        idx: 0,
     )
 }
 
@@ -750,31 +765,31 @@ fn access_cycle_step(
 
 fn ctrl_write_step(
     state: CtrlWriteState,
-    arm: bool,
+    ctrl_window: bool,
     addr: BusAddr,
     data: CardData,
     ctrl_write_delay: ClassifyCtr,
 ) -> CtrlWriteStep {
-    let fire = state.active && state.wait_ctr >= ctrl_write_delay;
-    let tracking = arm || state.active;
+    let starting = ctrl_window && !state.active;
+    let wait_ctr = if !ctrl_window {
+        0
+    } else if starting {
+        0
+    } else if !state.fired {
+        state.wait_ctr +. 1
+    } else {
+        state.wait_ctr
+    };
+    let fire = ctrl_window && !state.fired && wait_ctr >= ctrl_write_delay;
     CtrlWriteStep$(
         next_state: CtrlWriteState$(
-            active: if fire { false } else { tracking },
-            wait_ctr: if fire {
-                0
-            } else if arm {
-                1
-            } else if state.active {
-                state.wait_ctr +. 1
-            } else {
-                0
-            },
-            latched_addr: if tracking { addr } else { state.latched_addr },
-            latched_data: if tracking { data } else { state.latched_data },
+            active: ctrl_window,
+            fired: if !ctrl_window { false } else { state.fired || fire },
+            wait_ctr: wait_ctr,
         ),
         fire: fire,
-        addr: state.latched_addr,
-        data: state.latched_data,
+        addr: addr,
+        data: data,
     )
 }
 
@@ -856,6 +871,44 @@ fn ft_debug_uart_step(
         ),
         send: send_pending || send_direct,
         send_byte: if send_pending { state.pending } else { event_byte },
+    )
+}
+
+fn port_overrun_step(
+    state: PortOverrunState,
+    block_tx: bool,
+    overrun_valid: bool,
+) -> PortOverrunOut {
+    let queued = if overrun_valid {
+        saturating_inc_u8(state.pending_count)
+    } else {
+        state.pending_count
+    };
+    let sending_existing = state.pending_count != 0;
+    let cur_idx: uint<4> = if sending_existing { state.idx } else { 0 };
+    let tx_req = if queued != 0 && !block_tx {
+        TxReq8$(valid: true, byte: b"!OVERRUN\r\n"[trunc(cur_idx)])
+    } else {
+        tx_req_none()
+    };
+    let sent = tx_req.valid;
+    let last = cur_idx == 9;
+    PortOverrunOut$(
+        next_state: PortOverrunState$(
+            pending_count: if sent && last {
+                queued -. 1
+            } else {
+                queued
+            },
+            idx: if sent {
+                if last { 0 } else { cur_idx +. 1 }
+            } else if sending_existing {
+                state.idx
+            } else {
+                0
+            },
+        ),
+        tx_req: tx_req,
     )
 }
 
@@ -958,6 +1011,8 @@ entity main_core(
     let (data_uart_busy, data_uart_busy_w): (&bool, inv &bool) = port;
     let (event_uart_line, event_uart_line_w): (&bool, inv &bool) = port;
     let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
+    let (event_fifo_empty, event_fifo_empty_w): (&bool, inv &bool) = port;
+    let (event_fifo_dout, event_fifo_dout_w): (&EventWord, inv &EventWord) = port;
     let (ft_debug_uart_line, ft_debug_uart_line_w): (&bool, inv &bool) = port;
     let (ft_debug_uart_busy, ft_debug_uart_busy_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
@@ -1069,9 +1124,10 @@ entity main_core(
         if classify_delay_update_valid { classify_delay_update } else { classify_delay };
     reg(clk) ctrl_write_delay: ClassifyCtr reset(rst: default_ctrl_write_last) =
         if ctrl_write_delay_update_valid { ctrl_write_delay_update } else { ctrl_write_delay };
-    reg(clk) prev_rw: bool reset(rst: true) = rw;
-    reg(clk) ctrl_addr_shadow: BusAddr reset(rst: 0) = addr;
-    reg(clk) ctrl_data_shadow: CardData reset(rst: 0) = data_in;
+    reg(clk) rw_meta: bool reset(rst: true) = rw;
+    reg(clk) rw_ctrl: bool reset(rst: true) = rw_meta;
+    reg(clk) ce6_meta: bool reset(rst: true) = ce6;
+    reg(clk) ce6_ctrl: bool reset(rst: true) = ce6_meta;
     reg(clk) tick: FtDelta reset(rst: 0) = tick +. 1;
     reg(clk) mem_clear: MemClearState reset(rst: init_mem_clear_state()) =
         // Scrub card RAM after runtime reset so reset behavior is deterministic.
@@ -1087,12 +1143,13 @@ entity main_core(
     reg(clk) ce1_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
         access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
     let ce6_active = !ce6 && !mem_clear.active;
-    let ce6_ctrl_write_arm = ce6_active && ce6_ctrl_addr_in_range(addr) && prev_rw && !rw;
+    let ce6_ctrl_active = !ce6_ctrl && !mem_clear.active;
+    let ce6_ctrl_window = ce6_ctrl_active && !rw_ctrl && ce6_ctrl_addr_in_range(addr_now);
     reg(clk) ce6_ctrl_state: CtrlWriteState reset(rst: init_ctrl_write_state()) =
-        ctrl_write_step(ce6_ctrl_state, ce6_ctrl_write_arm, ctrl_addr_shadow, ctrl_data_shadow, ctrl_write_delay).next_state;
+        ctrl_write_step(ce6_ctrl_state, ce6_ctrl_window, addr_now, data_now, ctrl_write_delay).next_state;
     reg(clk) ce6_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
         access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay).next_state;
-    let ce6_ctrl_step = ctrl_write_step(ce6_ctrl_state, ce6_ctrl_write_arm, ctrl_addr_shadow, ctrl_data_shadow, ctrl_write_delay);
+    let ce6_ctrl_step = ctrl_write_step(ce6_ctrl_state, ce6_ctrl_window, addr_now, data_now, ctrl_write_delay);
     let ce1_step = access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
     let ce6_step = access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay);
 
@@ -1139,8 +1196,17 @@ entity main_core(
         ce6_read_event_word(if ce6_rom_addr_in_range(ce6_step.addr) { *rom_dout } else { ce6_step.data })
     };
 
-    reg(clk) event_state: EventUartState reset(rst: init_event_uart_state()) =
-        event_uart_step(event_state, *event_uart_busy, event_valid, event_word).next_state;
+    let event_fifo_wput = event_valid;
+    let event_fifo_rget = !*event_uart_busy && !*event_fifo_empty;
+    let event_fifo = inst sync_fifo::<16, 64>(
+        clk,
+        rst,
+        event_word,
+        event_fifo_wput,
+        event_fifo_rget,
+    );
+    set event_fifo_empty_w = &event_fifo.empty;
+    set event_fifo_dout_w = &event_fifo.dout;
 
     let echo_msg = usb_parse.echo;
     let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
@@ -1290,8 +1356,8 @@ entity main_core(
         tx_req_none()
     };
     let port_overrun_valid = ce6_port_write_valid && port_char_blocked;
-    reg(clk) port_state: PortStreamState reset(rst: init_port_stream()) =
-        port_stream_step(
+    reg(clk) port_state: PortOverrunState reset(rst: init_port_overrun_state()) =
+        port_overrun_step(
             port_state,
             *usb_tx_busy ||
             boot_banner_out.tx_req.valid ||
@@ -1299,9 +1365,8 @@ entity main_core(
             resp_out.tx_req.valid ||
             port_char_tx_req.valid,
             port_overrun_valid,
-            PortMsg::Overrun(),
-        ).state;
-    let port_out = port_stream_step(
+        ).next_state;
+    let port_out = port_overrun_step(
         port_state,
         *usb_tx_busy ||
         boot_banner_out.tx_req.valid ||
@@ -1309,11 +1374,9 @@ entity main_core(
         resp_out.tx_req.valid ||
         port_char_tx_req.valid,
         port_overrun_valid,
-        PortMsg::Overrun(),
     );
 
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
-    let event_step = event_uart_step(event_state, *event_uart_busy, event_valid, event_word);
     let ft_debug_step = ft_debug_uart_step(
         ft_debug_state,
         *ft_debug_uart_busy,
@@ -1345,8 +1408,8 @@ entity main_core(
         clk,
         rst,
         false,
-        event_step.send_word,
-        event_step.send,
+        *event_fifo_dout,
+        event_fifo_rget,
         event_uart_line_w,
         event_uart_busy_w,
     );
