@@ -308,6 +308,19 @@ def _parse_ft_stats_line(line: str) -> dict[str, int]:
     return stats
 
 
+def _parse_key_value_csv(line: str) -> tuple[str, dict[str, int]]:
+    parts = line.strip().split(",")
+    prefix = parts[0]
+    values: dict[str, int] = {}
+    for part in parts[1:]:
+        key, value = part.split("=", 1)
+        if key == "ARM":
+            values[key] = int(value, 10)
+        else:
+            values[key] = int(value, 16)
+    return prefix, values
+
+
 async def _disable_ft(dut):
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f0\r\n")))
     await _uart_send_text(dut, "f0\r")
@@ -742,6 +755,83 @@ async def usb_uart_can_set_control_write_delay(dut):
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"c08\r\nC=080ns\r\n")))
     await _uart_send_text(dut, "c08\r")
     assert await rx == b"c08\r\nC=080ns\r\n"
+
+
+@cocotb.test()
+async def measurement_reports_can_be_dumped_and_cleared(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"m?\r\nMS,CNT=00,OVF=00000000,ARM=0\r\n")))
+    await _uart_send_text(dut, "m?\r")
+    assert await rx == b"m?\r\nMS,CNT=00,OVF=00000000,ARM=0\r\n"
+
+    assert await _ce6_write(dut, 0x1FFF0, 0x12) == 0
+    await _bus_write(dut, 0x0012, 0x5A)
+    assert await _bus_read(dut, 0x0012) == 0x5A
+    assert await _ce6_write(dut, 0x1FFF2, 0x34) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"m?\r\n")))
+    await _uart_send_text(dut, "m?\r")
+    assert await rx == b"m?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "MS"
+    assert status == {"CNT": 0x01, "OVF": 0x00000000, "ARM": 0}
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"m\r\n")))
+    await _uart_send_text(dut, "m\r")
+    assert await rx == b"m\r\n"
+
+    prefix, report = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "MR"
+    assert report["S"] == 0x12
+    assert report["E"] == 0x34
+    assert report["TK"] > 0
+    assert report["EV"] == 0x00000002, report
+    assert report["FT"] == 0x00000000
+    assert report["AU"] > 0
+
+    assert await _uart_recv_line(dut) == "MEND\r\n"
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"m!\r\nOK\r\n")))
+    await _uart_send_text(dut, "m!\r")
+    assert await rx == b"m!\r\nOK\r\n"
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"m?\r\nMS,CNT=00,OVF=00000000,ARM=0\r\n")))
+    await _uart_send_text(dut, "m?\r")
+    assert await rx == b"m?\r\nMS,CNT=00,OVF=00000000,ARM=0\r\n"
+
+
+@cocotb.test()
+async def measurement_dump_preserves_fifo_order_for_multiple_reports(dut):
+    await _init(dut)
+
+    assert await _ce6_write(dut, 0x1FFF0, 0x21) == 0
+    await tick(dut.clk, 12)
+    assert await _ce6_write(dut, 0x1FFF2, 0x22) == 0
+
+    assert await _ce6_write(dut, 0x1FFF0, 0x31) == 0
+    await _bus_write(dut, 0x0001, 0x44)
+    assert await _ce6_write(dut, 0x1FFF2, 0x32) == 0
+
+    lines = cocotb.start_soon(_uart_recv_exact(dut, len(b"m\r\n")))
+    await _uart_send_text(dut, "m\r")
+    assert await lines == b"m\r\n"
+
+    prefix0, rec0 = _parse_key_value_csv(await _uart_recv_line(dut))
+    prefix1, rec1 = _parse_key_value_csv(await _uart_recv_line(dut))
+    end = await _uart_recv_line(dut)
+
+    assert prefix0 == "MR"
+    assert rec0["S"] == 0x21
+    assert rec0["E"] == 0x22
+    assert rec0["EV"] == 0x00000000
+
+    assert prefix1 == "MR"
+    assert rec1["S"] == 0x31
+    assert rec1["E"] == 0x32
+    assert rec1["EV"] == 0x00000001
+
+    assert end == "MEND\r\n"
 
 
 @cocotb.test()
