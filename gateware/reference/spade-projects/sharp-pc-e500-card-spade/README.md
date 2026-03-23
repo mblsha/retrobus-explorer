@@ -40,6 +40,9 @@ project is the second `/dev/cu.usbserial-*` device, which
 `sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py` auto-selects by
 default.
 
+For the complete FPGA command and CE6 control-register reference, see
+[FPGA_PROTOCOL.md](./FPGA_PROTOCOL.md).
+
 From `gateware/reference`:
 
 ```sh

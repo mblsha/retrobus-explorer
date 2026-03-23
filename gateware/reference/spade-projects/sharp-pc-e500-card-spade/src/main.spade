@@ -14,11 +14,17 @@ use shared_components::{
 use msg::{
     EchoStreamState,
     FtStats,
+    MeasureMsg,
+    MeasureReport,
+    MeasureStatus,
+    MeasureStreamState,
     RespMsg,
     RespStreamState,
     echo_stream_step,
     init_echo_stream,
+    init_measure_stream,
     init_resp_stream,
+    measure_stream_step,
     resp_stream_step,
 };
 use protocol::{EchoMsg, ParserEvent, ParserState, parser_step};
@@ -35,6 +41,9 @@ type FtOverflowCount = uint<26>;
 type FtCount = uint<32>;
 type FtQueueLevel = uint<14>;
 type FtBusSample = uint<30>;
+type MeasurePacked = uint<144>;
+type MeasureQueueLevel = uint<6>;
+type MeasureCount = uint<32>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -75,6 +84,21 @@ fn ce6_ctrl_addr_in_range(addr: BusAddr) -> bool {
 fn ce6_uart_port_addr_match(addr: BusAddr) -> bool {
     let low16: uint<16> = trunc(addr);
     low16 == 0xFFF1
+}
+
+fn ce6_measure_start_addr_match(addr: BusAddr) -> bool {
+    let low16: uint<16> = trunc(addr);
+    low16 == 0xFFF0
+}
+
+fn ce6_measure_stop_addr_match(addr: BusAddr) -> bool {
+    let low16: uint<16> = trunc(addr);
+    low16 == 0xFFF2
+}
+
+fn ce6_measure_abort_addr_match(addr: BusAddr) -> bool {
+    let low16: uint<16> = trunc(addr);
+    low16 == 0xFFF3
 }
 
 fn debug_event_word(prefix: uint<8>, data: CardData) -> EventWord {
@@ -210,6 +234,26 @@ fn pack_ft_overflow_record(delta: FtDelta, drop_count: FtOverflowCount) -> FtRec
     pack_ft_record(ft_kind_overflow(), delta, low, high, 0)
 }
 
+fn pack_measure_report(report: MeasureReport) -> MeasurePacked {
+    (zext(report.start_tag) << 136) |
+    (zext(report.stop_tag) << 128) |
+    (zext(report.delta_ticks) << 96) |
+    (zext(report.delta_events) << 64) |
+    (zext(report.delta_ft) << 32) |
+    zext(report.delta_addr_uart)
+}
+
+fn unpack_measure_report(value: MeasurePacked) -> MeasureReport {
+    MeasureReport$(
+        start_tag: trunc(value >> 136),
+        stop_tag: trunc(value >> 128),
+        delta_ticks: trunc(value >> 96),
+        delta_events: trunc(value >> 64),
+        delta_ft: trunc(value >> 32),
+        delta_addr_uart: trunc(value),
+    )
+}
+
 fn ft_record_word(record: FtRecord, idx: uint<3>) -> FtData {
     match idx {
         0 => trunc(record),
@@ -303,6 +347,15 @@ struct MemClearState {
     addr: CardOffset,
 }
 
+struct MeasureCaptureState {
+    armed: bool,
+    start_tag: CardData,
+    start_tick: FtDelta,
+    start_event_count: MeasureCount,
+    start_ft_count: MeasureCount,
+    start_addr_uart_count: MeasureCount,
+}
+
 struct EventUartOut {
     next_state: EventUartState,
     send: bool,
@@ -317,6 +370,17 @@ struct FtDebugUartOut {
 
 struct PortOverrunOut {
     next_state: PortOverrunState,
+    tx_req: TxReq8,
+}
+
+struct MeasureEngineState {
+    dump_active: bool,
+    stream: MeasureStreamState,
+}
+
+struct MeasureEngineOut {
+    next_state: MeasureEngineState,
+    fifo_rget: bool,
     tx_req: TxReq8,
 }
 
@@ -430,6 +494,24 @@ fn init_mem_clear_state() -> MemClearState {
     MemClearState$(
         active: true,
         addr: 0,
+    )
+}
+
+fn init_measure_capture_state() -> MeasureCaptureState {
+    MeasureCaptureState$(
+        armed: false,
+        start_tag: 0,
+        start_tick: 0,
+        start_event_count: 0,
+        start_ft_count: 0,
+        start_addr_uart_count: 0,
+    )
+}
+
+fn init_measure_engine_state() -> MeasureEngineState {
+    MeasureEngineState$(
+        dump_active: false,
+        stream: init_measure_stream(),
     )
 }
 
@@ -912,6 +994,55 @@ fn port_overrun_step(
     )
 }
 
+fn measure_engine_step(
+    state: MeasureEngineState,
+    block_tx: bool,
+    dump_request: bool,
+    clear_request: bool,
+    fifo_empty: bool,
+    fifo_dout: MeasurePacked,
+) -> MeasureEngineOut {
+    let probe = measure_stream_step(
+        state.stream,
+        block_tx,
+        false,
+        MeasureMsg::None(),
+    );
+    let want_msg = state.dump_active && probe.msg_none;
+    let next_msg = if !want_msg {
+        MeasureMsg::None()
+    } else if !fifo_empty {
+        MeasureMsg::Report(unpack_measure_report(fifo_dout))
+    } else {
+        MeasureMsg::End()
+    };
+    let stream_out = measure_stream_step(
+        state.stream,
+        block_tx,
+        want_msg,
+        next_msg,
+    );
+    let dump_complete = want_msg && fifo_empty;
+    MeasureEngineOut$(
+        next_state: if clear_request {
+            init_measure_engine_state()
+        } else {
+            MeasureEngineState$(
+                dump_active: if dump_complete {
+                    false
+                } else if dump_request {
+                    true
+                } else {
+                    state.dump_active
+                },
+                stream: stream_out.state,
+            )
+        },
+        fifo_rget: want_msg && !fifo_empty,
+        tx_req: stream_out.tx_req,
+    )
+}
+
 fn ft_record_stream_step(
     state: FtRecordStreamState,
     ui_din_full: bool,
@@ -1013,6 +1144,9 @@ entity main_core(
     let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
     let (event_fifo_empty, event_fifo_empty_w): (&bool, inv &bool) = port;
     let (event_fifo_dout, event_fifo_dout_w): (&EventWord, inv &EventWord) = port;
+    let (measure_fifo_full, measure_fifo_full_w): (&bool, inv &bool) = port;
+    let (measure_fifo_empty, measure_fifo_empty_w): (&bool, inv &bool) = port;
+    let (measure_fifo_dout, measure_fifo_dout_w): (&MeasurePacked, inv &MeasurePacked) = port;
     let (ft_debug_uart_line, ft_debug_uart_line_w): (&bool, inv &bool) = port;
     let (ft_debug_uart_busy, ft_debug_uart_busy_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
@@ -1113,6 +1247,9 @@ entity main_core(
     } else {
         false
     };
+    let measure_dump_request = if let ParserEvent::MeasureDump = usb_parse.event { true } else { false };
+    let measure_status_request = if let ParserEvent::MeasureStatus = usb_parse.event { true } else { false };
+    let measure_clear_request = if let ParserEvent::MeasureClear = usb_parse.event { true } else { false };
 
     reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
         pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
@@ -1298,6 +1435,114 @@ entity main_core(
     set ft_fifo_empty_w = &ft_fifo.empty;
     set ft_fifo_dout_w = &ft_fifo.dout;
 
+    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
+    let ce6_measure_start = ce6_ctrl_write_event && ce6_measure_start_addr_match(ce6_ctrl_step.addr);
+    let ce6_measure_stop = ce6_ctrl_write_event && ce6_measure_stop_addr_match(ce6_ctrl_step.addr);
+    let ce6_measure_abort = ce6_ctrl_write_event && ce6_measure_abort_addr_match(ce6_ctrl_step.addr);
+
+    reg(clk) event_total: MeasureCount reset(rst: 0) =
+        if event_valid { event_total +. 1 } else { event_total };
+    reg(clk) ft_record_total: MeasureCount reset(rst: 0) =
+        if ft_eval.fifo_wput { ft_record_total +. 1 } else { ft_record_total };
+    reg(clk) addr_uart_total: MeasureCount reset(rst: 0) =
+        if addr_step.send { addr_uart_total +. 1 } else { addr_uart_total };
+
+    reg(clk) measure_capture: MeasureCaptureState reset(rst: init_measure_capture_state()) =
+        if ce6_measure_start {
+            MeasureCaptureState$(
+                armed: true,
+                start_tag: ce6_ctrl_step.data,
+                start_tick: tick,
+                start_event_count: if event_valid { event_total +. 1 } else { event_total },
+                start_ft_count: if ft_eval.fifo_wput { ft_record_total +. 1 } else { ft_record_total },
+                start_addr_uart_count: if addr_step.send { addr_uart_total +. 1 } else { addr_uart_total },
+            )
+        } else if ce6_measure_abort || (ce6_measure_stop && measure_capture.armed) {
+            MeasureCaptureState$(
+                armed: false,
+                start_tag: measure_capture.start_tag,
+                start_tick: measure_capture.start_tick,
+                start_event_count: measure_capture.start_event_count,
+                start_ft_count: measure_capture.start_ft_count,
+                start_addr_uart_count: measure_capture.start_addr_uart_count,
+            )
+        } else {
+            measure_capture
+        };
+    let measure_report = MeasureReport$(
+        start_tag: measure_capture.start_tag,
+        stop_tag: ce6_ctrl_step.data,
+        delta_ticks: tick -. measure_capture.start_tick,
+        delta_events: event_total -. measure_capture.start_event_count,
+        delta_ft: ft_record_total -. measure_capture.start_ft_count,
+        delta_addr_uart: addr_uart_total -. measure_capture.start_addr_uart_count,
+    );
+
+    let measure_report_wput = ce6_measure_stop && measure_capture.armed && !*measure_fifo_full;
+    let measure_report_drop = ce6_measure_stop && measure_capture.armed && *measure_fifo_full;
+    let measure_block_tx =
+        *usb_tx_busy ||
+        boot_banner_out.tx_req.valid ||
+        echo_out.tx_req.valid;
+    reg(clk) measure_engine: MeasureEngineState reset(rst: init_measure_engine_state()) =
+        measure_engine_step(
+            measure_engine,
+            measure_block_tx,
+            measure_dump_request,
+            measure_clear_request,
+            *measure_fifo_empty,
+            *measure_fifo_dout,
+        ).next_state;
+    let measure_eval = measure_engine_step(
+        measure_engine,
+        measure_block_tx,
+        measure_dump_request,
+        measure_clear_request,
+        *measure_fifo_empty,
+        *measure_fifo_dout,
+    );
+    let measure_fifo_rst = rst || measure_clear_request;
+    let measure_fifo = inst sync_fifo::<144, 32>(
+        clk,
+        measure_fifo_rst,
+        pack_measure_report(measure_report),
+        measure_report_wput,
+        measure_eval.fifo_rget,
+    );
+    set measure_fifo_full_w = &measure_fifo.full;
+    set measure_fifo_empty_w = &measure_fifo.empty;
+    set measure_fifo_dout_w = &measure_fifo.dout;
+
+    let measure_queue_inc: MeasureQueueLevel = if measure_report_wput { 1 } else { 0 };
+    let measure_queue_dec: MeasureQueueLevel = if measure_eval.fifo_rget { 1 } else { 0 };
+    reg(clk) measure_queue_level: MeasureQueueLevel reset(rst: 0) =
+        if measure_clear_request {
+            0
+        } else if measure_queue_inc > measure_queue_dec {
+            measure_queue_level +. (measure_queue_inc -. measure_queue_dec)
+        } else if measure_queue_dec > measure_queue_inc {
+            if measure_queue_level > 0 {
+                measure_queue_level -. (measure_queue_dec -. measure_queue_inc)
+            } else {
+                0
+            }
+        } else {
+            measure_queue_level
+        };
+    reg(clk) measure_overflow_count: MeasureCount reset(rst: 0) =
+        if measure_clear_request {
+            0
+        } else if measure_report_drop {
+            measure_overflow_count +. 1
+        } else {
+            measure_overflow_count
+        };
+    let measure_status_now = MeasureStatus$(
+        count: zext(measure_queue_level),
+        overflow: measure_overflow_count,
+        armed: measure_capture.armed,
+    );
+
     let resp_msg = match usb_parse.event {
         ParserEvent::ReadRam$(addr) => {
             if mem_clear.active || uart_ram_read_collision {
@@ -1332,24 +1577,33 @@ entity main_core(
                 ))
             }
         },
+        ParserEvent::MeasureStatus => RespMsg::MeasureStatus(measure_status_now),
+        ParserEvent::MeasureClear => RespMsg::Ok(),
         ParserEvent::ParseErr => RespMsg::Err(),
         _ => RespMsg::None(),
     };
     let resp_msg_valid = if let RespMsg::None = resp_msg { false } else { true };
 
     reg(clk) resp_state: RespStreamState reset(rst: init_resp_stream()) =
-        resp_stream_step(resp_state, *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid, resp_msg_valid, resp_msg).state;
+        resp_stream_step(
+            resp_state,
+            *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid || measure_eval.tx_req.valid,
+            resp_msg_valid,
+            resp_msg,
+        ).state;
     let resp_out = resp_stream_step(
         resp_state,
-        *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid,
+        *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid || measure_eval.tx_req.valid,
         resp_msg_valid,
         resp_msg,
     );
+
     let port_char_blocked =
         *usb_tx_busy ||
         boot_banner_out.tx_req.valid ||
         echo_out.tx_req.valid ||
-        resp_out.tx_req.valid;
+        resp_out.tx_req.valid ||
+        measure_eval.tx_req.valid;
     let port_char_tx_req = if ce6_port_write_valid && !port_char_blocked {
         TxReq8$(valid: true, byte: ce6_port_write_byte)
     } else {
@@ -1359,24 +1613,24 @@ entity main_core(
     reg(clk) port_state: PortOverrunState reset(rst: init_port_overrun_state()) =
         port_overrun_step(
             port_state,
-            *usb_tx_busy ||
-            boot_banner_out.tx_req.valid ||
-            echo_out.tx_req.valid ||
-            resp_out.tx_req.valid ||
-            port_char_tx_req.valid,
-            port_overrun_valid,
-        ).next_state;
+        *usb_tx_busy ||
+        boot_banner_out.tx_req.valid ||
+        echo_out.tx_req.valid ||
+        resp_out.tx_req.valid ||
+        measure_eval.tx_req.valid ||
+        port_char_tx_req.valid,
+        port_overrun_valid,
+    ).next_state;
     let port_out = port_overrun_step(
         port_state,
         *usb_tx_busy ||
         boot_banner_out.tx_req.valid ||
         echo_out.tx_req.valid ||
         resp_out.tx_req.valid ||
+        measure_eval.tx_req.valid ||
         port_char_tx_req.valid,
         port_overrun_valid,
     );
-
-    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let ft_debug_step = ft_debug_uart_step(
         ft_debug_state,
         *ft_debug_uart_busy,
@@ -1384,7 +1638,8 @@ entity main_core(
         ft_debug_char(trunc(ft_eval.fifo_din >> 72)),
     );
     let usb_tx_low_req = tx_req_arbiter(resp_out.tx_req, port_char_tx_req, port_out.tx_req);
-    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, usb_tx_low_req);
+    let usb_tx_mid_req = tx_req_arbiter(measure_eval.tx_req, usb_tx_low_req, tx_req_none());
+    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, usb_tx_mid_req);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,
