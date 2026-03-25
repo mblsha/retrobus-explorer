@@ -27,7 +27,6 @@ PROFILE_PATHS: dict[str, str] = {
     "sharp_organizer_bus": "../sharp-organizer-card/constraint/sharp-organizer-card.acf",
     "sharp_pc_g850_bus": "../sharp-pc-g850-bus/constraint/pc-g850-bus.acf",
 }
-TOP_ENTITY_RE = re.compile(r"entity\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)\s*\{", re.DOTALL)
 PORT_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*:")
 
 
@@ -77,10 +76,10 @@ def ensure_positive_int(value: object, name: str) -> int:
 
 def parse_top_ports(top_file: Path, top_entity: str) -> set[str]:
     content = strip_comments(top_file.read_text())
-    for entity_name, body in TOP_ENTITY_RE.findall(content):
-        if entity_name != top_entity:
-            continue
-        return {name for name in PORT_RE.findall(body)}
+    entity_re = re.compile(rf"\bentity\s+{re.escape(top_entity)}\s*\((.*?)\)\s*\{{", re.DOTALL)
+    match = entity_re.search(content)
+    if match is not None:
+        return {name for name in PORT_RE.findall(match.group(1))}
     raise SystemExit(f"error: entity {top_entity!r} not found in {top_file}")
 
 
