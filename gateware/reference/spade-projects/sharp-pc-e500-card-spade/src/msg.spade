@@ -7,14 +7,6 @@ type EchoIdx = uint<2>;
 type RespIdx = uint<7>;
 type MeasureIdx = uint<7>;
 
-pub struct FtStats {
-    records: uint<32>,
-    dropped: uint<32>,
-    words: uint<32>,
-    tx_full_cycles: uint<32>,
-    qmax: uint<32>,
-}
-
 pub struct MeasureStatus {
     count: uint<8>,
     overflow: uint<32>,
@@ -26,7 +18,6 @@ pub struct MeasureReport {
     stop_tag: uint<8>,
     delta_ticks: uint<32>,
     delta_events: uint<32>,
-    delta_ft: uint<32>,
     delta_addr_uart: uint<32>,
 }
 
@@ -43,8 +34,6 @@ pub enum RespMsg {
     Read{addr: CardOffset, value: CardData},
     Timing{cycles: uint<7>},
     CtrlTiming{cycles: uint<7>},
-    Ft{enabled: bool},
-    FtStats{stats: FtStats},
     MeasureStatus{status: MeasureStatus},
 }
 
@@ -234,51 +223,6 @@ impl RespMsg {
                 8 => TxReq8$(valid: true, byte: b'\n'),
                 _ => tx_req_none(),
             },
-            Self::Ft$(enabled) => match idx {
-                0 => TxReq8$(valid: true, byte: b'F'),
-                1 => TxReq8$(valid: true, byte: b'='),
-                2 => TxReq8$(valid: true, byte: if enabled { b'1' } else { b'0' }),
-                3 => TxReq8$(valid: true, byte: b'\r'),
-                4 => TxReq8$(valid: true, byte: b'\n'),
-                _ => tx_req_none(),
-            },
-            Self::FtStats$(stats) => if idx < 4 {
-                TxReq8$(valid: true, byte: b"F=0 "[trunc(idx)])
-            } else if idx < 8 {
-                TxReq8$(valid: true, byte: b"REC="[trunc(idx -. 4)])
-            } else if idx < 16 {
-                TxReq8$(valid: true, byte: u32_hex_char(stats.records, trunc(idx -. 8)))
-            } else if idx == 16 {
-                TxReq8$(valid: true, byte: b' ')
-            } else if idx < 21 {
-                TxReq8$(valid: true, byte: b"DRP="[trunc(idx -. 17)])
-            } else if idx < 29 {
-                TxReq8$(valid: true, byte: u32_hex_char(stats.dropped, trunc(idx -. 21)))
-            } else if idx == 29 {
-                TxReq8$(valid: true, byte: b' ')
-            } else if idx < 34 {
-                TxReq8$(valid: true, byte: b"WRD="[trunc(idx -. 30)])
-            } else if idx < 42 {
-                TxReq8$(valid: true, byte: u32_hex_char(stats.words, trunc(idx -. 34)))
-            } else if idx == 42 {
-                TxReq8$(valid: true, byte: b' ')
-            } else if idx < 47 {
-                TxReq8$(valid: true, byte: b"QMX="[trunc(idx -. 43)])
-            } else if idx < 55 {
-                TxReq8$(valid: true, byte: u32_hex_char(stats.qmax, trunc(idx -. 47)))
-            } else if idx == 55 {
-                TxReq8$(valid: true, byte: b' ')
-            } else if idx < 60 {
-                TxReq8$(valid: true, byte: b"TFF="[trunc(idx -. 56)])
-            } else if idx < 68 {
-                TxReq8$(valid: true, byte: u32_hex_char(stats.tx_full_cycles, trunc(idx -. 60)))
-            } else if idx == 68 {
-                TxReq8$(valid: true, byte: b'\r')
-            } else if idx == 69 {
-                TxReq8$(valid: true, byte: b'\n')
-            } else {
-                tx_req_none()
-            },
             Self::Read$(addr, value) => match idx {
                 0 => TxReq8$(valid: true, byte: offset_hex_char(addr, 0)),
                 1 => TxReq8$(valid: true, byte: offset_hex_char(addr, 1)),
@@ -345,16 +289,12 @@ impl MeasureMsg {
             } else if idx < 36 {
                 TxReq8$(valid: true, byte: u32_hex_char(report.delta_events, trunc(idx -. 28)))
             } else if idx < 40 {
-                TxReq8$(valid: true, byte: b",FT="[trunc(idx -. 36)])
+                TxReq8$(valid: true, byte: b",AU="[trunc(idx -. 36)])
             } else if idx < 48 {
-                TxReq8$(valid: true, byte: u32_hex_char(report.delta_ft, trunc(idx -. 40)))
-            } else if idx < 52 {
-                TxReq8$(valid: true, byte: b",AU="[trunc(idx -. 48)])
-            } else if idx < 60 {
-                TxReq8$(valid: true, byte: u32_hex_char(report.delta_addr_uart, trunc(idx -. 52)))
-            } else if idx == 60 {
+                TxReq8$(valid: true, byte: u32_hex_char(report.delta_addr_uart, trunc(idx -. 40)))
+            } else if idx == 48 {
                 TxReq8$(valid: true, byte: b'\r')
-            } else if idx == 61 {
+            } else if idx == 49 {
                 TxReq8$(valid: true, byte: b'\n')
             } else {
                 tx_req_none()

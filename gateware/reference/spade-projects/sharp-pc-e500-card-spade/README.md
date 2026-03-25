@@ -1,37 +1,14 @@
 # SHARP PC-E500 Card Spade
 
-This project captures SHARP PC-E500 card-bus activity and streams FT records
-over the same Alchitry Au + Ft Element USB3 interface used by the original
-PC-G850 tooling.
+This project emulates a SHARP PC-E500 card with FPGA-backed CE1 RAM, CE6 ROM,
+and a CE6 control page exposed through the onboard USB-UART.
 
 ## Expected Host Interface
 
-Use the Alchitry Ft Element board as the bulk capture path.
+Use the Au1 onboard USB-UART as the host control path.
 
-- Data capture: FT600-class USB3 FIFO interface via the repository `py/d3xx` wrapper
-- Control and arming: Au onboard USB-UART
-
-Do not use `pyftdi` against the Au board's FT2232 USB-UART interface for FT
-capture; the expected host path for this project is the Ft Element USB3 board.
-
-## Capture Command
-
-From `gateware/reference/spade-projects`:
-
-```sh
-uv run ./sharp-pc-e500-card-spade/scripts/capture_ft.py \
-  --device-index 0 \
-  --channel 0 \
-  --raw-out /tmp/e500.ft16 \
-  --vcd-out /tmp/e500.vcd \
-  --duration 10 \
-  --idle-timeout 10
-```
-
-The raw capture format is 16-bit little-endian FT words written to `.ft16`.
-Use the USB-UART console to send `f1` when you want to enable FT streaming, and
-then decode the capture with `scripts/e500_ft.py` or convert it to VCD with
-`scripts/ft_to_vcd.py`.
+- Control, RAM/ROM access, and measurement dump: Au1 onboard USB-UART
+- Timing and bus visibility: Saleae debug header outputs
 
 ## Au1 USB-UART
 
@@ -154,15 +131,8 @@ Then run this on the PC-E500:
 LOAD"COM:"
 ```
 
-## Host Implementation
+## Notes
 
-The `scripts/capture_ft.py` and `scripts/ft_to_vcd.py` entrypoints now build
-and execute C++ implementations by default. The Python modules remain in-tree
-as the semantic reference and for unit tests, but normal CLI use goes through
-the C++ binaries in `.cpp-build/`.
-
-If you need to force the legacy Python path for debugging, set:
-
-```sh
-RETROBUS_E500_USE_PYTHON=1
-```
+There is no separate bulk-streaming interface in this project anymore. Host
+interaction is through the USB-UART command set documented in
+[FPGA_PROTOCOL.md](./FPGA_PROTOCOL.md).

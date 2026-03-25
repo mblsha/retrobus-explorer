@@ -11,7 +11,6 @@ pub enum ParserEvent {
     WriteRom{addr: CardOffset, value: CardData},
     SetClassifyDelay{cycles: uint<7>},
     SetCtrlWriteDelay{cycles: uint<7>},
-    SetFtStreaming{enabled: bool},
     MeasureDump,
     MeasureStatus,
     MeasureClear,
@@ -36,8 +35,6 @@ pub enum ParserState {
     TimingHi{control: bool},
     TimingLo{tens: uint<4>, control: bool},
     NeedTimingLineEnd{cycles: uint<7>, control: bool},
-    FtEnable,
-    NeedFtLineEnd{enabled: bool},
     Measure,
     NeedMeasureLineEnd{event: ParserEvent},
     Error,
@@ -116,8 +113,6 @@ pub fn parser_step(
                     parser_out(ParserState::TimingHi(false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if rx_byte.to_upper() == b'C' {
                     parser_out(ParserState::TimingHi(true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte.to_upper() == b'F' {
-                    parser_out(ParserState::FtEnable(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else if rx_byte.to_upper() == b'M' {
                     parser_out(ParserState::Measure(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
@@ -243,22 +238,6 @@ pub fn parser_step(
                         },
                         EchoMsg::CrLf(),
                     )
-                } else {
-                    parser_error(state, rx_byte)
-                }
-            },
-            ParserState::FtEnable => {
-                if rx_byte == b'0' {
-                    parser_out(ParserState::NeedFtLineEnd(false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte == b'1' {
-                    parser_out(ParserState::NeedFtLineEnd(true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else {
-                    parser_error(state, rx_byte)
-                }
-            },
-            ParserState::NeedFtLineEnd$(enabled) => {
-                if rx_byte.is_line_end() {
-                    parser_out(ParserState::Idle(), ParserEvent::SetFtStreaming(enabled), EchoMsg::CrLf())
                 } else {
                     parser_error(state, rx_byte)
                 }

@@ -15,23 +15,6 @@ DEFAULT_CLASSIFY_CYCLES = 45
 DEFAULT_CTRL_WRITE_DELAY_CYCLES = 3
 TAIL_CYCLES = 20
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-FT_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden.ft16"
-FT_CE6_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden_ce6.ft16"
-FT_OVERFLOW_FIXTURE_PATH = PROJECT_ROOT / "testdata" / "ft_golden_overflow_record.ft16"
-
-FT_KIND_BUS_CHANGE = 0x00
-FT_KIND_CE1_READ = 0x01
-FT_KIND_CE1_WRITE = 0x02
-FT_KIND_CE6_READ = 0x03
-FT_KIND_CE6_WRITE_ATTEMPT = 0x04
-FT_KIND_SYNC = 0xF0
-FT_KIND_OVERFLOW = 0xF1
-FT_KIND_CONFIG = 0xF2
-FT_RECORD_WORDS = 5
-FT_RECORD_FIFO_RECORDS = 8192
-FT_TAP_TX_FIFO_WORDS = 8192
-FT_TAP_TX_FIFO_RECORDS = FT_TAP_TX_FIFO_WORDS // FT_RECORD_WORDS
-FT_OVERFLOW_TRIGGER_READS = 12000
 
 
 def saleae_bit(value, idx):
@@ -41,51 +24,6 @@ def saleae_bit(value, idx):
 def expected_boot_banner() -> str:
     info = json.loads((PROJECT_ROOT / "build" / "build_info.json").read_text())
     return info["banner"]
-
-
-def _bit(signal) -> int:
-    value = signal.value
-    if not value.is_resolvable:
-        raise AssertionError(f"unresolved signal: {signal._name}={value}")
-    return int(value) & 1
-
-
-def _u16(signal) -> int:
-    value = signal.value
-    if not value.is_resolvable:
-        raise AssertionError(f"unresolved signal: {signal._name}={value}")
-    return int(value) & 0xFFFF
-
-
-def _u2(signal) -> int:
-    value = signal.value
-    if not value.is_resolvable:
-        raise AssertionError(f"unresolved signal: {signal._name}={value}")
-    return int(value) & 0x3
-
-
-def _ft_kind(record: int) -> int:
-    return (record >> 72) & 0xFF
-
-
-def _ft_delta(record: int) -> int:
-    return (record >> 40) & 0xFFFFFFFF
-
-
-def _ft_addr(record: int) -> int:
-    return (record >> 22) & 0x3FFFF
-
-
-def _ft_data(record: int) -> int:
-    return (record >> 14) & 0xFF
-
-
-def _ft_aux(record: int) -> int:
-    return record & 0x3FFF
-
-
-def _ft_overflow_count(record: int) -> int:
-    return _ft_addr(record) | (_ft_data(record) << 18)
 
 
 async def _uart_wait_start_fall(dut, timeout_cycles: int) -> None:
@@ -202,68 +140,12 @@ async def _fast_uart_recv_words(signal, clk, width: int, count: int, timeout_cyc
         data.append(await _fast_uart_recv_word(signal, clk, width, timeout_cycles))
     return data
 
-
-async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 4000) -> list[tuple[int, int]]:
-    observed: list[tuple[int, int]] = []
-    for _ in range(timeout_cycles):
-        await FallingEdge(dut.ft_clk)
-        will_write = _bit(dut.ft_oe) == 1 and _bit(dut.ft_wr) == 0 and _bit(dut.ft_txe) == 0
-        sampled_word = (_u16(dut.ft_data), _u2(dut.ft_be))
-        await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
-        if will_write:
-            observed.append(sampled_word)
-            if len(observed) == count:
-                return observed
-    raise AssertionError(f"timed out waiting for {count} FT writes")
-
-
-async def _assert_no_ft_write(dut, cycles: int = 800):
-    for _ in range(cycles):
-        await FallingEdge(dut.ft_clk)
-        will_write = _bit(dut.ft_oe) == 1 and _bit(dut.ft_wr) == 0 and _bit(dut.ft_txe) == 0
-        await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
-        assert not will_write, "unexpected FT write while streaming should be idle"
-
-
-async def _ft_recv_record(dut, timeout_cycles: int = 12000) -> int:
-    words = await _collect_ft_writes(dut, 5, timeout_cycles)
-    record = 0
-    for idx, (word, be) in enumerate(words):
-        assert be == 0x3, f"expected FT byte-enable 0x3, got {be:#x}"
-        record |= word << (16 * idx)
-    return record
-
-
-async def _ft_recv_records(dut, count: int, timeout_cycles: int = 12000) -> list[int]:
-    out: list[int] = []
-    for _ in range(count):
-        out.append(await _ft_recv_record(dut, timeout_cycles))
-    return out
-
-
-def _ft_records_to_bytes(records: list[int]) -> bytes:
-    out = bytearray()
-    for record in records:
-        out.extend(int(record).to_bytes(10, "little"))
-    return bytes(out)
-
-
 def _set_data_bus_z(dut):
     dut.data_host.value = 0
     dut.data_host_drive.value = 0
 
-
-def _set_ft_bus_z(dut):
-    dut.ft_data_host.value = 0
-    dut.ft_be_host.value = 0
-    dut.ft_host_drive.value = 0
-
-
 async def _init(dut):
     start_clock(dut.clk)
-    start_clock(dut.ft_clk)
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1
@@ -274,38 +156,12 @@ async def _init(dut):
     dut.vcc2.value = 0
     dut.nc.value = 0
     dut.addr.value = 0
-    dut.ft_rxf.value = 1
-    dut.ft_txe.value = 0
     _set_data_bus_z(dut)
-    _set_ft_bus_z(dut)
 
     await tick(dut.clk, 8)
     dut.rst_n.value = 1
     await tick(dut.clk, 12)
     assert await _uart_recv_line(dut) == expected_boot_banner()
-
-
-async def _enable_ft(dut, drain_debug_cycles: int = 32):
-    ft_records = cocotb.start_soon(_ft_recv_records(dut, 2))
-    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f1\r\nF=1\r\n")))
-    await _uart_send_text(dut, "f1\r")
-    assert await rx == b"f1\r\nF=1\r\n"
-    sync, config = await ft_records
-    if drain_debug_cycles > 0:
-        await tick(dut.clk, drain_debug_cycles)
-    return sync, config
-
-
-def _parse_ft_stats_line(line: str) -> dict[str, int]:
-    parts = line.strip().split()
-    stats: dict[str, int] = {}
-    for part in parts:
-        key, value = part.split("=", 1)
-        if key == "F":
-            stats[key] = int(value, 10)
-        else:
-            stats[key] = int(value, 16)
-    return stats
 
 
 def _parse_key_value_csv(line: str) -> tuple[str, dict[str, int]]:
@@ -319,16 +175,6 @@ def _parse_key_value_csv(line: str) -> tuple[str, dict[str, int]]:
         else:
             values[key] = int(value, 16)
     return prefix, values
-
-
-async def _disable_ft(dut):
-    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"f0\r\n")))
-    await _uart_send_text(dut, "f0\r")
-    assert await rx == b"f0\r\n"
-    line = await _uart_recv_line(dut, max_len=160)
-    stats = _parse_ft_stats_line(line)
-    assert stats["F"] == 0
-    return stats
 
 
 async def _find_uart_write_collision_phase(
@@ -560,16 +406,15 @@ async def _ce6_ctrl_async_write_phase(
 
 
 @cocotb.test()
-async def boot_banner_and_uart_ft_idle_after_boot(dut):
+async def boot_banner_and_uart_idle_after_boot(dut):
     await _init(dut)
 
     await _assert_no_usb_tx_start_bit(dut, USB_UART_BIT_CYCLES * 12)
-    await _assert_no_ft_write(dut, 400)
     assert int(dut.usb_tx.value) == 1
 
 
 @cocotb.test()
-async def usb_uart_echo_reads_writes_ft_toggle_and_reports_errors(dut):
+async def usb_uart_echo_reads_writes_and_reports_errors(dut):
     await _init(dut)
 
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"w005=A5\r\nOK\r\n")))
@@ -603,42 +448,6 @@ async def usb_uart_echo_reads_writes_ft_toggle_and_reports_errors(dut):
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"\r\nERR\r\n")))
     await _uart_send_text(dut, "x\r")
     assert await rx == b"\r\nERR\r\n"
-
-    stats = await _disable_ft(dut)
-    assert stats["REC"] == 0x0, stats
-    assert stats["DRP"] == 0x0, stats
-    assert stats["WRD"] == 0x0, stats
-    assert stats["QMX"] == 0x0, stats
-    assert stats["TFF"] == 0x0, stats
-    sync, config = await _enable_ft(dut, drain_debug_cycles=0)
-    assert _ft_kind(sync) == FT_KIND_SYNC
-    assert _ft_kind(config) == FT_KIND_CONFIG
-
-
-@cocotb.test()
-async def ft_disable_reports_stats_and_clears_counters(dut):
-    await _init(dut)
-
-    await _enable_ft(dut)
-    records = cocotb.start_soon(_ft_recv_records(dut, 2))
-    await _bus_write(dut, 0x0005, 0xA5)
-    assert await _bus_read(dut, 0x0005) == 0xA5
-    await records
-
-    stats = await _disable_ft(dut)
-    assert stats["REC"] > 0x4, stats
-    assert stats["DRP"] == 0x0, stats
-    assert stats["WRD"] == stats["REC"] * FT_RECORD_WORDS, stats
-    assert stats["QMX"] > 0, stats
-    assert stats["TFF"] == 0x0, stats
-
-    stats = await _disable_ft(dut)
-    assert stats["REC"] == 0x0, stats
-    assert stats["DRP"] == 0x0, stats
-    assert stats["WRD"] == 0x0, stats
-    assert stats["QMX"] == 0x0, stats
-    assert stats["TFF"] == 0x0, stats
-
 
 @cocotb.test()
 async def usb_uart_write_collisions_return_busy_and_do_not_commit_uart_write(dut):
@@ -710,19 +519,11 @@ async def runtime_reset_scrubs_ram_contents(dut):
 
 
 @cocotb.test()
-async def usb_uart_can_set_classify_delay_and_emit_ft_config(dut):
+async def usb_uart_can_set_classify_delay(dut):
     await _init(dut)
-    await _enable_ft(dut)
-
-    ft_config = cocotb.start_soon(_ft_recv_record(dut))
     rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"t20\r\nT=200ns\r\n")))
     await _uart_send_text(dut, "t20\r")
     assert await rx == b"t20\r\nT=200ns\r\n"
-
-    config = await ft_config
-    assert _ft_kind(config) == FT_KIND_CONFIG
-    assert _ft_addr(config) == 20
-    assert (_ft_aux(config) & 0x1) == 1
 
     await _bus_write(dut, 0x0005, 0x5A, classify_cycles=20)
 
@@ -787,7 +588,6 @@ async def measurement_reports_can_be_dumped_and_cleared(dut):
     assert report["E"] == 0x34
     assert report["TK"] > 0
     assert report["EV"] == 0x00000002, report
-    assert report["FT"] == 0x00000000
     assert report["AU"] > 0
 
     assert await _uart_recv_line(dut) == "MEND\r\n"
@@ -835,62 +635,6 @@ async def measurement_dump_preserves_fifo_order_for_multiple_reports(dut):
 
 
 @cocotb.test()
-async def ft_access_fixture_matches_hdl_bytes(dut):
-    await _init(dut)
-
-    sync, config = await _enable_ft(dut, drain_debug_cycles=0)
-    records = cocotb.start_soon(_ft_recv_records(dut, 3))
-    await _bus_write(dut, 0x0123, 0x5A)
-    assert await _bus_read(dut, 0x0123) == 0x5A
-    assert await _bus_read(dut, 0x0123) == 0x5A
-
-    expected = FT_FIXTURE_PATH.read_bytes()[: 5 * 10]
-    actual = _ft_records_to_bytes([sync, config] + await records)
-    assert actual == expected, f"actual={actual.hex()} expected={expected.hex()}"
-
-
-@cocotb.test()
-async def ft_ce6_fixture_matches_hdl_bytes(dut):
-    await _init(dut)
-
-    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"W021=A7\r\nOK\r\n")))
-    await _uart_send_text(dut, "W021=A7\r")
-    assert await rx == b"W021=A7\r\nOK\r\n"
-
-    sync, config = await _enable_ft(dut, drain_debug_cycles=0)
-    records = cocotb.start_soon(_ft_recv_records(dut, 2))
-    observed, drive = await _ce6_read(dut, 0x0021, 0xA7)
-    assert observed == 0xA7
-    assert drive == 1
-
-    expected = FT_CE6_FIXTURE_PATH.read_bytes()
-    actual = _ft_records_to_bytes([sync, config] + await records)
-    assert actual == expected, f"actual={actual.hex()} expected={expected.hex()}"
-
-
-@cocotb.test()
-async def ft_overflow_record_fixture_matches_hdl_bytes(dut):
-    await _init(dut)
-    await _enable_ft(dut)
-
-    dut.ft_txe.value = 1
-    for _ in range(FT_OVERFLOW_TRIGGER_READS):
-        await _bus_read(dut, 0x0000)
-
-    dut.ft_txe.value = 0
-    overflow = None
-    for _ in range(FT_OVERFLOW_TRIGGER_READS + 128):
-        rec = await _ft_recv_record(dut, timeout_cycles=60000)
-        if _ft_kind(rec) == FT_KIND_OVERFLOW:
-            overflow = rec
-            break
-
-    assert overflow is not None, "expected FT overflow record"
-    assert _ft_kind(overflow) == FT_KIND_OVERFLOW
-    assert _ft_overflow_count(overflow) > 0
-
-
-@cocotb.test()
 async def ram_card_writes_reads_and_mirrors_2k(dut):
     await _init(dut)
 
@@ -920,7 +664,7 @@ async def ram_card_writes_reads_and_mirrors_2k(dut):
 
 
 @cocotb.test()
-async def saleae_control_outputs_and_write_ft_records_report_bus_activity(dut):
+async def saleae_control_outputs_and_write_bus_activity(dut):
     await _init(dut)
     dut.ce1.value = 1
     dut.ce6.value = 1
@@ -937,48 +681,30 @@ async def saleae_control_outputs_and_write_ft_records_report_bus_activity(dut):
     dut.ce6.value = 1
     await tick(dut.clk, 1)
 
-    await _enable_ft(dut)
-
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    ft_debug_write = cocotb.start_soon(_fast_uart_recv_bytes(dut.saleae[4], dut.clk, 2))
     data_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
     addr_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 18))
-    ft_write = cocotb.start_soon(_ft_recv_records(dut, 2))
 
     await _bus_write(dut, 0x0012, 0x5A)
 
     assert await event_write == 0x575A
-    assert await ft_debug_write == [ord("W"), ord("W")]
     assert await data_uart == 0x5A
     assert await addr_uart == 0x0012
+    assert saleae_bit(int(dut.saleae.value), 4) == 1
     assert saleae_bit(int(dut.saleae.value), 5) == 0
-    write_records = await ft_write
-    assert [_ft_kind(rec) for rec in write_records] == [FT_KIND_CE1_WRITE, FT_KIND_CE1_WRITE]
-    assert _ft_addr(write_records[-1]) == 0x0012
-    assert _ft_data(write_records[-1]) == 0x5A
 
 
 @cocotb.test()
-async def saleae_read_ft_records_report_bus_activity(dut):
+async def saleae_read_reports_bus_activity(dut):
     await _init(dut)
 
     await _bus_write(dut, 0x0012, 0x5A)
-    await _enable_ft(dut)
 
     event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    ft_debug_reads = cocotb.start_soon(_fast_uart_recv_bytes(dut.saleae[4], dut.clk, 2))
-    ft_reads = cocotb.start_soon(_ft_recv_records(dut, 2))
 
     assert await _bus_read(dut, 0x0012) == 0x5A
     assert await event_read == 0x525A
     assert await _bus_read(dut, 0x0012) == 0x5A
-
-    assert await ft_debug_reads == [ord("R"), ord("R")]
-    reads = await ft_reads
-    assert _ft_kind(reads[0]) == FT_KIND_CE1_READ
-    assert _ft_kind(reads[1]) == FT_KIND_CE1_READ
-    assert _ft_addr(reads[1]) == 0x0012
-    assert _ft_data(reads[1]) == 0x5A
 
 
 @cocotb.test()
@@ -989,17 +715,11 @@ async def ce6_low_range_rom_reads_drive_backed_bytes_and_are_logged(dut):
     await _uart_send_text(dut, "W021=A7\r")
     assert await rx == b"W021=A7\r\nOK\r\n"
 
-    await _enable_ft(dut)
-
     event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
     observed, drive = await _ce6_read(dut, 0x0021, 0x11)
     assert observed == 0xA7
     assert drive == 1
     assert await event_read == 0x72A7
-    read_records = await ft_read
-    assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
-    assert _ft_addr(read_records[-1]) == 0x0021
 
 
 @cocotb.test()
@@ -1010,34 +730,22 @@ async def ce6_reads_alias_on_low16_bits(dut):
     await _uart_send_text(dut, "W021=A7\r")
     assert await rx == b"W021=A7\r\nOK\r\n"
 
-    await _enable_ft(dut)
-
     event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
     observed, drive = await _ce6_read(dut, 0x10021, 0x11)
     assert observed == 0xA7
     assert drive == 1
     assert await event_read == 0x72A7
-    read_records = await ft_read
-    assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
-    assert _ft_addr(read_records[-1]) == 0x10021
 
 
 @cocotb.test()
 async def ce6_high_range_reads_remain_passive_and_are_logged(dut):
     await _init(dut)
-    await _enable_ft(dut)
 
     event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
     observed, drive = await _ce6_read(dut, 0x0821, 0xA7)
     assert observed == 0xA7
     assert drive == 0
     assert await event_read == 0x72A7
-    read_records = await ft_read
-    assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
-    assert _ft_addr(read_records[-1]) == 0x0821
-    assert _ft_data(read_records[-1]) == 0xA7
 
 
 @cocotb.test()
@@ -1048,17 +756,10 @@ async def ce6_write_attempts_are_logged_but_never_drive_bus(dut):
     await _uart_send_text(dut, "W021=A7\r")
     assert await rx == b"W021=A7\r\nOK\r\n"
 
-    await _enable_ft(dut)
-
     event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    ft_write = cocotb.start_soon(_ft_recv_records(dut, 2))
     drive = await _ce6_write(dut, 0x0021, 0x3C)
     assert drive == 0
     assert await event_write == 0x773C
-    write_records = await ft_write
-    assert [_ft_kind(rec) for rec in write_records] == [FT_KIND_CE6_WRITE_ATTEMPT, FT_KIND_CE6_WRITE_ATTEMPT]
-    assert _ft_addr(write_records[-1]) == 0x0021
-    assert _ft_data(write_records[-1]) == 0x3C
     observed, read_drive = await _ce6_read(dut, 0x0021, 0x11)
     assert observed == 0xA7
     assert read_drive == 1
@@ -1080,17 +781,11 @@ async def ce6_magic_uart_port_writes_stream_bytes_for_both_aliases(dut):
 @cocotb.test()
 async def ce6_control_page_reads_remain_passive_and_are_logged(dut):
     await _init(dut)
-    await _enable_ft(dut)
 
-    ft_read = cocotb.start_soon(_ft_recv_records(dut, 2))
     observed, drive = await _ce6_read(dut, 0x1FFF1, 0x5E)
     assert observed == 0x5E
     assert drive == 0
     await _assert_no_fast_uart_start_fall(dut.saleae[3], dut.clk, 128)
-    read_records = await ft_read
-    assert [_ft_kind(rec) for rec in read_records] == [FT_KIND_CE6_READ, FT_KIND_CE6_READ]
-    assert _ft_addr(read_records[-1]) == 0x1FFF1
-    assert _ft_data(read_records[-1]) == 0x5E
 
 
 @cocotb.test()
@@ -1282,32 +977,3 @@ async def ce6_magic_uart_port_overrun_reports_error(dut):
 
     assert await first_char == b"A"
     assert await _uart_recv_exact(dut, len(b"!OVERRUN\r\n!OVERRUN\r\n")) == b"!OVERRUN\r\n!OVERRUN\r\n"
-
-
-@cocotb.test()
-async def ft_overflow_reports_dropped_accesses_after_host_stall(dut):
-    await _init(dut)
-    await _enable_ft(dut)
-
-    dut.ft_txe.value = 1
-    # E500 now has an 8192-record pre-FT FIFO plus the shared FT tap's
-    # 8192-word TX FIFO, which can hold 1638 more full 5-word records.
-    for _ in range(FT_OVERFLOW_TRIGGER_READS):
-        await _bus_read(dut, 0x0000)
-
-    dut.ft_txe.value = 0
-    records = []
-    for _ in range(FT_OVERFLOW_TRIGGER_READS + 128):
-        rec = await _ft_recv_record(dut, timeout_cycles=60000)
-        records.append(rec)
-        if _ft_kind(rec) == FT_KIND_OVERFLOW:
-            break
-
-    assert records, 'expected at least one FT record after stall'
-    assert _ft_kind(records[0]) in (FT_KIND_CE1_READ, FT_KIND_CE1_WRITE, FT_KIND_BUS_CHANGE)
-    assert _ft_kind(records[-1]) == FT_KIND_OVERFLOW
-    assert _ft_overflow_count(records[-1]) > 0
-    assert saleae_bit(int(dut.saleae.value), 5) == 1
-    stats = await _disable_ft(dut)
-    assert stats["QMX"] <= FT_RECORD_FIFO_RECORDS, stats
-    assert stats["TFF"] > 0, stats

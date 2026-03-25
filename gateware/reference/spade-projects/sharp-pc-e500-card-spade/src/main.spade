@@ -4,16 +4,14 @@ mod protocol;
 
 use shared_components::{
     boot_banner::{BootBannerState, boot_banner_step, init_boot_banner},
-    clocking::sampled_bool_clock,
-    config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
     memory::sync_fifo,
     message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
     primitives::{reset_conditioner, sync_bundle},
-    serial::{FtBe, FtData, uart_tx_tap},
+    serial::uart_tx_tap,
 };
 use msg::{
     EchoStreamState,
-    FtStats,
     MeasureMsg,
     MeasureReport,
     MeasureStatus,
@@ -34,14 +32,8 @@ type CardData = uint<8>;
 type CardOffset = uint<11>;
 type EventWord = uint<16>;
 type ClassifyCtr = uint<7>;
-type FtRecord = uint<80>;
-type FtDelta = uint<32>;
-type FtAux = uint<14>;
-type FtOverflowCount = uint<26>;
-type FtCount = uint<32>;
-type FtQueueLevel = uint<14>;
-type FtBusSample = uint<30>;
-type MeasurePacked = uint<144>;
+type TickCount = uint<32>;
+type MeasurePacked = uint<112>;
 type MeasureQueueLevel = uint<6>;
 type MeasureCount = uint<32>;
 
@@ -49,7 +41,6 @@ fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
 fn classify_ns() -> uint<32> { 450 }
 fn ctrl_write_ns() -> uint<32> { 30 }
-fn ft_stream_version() -> uint<8> { 1 }
 
 fn cooldown_last() -> uint<4> {
     trunc(((cooldown_ns() * sample_clk_hz()) `std::ops::comb_div` 1_000_000_000))
@@ -121,56 +112,6 @@ fn ce6_write_event_word(data: CardData) -> EventWord {
     debug_event_word(0x77, data)
 }
 
-fn ft_kind_bus_change() -> uint<8> { 0x00 }
-fn ft_kind_ce1_read() -> uint<8> { 0x01 }
-fn ft_kind_ce1_write() -> uint<8> { 0x02 }
-fn ft_kind_ce6_read() -> uint<8> { 0x03 }
-fn ft_kind_ce6_write_attempt() -> uint<8> { 0x04 }
-fn ft_kind_sync() -> uint<8> { 0xF0 }
-fn ft_kind_overflow() -> uint<8> { 0xF1 }
-fn ft_kind_config() -> uint<8> { 0xF2 }
-
-fn ft_access_aux(
-    rw_sample: bool,
-    oe_sample: bool,
-    ce1_sample: bool,
-    ce6_sample: bool,
-    same_addr: bool,
-    same_data: bool,
-    classified_after_delay: bool,
-) -> FtAux {
-    let rw_bit: FtAux = if rw_sample { 1 } else { 0 };
-    let oe_bit: FtAux = if oe_sample { 1 } else { 0 };
-    let ce1_bit: FtAux = if ce1_sample { 1 } else { 0 };
-    let ce6_bit: FtAux = if ce6_sample { 1 } else { 0 };
-    let same_addr_bit: FtAux = if same_addr { 1 } else { 0 };
-    let same_data_bit: FtAux = if same_data { 1 } else { 0 };
-    let delayed_bit: FtAux = if classified_after_delay { 1 } else { 0 };
-    rw_bit |
-    (oe_bit << 1) |
-    (ce1_bit << 2) |
-    (ce6_bit << 3) |
-    (same_addr_bit << 4) |
-    (same_data_bit << 5) |
-    (delayed_bit << 6)
-}
-
-fn ft_bus_sample(
-    rw_sample: bool,
-    oe_sample: bool,
-    ce1_sample: bool,
-    ce6_sample: bool,
-    addr: BusAddr,
-    data: CardData,
-) -> FtBusSample {
-    zext(data) |
-    (zext(addr) << 8) |
-    ((if oe_sample { 1 } else { 0 }) << 26) |
-    ((if rw_sample { 1 } else { 0 }) << 27) |
-    ((if ce6_sample { 1 } else { 0 }) << 28) |
-    ((if ce1_sample { 1 } else { 0 }) << 29)
-}
-
 fn settled_value<#uint WIDTH>(state: PendingUartState<WIDTH>, settle_last: uint<4>) -> uint<WIDTH> {
     if state.pending_valid && state.settle == settle_last {
         state.pending
@@ -179,89 +120,22 @@ fn settled_value<#uint WIDTH>(state: PendingUartState<WIDTH>, settle_last: uint<
     }
 }
 
-fn ft_queue_level_max() -> FtQueueLevel { 8192 }
-
-fn ft_bus_sample_data(sample: FtBusSample) -> CardData {
-    trunc(sample)
-}
-
-fn ft_bus_sample_addr(sample: FtBusSample) -> BusAddr {
-    trunc(sample >> 8)
-}
-
-fn ft_bus_sample_oe(sample: FtBusSample) -> bool {
-    ((sample >> 26) & 1) == 1
-}
-
-fn ft_bus_sample_rw(sample: FtBusSample) -> bool {
-    ((sample >> 27) & 1) == 1
-}
-
-fn ft_bus_sample_ce6(sample: FtBusSample) -> bool {
-    ((sample >> 28) & 1) == 1
-}
-
-fn ft_bus_sample_ce1(sample: FtBusSample) -> bool {
-    ((sample >> 29) & 1) == 1
-}
-
-fn ft_kind_from_bus_sample(sample: FtBusSample) -> uint<8> {
-    if ft_bus_sample_ce1(sample) {
-        if ft_bus_sample_rw(sample) { ft_kind_ce1_read() } else { ft_kind_ce1_write() }
-    } else if ft_bus_sample_ce6(sample) {
-        if ft_bus_sample_rw(sample) { ft_kind_ce6_read() } else { ft_kind_ce6_write_attempt() }
-    } else {
-        ft_kind_bus_change()
-    }
-}
-
-fn pack_ft_record(kind: uint<8>, delta: FtDelta, addr: BusAddr, data: CardData, aux: FtAux) -> FtRecord {
-    (zext(kind) << 72) | (zext(delta) << 40) | (zext(addr) << 22) | (zext(data) << 14) | zext(aux)
-}
-
-fn pack_ft_sync_record(delta: FtDelta) -> FtRecord {
-    pack_ft_record(ft_kind_sync(), delta, 0, ft_stream_version(), 0)
-}
-
-fn pack_ft_config_record(delta: FtDelta, classify_delay: ClassifyCtr, enabled: bool) -> FtRecord {
-    let aux: FtAux = if enabled { 1 } else { 0 };
-    pack_ft_record(ft_kind_config(), delta, zext(classify_delay), 0, aux)
-}
-
-fn pack_ft_overflow_record(delta: FtDelta, drop_count: FtOverflowCount) -> FtRecord {
-    let low: BusAddr = trunc(drop_count);
-    let high: CardData = trunc(drop_count >> 18);
-    pack_ft_record(ft_kind_overflow(), delta, low, high, 0)
-}
-
 fn pack_measure_report(report: MeasureReport) -> MeasurePacked {
-    (zext(report.start_tag) << 136) |
-    (zext(report.stop_tag) << 128) |
-    (zext(report.delta_ticks) << 96) |
-    (zext(report.delta_events) << 64) |
-    (zext(report.delta_ft) << 32) |
+    (zext(report.start_tag) << 104) |
+    (zext(report.stop_tag) << 96) |
+    (zext(report.delta_ticks) << 64) |
+    (zext(report.delta_events) << 32) |
     zext(report.delta_addr_uart)
 }
 
 fn unpack_measure_report(value: MeasurePacked) -> MeasureReport {
     MeasureReport$(
-        start_tag: trunc(value >> 136),
-        stop_tag: trunc(value >> 128),
-        delta_ticks: trunc(value >> 96),
-        delta_events: trunc(value >> 64),
-        delta_ft: trunc(value >> 32),
+        start_tag: trunc(value >> 104),
+        stop_tag: trunc(value >> 96),
+        delta_ticks: trunc(value >> 64),
+        delta_events: trunc(value >> 32),
         delta_addr_uart: trunc(value),
     )
-}
-
-fn ft_record_word(record: FtRecord, idx: uint<3>) -> FtData {
-    match idx {
-        0 => trunc(record),
-        1 => trunc(record >> 16),
-        2 => trunc(record >> 32),
-        3 => trunc(record >> 48),
-        _ => trunc(record >> 64),
-    }
 }
 
 fn saturating_inc_u8(value: uint<8>) -> uint<8> {
@@ -300,7 +174,7 @@ struct AccessCycleState {
     classified: bool,
     is_read: bool,
     wait_ctr: ClassifyCtr,
-    start_tick: FtDelta,
+    start_tick: TickCount,
     latched_addr: BusAddr,
     latched_write_data: CardData,
 }
@@ -309,7 +183,7 @@ struct AccessCycleStep {
     next_state: AccessCycleState,
     classify_now: bool,
     kind_read: bool,
-    start_tick: FtDelta,
+    start_tick: TickCount,
     addr: BusAddr,
     data: CardData,
 }
@@ -332,11 +206,6 @@ struct EventUartState {
     pending_valid: bool,
 }
 
-struct FtDebugUartState {
-    pending: CardData,
-    pending_valid: bool,
-}
-
 struct PortOverrunState {
     pending_count: uint<8>,
     idx: uint<4>,
@@ -350,9 +219,8 @@ struct MemClearState {
 struct MeasureCaptureState {
     armed: bool,
     start_tag: CardData,
-    start_tick: FtDelta,
+    start_tick: TickCount,
     start_event_count: MeasureCount,
-    start_ft_count: MeasureCount,
     start_addr_uart_count: MeasureCount,
 }
 
@@ -360,12 +228,6 @@ struct EventUartOut {
     next_state: EventUartState,
     send: bool,
     send_word: EventWord,
-}
-
-struct FtDebugUartOut {
-    next_state: FtDebugUartState,
-    send: bool,
-    send_byte: CardData,
 }
 
 struct PortOverrunOut {
@@ -382,60 +244,6 @@ struct MeasureEngineOut {
     next_state: MeasureEngineState,
     fifo_rget: bool,
     tx_req: TxReq8,
-}
-
-struct FtRecordStreamState {
-    active: bool,
-    word_idx: uint<3>,
-    cur_value: FtRecord,
-}
-
-struct FtRecordStreamOut {
-    next_state: FtRecordStreamState,
-    ui_din_valid: bool,
-    ui_din: FtData,
-    ui_din_be: FtBe,
-    ui_dout_get: bool,
-    stream_fifo_rget: bool,
-}
-
-struct FtState {
-    enabled: bool,
-    last_tick: FtDelta,
-    drop_count: FtOverflowCount,
-    records_total: FtCount,
-    dropped_total: FtCount,
-    words_total: FtCount,
-    tx_full_cycles: FtCount,
-    queue_level: FtQueueLevel,
-    queue_high_water: FtQueueLevel,
-    prev_sample_valid: bool,
-    prev_sample: FtBusSample,
-    pending_sync: bool,
-    pending_config: bool,
-    stream: FtRecordStreamState,
-}
-
-struct FtInputs {
-    tick: FtDelta,
-    ft_ui_din_full: bool,
-    ft_ui_dout_empty: bool,
-    ft_fifo_full: bool,
-    ft_fifo_empty: bool,
-    ft_fifo_dout: FtRecord,
-    bus_sample: FtBusSample,
-    classify_delay_update_valid: bool,
-    classify_delay_update: ClassifyCtr,
-    ft_enable_update_valid: bool,
-    ft_enable_update: bool,
-    current_classify_delay: ClassifyCtr,
-}
-
-struct FtEval {
-    next_state: FtState,
-    fifo_din: FtRecord,
-    fifo_wput: bool,
-    stream: FtRecordStreamOut,
 }
 
 fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
@@ -476,13 +284,6 @@ fn init_ctrl_write_state() -> CtrlWriteState {
     )
 }
 
-fn init_ft_debug_uart_state() -> FtDebugUartState {
-    FtDebugUartState$(
-        pending: 0,
-        pending_valid: false,
-    )
-}
-
 fn init_port_overrun_state() -> PortOverrunState {
     PortOverrunState$(
         pending_count: 0,
@@ -503,7 +304,6 @@ fn init_measure_capture_state() -> MeasureCaptureState {
         start_tag: 0,
         start_tick: 0,
         start_event_count: 0,
-        start_ft_count: 0,
         start_addr_uart_count: 0,
     )
 }
@@ -513,249 +313,6 @@ fn init_measure_engine_state() -> MeasureEngineState {
         dump_active: false,
         stream: init_measure_stream(),
     )
-}
-
-fn init_ft_record_stream_state() -> FtRecordStreamState {
-    FtRecordStreamState$(
-        active: false,
-        word_idx: 0,
-        cur_value: 0,
-    )
-}
-
-fn init_ft_state() -> FtState {
-    FtState$(
-        enabled: false,
-        last_tick: 0,
-        drop_count: 0,
-        records_total: 0,
-        dropped_total: 0,
-        words_total: 0,
-        tx_full_cycles: 0,
-        queue_level: 0,
-        queue_high_water: 0,
-        prev_sample_valid: false,
-        prev_sample: 0,
-        pending_sync: false,
-        pending_config: false,
-        stream: init_ft_record_stream_state(),
-    )
-}
-
-impl FtState {
-    fn eval(self, inputs: FtInputs) -> FtEval {
-        let ft_active = if inputs.ft_enable_update_valid { inputs.ft_enable_update } else { self.enabled };
-        let ft_disable_now = inputs.ft_enable_update_valid && !inputs.ft_enable_update;
-        let ft_enable_now = inputs.ft_enable_update_valid && inputs.ft_enable_update && !self.enabled;
-
-        let sync_valid_now = self.pending_sync || ft_enable_now;
-        let config_valid_now =
-            self.pending_config ||
-            ft_enable_now ||
-            (inputs.classify_delay_update_valid && ft_active);
-        let overflow_valid_now = ft_active && self.drop_count > 0;
-
-        let sync_record = pack_ft_sync_record(if ft_enable_now { 0 } else { inputs.tick -. self.last_tick });
-        let config_record = pack_ft_config_record(
-            inputs.tick -. self.last_tick,
-            if inputs.classify_delay_update_valid {
-                inputs.classify_delay_update
-            } else {
-                inputs.current_classify_delay
-            },
-            ft_active,
-        );
-        let overflow_record = pack_ft_overflow_record(inputs.tick -. self.last_tick, self.drop_count);
-        let sample_changed = ft_active && self.prev_sample_valid && inputs.bus_sample != self.prev_sample;
-        let same_addr = self.prev_sample_valid && ft_bus_sample_addr(self.prev_sample) == ft_bus_sample_addr(inputs.bus_sample);
-        let same_data = self.prev_sample_valid && ft_bus_sample_data(self.prev_sample) == ft_bus_sample_data(inputs.bus_sample);
-        let access_aux = ft_access_aux(
-            ft_bus_sample_rw(inputs.bus_sample),
-            ft_bus_sample_oe(inputs.bus_sample),
-            ft_bus_sample_ce1(inputs.bus_sample),
-            ft_bus_sample_ce6(inputs.bus_sample),
-            same_addr,
-            same_data,
-            true,
-        );
-        let access_record = pack_ft_record(
-            ft_kind_from_bus_sample(inputs.bus_sample),
-            inputs.tick -. self.last_tick,
-            ft_bus_sample_addr(inputs.bus_sample),
-            ft_bus_sample_data(inputs.bus_sample),
-            access_aux,
-        );
-
-        let record_valid = if ft_active {
-            if sample_changed {
-                true
-            } else if sync_valid_now {
-                true
-            } else if config_valid_now {
-                true
-            } else {
-                overflow_valid_now
-            }
-        } else {
-            false
-        };
-        let record_is_access = ft_active && sample_changed;
-        let record_is_sync = ft_active && !sample_changed && sync_valid_now;
-        let record_is_config = ft_active && !sample_changed && !sync_valid_now && config_valid_now;
-        let record_is_overflow =
-            ft_active &&
-            !sample_changed &&
-            !sync_valid_now &&
-            !config_valid_now &&
-            overflow_valid_now;
-        let record = if record_is_access {
-            access_record
-        } else if record_is_sync {
-            sync_record
-        } else if record_is_config {
-            config_record
-        } else {
-            overflow_record
-        };
-
-        let stream = ft_record_stream_step(
-            self.stream,
-            inputs.ft_ui_din_full,
-            inputs.ft_ui_dout_empty,
-            inputs.ft_fifo_empty,
-            inputs.ft_fifo_dout,
-        );
-        let fifo_wput = record_valid && !inputs.ft_fifo_full;
-        let queue_inc: FtQueueLevel = if fifo_wput { 1 } else { 0 };
-        let queue_dec: FtQueueLevel = if stream.stream_fifo_rget { 1 } else { 0 };
-        let next_queue_level = if queue_inc > queue_dec {
-            if self.queue_level < ft_queue_level_max() {
-                self.queue_level +. (queue_inc -. queue_dec)
-            } else {
-                ft_queue_level_max()
-            }
-        } else if queue_dec > queue_inc {
-            if self.queue_level > 0 {
-                self.queue_level -. (queue_dec -. queue_inc)
-            } else {
-                0
-            }
-        } else {
-            self.queue_level
-        };
-        let next_queue_high_water = if next_queue_level > self.queue_high_water {
-            next_queue_level
-        } else {
-            self.queue_high_water
-        };
-
-        let next_state = if ft_disable_now {
-            FtState$(
-                enabled: false,
-                last_tick: inputs.tick +. 1,
-                drop_count: 0,
-                records_total: 0,
-                dropped_total: 0,
-                words_total: 0,
-                tx_full_cycles: 0,
-                queue_level: 0,
-                queue_high_water: 0,
-                prev_sample_valid: false,
-                prev_sample: 0,
-                pending_sync: false,
-                pending_config: false,
-                stream: init_ft_record_stream_state(),
-            )
-        } else {
-            FtState$(
-                enabled: ft_active,
-                last_tick: if fifo_wput {
-                    inputs.tick
-                } else if ft_enable_now {
-                    inputs.tick
-                } else {
-                    self.last_tick
-                },
-                drop_count: if !ft_active {
-                    0
-                } else if record_is_overflow && fifo_wput {
-                    0
-                } else if sample_changed && inputs.ft_fifo_full {
-                    self.drop_count +. 1
-                } else {
-                    self.drop_count
-                },
-                records_total: if !ft_active {
-                    0
-                } else if fifo_wput {
-                    self.records_total +. 1
-                } else {
-                    self.records_total
-                },
-                dropped_total: if !ft_active {
-                    0
-                } else if sample_changed && inputs.ft_fifo_full {
-                    self.dropped_total +. 1
-                } else {
-                    self.dropped_total
-                },
-                words_total: if !ft_active {
-                    0
-                } else if stream.ui_din_valid {
-                    self.words_total +. 1
-                } else {
-                    self.words_total
-                },
-                tx_full_cycles: if !ft_active {
-                    0
-                } else if inputs.ft_ui_din_full {
-                    self.tx_full_cycles +. 1
-                } else {
-                    self.tx_full_cycles
-                },
-                queue_level: if !ft_active { 0 } else { next_queue_level },
-                queue_high_water: if !ft_active { 0 } else { next_queue_high_water },
-                prev_sample_valid: if !ft_active {
-                    false
-                } else if ft_enable_now {
-                    true
-                } else {
-                    self.prev_sample_valid
-                },
-                prev_sample: if !ft_active {
-                    0
-                } else {
-                    inputs.bus_sample
-                },
-                pending_sync: if record_is_sync && fifo_wput {
-                    false
-                } else if ft_enable_now {
-                    true
-                } else {
-                    self.pending_sync
-                },
-                pending_config: if record_is_config && fifo_wput {
-                    false
-                } else if ft_enable_now || (inputs.classify_delay_update_valid && ft_active) {
-                    true
-                } else {
-                    self.pending_config
-                },
-                stream: if !ft_active {
-                    init_ft_record_stream_state()
-                } else {
-                    stream.next_state
-                },
-            )
-        };
-
-        FtEval$(
-            next_state: next_state,
-            fifo_din: record,
-            fifo_wput: fifo_wput,
-            stream: stream,
-        )
-    }
 }
 
 fn pending_uart_step<#uint WIDTH>(
@@ -808,7 +365,7 @@ fn access_cycle_step(
     rw: bool,
     addr: BusAddr,
     data: CardData,
-    tick: FtDelta,
+    tick: TickCount,
     classify_delay: ClassifyCtr,
 ) -> AccessCycleStep {
     let classify_now = ce && !state.classified && state.wait_ctr == classify_delay;
@@ -909,53 +466,6 @@ fn event_uart_step(
     )
 }
 
-fn ft_debug_char(kind: uint<8>) -> CardData {
-    match kind {
-        0x00 => 0x42,
-        0x01 => 0x52,
-        0x02 => 0x57,
-        0x03 => 0x72,
-        0x04 => 0x77,
-        0xF0 => 0x53,
-        0xF1 => 0x45,
-        _ => 0x43,
-    }
-}
-
-fn ft_debug_uart_step(
-    state: FtDebugUartState,
-    busy: bool,
-    event_valid: bool,
-    event_byte: CardData,
-) -> FtDebugUartOut {
-    let send_pending = state.pending_valid && !busy;
-    let send_direct = !state.pending_valid && event_valid && !busy;
-    FtDebugUartOut$(
-        next_state: FtDebugUartState$(
-            pending: if send_pending {
-                if event_valid { event_byte } else { state.pending }
-            } else if send_direct {
-                state.pending
-            } else if event_valid {
-                event_byte
-            } else {
-                state.pending
-            },
-            pending_valid: if send_pending {
-                event_valid
-            } else if send_direct {
-                false
-            } else if event_valid {
-                true
-            } else {
-                state.pending_valid
-            }
-        ),
-        send: send_pending || send_direct,
-        send_byte: if send_pending { state.pending } else { event_byte },
-    )
-}
-
 fn port_overrun_step(
     state: PortOverrunState,
     block_tx: bool,
@@ -1043,54 +553,6 @@ fn measure_engine_step(
     )
 }
 
-fn ft_record_stream_step(
-    state: FtRecordStreamState,
-    ui_din_full: bool,
-    ui_dout_empty: bool,
-    stream_fifo_empty: bool,
-    stream_fifo_dout: FtRecord,
-) -> FtRecordStreamOut {
-    let can_push = !ui_din_full;
-    if state.active {
-        let send = can_push;
-        let next_idx = if state.word_idx == 4 { 0 } else { state.word_idx +. 1 };
-        FtRecordStreamOut$(
-            next_state: FtRecordStreamState$(
-                active: if send && state.word_idx == 4 { false } else { state.active },
-                word_idx: if send { next_idx } else { state.word_idx },
-                cur_value: state.cur_value,
-            ),
-            ui_din_valid: send,
-            ui_din: if send { ft_record_word(state.cur_value, state.word_idx) } else { 0 },
-            ui_din_be: if send { 0x3 } else { 0x0 },
-            ui_dout_get: !ui_dout_empty,
-            stream_fifo_rget: false,
-        )
-    } else if can_push && !stream_fifo_empty {
-        FtRecordStreamOut$(
-            next_state: FtRecordStreamState$(
-                active: true,
-                word_idx: 1,
-                cur_value: stream_fifo_dout,
-            ),
-            ui_din_valid: true,
-            ui_din: ft_record_word(stream_fifo_dout, 0),
-            ui_din_be: 0x3,
-            ui_dout_get: !ui_dout_empty,
-            stream_fifo_rget: true,
-        )
-    } else {
-        FtRecordStreamOut$(
-            next_state: state,
-            ui_din_valid: false,
-            ui_din: 0,
-            ui_din_be: 0x0,
-            ui_dout_get: !ui_dout_empty,
-            stream_fifo_rget: false,
-        )
-    }
-}
-
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -1098,16 +560,6 @@ entity main_core(
     led: inv &[bool; 8],
     usb_rx: bool,
     usb_tx: inv &bool,
-    ft_clk: bool,
-    ft_rxf: bool,
-    ft_txe: bool,
-    ft_data: FtData,
-    ft_be: FtBe,
-    ft_data_drive: inv &FtData,
-    ft_be_drive: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
     saleae: inv &[bool; 8],
     rw: bool,
     addr: BusAddr,
@@ -1121,7 +573,6 @@ entity main_core(
     oe: bool,
 ) {
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
-    let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
     let cooldown_last = cooldown_last();
     let default_classify_last = default_classify_last();
     let default_ctrl_write_last = default_ctrl_write_last();
@@ -1147,22 +598,8 @@ entity main_core(
     let (measure_fifo_full, measure_fifo_full_w): (&bool, inv &bool) = port;
     let (measure_fifo_empty, measure_fifo_empty_w): (&bool, inv &bool) = port;
     let (measure_fifo_dout, measure_fifo_dout_w): (&MeasurePacked, inv &MeasurePacked) = port;
-    let (ft_debug_uart_line, ft_debug_uart_line_w): (&bool, inv &bool) = port;
-    let (ft_debug_uart_busy, ft_debug_uart_busy_w): (&bool, inv &bool) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
-    let (ft_data_out, ft_data_out_w): (&FtData, inv &FtData) = port;
-    let (ft_be_out, ft_be_out_w): (&FtBe, inv &FtBe) = port;
-    let (ft_rd_sig, ft_rd_sig_w): (&bool, inv &bool) = port;
-    let (ft_wr_sig, ft_wr_sig_w): (&bool, inv &bool) = port;
-    let (ft_oe_sig, ft_oe_sig_w): (&bool, inv &bool) = port;
-    let (ft_ui_din_full, ft_ui_din_full_w): (&bool, inv &bool) = port;
-    let (ft_ui_dout, ft_ui_dout_w): (&FtData, inv &FtData) = port;
-    let (ft_ui_dout_be, ft_ui_dout_be_w): (&FtBe, inv &FtBe) = port;
-    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (&bool, inv &bool) = port;
-    let (ft_fifo_full, ft_fifo_full_w): (&bool, inv &bool) = port;
-    let (ft_fifo_empty, ft_fifo_empty_w): (&bool, inv &bool) = port;
-    let (ft_fifo_dout, ft_fifo_dout_w): (&FtRecord, inv &FtRecord) = port;
 
     let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
 
@@ -1236,17 +673,6 @@ entity main_core(
     } else {
         0
     };
-    let ft_enable_update_valid = if let ParserEvent::SetFtStreaming$(enabled) = usb_parse.event {
-        let _ = enabled;
-        true
-    } else {
-        false
-    };
-    let ft_enable_update = if let ParserEvent::SetFtStreaming$(enabled) = usb_parse.event {
-        enabled
-    } else {
-        false
-    };
     let measure_dump_request = if let ParserEvent::MeasureDump = usb_parse.event { true } else { false };
     let measure_status_request = if let ParserEvent::MeasureStatus = usb_parse.event { true } else { false };
     let measure_clear_request = if let ParserEvent::MeasureClear = usb_parse.event { true } else { false };
@@ -1265,7 +691,7 @@ entity main_core(
     reg(clk) rw_ctrl: bool reset(rst: true) = rw_meta;
     reg(clk) ce6_meta: bool reset(rst: true) = ce6;
     reg(clk) ce6_ctrl: bool reset(rst: true) = ce6_meta;
-    reg(clk) tick: FtDelta reset(rst: 0) = tick +. 1;
+    reg(clk) tick: TickCount reset(rst: 0) = tick +. 1;
     reg(clk) mem_clear: MemClearState reset(rst: init_mem_clear_state()) =
         // Scrub card RAM after runtime reset so reset behavior is deterministic.
         if mem_clear.active {
@@ -1392,49 +818,6 @@ entity main_core(
         rom_uart_mem_dout_w,
     );
 
-    let ft_bus_sample_now = ft_bus_sample(
-        rw,
-        oe,
-        ce1,
-        ce6_active,
-        settled_value(addr_state, cooldown_last),
-        settled_value(data_state, cooldown_last),
-    );
-    let ft_inputs = FtInputs$(
-        tick: tick,
-        ft_ui_din_full: *ft_ui_din_full,
-        ft_ui_dout_empty: *ft_ui_dout_empty,
-        ft_fifo_full: *ft_fifo_full,
-        ft_fifo_empty: *ft_fifo_empty,
-        ft_fifo_dout: *ft_fifo_dout,
-        bus_sample: ft_bus_sample_now,
-        classify_delay_update_valid: classify_delay_update_valid,
-        classify_delay_update: classify_delay_update,
-        ft_enable_update_valid: ft_enable_update_valid,
-        ft_enable_update: ft_enable_update,
-        current_classify_delay: classify_delay,
-    );
-    reg(clk) ft: FtState reset(rst: init_ft_state()) = ft.eval(ft_inputs).next_state;
-    let ft_eval = ft.eval(ft_inputs);
-    reg(clk) ft_debug_state: FtDebugUartState reset(rst: init_ft_debug_uart_state()) =
-        ft_debug_uart_step(
-            ft_debug_state,
-            *ft_debug_uart_busy,
-            ft_eval.fifo_wput,
-            ft_debug_char(trunc(ft_eval.fifo_din >> 72)),
-        ).next_state;
-    let ft_fifo_rst = rst || (ft_enable_update_valid && !ft_enable_update);
-    let ft_fifo = inst sync_fifo::<80, 8192>(
-        clk,
-        ft_fifo_rst,
-        ft_eval.fifo_din,
-        ft_eval.fifo_wput,
-        ft_eval.stream.stream_fifo_rget,
-    );
-    set ft_fifo_full_w = &ft_fifo.full;
-    set ft_fifo_empty_w = &ft_fifo.empty;
-    set ft_fifo_dout_w = &ft_fifo.dout;
-
     let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let ce6_measure_start = ce6_ctrl_write_event && ce6_measure_start_addr_match(ce6_ctrl_step.addr);
     let ce6_measure_stop = ce6_ctrl_write_event && ce6_measure_stop_addr_match(ce6_ctrl_step.addr);
@@ -1442,8 +825,6 @@ entity main_core(
 
     reg(clk) event_total: MeasureCount reset(rst: 0) =
         if event_valid { event_total +. 1 } else { event_total };
-    reg(clk) ft_record_total: MeasureCount reset(rst: 0) =
-        if ft_eval.fifo_wput { ft_record_total +. 1 } else { ft_record_total };
     reg(clk) addr_uart_total: MeasureCount reset(rst: 0) =
         if addr_step.send { addr_uart_total +. 1 } else { addr_uart_total };
 
@@ -1454,7 +835,6 @@ entity main_core(
                 start_tag: ce6_ctrl_step.data,
                 start_tick: tick,
                 start_event_count: if event_valid { event_total +. 1 } else { event_total },
-                start_ft_count: if ft_eval.fifo_wput { ft_record_total +. 1 } else { ft_record_total },
                 start_addr_uart_count: if addr_step.send { addr_uart_total +. 1 } else { addr_uart_total },
             )
         } else if ce6_measure_abort || (ce6_measure_stop && measure_capture.armed) {
@@ -1463,7 +843,6 @@ entity main_core(
                 start_tag: measure_capture.start_tag,
                 start_tick: measure_capture.start_tick,
                 start_event_count: measure_capture.start_event_count,
-                start_ft_count: measure_capture.start_ft_count,
                 start_addr_uart_count: measure_capture.start_addr_uart_count,
             )
         } else {
@@ -1474,7 +853,6 @@ entity main_core(
         stop_tag: ce6_ctrl_step.data,
         delta_ticks: tick -. measure_capture.start_tick,
         delta_events: event_total -. measure_capture.start_event_count,
-        delta_ft: ft_record_total -. measure_capture.start_ft_count,
         delta_addr_uart: addr_uart_total -. measure_capture.start_addr_uart_count,
     );
 
@@ -1502,7 +880,7 @@ entity main_core(
         *measure_fifo_dout,
     );
     let measure_fifo_rst = rst || measure_clear_request;
-    let measure_fifo = inst sync_fifo::<144, 32>(
+    let measure_fifo = inst sync_fifo::<112, 32>(
         clk,
         measure_fifo_rst,
         pack_measure_report(measure_report),
@@ -1564,19 +942,6 @@ entity main_core(
         },
         ParserEvent::SetClassifyDelay$(cycles) => RespMsg::Timing(cycles),
         ParserEvent::SetCtrlWriteDelay$(cycles) => RespMsg::CtrlTiming(cycles),
-        ParserEvent::SetFtStreaming$(enabled) => {
-            if enabled {
-                RespMsg::Ft(enabled)
-            } else {
-                RespMsg::FtStats(FtStats$(
-                    records: ft.records_total,
-                    dropped: ft.dropped_total,
-                    words: ft.words_total,
-                    tx_full_cycles: ft.tx_full_cycles,
-                    qmax: zext(ft.queue_high_water),
-                ))
-            }
-        },
         ParserEvent::MeasureStatus => RespMsg::MeasureStatus(measure_status_now),
         ParserEvent::MeasureClear => RespMsg::Ok(),
         ParserEvent::ParseErr => RespMsg::Err(),
@@ -1631,12 +996,6 @@ entity main_core(
         port_char_tx_req.valid,
         port_overrun_valid,
     );
-    let ft_debug_step = ft_debug_uart_step(
-        ft_debug_state,
-        *ft_debug_uart_busy,
-        ft_eval.fifo_wput,
-        ft_debug_char(trunc(ft_eval.fifo_din >> 72)),
-    );
     let usb_tx_low_req = tx_req_arbiter(resp_out.tx_req, port_char_tx_req, port_out.tx_req);
     let usb_tx_mid_req = tx_req_arbiter(measure_eval.tx_req, usb_tx_low_req, tx_req_none());
     let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, usb_tx_mid_req);
@@ -1668,15 +1027,6 @@ entity main_core(
         event_uart_line_w,
         event_uart_busy_w,
     );
-    let _ft_debug_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 8>(
-        clk,
-        rst,
-        false,
-        ft_debug_step.send_byte,
-        ft_debug_step.send,
-        ft_debug_uart_line_w,
-        ft_debug_uart_busy_w,
-    );
     let _usb_tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
@@ -1686,52 +1036,22 @@ entity main_core(
         usb_tx_line_w,
         usb_tx_busy_w,
     );
-    let _ft = inst au_ft_tap_u16(
-        clk,
-        rst,
-        ft_clk_clock,
-        ft_rxf,
-        ft_txe,
-        ft_data,
-        ft_be,
-        ft_eval.stream.ui_din,
-        ft_eval.stream.ui_din_be,
-        ft_eval.stream.ui_din_valid && ft.enabled,
-        ft_eval.stream.ui_dout_get,
-        ft_data_out_w,
-        ft_be_out_w,
-        ft_rd_sig_w,
-        ft_wr_sig_w,
-        ft_oe_sig_w,
-        ft_ui_din_full_w,
-        ft_ui_dout_w,
-        ft_ui_dout_be_w,
-        ft_ui_dout_empty_w,
-    );
-
-    // Sticky FT pressure indicator for Saleae: rises on downstream backpressure
-    // or any dropped FT records, and clears when FT is disabled with f0.
-    let ft_overflow_seen =
-        *ft_ui_din_full ||
-        ft_fifo.full ||
-        ft.tx_full_cycles != 0 ||
-        ft.dropped_total != 0;
 
     let saleae_lines: [bool; 8] = [
         ce1,
         ce6,
         rw,
         if rst { true } else { *event_uart_line },
-        if rst { true } else { *ft_debug_uart_line },
-        if rst { false } else { ft_overflow_seen },
+        true,
+        false,
         if rst { true } else { *data_uart_line },
         if rst { true } else { *addr_uart_line },
     ];
     let led_lines: [bool; 8] = [
-        ft.enabled,
-        ft.pending_sync,
-        ft.pending_config,
-        ft_fifo.full,
+        measure_capture.armed,
+        measure_queue_level != 0,
+        measure_overflow_count != 0,
+        false,
         false,
         false,
         false,
@@ -1743,14 +1063,6 @@ entity main_core(
     set usb_tx = &*usb_tx_line;
     set data_drive = &bus_data_out;
     set data_oe = &bus_drive_cycle;
-    set ft_data_drive = &*ft_data_out;
-    set ft_be_drive = &*ft_be_out;
-    set ft_rd = &*ft_rd_sig;
-    set ft_wr = &*ft_wr_sig;
-    set ft_oe = &*ft_oe_sig;
-
-    let _unused_ft_ui_dout = *ft_ui_dout;
-    let _unused_ft_ui_dout_be = *ft_ui_dout_be;
     let _unused_rst_n = rst_n;
     let _unused_vcc2 = vcc2;
     let _unused_nc = nc;

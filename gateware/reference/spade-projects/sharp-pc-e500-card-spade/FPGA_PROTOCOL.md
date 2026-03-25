@@ -13,7 +13,7 @@ All timings below assume the current `100 MHz` FPGA clock.
 The design exposes two separate control paths:
 
 - USB-UART command parser
-  - direct host control for RAM, ROM, FT streaming, and measurement dump
+  - direct host control for RAM, ROM, timing, and measurement dump
 - CE6 special control page
   - calculator-visible write-only registers in the CE6 card-ROM region
 
@@ -111,43 +111,6 @@ What they control:
 - `cNN`
   - CE6 control-page writes in low16 `0xFFF0..0xFFFF`
 
-### FT Streaming Commands
-
-| Command | Meaning |
-| --- | --- |
-| `f1` | Enable FT streaming |
-| `f0` | Disable FT streaming and print session stats |
-
-`f1` response:
-
-```text
-F=1
-```
-
-`f0` response:
-
-```text
-F=0 REC=........ DRP=........ WRD=........ QMX=........ TFF=........
-```
-
-Fields:
-
-- `REC`
-  - FT records accepted by the FPGA pre-FT queue
-- `DRP`
-  - FT records dropped while the FPGA pre-FT queue was full
-- `WRD`
-  - 16-bit words handed to the FT path
-- `QMX`
-  - max observed FPGA pre-FT queue occupancy
-- `TFF`
-  - cycles where the downstream FT TX side reported full/backpressure
-
-Operational note:
-
-- `f0` clears FT state after reporting stats
-- for a clean host-side capture, stop the host capture process, send `f0`, restart capture, then send `f1`
-
 ### Measurement Commands
 
 These dump measurement reports created by CE6 control-page writes.
@@ -176,7 +139,7 @@ Fields:
 `m` response:
 
 ```text
-MR,S=..,E=..,TK=........,EV=........,FT=........,AU=........
+MR,S=..,E=..,TK=........,EV=........,AU=........
 ...
 MEND
 ```
@@ -192,8 +155,6 @@ Fields:
   - convert to time with `ns = TK * 10`
 - `EV`
   - CE event count delta
-- `FT`
-  - FT record count delta
 - `AU`
   - address-UART emission count delta
 
@@ -272,7 +233,6 @@ Effect:
 - snapshots:
   - current tick counter
   - current CE event count
-  - current FT record count
   - current address-UART count
 
 The baseline is taken after the start marker's same-cycle bookkeeping, so the interval starts after the marker write itself.
@@ -310,7 +270,7 @@ Host-side:
 
 ```text
 m
-MR,S=01,E=02,TK=0000002D,EV=00000005,FT=00000012,AU=00000003
+MR,S=01,E=02,TK=0000002D,EV=00000005,AU=00000003
 MEND
 ```
 
@@ -320,7 +280,6 @@ Interpretation:
 - stop tag `0x02`
 - elapsed time `0x2D` ticks = `45 * 10 ns = 450 ns`
 - `5` CE events
-- `0x12` FT records
 - `3` address-UART emissions
 
 ## Error and Busy Responses
