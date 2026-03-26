@@ -708,6 +708,27 @@ async def saleae_read_reports_bus_activity(dut):
 
 
 @cocotb.test()
+async def saleae_s5_pulses_when_data_changes_while_data_uart_is_busy(dut):
+    await _init(dut)
+
+    dut.data_host.value = 0x00
+    dut.data_host_drive.value = 1
+    await tick(dut.clk, 1)
+
+    dut.data_host.value = 0x12
+    await tick(dut.clk, 1)
+    await tick(dut.clk, 2)
+
+    dut.data_host.value = 0x34
+    await tick(dut.clk, 1)
+    assert saleae_bit(int(dut.saleae.value), 5) == 1
+
+    await tick(dut.clk, 1)
+    assert saleae_bit(int(dut.saleae.value), 5) == 0
+    _set_data_bus_z(dut)
+
+
+@cocotb.test()
 async def ce6_low_range_rom_reads_drive_backed_bytes_and_are_logged(dut):
     await _init(dut)
 
