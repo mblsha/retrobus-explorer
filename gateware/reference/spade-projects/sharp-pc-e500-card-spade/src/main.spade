@@ -1043,7 +1043,7 @@ entity main_core(
         rw,
         if rst { true } else { *event_uart_line },
         true,
-        false,
+        if rst { false } else { data_uart_changed && *data_uart_busy },
         if rst { true } else { *data_uart_line },
         if rst { true } else { *addr_uart_line },
     ];
