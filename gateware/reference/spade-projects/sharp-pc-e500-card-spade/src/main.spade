@@ -39,6 +39,8 @@ type MeasureCount = uint<32>;
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
+fn addr_pulse_cooldown_cycles() -> uint<4> { 10 }
+fn addr_pulse_cooldown_reload() -> uint<4> { addr_pulse_cooldown_cycles() -. 1 }
 fn classify_ns() -> uint<32> { 450 }
 fn ctrl_write_ns() -> uint<32> { 30 }
 
@@ -683,6 +685,21 @@ entity main_core(
         pending_uart_step(data_state, data_now, false, cooldown_last).next_state;
     reg(clk) data_uart_last: CardData reset(rst: 0) = data_uart_now;
     reg(clk) data_uart_changed: bool reset(rst: false) = data_uart_now != data_uart_last;
+    reg(clk) addr_pulse_last: BusAddr reset(rst: 0) = addr_now;
+    let addr_pulse_changed = addr_now != addr_pulse_last;
+    reg(clk) addr_pulse_cooldown: uint<4> reset(rst: 0) =
+        if addr_pulse_changed && addr_pulse_cooldown == 0 {
+            addr_pulse_cooldown_reload()
+        } else if addr_pulse_cooldown != 0 {
+            addr_pulse_cooldown -. 1
+        } else {
+            0
+        };
+    let addr_pulse_fire = addr_pulse_changed && addr_pulse_cooldown == 0;
+    reg(clk) addr_pulse_gap_counter: TickCount reset(rst: 0) =
+        if addr_pulse_fire { 0 } else { addr_pulse_gap_counter +. 1 };
+    reg(clk) addr_pulse_last_gap: TickCount reset(rst: 0) =
+        if addr_pulse_fire { addr_pulse_gap_counter } else { addr_pulse_last_gap };
     reg(clk) classify_delay: ClassifyCtr reset(rst: default_classify_last) =
         if classify_delay_update_valid { classify_delay_update } else { classify_delay };
     reg(clk) ctrl_write_delay: ClassifyCtr reset(rst: default_ctrl_write_last) =
@@ -1043,7 +1060,7 @@ entity main_core(
         rw,
         if rst { true } else { *event_uart_line },
         true,
-        if rst { false } else { data_uart_changed && *data_uart_busy },
+        if rst { false } else { addr_pulse_fire },
         if rst { true } else { *data_uart_line },
         if rst { true } else { *addr_uart_line },
     ];

@@ -116,6 +116,14 @@ async def _assert_no_fast_uart_start_fall(signal, clk, cycles: int) -> None:
         await tick(clk, 1)
 
 
+async def _wait_signal_high(signal, clk, timeout_cycles: int) -> None:
+    for _ in range(timeout_cycles):
+        if int(signal.value) == 1:
+            return
+        await tick(clk, 1)
+    raise AssertionError("timeout waiting for signal high")
+
+
 async def _fast_uart_recv_word(signal, clk, width: int, timeout_cycles: int = 128) -> int:
     await _fast_uart_wait_start_fall(signal, clk, timeout_cycles)
     value = 0
@@ -708,24 +716,52 @@ async def saleae_read_reports_bus_activity(dut):
 
 
 @cocotb.test()
-async def saleae_s5_pulses_when_data_changes_while_data_uart_is_busy(dut):
+async def saleae_s5_pulses_on_first_addr_change_then_waits_100ns(dut):
     await _init(dut)
 
-    dut.data_host.value = 0x00
-    dut.data_host_drive.value = 1
-    await tick(dut.clk, 1)
+    dut.addr.value = 0x00000
+    await tick(dut.clk, 3)
 
-    dut.data_host.value = 0x12
-    await tick(dut.clk, 1)
-    await tick(dut.clk, 2)
-
-    dut.data_host.value = 0x34
-    await tick(dut.clk, 1)
-    assert saleae_bit(int(dut.saleae.value), 5) == 1
-
+    dut.addr.value = 0x00001
+    await _wait_signal_high(dut.saleae[5], dut.clk, 6)
     await tick(dut.clk, 1)
     assert saleae_bit(int(dut.saleae.value), 5) == 0
-    _set_data_bus_z(dut)
+
+
+@cocotb.test()
+async def addr_pulse_gap_counter_tracks_cycles_between_s5_pulses(dut):
+    await _init(dut)
+
+    dut.addr.value = 0x00000
+    await tick(dut.clk, 3)
+
+    dut.addr.value = 0x00011
+    await _wait_signal_high(dut.saleae[5], dut.clk, 6)
+    await tick(dut.clk, 1)
+
+    gap_cycles = 0
+    for _ in range(12):
+        assert saleae_bit(int(dut.saleae.value), 5) == 0
+        await tick(dut.clk, 1)
+        gap_cycles += 1
+
+    dut.addr.value = 0x00022
+    while saleae_bit(int(dut.saleae.value), 5) == 0:
+        await tick(dut.clk, 1)
+        gap_cycles += 1
+
+    await tick(dut.clk, 1)
+    assert int(dut.core.addr_pulse_last_gap.value) == gap_cycles
+
+    dut.addr.value = 0x00002
+    for _ in range(12):
+        assert saleae_bit(int(dut.saleae.value), 5) == 0
+        await tick(dut.clk, 1)
+
+    dut.addr.value = 0x00003
+    await _wait_signal_high(dut.saleae[5], dut.clk, 6)
+    await tick(dut.clk, 1)
+    assert saleae_bit(int(dut.saleae.value), 5) == 0
 
 
 @cocotb.test()
