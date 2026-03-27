@@ -4,10 +4,11 @@ mod protocol;
 
 use shared_components::{
     boot_banner::{BootBannerState, boot_banner_step, init_boot_banner},
+    clocking::sampled_bool_clock,
     config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
     memory::sync_fifo,
     message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
-    primitives::{reset_conditioner, sync_bundle},
+    primitives::{reset_conditioner, sync_bundle, sync_delay},
     serial::uart_tx_tap,
 };
 use msg::{
@@ -31,7 +32,10 @@ type BusAddr = uint<18>;
 type CardData = uint<8>;
 type CardOffset = uint<11>;
 type EventWord = uint<16>;
+type SampledBusWord = uint<32>;
+type SampledBusStatus = uint<6>;
 type ClassifyCtr = uint<7>;
+type SampleCtr = uint<8>;
 type TickCount = uint<32>;
 type MeasurePacked = uint<112>;
 type MeasureQueueLevel = uint<6>;
@@ -43,6 +47,7 @@ fn addr_pulse_cooldown_cycles() -> uint<4> { 10 }
 fn addr_pulse_cooldown_reload() -> uint<4> { addr_pulse_cooldown_cycles() -. 1 }
 fn classify_ns() -> uint<32> { 450 }
 fn ctrl_write_ns() -> uint<32> { 30 }
+fn sampled_bus_delay_cycles() -> SampleCtr { 75 }
 
 fn cooldown_last() -> uint<4> {
     trunc(((cooldown_ns() * sample_clk_hz()) `std::ops::comb_div` 1_000_000_000))
@@ -112,6 +117,36 @@ fn ce6_read_event_word(data: CardData) -> EventWord {
 
 fn ce6_write_event_word(data: CardData) -> EventWord {
     debug_event_word(0x77, data)
+}
+
+fn sampled_bus_status_bits(
+    rw: bool,
+    ce1_active: bool,
+    ce6_active: bool,
+    oe_level: bool,
+    from_cycle_start: bool,
+    ctrl_range: bool,
+) -> SampledBusStatus {
+    let rw_bit: SampledBusStatus = if rw { 1 } else { 0 };
+    let ce1_bit: SampledBusStatus = if ce1_active { 1 } else { 0 };
+    let ce6_bit: SampledBusStatus = if ce6_active { 1 } else { 0 };
+    let oe_bit: SampledBusStatus = if oe_level { 1 } else { 0 };
+    let cycle_bit: SampledBusStatus = if from_cycle_start { 1 } else { 0 };
+    let ctrl_bit: SampledBusStatus = if ctrl_range { 1 } else { 0 };
+    (ctrl_bit << 5) |
+    (cycle_bit << 4) |
+    (oe_bit << 3) |
+    (ce6_bit << 2) |
+    (ce1_bit << 1) |
+    rw_bit
+}
+
+fn pack_sampled_bus_word(
+    addr: BusAddr,
+    data: CardData,
+    status: SampledBusStatus,
+) -> SampledBusWord {
+    (zext(status) << 26) | (zext(data) << 18) | zext(addr)
 }
 
 fn settled_value<#uint WIDTH>(state: PendingUartState<WIDTH>, settle_last: uint<4>) -> uint<WIDTH> {
@@ -203,6 +238,19 @@ struct CtrlWriteStep {
     data: CardData,
 }
 
+struct SampledBusState {
+    active: bool,
+    from_cycle_start: bool,
+    prev_cycle_toggle: bool,
+    wait_ctr: SampleCtr,
+}
+
+struct SampledBusStep {
+    next_state: SampledBusState,
+    fire: bool,
+    from_cycle_start: bool,
+}
+
 struct EventUartState {
     pending: EventWord,
     pending_valid: bool,
@@ -282,6 +330,15 @@ fn init_ctrl_write_state() -> CtrlWriteState {
     CtrlWriteState$(
         active: false,
         fired: false,
+        wait_ctr: 0,
+    )
+}
+
+fn init_sampled_bus_state() -> SampledBusState {
+    SampledBusState$(
+        active: false,
+        from_cycle_start: false,
+        prev_cycle_toggle: false,
         wait_ctr: 0,
     )
 }
@@ -434,6 +491,49 @@ fn ctrl_write_step(
     )
 }
 
+fn sampled_bus_step(
+    state: SampledBusState,
+    cycle_toggle: bool,
+    addr_pulse_fire: bool,
+) -> SampledBusStep {
+    let cycle_start_now = cycle_toggle != state.prev_cycle_toggle;
+    let start_wait = !state.active && (cycle_start_now || addr_pulse_fire);
+    let restart_from_cycle = state.active && cycle_start_now && !state.from_cycle_start;
+    let from_cycle_start = if cycle_start_now { true } else { false };
+    let wait_ctr = if start_wait || restart_from_cycle {
+        0
+    } else if state.active {
+        state.wait_ctr +. 1
+    } else {
+        0
+    };
+    let fire = state.active && wait_ctr >= sampled_bus_delay_cycles();
+    SampledBusStep$(
+        next_state: SampledBusState$(
+            active: if fire {
+                false
+            } else if start_wait || restart_from_cycle {
+                true
+            } else {
+                state.active
+            },
+            from_cycle_start: if fire {
+                false
+            } else if restart_from_cycle {
+                true
+            } else if start_wait {
+                from_cycle_start
+            } else {
+                state.from_cycle_start
+            },
+            prev_cycle_toggle: cycle_toggle,
+            wait_ctr: if fire { 0 } else { wait_ctr },
+        ),
+        fire: fire,
+        from_cycle_start: state.from_cycle_start,
+    )
+}
+
 fn event_uart_step(
     state: EventUartState,
     busy: bool,
@@ -575,6 +675,8 @@ entity main_core(
     oe: bool,
 ) {
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    // Reuse the card's spare NC pin as an optional external cycle-start strobe.
+    let cycle_start_clock = unsafe { inst sampled_bool_clock(nc) };
     let cooldown_last = cooldown_last();
     let default_classify_last = default_classify_last();
     let default_ctrl_write_last = default_ctrl_write_last();
@@ -597,6 +699,11 @@ entity main_core(
     let (event_uart_busy, event_uart_busy_w): (&bool, inv &bool) = port;
     let (event_fifo_empty, event_fifo_empty_w): (&bool, inv &bool) = port;
     let (event_fifo_dout, event_fifo_dout_w): (&EventWord, inv &EventWord) = port;
+    let (sampled_bus_uart_line, sampled_bus_uart_line_w): (&bool, inv &bool) = port;
+    let (sampled_bus_uart_busy, sampled_bus_uart_busy_w): (&bool, inv &bool) = port;
+    let (sampled_bus_fifo_full, sampled_bus_fifo_full_w): (&bool, inv &bool) = port;
+    let (sampled_bus_fifo_empty, sampled_bus_fifo_empty_w): (&bool, inv &bool) = port;
+    let (sampled_bus_fifo_dout, sampled_bus_fifo_dout_w): (&SampledBusWord, inv &SampledBusWord) = port;
     let (measure_fifo_full, measure_fifo_full_w): (&bool, inv &bool) = port;
     let (measure_fifo_empty, measure_fifo_empty_w): (&bool, inv &bool) = port;
     let (measure_fifo_dout, measure_fifo_dout_w): (&MeasurePacked, inv &MeasurePacked) = port;
@@ -685,6 +792,8 @@ entity main_core(
         pending_uart_step(data_state, data_now, false, cooldown_last).next_state;
     reg(clk) data_uart_last: CardData reset(rst: 0) = data_uart_now;
     reg(clk) data_uart_changed: bool reset(rst: false) = data_uart_now != data_uart_last;
+    reg(cycle_start_clock) cycle_start_toggle: bool reset(rst: false) = !cycle_start_toggle;
+    let cycle_start_toggle_sync = inst sync_delay::<2>(clk, cycle_start_toggle);
     reg(clk) addr_pulse_last: BusAddr reset(rst: 0) = addr_now;
     let addr_pulse_changed = addr_now != addr_pulse_last;
     reg(clk) addr_pulse_cooldown: uint<4> reset(rst: 0) =
@@ -704,10 +813,14 @@ entity main_core(
         if classify_delay_update_valid { classify_delay_update } else { classify_delay };
     reg(clk) ctrl_write_delay: ClassifyCtr reset(rst: default_ctrl_write_last) =
         if ctrl_write_delay_update_valid { ctrl_write_delay_update } else { ctrl_write_delay };
+    reg(clk) ce1_meta: bool reset(rst: false) = ce1;
+    reg(clk) ce1_ctrl: bool reset(rst: false) = ce1_meta;
     reg(clk) rw_meta: bool reset(rst: true) = rw;
     reg(clk) rw_ctrl: bool reset(rst: true) = rw_meta;
     reg(clk) ce6_meta: bool reset(rst: true) = ce6;
     reg(clk) ce6_ctrl: bool reset(rst: true) = ce6_meta;
+    reg(clk) oe_meta: bool reset(rst: true) = oe;
+    reg(clk) oe_ctrl: bool reset(rst: true) = oe_meta;
     reg(clk) tick: TickCount reset(rst: 0) = tick +. 1;
     reg(clk) mem_clear: MemClearState reset(rst: init_mem_clear_state()) =
         // Scrub card RAM after runtime reset so reset behavior is deterministic.
@@ -724,11 +837,14 @@ entity main_core(
         access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
     let ce6_active = !ce6 && !mem_clear.active;
     let ce6_ctrl_active = !ce6_ctrl && !mem_clear.active;
+    reg(clk) sampled_bus_state: SampledBusState reset(rst: init_sampled_bus_state()) =
+        sampled_bus_step(sampled_bus_state, cycle_start_toggle_sync, addr_pulse_fire).next_state;
     let ce6_ctrl_window = ce6_ctrl_active && !rw_ctrl && ce6_ctrl_addr_in_range(addr_now);
     reg(clk) ce6_ctrl_state: CtrlWriteState reset(rst: init_ctrl_write_state()) =
         ctrl_write_step(ce6_ctrl_state, ce6_ctrl_window, addr_now, data_now, ctrl_write_delay).next_state;
     reg(clk) ce6_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
         access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay).next_state;
+    let sampled_bus = sampled_bus_step(sampled_bus_state, cycle_start_toggle_sync, addr_pulse_fire);
     let ce6_ctrl_step = ctrl_write_step(ce6_ctrl_state, ce6_ctrl_window, addr_now, data_now, ctrl_write_delay);
     let ce1_step = access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
     let ce6_step = access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay);
@@ -764,6 +880,19 @@ entity main_core(
         ce6_rom_drive_cycle ||
         (!mem_clear.active && ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read)));
     let event_valid = classify_now_ce1 || ce6_read_event || ce6_write_event || ce6_ctrl_write_event;
+    let sampled_ce1_now = ce1 && !mem_clear.active;
+    let sampled_ce6_now = !ce6 && !mem_clear.active;
+    let sampled_bus_ctrl = sampled_ce6_now && ce6_ctrl_addr_in_range(addr);
+    let sampled_bus_valid = sampled_bus.fire;
+    let sampled_bus_status = sampled_bus_status_bits(
+        rw,
+        sampled_ce1_now,
+        sampled_ce6_now,
+        oe,
+        sampled_bus.from_cycle_start,
+        sampled_bus_ctrl,
+    );
+    let sampled_bus_word = pack_sampled_bus_word(addr, data_in, sampled_bus_status);
     let event_word = if write_commit {
         write_event_word(ce1_step.data)
     } else if read_start {
@@ -787,6 +916,19 @@ entity main_core(
     );
     set event_fifo_empty_w = &event_fifo.empty;
     set event_fifo_dout_w = &event_fifo.dout;
+
+    let sampled_bus_fifo_wput = sampled_bus_valid && !*sampled_bus_fifo_full;
+    let sampled_bus_fifo_rget = !*sampled_bus_uart_busy && !*sampled_bus_fifo_empty;
+    let sampled_bus_fifo = inst sync_fifo::<32, 64>(
+        clk,
+        rst,
+        sampled_bus_word,
+        sampled_bus_fifo_wput,
+        sampled_bus_fifo_rget,
+    );
+    set sampled_bus_fifo_full_w = &sampled_bus_fifo.full;
+    set sampled_bus_fifo_empty_w = &sampled_bus_fifo.empty;
+    set sampled_bus_fifo_dout_w = &sampled_bus_fifo.dout;
 
     let echo_msg = usb_parse.echo;
     let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
@@ -1044,6 +1186,15 @@ entity main_core(
         event_uart_line_w,
         event_uart_busy_w,
     );
+    let _sampled_bus_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 32>(
+        clk,
+        rst,
+        false,
+        *sampled_bus_fifo_dout,
+        sampled_bus_fifo_rget,
+        sampled_bus_uart_line_w,
+        sampled_bus_uart_busy_w,
+    );
     let _usb_tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
@@ -1059,7 +1210,7 @@ entity main_core(
         ce6,
         rw,
         if rst { true } else { *event_uart_line },
-        true,
+        if rst { true } else { *sampled_bus_uart_line },
         if rst { false } else { addr_pulse_fire },
         if rst { true } else { *data_uart_line },
         if rst { true } else { *addr_uart_line },
