@@ -4,6 +4,7 @@ This document describes the PC-E500 card FPGA control surface:
 
 - USB-UART commands exposed by the FPGA
 - Special CE6 control-page registers handled by the FPGA
+- Saleae debug and bus-capture streams
 - Response formats and practical examples
 
 All timings below assume the current `100 MHz` FPGA clock.
@@ -19,6 +20,135 @@ The design exposes two separate control paths:
 
 Normal CE1 RAM and CE6 ROM timing uses the shared `tNN` delay.
 CE6 control-page writes use the separate `cNN` delay.
+
+## Saleae Debug Streams
+
+The Saleae header exposes raw bus pins plus several FPGA-generated debug streams.
+
+Current line map:
+
+| Line | Signal | Meaning |
+| --- | --- | --- |
+| `saleae[0]` | `ce1` | raw CE1 pin |
+| `saleae[1]` | `ce6` | raw CE6 pin, active low |
+| `saleae[2]` | `rw` | raw R/W pin |
+| `saleae[3]` | event stream | compact CE event stream |
+| `saleae[4]` | sampled bus stream | late-sampled address/data/status stream |
+| `saleae[5]` | address pulse | debounced address-change pulse |
+| `saleae[6]` | data UART | settled data-change stream |
+| `saleae[7]` | address UART | settled address-change stream |
+
+### Framing
+
+The Saleae UART-like streams are not the same as the `1,000,000 baud` USB-UART.
+
+- `saleae[3]`, `saleae[4]`, `saleae[6]`, and `saleae[7]` run at `100,000,000 baud`
+- FPGA clock is `100 MHz`, so one serial bit lasts one FPGA cycle = `10 ns`
+- framing is:
+  - `1` start bit, low
+  - `N` data bits, `LSB` first
+  - `1` stop bit, high
+  - no parity
+
+Important decode rule:
+
+- do not decode these as ordinary `8N1` bytes unless the payload width is actually `8`
+- `saleae[3]` is one `16`-bit frame
+- `saleae[4]` is one `32`-bit frame
+- `saleae[6]` is one `8`-bit frame
+- `saleae[7]` is one `18`-bit frame
+
+For `saleae[3]` and `saleae[4]`, a single event is one wide UART frame, not a sequence of little-endian bytes.
+
+### `saleae[3]` Event Stream
+
+`saleae[3]` emits one `16`-bit event word per classified CE event:
+
+```text
+bits 15:8  event tag
+bits  7:0  data byte
+```
+
+Tags:
+
+| Tag | Meaning |
+| --- | --- |
+| `0x52` | CE1 read |
+| `0x57` | CE1 write |
+| `0x72` | CE6 read |
+| `0x77` | CE6 write |
+
+Example:
+
+```text
+0x575A
+```
+
+means a CE1 write carrying data byte `0x5A`.
+
+### `saleae[4]` Sampled Bus Stream
+
+`saleae[4]` emits one `32`-bit sampled bus word. The sampler fires from either:
+
+- an external `cycle_start` pulse, or
+- the internal debounced address-change pulse on `saleae[5]`
+
+Word layout:
+
+```text
+bits 17:0   addr
+bits 25:18  data
+bits 31:26  status
+```
+
+Status bit layout:
+
+| Bit | Name | Meaning |
+| --- | --- | --- |
+| `0` | `rw` | sampled raw `R/W` pin |
+| `1` | `ce1_active` | normalized CE1-active flag |
+| `2` | `ce6_active` | normalized CE6-active flag |
+| `3` | `oe` | sampled raw `OE` pin level |
+| `4` | `from_cycle_start` | `1` if sample was armed by external `cycle_start` |
+| `5` | `ctrl_range` | `1` if CE6 was active and low16 was in `0xFFF0..0xFFFF` |
+
+Decode formulas:
+
+```text
+addr   =  word        & 0x3FFFF
+data   = (word >> 18) & 0xFF
+status = (word >> 26) & 0x3F
+```
+
+Example:
+
+```text
+word = 0x044311F0
+addr = 0x311F0
+data = 0x10
+status = 0x01
+```
+
+`status = 0x01` means:
+
+- `rw = 1`
+- `ce1_active = 0`
+- `ce6_active = 0`
+- `oe = 0`
+- `from_cycle_start = 0`
+- `ctrl_range = 0`
+
+So this sample came from the address-change path, not CE1/CE6-qualified decode, and captured address `0x311F0` with data `0x10`.
+
+### `saleae[5]` Address Pulse
+
+`saleae[5]` is not a UART. It is a one-bit pulse stream that marks the internal debounced address-change trigger.
+
+Properties:
+
+- it pulses on the first observed address change
+- it then waits about `100 ns` before re-arming
+- it is useful as a correlation marker for the sampled bus stream on `saleae[4]`
 
 ## USB-UART Commands
 

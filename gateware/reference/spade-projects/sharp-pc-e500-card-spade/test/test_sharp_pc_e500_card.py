@@ -21,6 +21,22 @@ def saleae_bit(value, idx):
     return (value >> idx) & 1
 
 
+def sampled_write_addr(word: int) -> int:
+    return word & 0x3FFFF
+
+
+def sampled_write_data(word: int) -> int:
+    return (word >> 18) & 0xFF
+
+
+def sampled_write_status(word: int) -> int:
+    return (word >> 26) & 0x3F
+
+
+def sampled_write_status_bit(word: int, idx: int) -> int:
+    return (sampled_write_status(word) >> idx) & 1
+
+
 def expected_boot_banner() -> str:
     info = json.loads((PROJECT_ROOT / "build" / "build_info.json").read_text())
     return info["banner"]
@@ -147,6 +163,15 @@ async def _fast_uart_recv_words(signal, clk, width: int, count: int, timeout_cyc
     for _ in range(count):
         data.append(await _fast_uart_recv_word(signal, clk, width, timeout_cycles))
     return data
+
+
+async def _pulse_cycle_start(dut, width_ns: int = 8):
+    dut.nc.value = 0
+    await RisingEdge(dut.clk)
+    await Timer(1, units="ns")
+    dut.nc.value = 1
+    await Timer(width_ns, units="ns")
+    dut.nc.value = 0
 
 def _set_data_bus_z(dut):
     dut.data_host.value = 0
@@ -713,6 +738,133 @@ async def saleae_read_reports_bus_activity(dut):
     assert await _bus_read(dut, 0x0012) == 0x5A
     assert await event_read == 0x525A
     assert await _bus_read(dut, 0x0012) == 0x5A
+
+
+@cocotb.test()
+async def saleae4_streams_sampled_ce1_write_after_cycle_start(dut):
+    await _init(dut)
+
+    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+
+    dut.addr.value = 0x0012
+    dut.ce1.value = 0
+    dut.ce6.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = 0x5A
+    dut.data_host_drive.value = 1
+
+    await _pulse_cycle_start(dut)
+    await tick(dut.clk, 58)
+    dut.ce1.value = 1
+    await tick(dut.clk, 4)
+    dut.rw.value = 0
+    await tick(dut.clk, 20)
+    dut.rw.value = 1
+    dut.ce1.value = 0
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+
+    word = await sampled_word
+    assert sampled_write_addr(word) == 0x0012
+    assert sampled_write_data(word) == 0x5A, hex(word)
+    assert sampled_write_status_bit(word, 0) == 0
+    assert sampled_write_status_bit(word, 1) == 1
+    assert sampled_write_status_bit(word, 2) == 0
+    assert sampled_write_status_bit(word, 3) == 1
+    assert sampled_write_status_bit(word, 4) == 1
+    assert sampled_write_status_bit(word, 5) == 0
+
+
+@cocotb.test()
+async def saleae4_streams_sampled_write_without_cycle_start_as_fallback(dut):
+    await _init(dut)
+
+    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+
+    dut.addr.value = 0x0034
+    dut.ce1.value = 0
+    dut.ce6.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = 0xA5
+    dut.data_host_drive.value = 1
+
+    await tick(dut.clk, 58)
+    dut.ce1.value = 1
+    await tick(dut.clk, 4)
+    dut.rw.value = 0
+    await tick(dut.clk, 20)
+    dut.rw.value = 1
+    dut.ce1.value = 0
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+
+    word = await sampled_word
+    assert sampled_write_addr(word) == 0x0034
+    assert sampled_write_data(word) == 0xA5, hex(word)
+    assert sampled_write_status_bit(word, 1) == 1
+    assert sampled_write_status_bit(word, 4) == 0
+
+
+@cocotb.test()
+async def saleae4_streams_sampled_ce6_control_write_with_ctrl_flag(dut):
+    await _init(dut)
+
+    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+
+    dut.addr.value = 0x1FFF1
+    dut.ce1.value = 0
+    dut.ce6.value = 0
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = ord("Z")
+    dut.data_host_drive.value = 1
+
+    await _pulse_cycle_start(dut)
+    await tick(dut.clk, 62)
+    dut.rw.value = 0
+    await tick(dut.clk, 20)
+    dut.rw.value = 1
+    dut.ce6.value = 1
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+
+    word = await sampled_word
+    assert sampled_write_addr(word) == 0x1FFF1
+    assert sampled_write_data(word) == ord("Z")
+    assert sampled_write_status_bit(word, 1) == 0
+    assert sampled_write_status_bit(word, 2) == 1
+    assert sampled_write_status_bit(word, 4) == 1
+    assert sampled_write_status_bit(word, 5) == 1
+
+
+@cocotb.test()
+async def saleae4_streams_addr_change_even_when_no_ce_is_active(dut):
+    await _init(dut)
+
+    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+
+    dut.addr.value = 0x15555
+    dut.ce1.value = 0
+    dut.ce6.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = 0x3C
+    dut.data_host_drive.value = 1
+
+    await tick(dut.clk, 90)
+    _set_data_bus_z(dut)
+
+    word = await sampled_word
+    assert sampled_write_addr(word) == 0x15555
+    assert sampled_write_data(word) == 0x3C, hex(word)
+    assert sampled_write_status_bit(word, 0) == 1
+    assert sampled_write_status_bit(word, 1) == 0
+    assert sampled_write_status_bit(word, 2) == 0
+    assert sampled_write_status_bit(word, 3) == 1
+    assert sampled_write_status_bit(word, 4) == 0
+    assert sampled_write_status_bit(word, 5) == 0
 
 
 @cocotb.test()
