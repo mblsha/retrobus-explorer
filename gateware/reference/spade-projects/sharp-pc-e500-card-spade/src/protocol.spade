@@ -67,6 +67,20 @@ fn addr_accum(value: CardOffset, nibble: uint<4>) -> CardOffset {
     trunc((value << 4) | zext(nibble))
 }
 
+fn next_addr_state(digits: uint<2>, value: CardOffset, rom: bool, read: bool) -> ParserState {
+    if read {
+        if digits == 3 {
+            ParserState::NeedReadLineEnd(value, rom)
+        } else {
+            ParserState::ReadAddr(digits, value, rom)
+        }
+    } else if digits == 3 {
+        ParserState::WriteEq(value, rom)
+    } else {
+        ParserState::WriteAddr(digits, value, rom)
+    }
+}
+
 fn read_event(addr: CardOffset, rom: bool) -> ParserEvent {
     if rom {
         ParserEvent::ReadRom(addr)
@@ -80,6 +94,35 @@ fn write_event(addr: CardOffset, value: CardData, rom: bool) -> ParserEvent {
         ParserEvent::WriteRom(addr, value)
     } else {
         ParserEvent::WriteRam(addr, value)
+    }
+}
+
+fn parse_timing_cycles(tens: uint<4>, ones: uint<4>) -> uint<7> {
+    let tens_u8: uint<8> = zext(tens);
+    let ones_u8: uint<8> = zext(ones);
+    let ten_u8: uint<8> = 10;
+    let tens_times_ten: uint<8> = trunc(tens_u8 * ten_u8);
+    trunc(tens_times_ten +. ones_u8)
+}
+
+fn idle_step(rx_byte: uint<8>) -> ParserStepOut {
+    if rx_byte.is_line_end() {
+        parser_out(ParserState::Idle(), ParserEvent::None(), EchoMsg::None())
+    } else if rx_byte == b'r' {
+        parser_out(ParserState::ReadAddr(0, 0, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+    } else if rx_byte == b'R' {
+        parser_out(ParserState::ReadAddr(0, 0, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+    } else if rx_byte == b'w' {
+        parser_out(ParserState::WriteAddr(0, 0, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+    } else if rx_byte == b'W' {
+        parser_out(ParserState::WriteAddr(0, 0, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
+    } else {
+        match rx_byte.to_upper() {
+            b'T' => parser_out(ParserState::TimingHi(false), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
+            b'C' => parser_out(ParserState::TimingHi(true), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
+            b'M' => parser_out(ParserState::Measure(), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
+            _ => parser_error(ParserState::Idle(), rx_byte),
+        }
     }
 }
 
@@ -98,46 +141,14 @@ pub fn parser_step(
         let nibble_ok = decoded.valid;
         let nibble = decoded.value;
         match state {
-            ParserState::Idle => {
-                if rx_byte.is_line_end() {
-                    parser_out(ParserState::Idle(), ParserEvent::None(), EchoMsg::None())
-                } else if rx_byte == b'r' {
-                    parser_out(ParserState::ReadAddr(0, 0, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte == b'R' {
-                    parser_out(ParserState::ReadAddr(0, 0, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte == b'w' {
-                    parser_out(ParserState::WriteAddr(0, 0, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte == b'W' {
-                    parser_out(ParserState::WriteAddr(0, 0, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte.to_upper() == b'T' {
-                    parser_out(ParserState::TimingHi(false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte.to_upper() == b'C' {
-                    parser_out(ParserState::TimingHi(true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else if rx_byte.to_upper() == b'M' {
-                    parser_out(ParserState::Measure(), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                } else {
-                    parser_error(state, rx_byte)
-                }
-            },
+            ParserState::Idle => idle_step(rx_byte),
             ParserState::ReadAddr$(digits, value, rom) => {
                 if !nibble_ok || (digits == 0 && nibble > 7) {
                     parser_error(state, rx_byte)
                 } else {
                     let next_digits = digits +. 1;
                     let next_value = addr_accum(value, nibble);
-                    if next_digits == 3 {
-                        parser_out(
-                            ParserState::NeedReadLineEnd(next_value, rom),
-                            ParserEvent::None(),
-                            EchoMsg::Byte(rx_byte),
-                        )
-                    } else {
-                        parser_out(
-                            ParserState::ReadAddr(next_digits, next_value, rom),
-                            ParserEvent::None(),
-                            EchoMsg::Byte(rx_byte),
-                        )
-                    }
+                    parser_out(next_addr_state(next_digits, next_value, rom, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 }
             },
             ParserState::NeedReadLineEnd$(addr, rom) => {
@@ -153,19 +164,7 @@ pub fn parser_step(
                 } else {
                     let next_digits = digits +. 1;
                     let next_value = addr_accum(value, nibble);
-                    if next_digits == 3 {
-                        parser_out(
-                            ParserState::WriteEq(next_value, rom),
-                            ParserEvent::None(),
-                            EchoMsg::Byte(rx_byte),
-                        )
-                    } else {
-                        parser_out(
-                            ParserState::WriteAddr(next_digits, next_value, rom),
-                            ParserEvent::None(),
-                            EchoMsg::Byte(rx_byte),
-                        )
-                    }
+                    parser_out(next_addr_state(next_digits, next_value, rom, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 }
             },
             ParserState::WriteEq$(addr, rom) => {
@@ -212,14 +211,8 @@ pub fn parser_step(
             ParserState::TimingLo$(tens, control) => {
                 let digit = rx_byte.decode_digit();
                 if digit.valid {
-                    let tens_u8: uint<8> = zext(tens);
-                    let digit_u8: uint<8> = zext(digit.value);
-                    let ten_u8: uint<8> = 10;
-                    let tens_times_ten: uint<8> = trunc(tens_u8 * ten_u8);
-                    let cycles_u8: uint<8> = tens_times_ten +. digit_u8;
-                    let cycles: uint<7> = trunc(cycles_u8);
                     parser_out(
-                        ParserState::NeedTimingLineEnd(cycles, control),
+                        ParserState::NeedTimingLineEnd(parse_timing_cycles(tens, digit.value), control),
                         ParserEvent::None(),
                         EchoMsg::Byte(rx_byte),
                     )
