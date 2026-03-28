@@ -4,6 +4,7 @@ use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, Tx
 use super::protocol::{CardData, CardOffset, EchoMsg};
 
 type EchoIdx = uint<2>;
+type PortIdx = uint<4>;
 type RespIdx = uint<7>;
 type MeasureIdx = uint<7>;
 
@@ -76,6 +77,17 @@ pub fn init_measure_stream() -> MeasureStreamState {
     init_byte_stream(MeasureMsg::None())
 }
 
+fn byte_stream_step<TMsg, #uint IDX_W>(
+    state: ByteMsgStreamState<TMsg, IDX_W>,
+    none_msg: TMsg,
+    block_tx: bool,
+    msg_valid: bool,
+    msg: TMsg,
+    is_none: impl Fn(TMsg) -> bool,
+    render_byte: impl Fn(TMsg, uint<IDX_W>) -> TxReq8,
+) -> ByteMsgStreamOut<TMsg, IDX_W> {
+    state.step_with(none_msg, is_none, render_byte, block_tx, msg_valid, msg)
+}
 
 fn offset_hex_char(addr: CardOffset, idx: uint<2>) -> uint<8> {
     match idx {
@@ -140,7 +152,7 @@ impl EchoMsg {
     }
 
     fn byte(self, idx: EchoIdx) -> TxReq8 {
-        let req = match self {
+        match self {
             Self::None => tx_req_none(),
             Self::Byte$(byte) => if idx == 0 {
                 TxReq8$(valid: true, byte: byte)
@@ -152,8 +164,7 @@ impl EchoMsg {
                 1 => TxReq8$(valid: true, byte: b'\n'),
                 _ => tx_req_none(),
             },
-        };
-        req
+        }
     }
 }
 
@@ -162,16 +173,15 @@ impl PortMsg {
         if let Self::None = self { true } else { false }
     }
 
-    fn byte(self, idx: uint<4>) -> TxReq8 {
-        let req = match self {
+    fn byte(self, idx: PortIdx) -> TxReq8 {
+        match self {
             Self::None => tx_req_none(),
             Self::Overrun => if idx < 10 {
                 TxReq8$(valid: true, byte: b"!OVERRUN\r\n"[trunc(idx)])
             } else {
                 tx_req_none()
             },
-        };
-        req
+        }
     }
 }
 
@@ -181,7 +191,7 @@ impl RespMsg {
     }
 
     fn byte(self, idx: RespIdx) -> TxReq8 {
-        let req = match self {
+        match self {
             Self::None => tx_req_none(),
             Self::Ok => if idx < 4 {
                 TxReq8$(valid: true, byte: b"OK\r\n"[trunc(idx)])
@@ -232,8 +242,7 @@ impl RespMsg {
             } else {
                 tx_req_none()
             },
-        };
-        req
+        }
     }
 }
 
@@ -243,7 +252,7 @@ impl MeasureMsg {
     }
 
     fn byte(self, idx: MeasureIdx) -> TxReq8 {
-        let req = match self {
+        match self {
             Self::None => tx_req_none(),
             Self::Report$(report) => if idx < 5 {
                 TxReq8$(valid: true, byte: b"MR,S="[trunc(idx)])
@@ -285,8 +294,7 @@ impl MeasureMsg {
             } else {
                 tx_req_none()
             },
-        };
-        req
+        }
     }
 }
 
@@ -296,13 +304,14 @@ pub fn echo_stream_step(
     msg_valid: bool,
     msg: EchoMsg,
 ) -> EchoStreamOut {
-    state.step_with(
+    byte_stream_step(
+        state,
         EchoMsg::None(),
-        fn |msg| { msg.is_none() },
-        fn |msg, idx| { msg.byte(idx) },
         block_tx,
         msg_valid,
         msg,
+        fn |stream_msg| { stream_msg.is_none() },
+        fn |stream_msg, idx| { stream_msg.byte(idx) },
     )
 }
 
@@ -312,13 +321,14 @@ pub fn port_stream_step(
     msg_valid: bool,
     msg: PortMsg,
 ) -> PortStreamOut {
-    state.step_with(
+    byte_stream_step(
+        state,
         PortMsg::None(),
-        fn |msg| { msg.is_none() },
-        fn |msg, idx| { msg.byte(idx) },
         block_tx,
         msg_valid,
         msg,
+        fn |stream_msg| { stream_msg.is_none() },
+        fn |stream_msg, idx| { stream_msg.byte(idx) },
     )
 }
 
@@ -328,13 +338,14 @@ pub fn resp_stream_step(
     msg_valid: bool,
     msg: RespMsg,
 ) -> RespStreamOut {
-    state.step_with(
+    byte_stream_step(
+        state,
         RespMsg::None(),
-        fn |msg| { msg.is_none() },
-        fn |msg, idx| { msg.byte(idx) },
         block_tx,
         msg_valid,
         msg,
+        fn |stream_msg| { stream_msg.is_none() },
+        fn |stream_msg, idx| { stream_msg.byte(idx) },
     )
 }
 
@@ -344,12 +355,13 @@ pub fn measure_stream_step(
     msg_valid: bool,
     msg: MeasureMsg,
 ) -> MeasureStreamOut {
-    state.step_with(
+    byte_stream_step(
+        state,
         MeasureMsg::None(),
-        fn |msg| { msg.is_none() },
-        fn |msg, idx| { msg.byte(idx) },
         block_tx,
         msg_valid,
         msg,
+        fn |stream_msg| { stream_msg.is_none() },
+        fn |stream_msg, idx| { stream_msg.byte(idx) },
     )
 }
