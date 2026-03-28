@@ -14,6 +14,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from project_meta import project_name
 from project_meta import resolve_verilog_sources
 from project_meta import tooling_top
 
@@ -146,6 +147,8 @@ def main() -> int:
 
     cmd = [
         resolve_cli(args.cli),
+        "--project",
+        project_name(project),
         "--token",
         token,
         "--top",

@@ -9,6 +9,14 @@ def load_swim(project: Path) -> dict:
     return tomllib.loads((project / "swim.toml").read_text())
 
 
+def project_name(project: Path) -> str:
+    config = load_swim(project)
+    name = config.get("name")
+    if isinstance(name, str) and name:
+        return name
+    return project.name
+
+
 def tooling_top(project: Path, override: str | None = None) -> str:
     if override:
         return override

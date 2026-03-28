@@ -115,7 +115,6 @@ set_property PACKAGE_PIN R3 [get_ports {ce6}]
 set_property IOSTANDARD LVCMOS33 [get_ports {ce6}]
 set_property PACKAGE_PIN T3 [get_ports {nc}]
 set_property IOSTANDARD LVCMOS33 [get_ports {nc}]
-set_property PULLDOWN true [get_ports {nc}]
 set_property PACKAGE_PIN T4 [get_ports {oe}]
 set_property IOSTANDARD LVCMOS33 [get_ports {oe}]
 
@@ -137,7 +136,6 @@ set_property DRIVE 4 [get_ports {saleae[7]}]
 set_property SLEW FAST [get_ports {saleae[7]}]
 
 create_clock -name clk -period 10.000 [get_ports {clk}]
-create_clock -name cycle_start -period 1310.000 [get_ports {nc}]
 
 # Vivado placement override for Au clock pin mapping
 set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {clk_IBUF}]

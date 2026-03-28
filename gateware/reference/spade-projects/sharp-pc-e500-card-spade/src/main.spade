@@ -348,6 +348,11 @@ struct ParserEventDecode {
     parse_error: bool,
 }
 
+struct ParserFrontStage {
+    event: ParserEvent,
+    echo: EchoMsg,
+}
+
 fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
     PendingUartState$(
         last_raw: 0,
@@ -416,6 +421,13 @@ fn init_measure_engine_state() -> MeasureEngineState {
     MeasureEngineState$(
         dump_active: false,
         stream: init_measure_stream(),
+    )
+}
+
+fn init_parser_front_stage() -> ParserFrontStage {
+    ParserFrontStage$(
+        event: ParserEvent::None(),
+        echo: EchoMsg::None(),
     )
 }
 
@@ -991,7 +1003,12 @@ entity main_core(
         usb_rx_out.parity_error,
         usb_rx_out.byte,
     );
-    let parser_event = decode_parser_event(usb_parse.event);
+    reg(clk) parser_front: ParserFrontStage reset(rst: init_parser_front_stage()) =
+        ParserFrontStage$(
+            event: usb_parse.event,
+            echo: usb_parse.echo,
+        );
+    let parser_event = decode_parser_event(parser_front.event);
     let parser_ram_read = parser_event.mem.ram_read();
     let parser_ram_write = parser_event.mem.ram_write();
     let parser_rom_read = parser_event.mem.rom_read();
@@ -1191,7 +1208,7 @@ entity main_core(
     set sampled_bus_fifo_empty_w = &sampled_bus_fifo.empty;
     set sampled_bus_fifo_dout_w = &sampled_bus_fifo.dout;
 
-    let echo_msg = usb_parse.echo;
+    let echo_msg = parser_front.echo;
     let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
 
     let boot_tx_busy = *usb_tx_busy || boot_banner_out.tx_req.valid;
@@ -1330,7 +1347,7 @@ entity main_core(
         armed: measure_capture.armed,
     );
 
-    let resp_msg = if usb_ram_read_valid {
+    let next_resp_msg = if usb_ram_read_valid {
         if mem_clear.active || uart_ram_read_collision {
             RespMsg::Busy()
         } else {
@@ -1355,6 +1372,7 @@ entity main_core(
     } else {
         RespMsg::None()
     };
+    reg(clk) resp_msg: RespMsg reset(rst: RespMsg::None()) = next_resp_msg;
     let resp_msg_valid = if let RespMsg::None = resp_msg { false } else { true };
 
     let resp_block_tx = measure_block_tx || measure_eval.tx_req.valid;
