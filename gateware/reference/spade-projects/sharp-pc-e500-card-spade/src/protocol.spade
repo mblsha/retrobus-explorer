@@ -23,6 +23,72 @@ pub(lib) enum EchoMsg {
     CrLf,
 }
 
+impl ParserEvent {
+    pub(lib) fn ram_read(self) -> Option<CardOffset> {
+        if let Self::ReadRam$(addr) = self {
+            Some(addr)
+        } else {
+            None
+        }
+    }
+
+    pub(lib) fn ram_write(self) -> Option<(CardOffset, CardData)> {
+        if let Self::WriteRam$(addr, value) = self {
+            Some((addr, value))
+        } else {
+            None
+        }
+    }
+
+    pub(lib) fn rom_read(self) -> Option<CardOffset> {
+        if let Self::ReadRom$(addr) = self {
+            Some(addr)
+        } else {
+            None
+        }
+    }
+
+    pub(lib) fn rom_write(self) -> Option<(CardOffset, CardData)> {
+        if let Self::WriteRom$(addr, value) = self {
+            Some((addr, value))
+        } else {
+            None
+        }
+    }
+
+    pub(lib) fn classify_delay(self) -> Option<uint<7>> {
+        if let Self::SetClassifyDelay$(cycles) = self {
+            Some(cycles)
+        } else {
+            None
+        }
+    }
+
+    pub(lib) fn ctrl_write_delay(self) -> Option<uint<7>> {
+        if let Self::SetCtrlWriteDelay$(cycles) = self {
+            Some(cycles)
+        } else {
+            None
+        }
+    }
+
+    pub(lib) fn measure_dump_request(self) -> bool {
+        if let Self::MeasureDump = self { true } else { false }
+    }
+
+    pub(lib) fn measure_status_request(self) -> bool {
+        if let Self::MeasureStatus = self { true } else { false }
+    }
+
+    pub(lib) fn measure_clear_request(self) -> bool {
+        if let Self::MeasureClear = self { true } else { false }
+    }
+
+    pub(lib) fn is_parse_err(self) -> bool {
+        if let Self::ParseErr = self { true } else { false }
+    }
+}
+
 pub(lib) enum ParserState {
     Idle,
     ReadAddr{digits: uint<2>, value: CardOffset, rom: bool},

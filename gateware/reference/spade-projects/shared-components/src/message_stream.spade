@@ -156,4 +156,36 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             next_msg_is_none,
         )
     }
+
+    pub fn step_with_option(
+        self,
+        none_msg: TMsg,
+        is_none: impl Fn(TMsg) -> bool,
+        render_byte: impl Fn(TMsg, uint<IDX_W>) -> TxReq8,
+        block_tx: bool,
+        next_msg: Option<TMsg>,
+    ) -> ByteMsgStreamOut<TMsg, IDX_W> {
+        let cur_msg_is_none = is_none.call((self.cur_msg,));
+        let pending_msg_is_none = is_none.call((self.pending_msg,));
+        let cur_byte = render_byte.call((self.cur_msg, self.cur_idx));
+        let next_idx: uint<IDX_W> = self.cur_idx +. 1;
+        let next_byte = render_byte.call((self.cur_msg, next_idx));
+        let (next_msg_valid, next_msg_value, next_msg_is_none): (bool, TMsg, bool) = if let Some(msg) = next_msg {
+            (true, msg, is_none.call((msg,)))
+        } else {
+            (false, none_msg, true)
+        };
+
+        self.step(
+            none_msg,
+            cur_msg_is_none,
+            pending_msg_is_none,
+            cur_byte,
+            next_byte,
+            block_tx,
+            next_msg_valid,
+            next_msg_value,
+            next_msg_is_none,
+        )
+    }
 }
