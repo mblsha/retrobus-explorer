@@ -296,6 +296,27 @@ struct MeasureEngineOut {
     tx_req: TxReq8,
 }
 
+struct ParserEventDecode {
+    ram_read_valid: bool,
+    ram_read_addr: CardOffset,
+    ram_write_valid: bool,
+    ram_write_addr: CardOffset,
+    ram_write_data: CardData,
+    rom_read_valid: bool,
+    rom_read_addr: CardOffset,
+    rom_write_valid: bool,
+    rom_write_addr: CardOffset,
+    rom_write_data: CardData,
+    classify_delay_update_valid: bool,
+    classify_delay_update: ClassifyCtr,
+    ctrl_write_delay_update_valid: bool,
+    ctrl_write_delay_update: ClassifyCtr,
+    measure_dump_request: bool,
+    measure_status_request: bool,
+    measure_clear_request: bool,
+    parse_error: bool,
+}
+
 fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
     PendingUartState$(
         last_raw: 0,
@@ -372,6 +393,265 @@ fn init_measure_engine_state() -> MeasureEngineState {
         dump_active: false,
         stream: init_measure_stream(),
     )
+}
+
+fn init_parser_event_decode() -> ParserEventDecode {
+    ParserEventDecode$(
+        ram_read_valid: false,
+        ram_read_addr: 0,
+        ram_write_valid: false,
+        ram_write_addr: 0,
+        ram_write_data: 0,
+        rom_read_valid: false,
+        rom_read_addr: 0,
+        rom_write_valid: false,
+        rom_write_addr: 0,
+        rom_write_data: 0,
+        classify_delay_update_valid: false,
+        classify_delay_update: 0,
+        ctrl_write_delay_update_valid: false,
+        ctrl_write_delay_update: 0,
+        measure_dump_request: false,
+        measure_status_request: false,
+        measure_clear_request: false,
+        parse_error: false,
+    )
+}
+
+fn decode_parser_event(event: ParserEvent) -> ParserEventDecode {
+    match event {
+        ParserEvent::ReadRam$(addr) => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: true,
+                ram_read_addr: addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::WriteRam$(addr, value) => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: true,
+                ram_write_addr: addr,
+                ram_write_data: value,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::ReadRom$(addr) => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: true,
+                rom_read_addr: addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::WriteRom$(addr, value) => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: true,
+                rom_write_addr: addr,
+                rom_write_data: value,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::SetClassifyDelay$(cycles) => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: true,
+                classify_delay_update: cycles,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::SetCtrlWriteDelay$(cycles) => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: true,
+                ctrl_write_delay_update: cycles,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::MeasureDump => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: true,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::MeasureStatus => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: true,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::MeasureClear => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: true,
+                parse_error: base.parse_error,
+            )
+        },
+        ParserEvent::ParseErr => {
+            let base = init_parser_event_decode();
+            ParserEventDecode$(
+                ram_read_valid: base.ram_read_valid,
+                ram_read_addr: base.ram_read_addr,
+                ram_write_valid: base.ram_write_valid,
+                ram_write_addr: base.ram_write_addr,
+                ram_write_data: base.ram_write_data,
+                rom_read_valid: base.rom_read_valid,
+                rom_read_addr: base.rom_read_addr,
+                rom_write_valid: base.rom_write_valid,
+                rom_write_addr: base.rom_write_addr,
+                rom_write_data: base.rom_write_data,
+                classify_delay_update_valid: base.classify_delay_update_valid,
+                classify_delay_update: base.classify_delay_update,
+                ctrl_write_delay_update_valid: base.ctrl_write_delay_update_valid,
+                ctrl_write_delay_update: base.ctrl_write_delay_update,
+                measure_dump_request: base.measure_dump_request,
+                measure_status_request: base.measure_status_request,
+                measure_clear_request: base.measure_clear_request,
+                parse_error: true,
+            )
+        },
+        ParserEvent::None => init_parser_event_decode(),
+    }
 }
 
 fn pending_uart_step<#uint WIDTH>(
@@ -719,72 +999,22 @@ entity main_core(
     reg(clk) parser: ParserState reset(rst: protocol::init_parser()) =
         parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte).state;
     let usb_parse = parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte);
+    let parser_event = decode_parser_event(usb_parse.event);
 
-    let usb_ram_read_addr = if let ParserEvent::ReadRam$(addr) = usb_parse.event { addr } else { 0 };
-    let usb_rom_read_addr = if let ParserEvent::ReadRom$(addr) = usb_parse.event { addr } else { 0 };
-    let uart_ram_write_valid = if let ParserEvent::WriteRam$(addr, value) = usb_parse.event {
-        let _ = addr;
-        let _ = value;
-        true
-    } else {
-        false
-    };
-    let uart_ram_write_addr = if let ParserEvent::WriteRam$(addr, value) = usb_parse.event {
-        let _ = value;
-        addr
-    } else {
-        0
-    };
-    let uart_ram_write_data = if let ParserEvent::WriteRam$(addr, value) = usb_parse.event {
-        let _ = addr;
-        value
-    } else {
-        0
-    };
-    let uart_rom_write_valid = if let ParserEvent::WriteRom$(addr, value) = usb_parse.event {
-        let _ = addr;
-        let _ = value;
-        true
-    } else {
-        false
-    };
-    let uart_rom_write_addr = if let ParserEvent::WriteRom$(addr, value) = usb_parse.event {
-        let _ = value;
-        addr
-    } else {
-        0
-    };
-    let uart_rom_write_data = if let ParserEvent::WriteRom$(addr, value) = usb_parse.event {
-        let _ = addr;
-        value
-    } else {
-        0
-    };
-    let classify_delay_update_valid = if let ParserEvent::SetClassifyDelay$(cycles) = usb_parse.event {
-        let _ = cycles;
-        true
-    } else {
-        false
-    };
-    let classify_delay_update = if let ParserEvent::SetClassifyDelay$(cycles) = usb_parse.event {
-        cycles
-    } else {
-        0
-    };
-    let ctrl_write_delay_update_valid = if let ParserEvent::SetCtrlWriteDelay$(cycles) = usb_parse.event {
-        let _ = cycles;
-        true
-    } else {
-        false
-    };
-    let ctrl_write_delay_update = if let ParserEvent::SetCtrlWriteDelay$(cycles) = usb_parse.event {
-        cycles
-    } else {
-        0
-    };
-    let measure_dump_request = if let ParserEvent::MeasureDump = usb_parse.event { true } else { false };
-    let measure_status_request = if let ParserEvent::MeasureStatus = usb_parse.event { true } else { false };
-    let measure_clear_request = if let ParserEvent::MeasureClear = usb_parse.event { true } else { false };
+    let usb_ram_read_addr = parser_event.ram_read_addr;
+    let usb_rom_read_addr = parser_event.rom_read_addr;
+    let uart_ram_write_valid = parser_event.ram_write_valid;
+    let uart_ram_write_addr = parser_event.ram_write_addr;
+    let uart_ram_write_data = parser_event.ram_write_data;
+    let uart_rom_write_valid = parser_event.rom_write_valid;
+    let uart_rom_write_addr = parser_event.rom_write_addr;
+    let uart_rom_write_data = parser_event.rom_write_data;
+    let classify_delay_update_valid = parser_event.classify_delay_update_valid;
+    let classify_delay_update = parser_event.classify_delay_update;
+    let ctrl_write_delay_update_valid = parser_event.ctrl_write_delay_update_valid;
+    let ctrl_write_delay_update = parser_event.ctrl_write_delay_update;
+    let measure_dump_request = parser_event.measure_dump_request;
+    let measure_clear_request = parser_event.measure_clear_request;
 
     reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
         pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
@@ -833,8 +1063,9 @@ entity main_core(
             mem_clear
         };
 
+    let ce1_active = ce1 && !mem_clear.active;
     reg(clk) ce1_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
-        access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay).next_state;
+        access_cycle_step(ce1_cycle, ce1_active, rw, addr, data_in, tick, classify_delay).next_state;
     let ce6_active = !ce6 && !mem_clear.active;
     let ce6_ctrl_active = !ce6_ctrl && !mem_clear.active;
     reg(clk) sampled_bus_state: SampledBusState reset(rst: init_sampled_bus_state()) =
@@ -846,19 +1077,14 @@ entity main_core(
         access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay).next_state;
     let sampled_bus = sampled_bus_step(sampled_bus_state, cycle_start_toggle_sync, addr_pulse_fire);
     let ce6_ctrl_step = ctrl_write_step(ce6_ctrl_state, ce6_ctrl_window, addr_now, data_now, ctrl_write_delay);
-    let ce1_step = access_cycle_step(ce1_cycle, ce1 && !mem_clear.active, rw, addr, data_in, tick, classify_delay);
+    let ce1_step = access_cycle_step(ce1_cycle, ce1_active, rw, addr, data_in, tick, classify_delay);
     let ce6_step = access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay);
 
     let classify_now_ce1 = ce1_step.classify_now;
     let classify_now_ce6 = ce6_step.classify_now;
     let read_start = classify_now_ce1 && ce1_step.kind_read;
     let write_commit = classify_now_ce1 && !ce1_step.kind_read;
-    let usb_ram_read_valid = if let ParserEvent::ReadRam$(addr) = usb_parse.event {
-        let _ = addr;
-        true
-    } else {
-        false
-    };
+    let usb_ram_read_valid = parser_event.ram_read_valid;
     let uart_ram_read_collision = usb_ram_read_valid && write_commit && card_offset(ce1_step.addr) == usb_ram_read_addr;
     let uart_ram_write_busy = uart_ram_write_valid && (write_commit || mem_clear.active);
     let uart_ram_write_fire = uart_ram_write_valid && !write_commit && !mem_clear.active;
@@ -880,7 +1106,7 @@ entity main_core(
         ce6_rom_drive_cycle ||
         (!mem_clear.active && ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read)));
     let event_valid = classify_now_ce1 || ce6_read_event || ce6_write_event || ce6_ctrl_write_event;
-    let sampled_ce1_now = ce1 && !mem_clear.active;
+    let sampled_ce1_now = ce1_active;
     let sampled_ce6_now = !ce6 && !mem_clear.active;
     let sampled_bus_ctrl = sampled_ce6_now && ce6_ctrl_addr_in_range(addr);
     let sampled_bus_valid = sampled_bus.fire;
@@ -933,11 +1159,12 @@ entity main_core(
     let echo_msg = usb_parse.echo;
     let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
 
+    let boot_tx_busy = *usb_tx_busy || boot_banner_out.tx_req.valid;
     reg(clk) echo_state: EchoStreamState reset(rst: init_echo_stream()) =
-        echo_stream_step(echo_state, *usb_tx_busy || boot_banner_out.tx_req.valid, echo_msg_valid, echo_msg).state;
+        echo_stream_step(echo_state, boot_tx_busy, echo_msg_valid, echo_msg).state;
     let echo_out = echo_stream_step(
         echo_state,
-        *usb_tx_busy || boot_banner_out.tx_req.valid,
+        boot_tx_busy,
         echo_msg_valid,
         echo_msg,
     );
@@ -1017,10 +1244,7 @@ entity main_core(
 
     let measure_report_wput = ce6_measure_stop && measure_capture.armed && !*measure_fifo_full;
     let measure_report_drop = ce6_measure_stop && measure_capture.armed && *measure_fifo_full;
-    let measure_block_tx =
-        *usb_tx_busy ||
-        boot_banner_out.tx_req.valid ||
-        echo_out.tx_req.valid;
+    let measure_block_tx = boot_tx_busy || echo_out.tx_req.valid;
     reg(clk) measure_engine: MeasureEngineState reset(rst: init_measure_engine_state()) =
         measure_engine_step(
             measure_engine,
@@ -1080,79 +1304,65 @@ entity main_core(
         armed: measure_capture.armed,
     );
 
-    let resp_msg = match usb_parse.event {
-        ParserEvent::ReadRam$(addr) => {
-            if mem_clear.active || uart_ram_read_collision {
-                RespMsg::Busy()
-            } else {
-                RespMsg::Read(addr, *uart_mem_dout)
-            }
-        },
-        ParserEvent::WriteRam$(addr, value) => {
-            let _ = addr;
-            let _ = value;
-            if uart_ram_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
-        },
-        ParserEvent::ReadRom$(addr) => RespMsg::Read(addr, *rom_uart_mem_dout),
-        ParserEvent::WriteRom$(addr, value) => {
-            let _ = addr;
-            let _ = value;
-            RespMsg::Ok()
-        },
-        ParserEvent::SetClassifyDelay$(cycles) => RespMsg::Timing(cycles),
-        ParserEvent::SetCtrlWriteDelay$(cycles) => RespMsg::CtrlTiming(cycles),
-        ParserEvent::MeasureStatus => RespMsg::MeasureStatus(measure_status_now),
-        ParserEvent::MeasureClear => RespMsg::Ok(),
-        ParserEvent::ParseErr => RespMsg::Err(),
-        _ => RespMsg::None(),
+    let resp_msg = if parser_event.ram_read_valid {
+        if mem_clear.active || uart_ram_read_collision {
+            RespMsg::Busy()
+        } else {
+            RespMsg::Read(parser_event.ram_read_addr, *uart_mem_dout)
+        }
+    } else if parser_event.ram_write_valid {
+        if uart_ram_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
+    } else if parser_event.rom_read_valid {
+        RespMsg::Read(parser_event.rom_read_addr, *rom_uart_mem_dout)
+    } else if parser_event.rom_write_valid {
+        RespMsg::Ok()
+    } else if parser_event.classify_delay_update_valid {
+        RespMsg::Timing(parser_event.classify_delay_update)
+    } else if parser_event.ctrl_write_delay_update_valid {
+        RespMsg::CtrlTiming(parser_event.ctrl_write_delay_update)
+    } else if parser_event.measure_status_request {
+        RespMsg::MeasureStatus(measure_status_now)
+    } else if parser_event.measure_clear_request {
+        RespMsg::Ok()
+    } else if parser_event.parse_error {
+        RespMsg::Err()
+    } else {
+        RespMsg::None()
     };
     let resp_msg_valid = if let RespMsg::None = resp_msg { false } else { true };
 
+    let resp_block_tx = measure_block_tx || measure_eval.tx_req.valid;
     reg(clk) resp_state: RespStreamState reset(rst: init_resp_stream()) =
         resp_stream_step(
             resp_state,
-            *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid || measure_eval.tx_req.valid,
+            resp_block_tx,
             resp_msg_valid,
             resp_msg,
         ).state;
     let resp_out = resp_stream_step(
         resp_state,
-        *usb_tx_busy || boot_banner_out.tx_req.valid || echo_out.tx_req.valid || measure_eval.tx_req.valid,
+        resp_block_tx,
         resp_msg_valid,
         resp_msg,
     );
 
-    let port_char_blocked =
-        *usb_tx_busy ||
-        boot_banner_out.tx_req.valid ||
-        echo_out.tx_req.valid ||
-        resp_out.tx_req.valid ||
-        measure_eval.tx_req.valid;
+    let port_char_blocked = resp_block_tx || resp_out.tx_req.valid;
     let port_char_tx_req = if ce6_port_write_valid && !port_char_blocked {
         TxReq8$(valid: true, byte: ce6_port_write_byte)
     } else {
         tx_req_none()
     };
     let port_overrun_valid = ce6_port_write_valid && port_char_blocked;
+    let port_overrun_blocked = port_char_blocked || port_char_tx_req.valid;
     reg(clk) port_state: PortOverrunState reset(rst: init_port_overrun_state()) =
         port_overrun_step(
             port_state,
-        *usb_tx_busy ||
-        boot_banner_out.tx_req.valid ||
-        echo_out.tx_req.valid ||
-        resp_out.tx_req.valid ||
-        measure_eval.tx_req.valid ||
-        port_char_tx_req.valid,
-        port_overrun_valid,
-    ).next_state;
+            port_overrun_blocked,
+            port_overrun_valid,
+        ).next_state;
     let port_out = port_overrun_step(
         port_state,
-        *usb_tx_busy ||
-        boot_banner_out.tx_req.valid ||
-        echo_out.tx_req.valid ||
-        resp_out.tx_req.valid ||
-        measure_eval.tx_req.valid ||
-        port_char_tx_req.valid,
+        port_overrun_blocked,
         port_overrun_valid,
     );
     let usb_tx_low_req = tx_req_arbiter(resp_out.tx_req, port_char_tx_req, port_out.tx_req);

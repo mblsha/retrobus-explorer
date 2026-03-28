@@ -52,36 +52,28 @@ pub type RespStreamOut = ByteMsgStreamOut<RespMsg, 7>;
 pub type MeasureStreamState = ByteMsgStreamState<MeasureMsg, 7>;
 pub type MeasureStreamOut = ByteMsgStreamOut<MeasureMsg, 7>;
 
-pub fn init_echo_stream() -> EchoStreamState {
+fn init_byte_stream<TMsg, #uint IDX_W>(none_msg: TMsg) -> ByteMsgStreamState<TMsg, IDX_W> {
     ByteMsgStreamState$(
-        cur_msg: EchoMsg::None(),
+        cur_msg: none_msg,
         cur_idx: 0,
-        pending_msg: EchoMsg::None(),
+        pending_msg: none_msg,
     )
+}
+
+pub fn init_echo_stream() -> EchoStreamState {
+    init_byte_stream(EchoMsg::None())
 }
 
 pub fn init_port_stream() -> PortStreamState {
-    ByteMsgStreamState$(
-        cur_msg: PortMsg::None(),
-        cur_idx: 0,
-        pending_msg: PortMsg::None(),
-    )
+    init_byte_stream(PortMsg::None())
 }
 
 pub fn init_resp_stream() -> RespStreamState {
-    ByteMsgStreamState$(
-        cur_msg: RespMsg::None(),
-        cur_idx: 0,
-        pending_msg: RespMsg::None(),
-    )
+    init_byte_stream(RespMsg::None())
 }
 
 pub fn init_measure_stream() -> MeasureStreamState {
-    ByteMsgStreamState$(
-        cur_msg: MeasureMsg::None(),
-        cur_idx: 0,
-        pending_msg: MeasureMsg::None(),
-    )
+    init_byte_stream(MeasureMsg::None())
 }
 
 
@@ -105,6 +97,21 @@ fn dec_char(value: uint<4>) -> uint<8> {
     b'0' +. zext(value)
 }
 
+fn timing_byte(prefix: uint<8>, cycles: uint<7>, idx: RespIdx) -> TxReq8 {
+    match idx {
+        0 => TxReq8$(valid: true, byte: prefix),
+        1 => TxReq8$(valid: true, byte: b'='),
+        2 => TxReq8$(valid: true, byte: dec_char(timing_ns_hundreds(cycles))),
+        3 => TxReq8$(valid: true, byte: dec_char(timing_ns_tens(cycles))),
+        4 => TxReq8$(valid: true, byte: b'0'),
+        5 => TxReq8$(valid: true, byte: b'n'),
+        6 => TxReq8$(valid: true, byte: b's'),
+        7 => TxReq8$(valid: true, byte: b'\r'),
+        8 => TxReq8$(valid: true, byte: b'\n'),
+        _ => tx_req_none(),
+    }
+}
+
 fn u32_hex_char(value: uint<32>, idx: uint<3>) -> uint<8> {
     let nibble: uint<4> = match idx {
         0 => trunc(value >> 28),
@@ -117,14 +124,6 @@ fn u32_hex_char(value: uint<32>, idx: uint<3>) -> uint<8> {
         _ => trunc(value),
     };
     ascii::hex_char(nibble)
-}
-
-fn u8_hex_char(value: uint<8>, low_nibble: bool) -> uint<8> {
-    if low_nibble {
-        ascii::hex_char(trunc(value))
-    } else {
-        ascii::hex_char(trunc(value >> 4))
-    }
 }
 
 fn timing_ns_hundreds(cycles: uint<7>) -> uint<4> {
@@ -199,30 +198,8 @@ impl RespMsg {
             } else {
                 tx_req_none()
             },
-            Self::Timing$(cycles) => match idx {
-                0 => TxReq8$(valid: true, byte: b'T'),
-                1 => TxReq8$(valid: true, byte: b'='),
-                2 => TxReq8$(valid: true, byte: dec_char(timing_ns_hundreds(cycles))),
-                3 => TxReq8$(valid: true, byte: dec_char(timing_ns_tens(cycles))),
-                4 => TxReq8$(valid: true, byte: b'0'),
-                5 => TxReq8$(valid: true, byte: b'n'),
-                6 => TxReq8$(valid: true, byte: b's'),
-                7 => TxReq8$(valid: true, byte: b'\r'),
-                8 => TxReq8$(valid: true, byte: b'\n'),
-                _ => tx_req_none(),
-            },
-            Self::CtrlTiming$(cycles) => match idx {
-                0 => TxReq8$(valid: true, byte: b'C'),
-                1 => TxReq8$(valid: true, byte: b'='),
-                2 => TxReq8$(valid: true, byte: dec_char(timing_ns_hundreds(cycles))),
-                3 => TxReq8$(valid: true, byte: dec_char(timing_ns_tens(cycles))),
-                4 => TxReq8$(valid: true, byte: b'0'),
-                5 => TxReq8$(valid: true, byte: b'n'),
-                6 => TxReq8$(valid: true, byte: b's'),
-                7 => TxReq8$(valid: true, byte: b'\r'),
-                8 => TxReq8$(valid: true, byte: b'\n'),
-                _ => tx_req_none(),
-            },
+            Self::Timing$(cycles) => timing_byte(b'T', cycles, idx),
+            Self::CtrlTiming$(cycles) => timing_byte(b'C', cycles, idx),
             Self::Read$(addr, value) => match idx {
                 0 => TxReq8$(valid: true, byte: offset_hex_char(addr, 0)),
                 1 => TxReq8$(valid: true, byte: offset_hex_char(addr, 1)),
@@ -237,9 +214,9 @@ impl RespMsg {
             Self::MeasureStatus$(status) => if idx < 7 {
                 TxReq8$(valid: true, byte: b"MS,CNT="[trunc(idx)])
             } else if idx == 7 {
-                TxReq8$(valid: true, byte: u8_hex_char(status.count, false))
+                TxReq8$(valid: true, byte: byte_hex_char(status.count, false))
             } else if idx == 8 {
-                TxReq8$(valid: true, byte: u8_hex_char(status.count, true))
+                TxReq8$(valid: true, byte: byte_hex_char(status.count, true))
             } else if idx < 14 {
                 TxReq8$(valid: true, byte: b",OVF=0"[trunc(idx -. 9)])
             } else if idx < 22 {
@@ -271,15 +248,15 @@ impl MeasureMsg {
             Self::Report$(report) => if idx < 5 {
                 TxReq8$(valid: true, byte: b"MR,S="[trunc(idx)])
             } else if idx == 5 {
-                TxReq8$(valid: true, byte: u8_hex_char(report.start_tag, false))
+                TxReq8$(valid: true, byte: byte_hex_char(report.start_tag, false))
             } else if idx == 6 {
-                TxReq8$(valid: true, byte: u8_hex_char(report.start_tag, true))
+                TxReq8$(valid: true, byte: byte_hex_char(report.start_tag, true))
             } else if idx < 10 {
                 TxReq8$(valid: true, byte: b",E="[trunc(idx -. 7)])
             } else if idx == 10 {
-                TxReq8$(valid: true, byte: u8_hex_char(report.stop_tag, false))
+                TxReq8$(valid: true, byte: byte_hex_char(report.stop_tag, false))
             } else if idx == 11 {
-                TxReq8$(valid: true, byte: u8_hex_char(report.stop_tag, true))
+                TxReq8$(valid: true, byte: byte_hex_char(report.stop_tag, true))
             } else if idx < 16 {
                 TxReq8$(valid: true, byte: b",TK="[trunc(idx -. 12)])
             } else if idx < 24 {
