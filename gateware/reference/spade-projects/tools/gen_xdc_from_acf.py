@@ -275,6 +275,8 @@ def render_xdc(
         lines.append("")
         lines.append("# Vivado placement override for Au clock pin mapping")
         lines.append("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {clk_IBUF}]")
+    if any(signal == "nc" for signal, _, _ in pins):
+        lines.append("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {nc_IBUF}]")
 
     lines.append("")
     lines.append("# Allow bitstream generation even when some ports are intentionally left unconstrained")

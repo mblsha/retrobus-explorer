@@ -28,11 +28,12 @@ def require_command(name: str, help_text: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run cocotb test and emit VCD for Surfer")
+    parser = argparse.ArgumentParser(description="Run cocotb tests; optionally emit VCD for Surfer")
     parser.add_argument("--project", required=True, type=Path, help="Spade project directory")
     parser.add_argument("--top", help="HDL top module name (default: tooling.top or main)")
     parser.add_argument("--test-module", help="Python test module name (default: tooling.test_module)")
     parser.add_argument("--build-dir", default="build/main_cocotb", help="Cocotb build directory")
+    parser.add_argument("--waves", action="store_true", help="Emit dump.vcd and dump.surfer.vcd")
     args = parser.parse_args()
 
     require_command("swim", "install swim from spade-lang")
@@ -48,6 +49,8 @@ def main() -> int:
         return 2
 
     test_dir = project / "test"
+    vcd = test_dir / "dump.vcd"
+    surfer_vcd = test_dir / "dump.surfer.vcd"
     tools_dir = Path(__file__).resolve().parent
     umbrella_project = tools_dir.parent
 
@@ -66,14 +69,20 @@ def main() -> int:
     if cocotb_build_dir.exists():
         shutil.rmtree(cocotb_build_dir)
 
+    if not args.waves:
+        for stale_wave in (vcd, surfer_vcd):
+            if stale_wave.exists():
+                stale_wave.unlink()
+
     verilog_sources = [project / "build" / "spade.sv"] + resolve_verilog_sources(project)
     verilog_list_repr = ", ".join(f"Path(r'{p}')" for p in verilog_sources)
+    waves_literal = "True" if args.waves else "False"
     driver = (
         "from pathlib import Path\n"
         "from cocotb.runner import get_runner\n"
         "runner = get_runner('verilator')\n"
-        f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{top}', always=True, waves=True, build_dir='{args.build_dir}')\n"
-        f"runner.test(hdl_toplevel='{top}', test_module='{test_module}', test_dir=Path('test'), waves=True)\n"
+        f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{top}', always=True, waves={waves_literal}, build_dir='{args.build_dir}')\n"
+        f"runner.test(hdl_toplevel='{top}', test_module='{test_module}', test_dir=Path('test'), waves={waves_literal})\n"
     )
     venv_python = umbrella_project / ".venv" / "bin" / "python"
     if venv_python.is_file():
@@ -82,15 +91,14 @@ def main() -> int:
         require_command("uv", "https://docs.astral.sh/uv/")
         run(["uv", "run", "python", "-c", driver], cwd=project, env=env)
 
-    vcd = test_dir / "dump.vcd"
-    surfer_vcd = test_dir / "dump.surfer.vcd"
-    if not vcd.exists():
-        print(f"error: expected {vcd}", file=sys.stderr)
-        return 1
+    if args.waves:
+        if not vcd.exists():
+            print(f"error: expected {vcd}", file=sys.stderr)
+            return 1
 
-    shutil.copyfile(vcd, surfer_vcd)
-    print(f"waveform: {vcd}")
-    print(f"surfer waveform: {surfer_vcd}")
+        shutil.copyfile(vcd, surfer_vcd)
+        print(f"waveform: {vcd}")
+        print(f"surfer waveform: {surfer_vcd}")
     print(f"results: {test_dir / 'results.xml'}")
     return 0
 
