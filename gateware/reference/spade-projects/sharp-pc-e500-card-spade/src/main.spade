@@ -41,7 +41,6 @@ type MeasurePacked = uint<112>;
 type MeasureQueueLevel = uint<6>;
 type MeasureCount = uint<32>;
 type Ce6Low16 = uint<16>;
-type WriteReq = (CardOffset, CardData);
 
 fn sample_clk_hz() -> uint<32> { 100_000_000 }
 fn cooldown_ns() -> uint<32> { 50 }
@@ -320,34 +319,6 @@ struct MeasureEngineOut {
     tx_req: TxReq8,
 }
 
-enum ParserMemAccess {
-    None,
-    RamRead{addr: CardOffset},
-    RamWrite{addr: CardOffset, data: CardData},
-    RomRead{addr: CardOffset},
-    RomWrite{addr: CardOffset, data: CardData},
-}
-
-enum ParserTimingUpdate {
-    None,
-    Classify{cycles: ClassifyCtr},
-    CtrlWrite{cycles: ClassifyCtr},
-}
-
-enum ParserMeasureAction {
-    None,
-    Dump,
-    Status,
-    Clear,
-}
-
-struct ParserEventDecode {
-    mem: ParserMemAccess,
-    timing: ParserTimingUpdate,
-    measure: ParserMeasureAction,
-    parse_error: bool,
-}
-
 struct ParserFrontStage {
     event: ParserEvent,
     echo: EchoMsg,
@@ -429,143 +400,6 @@ fn init_parser_front_stage() -> ParserFrontStage {
         event: ParserEvent::None(),
         echo: EchoMsg::None(),
     )
-}
-
-impl ParserMemAccess {
-    fn ram_read(self) -> Option<CardOffset> {
-        if let Self::RamRead$(addr) = self {
-            Some(addr)
-        } else {
-            None
-        }
-    }
-
-    fn ram_write(self) -> Option<WriteReq> {
-        if let Self::RamWrite$(addr, data) = self {
-            Some((addr, data))
-        } else {
-            None
-        }
-    }
-
-    fn rom_read(self) -> Option<CardOffset> {
-        if let Self::RomRead$(addr) = self {
-            Some(addr)
-        } else {
-            None
-        }
-    }
-
-    fn rom_write(self) -> Option<WriteReq> {
-        if let Self::RomWrite$(addr, data) = self {
-            Some((addr, data))
-        } else {
-            None
-        }
-    }
-}
-
-impl ParserTimingUpdate {
-    fn classify(self) -> Option<ClassifyCtr> {
-        if let Self::Classify$(cycles) = self {
-            Some(cycles)
-        } else {
-            None
-        }
-    }
-
-    fn ctrl_write(self) -> Option<ClassifyCtr> {
-        if let Self::CtrlWrite$(cycles) = self {
-            Some(cycles)
-        } else {
-            None
-        }
-    }
-}
-
-impl ParserMeasureAction {
-    fn dump_request(self) -> bool {
-        if let Self::Dump = self { true } else { false }
-    }
-
-    fn status_request(self) -> bool {
-        if let Self::Status = self { true } else { false }
-    }
-
-    fn clear_request(self) -> bool {
-        if let Self::Clear = self { true } else { false }
-    }
-}
-
-fn decode_parser_event(event: ParserEvent) -> ParserEventDecode {
-    match event {
-        ParserEvent::ReadRam$(addr) => ParserEventDecode$(
-            mem: ParserMemAccess::RamRead(addr),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::None(),
-            parse_error: false,
-        ),
-        ParserEvent::WriteRam$(addr, value) => ParserEventDecode$(
-            mem: ParserMemAccess::RamWrite(addr, value),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::None(),
-            parse_error: false,
-        ),
-        ParserEvent::ReadRom$(addr) => ParserEventDecode$(
-            mem: ParserMemAccess::RomRead(addr),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::None(),
-            parse_error: false,
-        ),
-        ParserEvent::WriteRom$(addr, value) => ParserEventDecode$(
-            mem: ParserMemAccess::RomWrite(addr, value),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::None(),
-            parse_error: false,
-        ),
-        ParserEvent::SetClassifyDelay$(cycles) => ParserEventDecode$(
-            mem: ParserMemAccess::None(),
-            timing: ParserTimingUpdate::Classify(cycles),
-            measure: ParserMeasureAction::None(),
-            parse_error: false,
-        ),
-        ParserEvent::SetCtrlWriteDelay$(cycles) => ParserEventDecode$(
-            mem: ParserMemAccess::None(),
-            timing: ParserTimingUpdate::CtrlWrite(cycles),
-            measure: ParserMeasureAction::None(),
-            parse_error: false,
-        ),
-        ParserEvent::MeasureDump => ParserEventDecode$(
-            mem: ParserMemAccess::None(),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::Dump(),
-            parse_error: false,
-        ),
-        ParserEvent::MeasureStatus => ParserEventDecode$(
-            mem: ParserMemAccess::None(),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::Status(),
-            parse_error: false,
-        ),
-        ParserEvent::MeasureClear => ParserEventDecode$(
-            mem: ParserMemAccess::None(),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::Clear(),
-            parse_error: false,
-        ),
-        ParserEvent::ParseErr => ParserEventDecode$(
-            mem: ParserMemAccess::None(),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::None(),
-            parse_error: true,
-        ),
-        ParserEvent::None => ParserEventDecode$(
-            mem: ParserMemAccess::None(),
-            timing: ParserTimingUpdate::None(),
-            measure: ParserMeasureAction::None(),
-            parse_error: false,
-        ),
-    }
 }
 
 fn pending_uart_step<#uint WIDTH>(
@@ -777,21 +611,19 @@ fn measure_engine_step(
     let probe = measure_stream_step(
         state.stream,
         block_tx,
-        false,
-        MeasureMsg::None(),
+        None,
     );
     let want_msg = state.dump_active && probe.msg_none;
     let next_msg = if !want_msg {
-        MeasureMsg::None()
+        None
     } else if !fifo_empty {
-        MeasureMsg::Report(unpack_measure_report(fifo_dout))
+        Some(MeasureMsg::Report(unpack_measure_report(fifo_dout)))
     } else {
-        MeasureMsg::End()
+        Some(MeasureMsg::End())
     };
     let stream_out = measure_stream_step(
         state.stream,
         block_tx,
-        want_msg,
         next_msg,
     );
     let dump_complete = want_msg && fifo_empty;
@@ -840,6 +672,32 @@ entity parser_core(
     };
 
     parser_step(state, rx_valid, rx_parity_error, rx_byte)
+}
+
+entity echo_stream_core(
+    clk: clock,
+    rst: bool,
+    block_tx: bool,
+    next_msg: Option<EchoMsg>,
+) -> msg::EchoStreamOut {
+    reg(clk) state: EchoStreamState reset(rst: init_echo_stream()) = {
+        echo_stream_step(state, block_tx, next_msg).state
+    };
+
+    echo_stream_step(state, block_tx, next_msg)
+}
+
+entity resp_stream_core(
+    clk: clock,
+    rst: bool,
+    block_tx: bool,
+    next_msg: Option<RespMsg>,
+) -> msg::RespStreamOut {
+    reg(clk) state: RespStreamState reset(rst: init_resp_stream()) = {
+        resp_stream_step(state, block_tx, next_msg).state
+    };
+
+    resp_stream_step(state, block_tx, next_msg)
 }
 
 entity pending_uart_core<#uint WIDTH>(
@@ -1008,40 +866,34 @@ entity main_core(
             event: usb_parse.event,
             echo: usb_parse.echo,
         );
-    let parser_event = decode_parser_event(parser_front.event);
-    let parser_ram_read = parser_event.mem.ram_read();
-    let parser_ram_write = parser_event.mem.ram_write();
-    let parser_rom_read = parser_event.mem.rom_read();
-    let parser_rom_write = parser_event.mem.rom_write();
-    let classify_delay_update = parser_event.timing.classify();
-    let ctrl_write_delay_update = parser_event.timing.ctrl_write();
-    let measure_dump_request = parser_event.measure.dump_request();
-    let measure_status_request = parser_event.measure.status_request();
-    let measure_clear_request = parser_event.measure.clear_request();
-    let (usb_ram_read_valid, usb_ram_read_addr): (bool, CardOffset) = match parser_ram_read {
+    let parser_event = parser_front.event;
+    let (usb_ram_read_valid, usb_ram_read_addr): (bool, CardOffset) = match parser_event.ram_read() {
         Some(addr) => (true, addr),
         None => (false, 0),
     };
-    let (usb_rom_read_valid, usb_rom_read_addr): (bool, CardOffset) = match parser_rom_read {
+    let (usb_rom_read_valid, usb_rom_read_addr): (bool, CardOffset) = match parser_event.rom_read() {
         Some(addr) => (true, addr),
         None => (false, 0),
     };
-    let (uart_ram_write_valid, uart_ram_write_addr, uart_ram_write_data): (bool, CardOffset, CardData) = match parser_ram_write {
+    let (uart_ram_write_valid, uart_ram_write_addr, uart_ram_write_data): (bool, CardOffset, CardData) = match parser_event.ram_write() {
         Some((addr, data)) => (true, addr, data),
         None => (false, 0, 0),
     };
-    let (uart_rom_write_valid, uart_rom_write_addr, uart_rom_write_data): (bool, CardOffset, CardData) = match parser_rom_write {
+    let (uart_rom_write_valid, uart_rom_write_addr, uart_rom_write_data): (bool, CardOffset, CardData) = match parser_event.rom_write() {
         Some((addr, data)) => (true, addr, data),
         None => (false, 0, 0),
     };
-    let (classify_delay_update_valid, classify_delay_cycles): (bool, ClassifyCtr) = match classify_delay_update {
+    let (classify_delay_update_valid, classify_delay_cycles): (bool, ClassifyCtr) = match parser_event.classify_delay() {
         Some(cycles) => (true, cycles),
         None => (false, 0),
     };
-    let (ctrl_write_delay_update_valid, ctrl_write_delay_cycles): (bool, ClassifyCtr) = match ctrl_write_delay_update {
+    let (ctrl_write_delay_update_valid, ctrl_write_delay_cycles): (bool, ClassifyCtr) = match parser_event.ctrl_write_delay() {
         Some(cycles) => (true, cycles),
         None => (false, 0),
     };
+    let measure_dump_request = parser_event.measure_dump_request();
+    let measure_status_request = parser_event.measure_status_request();
+    let measure_clear_request = parser_event.measure_clear_request();
 
     let addr_uart = inst pending_uart_core::<18>(
         clk,
@@ -1208,17 +1060,12 @@ entity main_core(
     set sampled_bus_fifo_empty_w = &sampled_bus_fifo.empty;
     set sampled_bus_fifo_dout_w = &sampled_bus_fifo.dout;
 
-    let echo_msg = parser_front.echo;
-    let echo_msg_valid = if let EchoMsg::None = echo_msg { false } else { true };
-
     let boot_tx_busy = *usb_tx_busy || boot_banner_out.tx_req.valid;
-    reg(clk) echo_state: EchoStreamState reset(rst: init_echo_stream()) =
-        echo_stream_step(echo_state, boot_tx_busy, echo_msg_valid, echo_msg).state;
-    let echo_out = echo_stream_step(
-        echo_state,
+    let echo_out = inst echo_stream_core(
+        clk,
+        rst,
         boot_tx_busy,
-        echo_msg_valid,
-        echo_msg,
+        parser_front.echo.as_option(),
     );
     let ce6_port_write_valid = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_uart_port();
     let ce6_port_write_byte = ce6_ctrl_step.data;
@@ -1367,27 +1214,19 @@ entity main_core(
         RespMsg::MeasureStatus(measure_status_now)
     } else if measure_clear_request {
         RespMsg::Ok()
-    } else if parser_event.parse_error {
+    } else if parser_event.is_parse_err() {
         RespMsg::Err()
     } else {
         RespMsg::None()
     };
     reg(clk) resp_msg: RespMsg reset(rst: RespMsg::None()) = next_resp_msg;
-    let resp_msg_valid = if let RespMsg::None = resp_msg { false } else { true };
 
     let resp_block_tx = measure_block_tx || measure_eval.tx_req.valid;
-    reg(clk) resp_state: RespStreamState reset(rst: init_resp_stream()) =
-        resp_stream_step(
-            resp_state,
-            resp_block_tx,
-            resp_msg_valid,
-            resp_msg,
-        ).state;
-    let resp_out = resp_stream_step(
-        resp_state,
+    let resp_out = inst resp_stream_core(
+        clk,
+        rst,
         resp_block_tx,
-        resp_msg_valid,
-        resp_msg,
+        resp_msg.as_option(),
     );
 
     let port_char_blocked = resp_block_tx || resp_out.tx_req.valid;

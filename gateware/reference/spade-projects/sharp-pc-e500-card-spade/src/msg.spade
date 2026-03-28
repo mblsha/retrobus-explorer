@@ -1,5 +1,5 @@
 use shared_components::ascii;
-use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
+use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_from_option, tx_req_none};
 
 use super::protocol::{CardData, CardOffset, EchoMsg};
 
@@ -69,12 +69,23 @@ fn byte_stream_step<TMsg, #uint IDX_W>(
     state: ByteMsgStreamState<TMsg, IDX_W>,
     none_msg: TMsg,
     block_tx: bool,
-    msg_valid: bool,
-    msg: TMsg,
+    next_msg: Option<TMsg>,
     is_none: impl Fn(TMsg) -> bool,
     render_byte: impl Fn(TMsg, uint<IDX_W>) -> TxReq8,
 ) -> ByteMsgStreamOut<TMsg, IDX_W> {
-    state.step_with(none_msg, is_none, render_byte, block_tx, msg_valid, msg)
+    state.step_with_option(none_msg, is_none, render_byte, block_tx, next_msg)
+}
+
+fn tx_req_byte(byte: uint<8>) -> TxReq8 {
+    TxReq8$(valid: true, byte: byte)
+}
+
+fn indexed_bytes<#uint N, #uint IDX_W>(bytes: [uint<8>; N], idx: uint<IDX_W>) -> TxReq8 {
+    tx_req_from_option(if idx < N {
+        Some(bytes[trunc(idx)])
+    } else {
+        None
+    })
 }
 
 fn offset_hex_char(addr: CardOffset, idx: uint<2>) -> uint<8> {
@@ -135,6 +146,14 @@ fn timing_ns_tens(cycles: uint<7>) -> uint<4> {
 }
 
 impl EchoMsg {
+    pub(lib) fn as_option(self) -> Option<Self> {
+        if self.is_none() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
     fn is_none(self) -> bool {
         if let Self::None = self { true } else { false }
     }
@@ -142,21 +161,21 @@ impl EchoMsg {
     fn byte(self, idx: EchoIdx) -> TxReq8 {
         match self {
             Self::None => tx_req_none(),
-            Self::Byte$(byte) => if idx == 0 {
-                TxReq8$(valid: true, byte: byte)
-            } else {
-                tx_req_none()
-            },
-            Self::CrLf => match idx {
-                0 => TxReq8$(valid: true, byte: b'\r'),
-                1 => TxReq8$(valid: true, byte: b'\n'),
-                _ => tx_req_none(),
-            },
+            Self::Byte$(byte) => indexed_bytes([byte], idx),
+            Self::CrLf => indexed_bytes(b"\r\n", idx),
         }
     }
 }
 
 impl RespMsg {
+    pub(lib) fn as_option(self) -> Option<Self> {
+        if self.is_none() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
     fn is_none(self) -> bool {
         if let Self::None = self { true } else { false }
     }
@@ -164,52 +183,40 @@ impl RespMsg {
     fn byte(self, idx: RespIdx) -> TxReq8 {
         match self {
             Self::None => tx_req_none(),
-            Self::Ok => if idx < 4 {
-                TxReq8$(valid: true, byte: b"OK\r\n"[trunc(idx)])
-            } else {
-                tx_req_none()
-            },
-            Self::Busy => if idx < 6 {
-                TxReq8$(valid: true, byte: b"BUSY\r\n"[trunc(idx)])
-            } else {
-                tx_req_none()
-            },
-            Self::Err => if idx < 5 {
-                TxReq8$(valid: true, byte: b"ERR\r\n"[trunc(idx)])
-            } else {
-                tx_req_none()
-            },
+            Self::Ok => indexed_bytes(b"OK\r\n", idx),
+            Self::Busy => indexed_bytes(b"BUSY\r\n", idx),
+            Self::Err => indexed_bytes(b"ERR\r\n", idx),
             Self::Timing$(cycles) => timing_byte(b'T', cycles, idx),
             Self::CtrlTiming$(cycles) => timing_byte(b'C', cycles, idx),
             Self::Read$(addr, value) => match idx {
-                0 => TxReq8$(valid: true, byte: offset_hex_char(addr, 0)),
-                1 => TxReq8$(valid: true, byte: offset_hex_char(addr, 1)),
-                2 => TxReq8$(valid: true, byte: offset_hex_char(addr, 2)),
-                3 => TxReq8$(valid: true, byte: b'='),
-                4 => TxReq8$(valid: true, byte: byte_hex_char(value, false)),
-                5 => TxReq8$(valid: true, byte: byte_hex_char(value, true)),
-                6 => TxReq8$(valid: true, byte: b'\r'),
-                7 => TxReq8$(valid: true, byte: b'\n'),
+                0 => tx_req_byte(offset_hex_char(addr, 0)),
+                1 => tx_req_byte(offset_hex_char(addr, 1)),
+                2 => tx_req_byte(offset_hex_char(addr, 2)),
+                3 => tx_req_byte(b'='),
+                4 => tx_req_byte(byte_hex_char(value, false)),
+                5 => tx_req_byte(byte_hex_char(value, true)),
+                6 => tx_req_byte(b'\r'),
+                7 => tx_req_byte(b'\n'),
                 _ => tx_req_none(),
             },
             Self::MeasureStatus$(status) => if idx < 7 {
-                TxReq8$(valid: true, byte: b"MS,CNT="[trunc(idx)])
+                indexed_bytes(b"MS,CNT=", idx)
             } else if idx == 7 {
-                TxReq8$(valid: true, byte: byte_hex_char(status.count, false))
+                tx_req_byte(byte_hex_char(status.count, false))
             } else if idx == 8 {
-                TxReq8$(valid: true, byte: byte_hex_char(status.count, true))
+                tx_req_byte(byte_hex_char(status.count, true))
             } else if idx < 14 {
-                TxReq8$(valid: true, byte: b",OVF=0"[trunc(idx -. 9)])
+                indexed_bytes(b",OVF=0", idx -. 9)
             } else if idx < 22 {
-                TxReq8$(valid: true, byte: u32_hex_char(status.overflow, trunc(idx -. 14)))
+                tx_req_byte(u32_hex_char(status.overflow, trunc(idx -. 14)))
             } else if idx < 27 {
-                TxReq8$(valid: true, byte: b",ARM="[trunc(idx -. 22)])
+                indexed_bytes(b",ARM=", idx -. 22)
             } else if idx == 27 {
-                TxReq8$(valid: true, byte: if status.armed { b'1' } else { b'0' })
+                tx_req_byte(if status.armed { b'1' } else { b'0' })
             } else if idx == 28 {
-                TxReq8$(valid: true, byte: b'\r')
+                tx_req_byte(b'\r')
             } else if idx == 29 {
-                TxReq8$(valid: true, byte: b'\n')
+                tx_req_byte(b'\n')
             } else {
                 tx_req_none()
             },
@@ -218,6 +225,14 @@ impl RespMsg {
 }
 
 impl MeasureMsg {
+    pub(lib) fn as_option(self) -> Option<Self> {
+        if self.is_none() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
     fn is_none(self) -> bool {
         if let Self::None = self { true } else { false }
     }
@@ -226,42 +241,42 @@ impl MeasureMsg {
         match self {
             Self::None => tx_req_none(),
             Self::Report$(report) => if idx < 5 {
-                TxReq8$(valid: true, byte: b"MR,S="[trunc(idx)])
+                indexed_bytes(b"MR,S=", idx)
             } else if idx == 5 {
-                TxReq8$(valid: true, byte: byte_hex_char(report.start_tag, false))
+                tx_req_byte(byte_hex_char(report.start_tag, false))
             } else if idx == 6 {
-                TxReq8$(valid: true, byte: byte_hex_char(report.start_tag, true))
+                tx_req_byte(byte_hex_char(report.start_tag, true))
             } else if idx < 10 {
-                TxReq8$(valid: true, byte: b",E="[trunc(idx -. 7)])
+                indexed_bytes(b",E=", idx -. 7)
             } else if idx == 10 {
-                TxReq8$(valid: true, byte: byte_hex_char(report.stop_tag, false))
+                tx_req_byte(byte_hex_char(report.stop_tag, false))
             } else if idx == 11 {
-                TxReq8$(valid: true, byte: byte_hex_char(report.stop_tag, true))
+                tx_req_byte(byte_hex_char(report.stop_tag, true))
             } else if idx < 16 {
-                TxReq8$(valid: true, byte: b",TK="[trunc(idx -. 12)])
+                indexed_bytes(b",TK=", idx -. 12)
             } else if idx < 24 {
-                TxReq8$(valid: true, byte: u32_hex_char(report.delta_ticks, trunc(idx -. 16)))
+                tx_req_byte(u32_hex_char(report.delta_ticks, trunc(idx -. 16)))
             } else if idx < 28 {
-                TxReq8$(valid: true, byte: b",EV="[trunc(idx -. 24)])
+                indexed_bytes(b",EV=", idx -. 24)
             } else if idx < 36 {
-                TxReq8$(valid: true, byte: u32_hex_char(report.delta_events, trunc(idx -. 28)))
+                tx_req_byte(u32_hex_char(report.delta_events, trunc(idx -. 28)))
             } else if idx < 40 {
-                TxReq8$(valid: true, byte: b",AU="[trunc(idx -. 36)])
+                indexed_bytes(b",AU=", idx -. 36)
             } else if idx < 48 {
-                TxReq8$(valid: true, byte: u32_hex_char(report.delta_addr_uart, trunc(idx -. 40)))
+                tx_req_byte(u32_hex_char(report.delta_addr_uart, trunc(idx -. 40)))
             } else if idx == 48 {
-                TxReq8$(valid: true, byte: b'\r')
+                tx_req_byte(b'\r')
             } else if idx == 49 {
-                TxReq8$(valid: true, byte: b'\n')
+                tx_req_byte(b'\n')
             } else {
                 tx_req_none()
             },
             Self::End => if idx < 4 {
-                TxReq8$(valid: true, byte: b"MEND"[trunc(idx)])
+                indexed_bytes(b"MEND", idx)
             } else if idx == 4 {
-                TxReq8$(valid: true, byte: b'\r')
+                tx_req_byte(b'\r')
             } else if idx == 5 {
-                TxReq8$(valid: true, byte: b'\n')
+                tx_req_byte(b'\n')
             } else {
                 tx_req_none()
             },
@@ -272,15 +287,13 @@ impl MeasureMsg {
 pub(lib) fn echo_stream_step(
     state: EchoStreamState,
     block_tx: bool,
-    msg_valid: bool,
-    msg: EchoMsg,
+    next_msg: Option<EchoMsg>,
 ) -> EchoStreamOut {
     byte_stream_step(
         state,
         EchoMsg::None(),
         block_tx,
-        msg_valid,
-        msg,
+        next_msg,
         fn |stream_msg| { stream_msg.is_none() },
         fn |stream_msg, idx| { stream_msg.byte(idx) },
     )
@@ -289,15 +302,13 @@ pub(lib) fn echo_stream_step(
 pub(lib) fn resp_stream_step(
     state: RespStreamState,
     block_tx: bool,
-    msg_valid: bool,
-    msg: RespMsg,
+    next_msg: Option<RespMsg>,
 ) -> RespStreamOut {
     byte_stream_step(
         state,
         RespMsg::None(),
         block_tx,
-        msg_valid,
-        msg,
+        next_msg,
         fn |stream_msg| { stream_msg.is_none() },
         fn |stream_msg, idx| { stream_msg.byte(idx) },
     )
@@ -306,15 +317,13 @@ pub(lib) fn resp_stream_step(
 pub(lib) fn measure_stream_step(
     state: MeasureStreamState,
     block_tx: bool,
-    msg_valid: bool,
-    msg: MeasureMsg,
+    next_msg: Option<MeasureMsg>,
 ) -> MeasureStreamOut {
     byte_stream_step(
         state,
         MeasureMsg::None(),
         block_tx,
-        msg_valid,
-        msg,
+        next_msg,
         fn |stream_msg| { stream_msg.is_none() },
         fn |stream_msg, idx| { stream_msg.byte(idx) },
     )
