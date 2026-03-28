@@ -3,7 +3,7 @@ mod msg;
 mod protocol;
 
 use shared_components::{
-    boot_banner::{BootBannerState, boot_banner_step, init_boot_banner},
+    boot_banner::{BootBannerOut, BootBannerState, boot_banner_step, init_boot_banner},
     clocking::sampled_bool_clock,
     config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
     memory::sync_fifo,
@@ -26,7 +26,7 @@ use msg::{
     measure_stream_step,
     resp_stream_step,
 };
-use protocol::{EchoMsg, ParserEvent, ParserState, parser_step};
+use protocol::{EchoMsg, ParserEvent, ParserState, ParserStepOut, parser_step};
 
 type BusAddr = uint<18>;
 type CardData = uint<8>;
@@ -231,6 +231,11 @@ struct PendingUartOut<#uint WIDTH> {
     dropped: bool,
 }
 
+struct PendingUartEval<#uint WIDTH> {
+    state: PendingUartState<WIDTH>,
+    step: PendingUartOut<WIDTH>,
+}
+
 struct AccessCycleState {
     prev_ce: bool,
     classified: bool,
@@ -248,6 +253,11 @@ struct AccessCycleStep {
     start_tick: TickCount,
     addr: BusAddr,
     data: CardData,
+}
+
+struct AccessCycleEval {
+    state: AccessCycleState,
+    step: AccessCycleStep,
 }
 
 struct CtrlWriteState {
@@ -793,6 +803,123 @@ fn measure_engine_step(
     )
 }
 
+entity boot_banner_core<#uint IDX_W, #uint N>(
+    clk: clock,
+    rst: bool,
+    banner: [uint<8>; N],
+    block_tx: bool,
+) -> BootBannerOut<IDX_W> {
+    reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = {
+        boot_banner_step(state, banner, block_tx).state
+    };
+
+    boot_banner_step(state, banner, block_tx)
+}
+
+entity parser_core(
+    clk: clock,
+    rst: bool,
+    rx_valid: bool,
+    rx_parity_error: bool,
+    rx_byte: uint<8>,
+) -> ParserStepOut {
+    reg(clk) state: ParserState reset(rst: protocol::init_parser()) = {
+        parser_step(state, rx_valid, rx_parity_error, rx_byte).state
+    };
+
+    parser_step(state, rx_valid, rx_parity_error, rx_byte)
+}
+
+entity pending_uart_core<#uint WIDTH>(
+    clk: clock,
+    rst: bool,
+    now: uint<WIDTH>,
+    busy: bool,
+    settle_last: uint<4>,
+) -> PendingUartEval<WIDTH> {
+    reg(clk) state: PendingUartState<WIDTH> reset(rst: init_pending_uart_state()) = {
+        pending_uart_step(state, now, busy, settle_last).next_state
+    };
+    let step = pending_uart_step(state, now, busy, settle_last);
+
+    PendingUartEval$(state: state, step: step)
+}
+
+entity access_cycle_core(
+    clk: clock,
+    rst: bool,
+    ce: bool,
+    rw: bool,
+    addr: BusAddr,
+    data: CardData,
+    tick: TickCount,
+    classify_delay: ClassifyCtr,
+) -> AccessCycleEval {
+    reg(clk) state: AccessCycleState reset(rst: init_access_cycle_state()) = {
+        access_cycle_step(state, ce, rw, addr, data, tick, classify_delay).next_state
+    };
+    let step = access_cycle_step(state, ce, rw, addr, data, tick, classify_delay);
+
+    AccessCycleEval$(state: state, step: step)
+}
+
+entity ctrl_write_core(
+    clk: clock,
+    rst: bool,
+    ctrl_window: bool,
+    addr: BusAddr,
+    data: CardData,
+    ctrl_write_delay: ClassifyCtr,
+) -> CtrlWriteStep {
+    reg(clk) state: CtrlWriteState reset(rst: init_ctrl_write_state()) = {
+        ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay).next_state
+    };
+
+    ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay)
+}
+
+entity sampled_bus_core(
+    clk: clock,
+    rst: bool,
+    cycle_toggle: bool,
+    addr_pulse_fire: bool,
+) -> SampledBusStep {
+    reg(clk) state: SampledBusState reset(rst: init_sampled_bus_state()) = {
+        sampled_bus_step(state, cycle_toggle, addr_pulse_fire).next_state
+    };
+
+    sampled_bus_step(state, cycle_toggle, addr_pulse_fire)
+}
+
+entity measure_engine_core(
+    clk: clock,
+    rst: bool,
+    block_tx: bool,
+    dump_request: bool,
+    clear_request: bool,
+    fifo_empty: bool,
+    fifo_dout: MeasurePacked,
+) -> MeasureEngineOut {
+    reg(clk) state: MeasureEngineState reset(rst: init_measure_engine_state()) = {
+        measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout).next_state
+    };
+
+    measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout)
+}
+
+entity port_overrun_core(
+    clk: clock,
+    rst: bool,
+    block_tx: bool,
+    overrun_valid: bool,
+) -> PortOverrunOut {
+    reg(clk) state: PortOverrunState reset(rst: init_port_overrun_state()) = {
+        port_overrun_step(state, block_tx, overrun_valid).next_state
+    };
+
+    port_overrun_step(state, block_tx, overrun_valid)
+}
+
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -850,13 +977,20 @@ entity main_core(
 
     let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
 
-    reg(clk) boot_banner: BootBannerState<8> reset(rst: init_boot_banner()) =
-        boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy).state;
-    let boot_banner_out = boot_banner_step(boot_banner, build_info::boot_banner_text(), *usb_tx_busy);
+    let boot_banner_out = inst boot_banner_core::<8, 56>(
+        clk,
+        rst,
+        build_info::boot_banner_text(),
+        *usb_tx_busy,
+    );
 
-    reg(clk) parser: ParserState reset(rst: protocol::init_parser()) =
-        parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte).state;
-    let usb_parse = parser_step(parser, usb_rx_out.valid, usb_rx_out.parity_error, usb_rx_out.byte);
+    let usb_parse = inst parser_core(
+        clk,
+        rst,
+        usb_rx_out.valid,
+        usb_rx_out.parity_error,
+        usb_rx_out.byte,
+    );
     let parser_event = decode_parser_event(usb_parse.event);
     let parser_ram_read = parser_event.mem.ram_read();
     let parser_ram_write = parser_event.mem.ram_write();
@@ -892,10 +1026,13 @@ entity main_core(
         None => (false, 0),
     };
 
-    reg(clk) addr_state: PendingUartState<18> reset(rst: init_pending_uart_state()) =
-        pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last).next_state;
-    reg(clk) data_state: PendingUartState<8> reset(rst: init_pending_uart_state()) =
-        pending_uart_step(data_state, data_now, false, cooldown_last).next_state;
+    let addr_uart = inst pending_uart_core::<18>(
+        clk,
+        rst,
+        addr_now,
+        *addr_uart_busy,
+        cooldown_last,
+    );
     reg(clk) data_uart_last: CardData reset(rst: 0) = data_uart_now;
     reg(clk) data_uart_changed: bool reset(rst: false) = data_uart_now != data_uart_last;
     reg(cycle_start_clock) cycle_start_toggle: bool reset(rst: false) = !cycle_start_toggle;
@@ -940,47 +1077,69 @@ entity main_core(
         };
 
     let ce1_active = ce1 && !mem_clear.active;
-    reg(clk) ce1_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
-        access_cycle_step(ce1_cycle, ce1_active, rw, addr, data_in, tick, classify_delay).next_state;
     let ce6_active = !ce6 && !mem_clear.active;
     let ce6_ctrl_active = !ce6_ctrl && !mem_clear.active;
-    reg(clk) sampled_bus_state: SampledBusState reset(rst: init_sampled_bus_state()) =
-        sampled_bus_step(sampled_bus_state, cycle_start_toggle_sync, addr_pulse_fire).next_state;
     let ce6_now_addr = decode_ce6_addr(addr_now);
     let ce6_bus_addr = decode_ce6_addr(addr);
     let ce6_ctrl_window = ce6_ctrl_active && !rw_ctrl && ce6_now_addr.ctrl.in_range();
-    reg(clk) ce6_ctrl_state: CtrlWriteState reset(rst: init_ctrl_write_state()) =
-        ctrl_write_step(ce6_ctrl_state, ce6_ctrl_window, addr_now, data_now, ctrl_write_delay).next_state;
-    reg(clk) ce6_cycle: AccessCycleState reset(rst: init_access_cycle_state()) =
-        access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay).next_state;
-    let sampled_bus = sampled_bus_step(sampled_bus_state, cycle_start_toggle_sync, addr_pulse_fire);
-    let ce6_ctrl_step = ctrl_write_step(ce6_ctrl_state, ce6_ctrl_window, addr_now, data_now, ctrl_write_delay);
-    let ce1_step = access_cycle_step(ce1_cycle, ce1_active, rw, addr, data_in, tick, classify_delay);
-    let ce6_step = access_cycle_step(ce6_cycle, ce6_active, rw, addr, data_in, tick, classify_delay);
-    let ce6_step_addr = decode_ce6_addr(ce6_step.addr);
+    let ce1_eval = inst access_cycle_core(
+        clk,
+        rst,
+        ce1_active,
+        rw,
+        addr,
+        data_in,
+        tick,
+        classify_delay,
+    );
+    let sampled_bus = inst sampled_bus_core(
+        clk,
+        rst,
+        cycle_start_toggle_sync,
+        addr_pulse_fire,
+    );
+    let ce6_ctrl_step = inst ctrl_write_core(
+        clk,
+        rst,
+        ce6_ctrl_window,
+        addr_now,
+        data_now,
+        ctrl_write_delay,
+    );
+    let ce6_eval = inst access_cycle_core(
+        clk,
+        rst,
+        ce6_active,
+        rw,
+        addr,
+        data_in,
+        tick,
+        classify_delay,
+    );
+    let ce6_step_addr = decode_ce6_addr(ce6_eval.step.addr);
     let ce6_ctrl_step_addr = decode_ce6_addr(ce6_ctrl_step.addr);
-    let ce6_cycle_addr = decode_ce6_addr(if ce6_cycle.classified { ce6_cycle.latched_addr } else { addr });
+    let ce6_cycle_addr = decode_ce6_addr(if ce6_eval.state.classified { ce6_eval.state.latched_addr } else { addr });
 
-    let classify_now_ce1 = ce1_step.classify_now;
-    let classify_now_ce6 = ce6_step.classify_now;
-    let read_start = classify_now_ce1 && ce1_step.kind_read;
-    let write_commit = classify_now_ce1 && !ce1_step.kind_read;
-    let uart_ram_read_collision = usb_ram_read_valid && write_commit && card_offset(ce1_step.addr) == usb_ram_read_addr;
+    let classify_now_ce1 = ce1_eval.step.classify_now;
+    let classify_now_ce6 = ce6_eval.step.classify_now;
+    let read_start = classify_now_ce1 && ce1_eval.step.kind_read;
+    let write_commit = classify_now_ce1 && !ce1_eval.step.kind_read;
+    let uart_ram_read_collision = usb_ram_read_valid && write_commit && card_offset(ce1_eval.step.addr) == usb_ram_read_addr;
     let uart_ram_write_busy = uart_ram_write_valid && (write_commit || mem_clear.active);
     let uart_ram_write_fire = uart_ram_write_valid && !write_commit && !mem_clear.active;
-    let ce6_read_event = classify_now_ce6 && ce6_step.kind_read && !ce6_step_addr.ctrl.in_range();
+    let ce6_read_event = classify_now_ce6 && ce6_eval.step.kind_read && !ce6_step_addr.ctrl.in_range();
     let ce6_ctrl_write_event = ce6_ctrl_step.fire;
-    let ce6_write_event = classify_now_ce6 && !ce6_step.kind_read && !ce6_step_addr.ctrl.in_range();
-    let mem_addr = if ce1_cycle.classified { card_offset(ce1_cycle.latched_addr) } else { card_offset(addr) };
+    let ce6_write_event = classify_now_ce6 && !ce6_eval.step.kind_read && !ce6_step_addr.ctrl.in_range();
+    let mem_addr = if ce1_eval.state.classified { card_offset(ce1_eval.state.latched_addr) } else { card_offset(addr) };
     let ce6_rom_bus_addr = ce6_cycle_addr.offset;
     let ce6_rom_drive_cycle =
         ce6_active &&
         ce6_cycle_addr.rom_in_range &&
-        (ce6_read_event || (ce6_cycle.classified && ce6_cycle.is_read));
+        (ce6_read_event || (ce6_eval.state.classified && ce6_eval.state.is_read));
     let bus_data_out = if ce6_rom_drive_cycle { *rom_dout } else { *mem_dout };
     let bus_drive_cycle =
         ce6_rom_drive_cycle ||
-        (!mem_clear.active && ce1 && (read_start || (ce1_cycle.classified && ce1_cycle.is_read)));
+        (!mem_clear.active && ce1 && (read_start || (ce1_eval.state.classified && ce1_eval.state.is_read)));
     let event_valid = classify_now_ce1 || ce6_read_event || ce6_write_event || ce6_ctrl_write_event;
     let sampled_ce1_now = ce1_active;
     let sampled_ce6_now = !ce6 && !mem_clear.active;
@@ -996,15 +1155,15 @@ entity main_core(
     );
     let sampled_bus_word = pack_sampled_bus_word(addr, data_in, sampled_bus_status);
     let event_word = if write_commit {
-        write_event_word(ce1_step.data)
+        write_event_word(ce1_eval.step.data)
     } else if read_start {
         read_event_word(bus_data_out)
     } else if ce6_ctrl_write_event {
         ce6_write_event_word(ce6_ctrl_step.data)
     } else if ce6_write_event {
-        ce6_write_event_word(ce6_step.data)
+        ce6_write_event_word(ce6_eval.step.data)
     } else {
-        ce6_read_event_word(if ce6_step_addr.rom_in_range { *rom_dout } else { ce6_step.data })
+        ce6_read_event_word(if ce6_step_addr.rom_in_range { *rom_dout } else { ce6_eval.step.data })
     };
 
     let event_fifo_wput = event_valid;
@@ -1052,14 +1211,14 @@ entity main_core(
         if mem_clear.active {
             mem_clear.addr
         } else if write_commit {
-            card_offset(ce1_step.addr)
+            card_offset(ce1_eval.step.addr)
         } else {
             uart_ram_write_addr
         },
         if mem_clear.active {
             0
         } else if write_commit {
-            ce1_step.data
+            ce1_eval.step.data
         } else {
             uart_ram_write_data
         },
@@ -1080,7 +1239,6 @@ entity main_core(
         rom_uart_mem_dout_w,
     );
 
-    let addr_step = pending_uart_step(addr_state, addr_now, *addr_uart_busy, cooldown_last);
     let ce6_measure_start = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_start();
     let ce6_measure_stop = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_stop();
     let ce6_measure_abort = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_abort();
@@ -1088,7 +1246,7 @@ entity main_core(
     reg(clk) event_total: MeasureCount reset(rst: 0) =
         if event_valid { event_total +. 1 } else { event_total };
     reg(clk) addr_uart_total: MeasureCount reset(rst: 0) =
-        if addr_step.send { addr_uart_total +. 1 } else { addr_uart_total };
+        if addr_uart.step.send { addr_uart_total +. 1 } else { addr_uart_total };
 
     reg(clk) measure_capture: MeasureCaptureState reset(rst: init_measure_capture_state()) =
         if ce6_measure_start {
@@ -1097,7 +1255,7 @@ entity main_core(
                 start_tag: ce6_ctrl_step.data,
                 start_tick: tick,
                 start_event_count: if event_valid { event_total +. 1 } else { event_total },
-                start_addr_uart_count: if addr_step.send { addr_uart_total +. 1 } else { addr_uart_total },
+                start_addr_uart_count: if addr_uart.step.send { addr_uart_total +. 1 } else { addr_uart_total },
             )
         } else if ce6_measure_abort || (ce6_measure_stop && measure_capture.armed) {
             MeasureCaptureState$(
@@ -1121,17 +1279,9 @@ entity main_core(
     let measure_report_wput = ce6_measure_stop && measure_capture.armed && !*measure_fifo_full;
     let measure_report_drop = ce6_measure_stop && measure_capture.armed && *measure_fifo_full;
     let measure_block_tx = boot_tx_busy || echo_out.tx_req.valid;
-    reg(clk) measure_engine: MeasureEngineState reset(rst: init_measure_engine_state()) =
-        measure_engine_step(
-            measure_engine,
-            measure_block_tx,
-            measure_dump_request,
-            measure_clear_request,
-            *measure_fifo_empty,
-            *measure_fifo_dout,
-        ).next_state;
-    let measure_eval = measure_engine_step(
-        measure_engine,
+    let measure_eval = inst measure_engine_core(
+        clk,
+        rst,
         measure_block_tx,
         measure_dump_request,
         measure_clear_request,
@@ -1230,14 +1380,9 @@ entity main_core(
     };
     let port_overrun_valid = ce6_port_write_valid && port_char_blocked;
     let port_overrun_blocked = port_char_blocked || port_char_tx_req.valid;
-    reg(clk) port_state: PortOverrunState reset(rst: init_port_overrun_state()) =
-        port_overrun_step(
-            port_state,
-            port_overrun_blocked,
-            port_overrun_valid,
-        ).next_state;
-    let port_out = port_overrun_step(
-        port_state,
+    let port_out = inst port_overrun_core(
+        clk,
+        rst,
         port_overrun_blocked,
         port_overrun_valid,
     );
@@ -1249,8 +1394,8 @@ entity main_core(
         clk,
         rst,
         false,
-        addr_state.pending,
-        addr_step.send,
+        addr_uart.state.pending,
+        addr_uart.step.send,
         addr_uart_line_w,
         addr_uart_busy_w,
     );
