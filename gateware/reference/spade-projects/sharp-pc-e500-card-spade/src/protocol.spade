@@ -1,9 +1,9 @@
 use shared_components::ascii;
 
-pub type CardData = uint<8>;
-pub type CardOffset = uint<11>;
+pub(lib) type CardData = uint<8>;
+pub(lib) type CardOffset = uint<11>;
 
-pub enum ParserEvent {
+pub(lib) enum ParserEvent {
     None,
     ReadRam{addr: CardOffset},
     WriteRam{addr: CardOffset, value: CardData},
@@ -17,13 +17,13 @@ pub enum ParserEvent {
     ParseErr,
 }
 
-pub enum EchoMsg {
+pub(lib) enum EchoMsg {
     None,
     Byte{byte: uint<8>},
     CrLf,
 }
 
-pub enum ParserState {
+pub(lib) enum ParserState {
     Idle,
     ReadAddr{digits: uint<2>, value: CardOffset, rom: bool},
     NeedReadLineEnd{addr: CardOffset, rom: bool},
@@ -40,13 +40,13 @@ pub enum ParserState {
     Error,
 }
 
-pub struct ParserStepOut {
+pub(lib) struct ParserStepOut {
     state: ParserState,
     event: ParserEvent,
     echo: EchoMsg,
 }
 
-pub fn init_parser() -> ParserState {
+pub(lib) fn init_parser() -> ParserState {
     ParserState::Idle()
 }
 
@@ -78,6 +78,25 @@ fn next_addr_state(digits: uint<2>, value: CardOffset, rom: bool, read: bool) ->
         ParserState::WriteEq(value, rom)
     } else {
         ParserState::WriteAddr(digits, value, rom)
+    }
+}
+
+fn addr_digit_step(
+    state: ParserState,
+    rx_byte: uint<8>,
+    digits: uint<2>,
+    value: CardOffset,
+    rom: bool,
+    read: bool,
+    nibble_ok: bool,
+    nibble: uint<4>,
+) -> ParserStepOut {
+    if !nibble_ok || (digits == 0 && nibble > 7) {
+        parser_error(state, rx_byte)
+    } else {
+        let next_digits = digits +. 1;
+        let next_value = addr_accum(value, nibble);
+        parser_out(next_addr_state(next_digits, next_value, rom, read), ParserEvent::None(), EchoMsg::Byte(rx_byte))
     }
 }
 
@@ -126,7 +145,7 @@ fn idle_step(rx_byte: uint<8>) -> ParserStepOut {
     }
 }
 
-pub fn parser_step(
+pub(lib) fn parser_step(
     state: ParserState,
     rx_valid: bool,
     rx_parity_error: bool,
@@ -142,15 +161,8 @@ pub fn parser_step(
         let nibble = decoded.value;
         match state {
             ParserState::Idle => idle_step(rx_byte),
-            ParserState::ReadAddr$(digits, value, rom) => {
-                if !nibble_ok || (digits == 0 && nibble > 7) {
-                    parser_error(state, rx_byte)
-                } else {
-                    let next_digits = digits +. 1;
-                    let next_value = addr_accum(value, nibble);
-                    parser_out(next_addr_state(next_digits, next_value, rom, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                }
-            },
+            ParserState::ReadAddr$(digits, value, rom) =>
+                addr_digit_step(state, rx_byte, digits, value, rom, true, nibble_ok, nibble),
             ParserState::NeedReadLineEnd$(addr, rom) => {
                 if rx_byte.is_line_end() {
                     parser_out(ParserState::Idle(), read_event(addr, rom), EchoMsg::CrLf())
@@ -158,15 +170,8 @@ pub fn parser_step(
                     parser_error(state, rx_byte)
                 }
             },
-            ParserState::WriteAddr$(digits, value, rom) => {
-                if !nibble_ok || (digits == 0 && nibble > 7) {
-                    parser_error(state, rx_byte)
-                } else {
-                    let next_digits = digits +. 1;
-                    let next_value = addr_accum(value, nibble);
-                    parser_out(next_addr_state(next_digits, next_value, rom, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-                }
-            },
+            ParserState::WriteAddr$(digits, value, rom) =>
+                addr_digit_step(state, rx_byte, digits, value, rom, false, nibble_ok, nibble),
             ParserState::WriteEq$(addr, rom) => {
                 if rx_byte == b'=' {
                     parser_out(ParserState::WriteDataHi(addr, rom), ParserEvent::None(), EchoMsg::Byte(rx_byte))
