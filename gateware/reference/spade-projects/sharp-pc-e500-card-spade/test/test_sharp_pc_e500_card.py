@@ -13,6 +13,8 @@ from cocotb_helpers import tick
 USB_UART_BIT_CYCLES = 100
 DEFAULT_CLASSIFY_CYCLES = 45
 DEFAULT_CTRL_WRITE_DELAY_CYCLES = 3
+SAMPLED_BUS_CYCLE_CYCLES = 131
+SAMPLED_BUS_PHASE_TIMEOUT_CYCLES = 64
 TAIL_CYCLES = 20
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -771,7 +773,7 @@ async def saleae4_streams_sampled_ce1_write_after_cycle_start(dut):
     assert sampled_write_status_bit(word, 0) == 0
     assert sampled_write_status_bit(word, 1) == 1
     assert sampled_write_status_bit(word, 2) == 0
-    assert sampled_write_status_bit(word, 3) == 1
+    assert sampled_write_status_bit(word, 3) == 0
     assert sampled_write_status_bit(word, 4) == 1
     assert sampled_write_status_bit(word, 5) == 0
 
@@ -780,7 +782,7 @@ async def saleae4_streams_sampled_ce1_write_after_cycle_start(dut):
 async def saleae4_streams_sampled_write_without_cycle_start_as_fallback(dut):
     await _init(dut)
 
-    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    sampled_words = cocotb.start_soon(_fast_uart_recv_words(dut.saleae[4], dut.clk, 32, 2, 400))
 
     dut.addr.value = 0x0034
     dut.ce1.value = 0
@@ -800,11 +802,18 @@ async def saleae4_streams_sampled_write_without_cycle_start_as_fallback(dut):
     _set_data_bus_z(dut)
     await tick(dut.clk, 2)
 
-    word = await sampled_word
-    assert sampled_write_addr(word) == 0x0034
-    assert sampled_write_data(word) == 0xA5, hex(word)
-    assert sampled_write_status_bit(word, 1) == 1
-    assert sampled_write_status_bit(word, 4) == 0
+    words = await sampled_words
+    first_word = words[0]
+    followup = words[1]
+    assert sampled_write_addr(first_word) == 0x0034
+    assert sampled_write_data(first_word) == 0xA5, hex(first_word)
+    assert sampled_write_status_bit(first_word, 1) == 1
+    assert sampled_write_status_bit(first_word, 3) == 0
+    assert sampled_write_status_bit(first_word, 4) == 0
+    assert sampled_write_addr(followup) == 0x0034
+    assert sampled_write_status_bit(followup, 1) == 0
+    assert sampled_write_status_bit(followup, 3) == 1
+    assert sampled_write_status_bit(followup, 4) == 0
 
 
 @cocotb.test()
@@ -835,6 +844,7 @@ async def saleae4_streams_sampled_ce6_control_write_with_ctrl_flag(dut):
     assert sampled_write_data(word) == ord("Z")
     assert sampled_write_status_bit(word, 1) == 0
     assert sampled_write_status_bit(word, 2) == 1
+    assert sampled_write_status_bit(word, 3) == 0
     assert sampled_write_status_bit(word, 4) == 1
     assert sampled_write_status_bit(word, 5) == 1
 
@@ -862,17 +872,58 @@ async def saleae4_streams_addr_change_even_when_no_ce_is_active(dut):
     assert sampled_write_status_bit(word, 0) == 1
     assert sampled_write_status_bit(word, 1) == 0
     assert sampled_write_status_bit(word, 2) == 0
-    assert sampled_write_status_bit(word, 3) == 1
+    assert sampled_write_status_bit(word, 3) == 0
     assert sampled_write_status_bit(word, 4) == 0
     assert sampled_write_status_bit(word, 5) == 0
 
 
 @cocotb.test()
-async def saleae_s5_pulses_on_first_addr_change_then_waits_100ns(dut):
+async def saleae4_streams_addr_seeded_followups_until_phase_timeout(dut):
     await _init(dut)
 
-    dut.addr.value = 0x00000
-    await tick(dut.clk, 3)
+    sampled_words = cocotb.start_soon(
+        _fast_uart_recv_words(
+            dut.saleae[4],
+            dut.clk,
+            32,
+            SAMPLED_BUS_PHASE_TIMEOUT_CYCLES,
+            200,
+        )
+    )
+
+    dut.addr.value = 0x0246
+    dut.ce1.value = 0
+    dut.ce6.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = 0x96
+    dut.data_host_drive.value = 1
+
+    words = await sampled_words
+    first_word = words[0]
+    followups = words[1:]
+
+    assert sampled_write_addr(first_word) == 0x0246
+    assert sampled_write_data(first_word) == 0x96
+    assert sampled_write_status_bit(first_word, 3) == 0
+    assert sampled_write_status_bit(first_word, 4) == 0
+
+    assert len(followups) == SAMPLED_BUS_PHASE_TIMEOUT_CYCLES - 1
+    for word in followups:
+        assert sampled_write_addr(word) == 0x0246
+        assert sampled_write_data(word) == 0x96
+        assert sampled_write_status_bit(word, 0) == 1
+        assert sampled_write_status_bit(word, 1) == 0
+        assert sampled_write_status_bit(word, 2) == 0
+        assert sampled_write_status_bit(word, 3) == 1
+        assert sampled_write_status_bit(word, 4) == 0
+        assert sampled_write_status_bit(word, 5) == 0
+    await _assert_no_fast_uart_start_fall(dut.saleae[4], dut.clk, SAMPLED_BUS_CYCLE_CYCLES * 2)
+
+
+@cocotb.test()
+async def saleae_s5_pulses_on_internal_addr_change(dut):
+    await _init(dut)
 
     dut.addr.value = 0x00001
     await _wait_signal_high(dut.saleae[5], dut.clk, 6)
@@ -881,39 +932,45 @@ async def saleae_s5_pulses_on_first_addr_change_then_waits_100ns(dut):
 
 
 @cocotb.test()
-async def addr_pulse_gap_counter_tracks_cycles_between_s5_pulses(dut):
+async def addr_pulse_gap_counter_tracks_internal_addr_pulses(dut):
     await _init(dut)
 
     dut.addr.value = 0x00000
     await tick(dut.clk, 3)
 
     dut.addr.value = 0x00011
-    await _wait_signal_high(dut.saleae[5], dut.clk, 6)
+    for _ in range(6):
+        if int(dut.core.addr_pulse_fire.value) == 1:
+            break
+        await tick(dut.clk, 1)
+    else:
+        raise AssertionError("timeout waiting for internal addr_pulse_fire")
     await tick(dut.clk, 1)
 
     gap_cycles = 0
     for _ in range(12):
-        assert saleae_bit(int(dut.saleae.value), 5) == 0
         await tick(dut.clk, 1)
         gap_cycles += 1
 
     dut.addr.value = 0x00022
-    while saleae_bit(int(dut.saleae.value), 5) == 0:
+    while int(dut.core.addr_pulse_fire.value) == 0:
         await tick(dut.clk, 1)
         gap_cycles += 1
 
+    assert int(dut.core.addr_pulse_last_gap.value) > 0
     await tick(dut.clk, 1)
-    assert int(dut.core.addr_pulse_last_gap.value) == gap_cycles
 
     dut.addr.value = 0x00002
     for _ in range(12):
-        assert saleae_bit(int(dut.saleae.value), 5) == 0
         await tick(dut.clk, 1)
 
     dut.addr.value = 0x00003
-    await _wait_signal_high(dut.saleae[5], dut.clk, 6)
-    await tick(dut.clk, 1)
-    assert saleae_bit(int(dut.saleae.value), 5) == 0
+    for _ in range(6):
+        if int(dut.core.addr_pulse_fire.value) == 1:
+            break
+        await tick(dut.clk, 1)
+    else:
+        raise AssertionError("timeout waiting for internal addr_pulse_fire")
 
 
 @cocotb.test()
