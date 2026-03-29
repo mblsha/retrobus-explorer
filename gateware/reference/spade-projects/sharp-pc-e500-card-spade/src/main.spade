@@ -71,10 +71,11 @@ fn card_offset(addr: BusAddr) -> CardOffset {
 
 fn ce6_rom_window_last() -> Ce6Low16 { 0x0800 }
 fn ce6_ctrl_page_base() -> Ce6Low16 { 0xFFF0 }
-fn ce6_measure_start_port() -> Ce6Low16 { 0xFFF0 }
-fn ce6_uart_port() -> Ce6Low16 { 0xFFF1 }
-fn ce6_measure_stop_port() -> Ce6Low16 { 0xFFF2 }
-fn ce6_measure_abort_port() -> Ce6Low16 { 0xFFF3 }
+fn ce6_ctrl_port(offset: Ce6Low16) -> Ce6Low16 { ce6_ctrl_page_base() +. offset }
+fn ce6_measure_start_port() -> Ce6Low16 { ce6_ctrl_port(0) }
+fn ce6_uart_port() -> Ce6Low16 { ce6_ctrl_port(1) }
+fn ce6_measure_stop_port() -> Ce6Low16 { ce6_ctrl_port(2) }
+fn ce6_measure_abort_port() -> Ce6Low16 { ce6_ctrl_port(3) }
 
 enum Ce6CtrlAddr {
     None,
