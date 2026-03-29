@@ -190,22 +190,22 @@ fn parse_timing_cycles(tens: uint<4>, ones: uint<4>) -> uint<7> {
     trunc(tens_times_ten +. ones_u8)
 }
 
+fn parser_idle_cmd(state: ParserState, rx_byte: uint<8>) -> ParserStepOut {
+    parser_out(state, ParserEvent::None(), EchoMsg::Byte(rx_byte))
+}
+
 fn idle_step(rx_byte: uint<8>) -> ParserStepOut {
     if rx_byte.is_line_end() {
         parser_out(ParserState::Idle(), ParserEvent::None(), EchoMsg::None())
-    } else if rx_byte == b'r' {
-        parser_out(ParserState::ReadAddr(0, 0, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-    } else if rx_byte == b'R' {
-        parser_out(ParserState::ReadAddr(0, 0, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-    } else if rx_byte == b'w' {
-        parser_out(ParserState::WriteAddr(0, 0, false), ParserEvent::None(), EchoMsg::Byte(rx_byte))
-    } else if rx_byte == b'W' {
-        parser_out(ParserState::WriteAddr(0, 0, true), ParserEvent::None(), EchoMsg::Byte(rx_byte))
     } else {
-        match rx_byte.to_upper() {
-            b'T' => parser_out(ParserState::TimingHi(false), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
-            b'C' => parser_out(ParserState::TimingHi(true), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
-            b'M' => parser_out(ParserState::Measure(), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
+        match rx_byte {
+            b'r' => parser_idle_cmd(ParserState::ReadAddr(0, 0, false), rx_byte),
+            b'R' => parser_idle_cmd(ParserState::ReadAddr(0, 0, true), rx_byte),
+            b'w' => parser_idle_cmd(ParserState::WriteAddr(0, 0, false), rx_byte),
+            b'W' => parser_idle_cmd(ParserState::WriteAddr(0, 0, true), rx_byte),
+            b'T' | b't' => parser_idle_cmd(ParserState::TimingHi(false), rx_byte),
+            b'C' | b'c' => parser_idle_cmd(ParserState::TimingHi(true), rx_byte),
+            b'M' | b'm' => parser_idle_cmd(ParserState::Measure(), rx_byte),
             _ => parser_error(ParserState::Idle(), rx_byte),
         }
     }
