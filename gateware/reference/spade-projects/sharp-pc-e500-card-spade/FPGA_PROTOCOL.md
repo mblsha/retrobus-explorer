@@ -34,7 +34,7 @@ Current line map:
 | `saleae[2]` | `rw` | raw R/W pin |
 | `saleae[3]` | event stream | compact CE event stream |
 | `saleae[4]` | sampled bus stream | late-sampled address/data/status stream |
-| `saleae[5]` | address pulse | debounced address-change pulse |
+| `saleae[5]` | address pulse | debounced internal address-change pulse |
 | `saleae[6]` | data UART | settled data-change stream |
 | `saleae[7]` | address UART | settled address-change stream |
 
@@ -91,7 +91,14 @@ means a CE1 write carrying data byte `0x5A`.
 `saleae[4]` emits one `32`-bit sampled bus word. The sampler fires from either:
 
 - an external `cycle_start` pulse, or
-- the internal debounced address-change pulse on `saleae[5]`
+- the internal debounced address-change trigger
+
+After either a real `cycle_start` or an internal address-change trigger seeds a
+sample, the FPGA may continue emitting phase-locked synthetic follow-up samples
+at the nominal `1310 ns` cycle time even if no new trigger arrives. Follow-ups
+stop after the captured phase has timed out, which is currently about `64`
+nominal cycles (`~83.8 us`) without a new `cycle_start` or address-change
+trigger.
 
 Word layout:
 
@@ -108,7 +115,7 @@ Status bit layout:
 | `0` | `rw` | sampled raw `R/W` pin |
 | `1` | `ce1_active` | normalized CE1-active flag |
 | `2` | `ce6_active` | normalized CE6-active flag |
-| `3` | `oe` | sampled raw `OE` pin level |
+| `3` | `synthetic_followup` | `1` if this sample is a phase-locked synthetic follow-up event |
 | `4` | `from_cycle_start` | `1` if sample was armed by external `cycle_start` |
 | `5` | `ctrl_range` | `1` if CE6 was active and low16 was in `0xFFF0..0xFFFF` |
 
@@ -134,7 +141,7 @@ status = 0x01
 - `rw = 1`
 - `ce1_active = 0`
 - `ce6_active = 0`
-- `oe = 0`
+- `synthetic_followup = 0`
 - `from_cycle_start = 0`
 - `ctrl_range = 0`
 
@@ -142,13 +149,15 @@ So this sample came from the address-change path, not CE1/CE6-qualified decode, 
 
 ### `saleae[5]` Address Pulse
 
-`saleae[5]` is not a UART. It is a one-bit pulse stream that marks the internal debounced address-change trigger.
+`saleae[5]` is not a UART. It is a one-bit pulse stream that marks the
+internal debounced address-change trigger.
 
 Properties:
 
 - it pulses on the first observed address change
 - it then waits about `100 ns` before re-arming
 - it is useful as a correlation marker for the sampled bus stream on `saleae[4]`
+- it is upstream of the settled address UART on `saleae[7]`
 
 ## USB-UART Commands
 

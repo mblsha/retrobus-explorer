@@ -49,6 +49,9 @@ fn addr_pulse_cooldown_reload() -> uint<4> { addr_pulse_cooldown_cycles() -. 1 }
 fn classify_ns() -> uint<32> { 450 }
 fn ctrl_write_ns() -> uint<32> { 30 }
 fn sampled_bus_delay_cycles() -> SampleCtr { 75 }
+fn sampled_bus_cycle_cycles() -> SampleCtr { 131 }
+fn sampled_bus_cycle_last() -> SampleCtr { sampled_bus_cycle_cycles() -. 1 }
+fn sampled_bus_phase_timeout_cycles() -> SampleCtr { 64 }
 
 fn cooldown_last() -> uint<4> {
     trunc(((cooldown_ns() * sample_clk_hz()) `std::ops::comb_div` 1_000_000_000))
@@ -155,19 +158,19 @@ fn sampled_bus_status_bits(
     rw: bool,
     ce1_active: bool,
     ce6_active: bool,
-    oe_level: bool,
+    synthetic_followup: bool,
     from_cycle_start: bool,
     ctrl_range: bool,
 ) -> SampledBusStatus {
     let rw_bit: SampledBusStatus = if rw { 1 } else { 0 };
     let ce1_bit: SampledBusStatus = if ce1_active { 1 } else { 0 };
     let ce6_bit: SampledBusStatus = if ce6_active { 1 } else { 0 };
-    let oe_bit: SampledBusStatus = if oe_level { 1 } else { 0 };
+    let followup_bit: SampledBusStatus = if synthetic_followup { 1 } else { 0 };
     let cycle_bit: SampledBusStatus = if from_cycle_start { 1 } else { 0 };
     let ctrl_bit: SampledBusStatus = if ctrl_range { 1 } else { 0 };
     (ctrl_bit << 5) |
     (cycle_bit << 4) |
-    (oe_bit << 3) |
+    (followup_bit << 3) |
     (ce6_bit << 2) |
     (ce1_bit << 1) |
     rw_bit
@@ -275,14 +278,19 @@ struct CtrlWriteStep {
 struct SampledBusState {
     active: bool,
     from_cycle_start: bool,
-    prev_cycle_toggle: bool,
     wait_ctr: SampleCtr,
+    cycle_seen: bool,
+    cycle_phase: SampleCtr,
+    cycles_since_cycle_start: SampleCtr,
+    synthetic_armed: bool,
 }
 
 struct SampledBusStep {
     next_state: SampledBusState,
     fire: bool,
     from_cycle_start: bool,
+    synthetic_followup: bool,
+    cycle_start_pulse: bool,
 }
 
 struct PortOverrunState {
@@ -359,8 +367,11 @@ fn init_sampled_bus_state() -> SampledBusState {
     SampledBusState$(
         active: false,
         from_cycle_start: false,
-        prev_cycle_toggle: false,
         wait_ctr: 0,
+        cycle_seen: false,
+        cycle_phase: 0,
+        cycles_since_cycle_start: 0,
+        synthetic_armed: false,
     )
 }
 
@@ -521,44 +532,85 @@ fn ctrl_write_step(
 
 fn sampled_bus_step(
     state: SampledBusState,
-    cycle_toggle: bool,
+    cycle_start_now: bool,
     addr_pulse_fire: bool,
 ) -> SampledBusStep {
-    let cycle_start_now = cycle_toggle != state.prev_cycle_toggle;
-    let start_wait = !state.active && (cycle_start_now || addr_pulse_fire);
-    let restart_from_cycle = state.active && cycle_start_now && !state.from_cycle_start;
-    let from_cycle_start = if cycle_start_now { true } else { false };
-    let wait_ctr = if start_wait || restart_from_cycle {
+    let real_trigger = cycle_start_now || addr_pulse_fire;
+    let cycle_seen = state.cycle_seen || real_trigger;
+    let cycle_wrapped = state.cycle_seen && !real_trigger && state.cycle_phase == sampled_bus_cycle_last();
+    let cycle_phase = if real_trigger {
+        0
+    } else if state.cycle_seen {
+        if state.cycle_phase == sampled_bus_cycle_last() {
+            0
+        } else {
+            state.cycle_phase +. 1
+        }
+    } else {
+        0
+    };
+    let start_wait = real_trigger;
+    let cycles_since_cycle_start = if real_trigger {
+        0
+    } else if cycle_wrapped {
+        if state.cycles_since_cycle_start < sampled_bus_phase_timeout_cycles() {
+            state.cycles_since_cycle_start +. 1
+        } else {
+            state.cycles_since_cycle_start
+        }
+    } else {
+        state.cycles_since_cycle_start
+    };
+    let phase_valid = cycle_seen && cycles_since_cycle_start < sampled_bus_phase_timeout_cycles();
+    let wait_ctr = if start_wait {
         0
     } else if state.active {
         state.wait_ctr +. 1
     } else {
         0
     };
-    let fire = state.active && wait_ctr >= sampled_bus_delay_cycles();
+    let real_fire = state.active && !real_trigger && wait_ctr >= sampled_bus_delay_cycles();
+    let synthetic_fire =
+        !real_trigger &&
+        !state.active &&
+        phase_valid &&
+        state.synthetic_armed &&
+        cycle_phase == sampled_bus_delay_cycles();
+    let synthetic_armed = if !phase_valid {
+        false
+    } else if real_trigger {
+        false
+    } else if real_fire {
+        true
+    } else {
+        state.synthetic_armed
+    };
     SampledBusStep$(
         next_state: SampledBusState$(
-            active: if fire {
+            active: if real_fire {
                 false
-            } else if start_wait || restart_from_cycle {
+            } else if start_wait {
                 true
             } else {
                 state.active
             },
-            from_cycle_start: if fire {
+            from_cycle_start: if real_fire {
                 false
-            } else if restart_from_cycle {
-                true
             } else if start_wait {
-                from_cycle_start
+                cycle_start_now
             } else {
                 state.from_cycle_start
             },
-            prev_cycle_toggle: cycle_toggle,
-            wait_ctr: if fire { 0 } else { wait_ctr },
+            wait_ctr: if real_fire { 0 } else { wait_ctr },
+            cycle_seen: cycle_seen,
+            cycle_phase: cycle_phase,
+            cycles_since_cycle_start: cycles_since_cycle_start,
+            synthetic_armed: synthetic_armed,
         ),
-        fire: fire,
-        from_cycle_start: state.from_cycle_start,
+        fire: real_fire || synthetic_fire,
+        from_cycle_start: if real_fire { state.from_cycle_start } else { false },
+        synthetic_followup: synthetic_fire,
+        cycle_start_pulse: cycle_start_now,
     )
 }
 
@@ -751,14 +803,14 @@ entity ctrl_write_core(
 entity sampled_bus_core(
     clk: clock,
     rst: bool,
-    cycle_toggle: bool,
+    cycle_start_now: bool,
     addr_pulse_fire: bool,
 ) -> SampledBusStep {
     reg(clk) state: SampledBusState reset(rst: init_sampled_bus_state()) = {
-        sampled_bus_step(state, cycle_toggle, addr_pulse_fire).next_state
+        sampled_bus_step(state, cycle_start_now, addr_pulse_fire).next_state
     };
 
-    sampled_bus_step(state, cycle_toggle, addr_pulse_fire)
+    sampled_bus_step(state, cycle_start_now, addr_pulse_fire)
 }
 
 entity measure_engine_core(
@@ -906,6 +958,8 @@ entity main_core(
     reg(clk) data_uart_changed: bool reset(rst: false) = data_uart_now != data_uart_last;
     reg(cycle_start_clock) cycle_start_toggle: bool reset(rst: false) = !cycle_start_toggle;
     let cycle_start_toggle_sync = inst sync_delay::<2>(clk, cycle_start_toggle);
+    reg(clk) cycle_start_toggle_last: bool reset(rst: false) = cycle_start_toggle_sync;
+    let cycle_start_now = cycle_start_toggle_sync != cycle_start_toggle_last;
     reg(clk) addr_pulse_last: BusAddr reset(rst: 0) = addr_now;
     let addr_pulse_changed = addr_now != addr_pulse_last;
     reg(clk) addr_pulse_cooldown: uint<4> reset(rst: 0) =
@@ -931,8 +985,6 @@ entity main_core(
     reg(clk) rw_ctrl: bool reset(rst: true) = rw_meta;
     reg(clk) ce6_meta: bool reset(rst: true) = ce6;
     reg(clk) ce6_ctrl: bool reset(rst: true) = ce6_meta;
-    reg(clk) oe_meta: bool reset(rst: true) = oe;
-    reg(clk) oe_ctrl: bool reset(rst: true) = oe_meta;
     reg(clk) tick: TickCount reset(rst: 0) = tick +. 1;
     reg(clk) mem_clear: MemClearState reset(rst: init_mem_clear_state()) =
         // Scrub card RAM after runtime reset so reset behavior is deterministic.
@@ -964,7 +1016,7 @@ entity main_core(
     let sampled_bus = inst sampled_bus_core(
         clk,
         rst,
-        cycle_start_toggle_sync,
+        cycle_start_now,
         addr_pulse_fire,
     );
     let ce6_ctrl_step = inst ctrl_write_core(
@@ -1018,7 +1070,7 @@ entity main_core(
         rw,
         sampled_ce1_now,
         sampled_ce6_now,
-        oe,
+        sampled_bus.synthetic_followup,
         sampled_bus.from_cycle_start,
         sampled_bus_ctrl,
     );
