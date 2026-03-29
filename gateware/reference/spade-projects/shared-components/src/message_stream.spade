@@ -137,23 +137,16 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
         next_msg_valid: bool,
         next_msg: TMsg,
     ) -> ByteMsgStreamOut<TMsg, IDX_W> {
-        let cur_msg_is_none = is_none.call((self.cur_msg,));
-        let pending_msg_is_none = is_none.call((self.pending_msg,));
-        let cur_byte = render_byte.call((self.cur_msg, self.cur_idx));
-        let next_idx: uint<IDX_W> = self.cur_idx +. 1;
-        let next_byte = render_byte.call((self.cur_msg, next_idx));
-        let next_msg_is_none = is_none.call((next_msg,));
-
-        self.step(
+        self.step_with_option(
             none_msg,
-            cur_msg_is_none,
-            pending_msg_is_none,
-            cur_byte,
-            next_byte,
+            is_none,
+            render_byte,
             block_tx,
-            next_msg_valid,
-            next_msg,
-            next_msg_is_none,
+            if next_msg_valid {
+                Some(next_msg)
+            } else {
+                None
+            },
         )
     }
 
