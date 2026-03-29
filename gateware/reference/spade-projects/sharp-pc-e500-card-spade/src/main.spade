@@ -206,6 +206,18 @@ fn saturating_inc_u8(value: uint<8>) -> uint<8> {
     if value == 0xFF { value } else { value +. 1 }
 }
 
+fn overrun_text() -> [uint<8>; 10] {
+    b"!OVERRUN\r\n"
+}
+
+fn overrun_text_len() -> uint<4> {
+    10
+}
+
+fn overrun_last_idx() -> uint<4> {
+    overrun_text_len() -. 1
+}
+
 #[no_mangle(all)]
 extern entity card_ram_2k_v(
     clk: clock,
@@ -619,6 +631,7 @@ fn port_overrun_step(
     block_tx: bool,
     overrun_valid: bool,
 ) -> PortOverrunOut {
+    let overrun = overrun_text();
     let queued = if overrun_valid {
         saturating_inc_u8(state.pending_count)
     } else {
@@ -627,12 +640,12 @@ fn port_overrun_step(
     let sending_existing = state.pending_count != 0;
     let cur_idx: uint<4> = if sending_existing { state.idx } else { 0 };
     let tx_req = if queued != 0 && !block_tx {
-        TxReq8$(valid: true, byte: b"!OVERRUN\r\n"[trunc(cur_idx)])
+        TxReq8$(valid: true, byte: overrun[trunc(cur_idx)])
     } else {
         tx_req_none()
     };
     let sent = tx_req.valid;
-    let last = cur_idx == 9;
+    let last = cur_idx == overrun_last_idx();
     PortOverrunOut$(
         next_state: PortOverrunState$(
             pending_count: if sent && last {
