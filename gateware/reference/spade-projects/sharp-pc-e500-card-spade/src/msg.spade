@@ -110,15 +110,15 @@ fn dec_char(value: uint<4>) -> uint<8> {
 
 fn timing_byte(prefix: uint<8>, cycles: uint<7>, idx: RespIdx) -> TxReq8 {
     match idx {
-        0 => TxReq8$(valid: true, byte: prefix),
-        1 => TxReq8$(valid: true, byte: b'='),
-        2 => TxReq8$(valid: true, byte: dec_char(timing_ns_hundreds(cycles))),
-        3 => TxReq8$(valid: true, byte: dec_char(timing_ns_tens(cycles))),
-        4 => TxReq8$(valid: true, byte: b'0'),
-        5 => TxReq8$(valid: true, byte: b'n'),
-        6 => TxReq8$(valid: true, byte: b's'),
-        7 => TxReq8$(valid: true, byte: b'\r'),
-        8 => TxReq8$(valid: true, byte: b'\n'),
+        0 => tx_req_byte(prefix),
+        1 => tx_req_byte(b'='),
+        2 => tx_req_byte(dec_char(timing_ns_hundreds(cycles))),
+        3 => tx_req_byte(dec_char(timing_ns_tens(cycles))),
+        4 => tx_req_byte(b'0'),
+        5 => tx_req_byte(b'n'),
+        6 => tx_req_byte(b's'),
+        7 => tx_req_byte(b'\r'),
+        8 => tx_req_byte(b'\n'),
         _ => tx_req_none(),
     }
 }
