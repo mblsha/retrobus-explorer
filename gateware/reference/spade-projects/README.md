@@ -56,6 +56,14 @@ SPADEFORGE_TOKEN=test123 ./tools/project.py build-with-spadeforge --project ./sh
 
 By default, build artifacts are written under `build/forge-output-<timestamp>/` inside each project.
 
+Flash the latest local forge build through spadeloader-cli:
+
+```sh
+./tools/project.py flash-with-spadeloader --project ./sharp-pc-g850-bus-spade
+```
+
+This flashes the newest `.bit` under `build/forge-output-*` for that project and relies on zeroconf discovery by default. Use `--bitstream <path>` to flash an explicit file or `--server <url>` as an override.
+
 Run a local web UI to pick projects, run testbenches, and inspect `dump.surfer.vcd` in Surfer Web:
 
 ```sh
