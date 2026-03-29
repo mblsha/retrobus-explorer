@@ -705,11 +705,12 @@ entity boot_banner_core<#uint IDX_W, #uint N>(
     banner: [uint<8>; N],
     block_tx: bool,
 ) -> BootBannerOut<IDX_W> {
+    let step = boot_banner_step(state, banner, block_tx);
     reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = {
-        boot_banner_step(state, banner, block_tx).state
+        step.state
     };
 
-    boot_banner_step(state, banner, block_tx)
+    step
 }
 
 entity parser_core(
@@ -719,11 +720,12 @@ entity parser_core(
     rx_parity_error: bool,
     rx_byte: uint<8>,
 ) -> ParserStepOut {
+    let step = parser_step(state, rx_valid, rx_parity_error, rx_byte);
     reg(clk) state: ParserState reset(rst: protocol::init_parser()) = {
-        parser_step(state, rx_valid, rx_parity_error, rx_byte).state
+        step.state
     };
 
-    parser_step(state, rx_valid, rx_parity_error, rx_byte)
+    step
 }
 
 entity echo_stream_core(
@@ -732,11 +734,12 @@ entity echo_stream_core(
     block_tx: bool,
     next_msg: Option<EchoMsg>,
 ) -> msg::EchoStreamOut {
+    let step = echo_stream_step(state, block_tx, next_msg);
     reg(clk) state: EchoStreamState reset(rst: init_echo_stream()) = {
-        echo_stream_step(state, block_tx, next_msg).state
+        step.state
     };
 
-    echo_stream_step(state, block_tx, next_msg)
+    step
 }
 
 entity resp_stream_core(
@@ -745,11 +748,12 @@ entity resp_stream_core(
     block_tx: bool,
     next_msg: Option<RespMsg>,
 ) -> msg::RespStreamOut {
+    let step = resp_stream_step(state, block_tx, next_msg);
     reg(clk) state: RespStreamState reset(rst: init_resp_stream()) = {
-        resp_stream_step(state, block_tx, next_msg).state
+        step.state
     };
 
-    resp_stream_step(state, block_tx, next_msg)
+    step
 }
 
 entity pending_uart_core<#uint WIDTH>(
@@ -793,11 +797,12 @@ entity ctrl_write_core(
     data: CardData,
     ctrl_write_delay: ClassifyCtr,
 ) -> CtrlWriteStep {
+    let step = ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay);
     reg(clk) state: CtrlWriteState reset(rst: init_ctrl_write_state()) = {
-        ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay).next_state
+        step.next_state
     };
 
-    ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay)
+    step
 }
 
 entity sampled_bus_core(
@@ -806,11 +811,12 @@ entity sampled_bus_core(
     cycle_start_now: bool,
     addr_pulse_fire: bool,
 ) -> SampledBusStep {
+    let step = sampled_bus_step(state, cycle_start_now, addr_pulse_fire);
     reg(clk) state: SampledBusState reset(rst: init_sampled_bus_state()) = {
-        sampled_bus_step(state, cycle_start_now, addr_pulse_fire).next_state
+        step.next_state
     };
 
-    sampled_bus_step(state, cycle_start_now, addr_pulse_fire)
+    step
 }
 
 entity measure_engine_core(
@@ -822,11 +828,12 @@ entity measure_engine_core(
     fifo_empty: bool,
     fifo_dout: MeasurePacked,
 ) -> MeasureEngineOut {
+    let step = measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout);
     reg(clk) state: MeasureEngineState reset(rst: init_measure_engine_state()) = {
-        measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout).next_state
+        step.next_state
     };
 
-    measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout)
+    step
 }
 
 entity port_overrun_core(
@@ -835,11 +842,12 @@ entity port_overrun_core(
     block_tx: bool,
     overrun_valid: bool,
 ) -> PortOverrunOut {
+    let step = port_overrun_step(state, block_tx, overrun_valid);
     reg(clk) state: PortOverrunState reset(rst: init_port_overrun_state()) = {
-        port_overrun_step(state, block_tx, overrun_valid).next_state
+        step.next_state
     };
 
-    port_overrun_step(state, block_tx, overrun_valid)
+    step
 }
 
 #[no_mangle(all)]
