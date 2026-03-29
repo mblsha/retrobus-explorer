@@ -121,7 +121,7 @@ fn parser_out(next_state: ParserState, event: ParserEvent, echo: EchoMsg) -> Par
     ParserStepOut$(state: next_state, event: event, echo: echo)
 }
 
-fn parser_error(state: ParserState, rx_byte: uint<8>) -> ParserStepOut {
+fn parser_error(rx_byte: uint<8>) -> ParserStepOut {
     if rx_byte.is_line_end() {
         parser_out(ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
     } else {
@@ -158,7 +158,7 @@ fn addr_digit_step(
     nibble: uint<4>,
 ) -> ParserStepOut {
     if !nibble_ok || (digits == 0 && nibble > 7) {
-        parser_error(state, rx_byte)
+        parser_error(rx_byte)
     } else {
         let next_digits = digits +. 1;
         let next_value = addr_accum(value, nibble);
@@ -206,7 +206,7 @@ fn idle_step(rx_byte: uint<8>) -> ParserStepOut {
             b'T' => parser_out(ParserState::TimingHi(false), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
             b'C' => parser_out(ParserState::TimingHi(true), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
             b'M' => parser_out(ParserState::Measure(), ParserEvent::None(), EchoMsg::Byte(rx_byte)),
-            _ => parser_error(ParserState::Idle(), rx_byte),
+            _ => parser_error(rx_byte),
         }
     }
 }
@@ -220,7 +220,7 @@ pub(lib) fn parser_step(
     if !rx_valid {
         ParserStepOut$(state: state, event: ParserEvent::None(), echo: EchoMsg::None())
     } else if rx_parity_error {
-        parser_error(state, rx_byte)
+        parser_error(rx_byte)
     } else {
         let decoded = rx_byte.decode_hex();
         let nibble_ok = decoded.valid;
@@ -233,7 +233,7 @@ pub(lib) fn parser_step(
                 if rx_byte.is_line_end() {
                     parser_out(ParserState::Idle(), read_event(addr, rom), EchoMsg::CrLf())
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::WriteAddr$(digits, value, rom) =>
@@ -242,14 +242,14 @@ pub(lib) fn parser_step(
                 if rx_byte == b'=' {
                     parser_out(ParserState::WriteDataHi(addr, rom), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::WriteDataHi$(addr, rom) => {
                 if nibble_ok {
                     parser_out(ParserState::WriteDataLo(addr, nibble, rom), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::WriteDataLo$(addr, hi, rom) => {
@@ -261,14 +261,14 @@ pub(lib) fn parser_step(
                         EchoMsg::Byte(rx_byte),
                     )
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::NeedWriteLineEnd$(addr, value, rom) => {
                 if rx_byte.is_line_end() {
                     parser_out(ParserState::Idle(), write_event(addr, value, rom), EchoMsg::CrLf())
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::TimingHi$(control) => {
@@ -276,7 +276,7 @@ pub(lib) fn parser_step(
                 if digit.valid {
                     parser_out(ParserState::TimingLo(digit.value, control), ParserEvent::None(), EchoMsg::Byte(rx_byte))
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::TimingLo$(tens, control) => {
@@ -288,7 +288,7 @@ pub(lib) fn parser_step(
                         EchoMsg::Byte(rx_byte),
                     )
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::NeedTimingLineEnd$(cycles, control) => {
@@ -303,7 +303,7 @@ pub(lib) fn parser_step(
                         EchoMsg::CrLf(),
                     )
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::Measure => {
@@ -322,23 +322,17 @@ pub(lib) fn parser_step(
                         EchoMsg::Byte(rx_byte),
                     )
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
             ParserState::NeedMeasureLineEnd$(event) => {
                 if rx_byte.is_line_end() {
                     parser_out(ParserState::Idle(), event, EchoMsg::CrLf())
                 } else {
-                    parser_error(state, rx_byte)
+                    parser_error(rx_byte)
                 }
             },
-            ParserState::Error => {
-                if rx_byte.is_line_end() {
-                    parser_out(ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
-                } else {
-                    parser_out(ParserState::Error(), ParserEvent::None(), EchoMsg::None())
-                }
-            },
+            ParserState::Error => parser_error(rx_byte),
         }
     }
 }
