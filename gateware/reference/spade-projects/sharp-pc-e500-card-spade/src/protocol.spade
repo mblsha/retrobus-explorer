@@ -331,11 +331,7 @@ pub(lib) fn parser_step(
                 }
             },
             ParserState::Error => {
-                if rx_byte.is_line_end() {
-                    parser_out(ParserState::Idle(), ParserEvent::ParseErr(), EchoMsg::CrLf())
-                } else {
-                    parser_out(ParserState::Error(), ParserEvent::None(), EchoMsg::None())
-                }
+                parser_error(state, rx_byte)
             },
         }
     }
