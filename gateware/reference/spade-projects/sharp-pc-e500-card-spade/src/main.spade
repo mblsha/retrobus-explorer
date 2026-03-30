@@ -777,10 +777,10 @@ entity pending_uart_core<#uint WIDTH>(
     busy: bool,
     settle_last: uint<4>,
 ) -> PendingUartEval<WIDTH> {
-    reg(clk) state: PendingUartState<WIDTH> reset(rst: init_pending_uart_state()) = {
-        pending_uart_step(state, now, busy, settle_last).next_state
-    };
     let step = pending_uart_step(state, now, busy, settle_last);
+    reg(clk) state: PendingUartState<WIDTH> reset(rst: init_pending_uart_state()) = {
+        step.next_state
+    };
 
     PendingUartEval$(state: state, step: step)
 }
@@ -795,10 +795,10 @@ entity access_cycle_core(
     tick: TickCount,
     classify_delay: ClassifyCtr,
 ) -> AccessCycleEval {
-    reg(clk) state: AccessCycleState reset(rst: init_access_cycle_state()) = {
-        access_cycle_step(state, ce, rw, addr, data, tick, classify_delay).next_state
-    };
     let step = access_cycle_step(state, ce, rw, addr, data, tick, classify_delay);
+    reg(clk) state: AccessCycleState reset(rst: init_access_cycle_state()) = {
+        step.next_state
+    };
 
     AccessCycleEval$(state: state, step: step)
 }
