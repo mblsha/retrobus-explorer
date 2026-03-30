@@ -185,9 +185,7 @@ fn write_event(addr: CardOffset, value: CardData, rom: bool) -> ParserEvent {
 fn parse_timing_cycles(tens: uint<4>, ones: uint<4>) -> uint<7> {
     let tens_u8: uint<8> = zext(tens);
     let ones_u8: uint<8> = zext(ones);
-    let ten_u8: uint<8> = 10;
-    let tens_times_ten: uint<8> = trunc(tens_u8 * ten_u8);
-    trunc(tens_times_ten +. ones_u8)
+    trunc((tens_u8 * 10) +. ones_u8)
 }
 
 fn parser_idle_cmd(state: ParserState, rx_byte: uint<8>) -> ParserStepOut {
