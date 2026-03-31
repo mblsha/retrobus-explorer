@@ -147,10 +147,9 @@ fn timing_ns_tens(cycles: uint<7>) -> uint<4> {
 
 impl EchoMsg {
     pub(lib) fn as_option(self) -> Option<Self> {
-        if self.is_none() {
-            None
-        } else {
-            Some(self)
+        match self {
+            Self::None => None,
+            _ => Some(self),
         }
     }
 
@@ -169,10 +168,9 @@ impl EchoMsg {
 
 impl RespMsg {
     pub(lib) fn as_option(self) -> Option<Self> {
-        if self.is_none() {
-            None
-        } else {
-            Some(self)
+        match self {
+            Self::None => None,
+            _ => Some(self),
         }
     }
 
@@ -226,10 +224,9 @@ impl RespMsg {
 
 impl MeasureMsg {
     pub(lib) fn as_option(self) -> Option<Self> {
-        if self.is_none() {
-            None
-        } else {
-            Some(self)
+        match self {
+            Self::None => None,
+            _ => Some(self),
         }
     }
 
