@@ -52,17 +52,20 @@ fn sampled_bus_delay_cycles() -> SampleCtr { 75 }
 fn sampled_bus_cycle_cycles() -> SampleCtr { 131 }
 fn sampled_bus_cycle_last() -> SampleCtr { sampled_bus_cycle_cycles() -. 1 }
 fn sampled_bus_phase_timeout_cycles() -> SampleCtr { 64 }
+fn ns_to_cycles_ceil(duration_ns: uint<32>) -> uint<32> {
+    ((duration_ns * sample_clk_hz()) +. 999_999_999) `std::ops::comb_div` 1_000_000_000
+}
 
 fn cooldown_last() -> uint<4> {
     trunc(((cooldown_ns() * sample_clk_hz()) `std::ops::comb_div` 1_000_000_000))
 }
 
 fn default_classify_last() -> ClassifyCtr {
-    trunc((((classify_ns() * sample_clk_hz()) +. 999_999_999) `std::ops::comb_div` 1_000_000_000))
+    trunc(ns_to_cycles_ceil(classify_ns()))
 }
 
 fn default_ctrl_write_last() -> ClassifyCtr {
-    trunc((((ctrl_write_ns() * sample_clk_hz()) +. 999_999_999) `std::ops::comb_div` 1_000_000_000))
+    trunc(ns_to_cycles_ceil(ctrl_write_ns()))
 }
 
 fn card_offset(addr: BusAddr) -> CardOffset {
