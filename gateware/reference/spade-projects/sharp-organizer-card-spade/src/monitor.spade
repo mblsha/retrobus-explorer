@@ -82,8 +82,10 @@ pub(lib) struct OrganizerMonitorLines {
     misc: bool,
 }
 
+const STABLE_SAMPLE_THRESHOLD: SampleCount = 5;
+
 pub(lib) fn stable_threshold() -> SampleCount {
-    5
+    STABLE_SAMPLE_THRESHOLD
 }
 
 fn empty_queued_sample() -> QueuedSample {
