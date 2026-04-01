@@ -31,6 +31,11 @@ type AddrSampleState = StableSampleState<20, 32>;
 type DataSampleState = StableSampleState<8, 32>;
 type MiscSampleState = StableSampleState<11, 32>;
 
+const UART_MONITOR_CLK_HZ: int = 400_000_000;
+const UART_MONITOR_CLK_UART_HZ: int = 100_000_000;
+const UART_MONITOR_DIVISOR: int = 4;
+const UART_MONITOR_OVERSAMPLE: int = 3;
+
 struct QueuedSample {
     valid: bool,
     sample: OrganizerSample,
@@ -274,7 +279,13 @@ pub(lib) entity organizer_monitor_uarts(
     clk_uart: clock,
     samples: OrganizerMonitorSamples,
 ) -> OrganizerMonitorLines {
-    let addr_uart = inst async_uart_monitor::<20, 4, 3, 400_000_000, 100_000_000>(
+    let addr_uart = inst async_uart_monitor::<
+        20,
+        UART_MONITOR_DIVISOR,
+        UART_MONITOR_OVERSAMPLE,
+        UART_MONITOR_CLK_HZ,
+        UART_MONITOR_CLK_UART_HZ,
+    >(
         clk,
         rst,
         sample_addr_value(samples.addr),
@@ -282,7 +293,13 @@ pub(lib) entity organizer_monitor_uarts(
         clk_uart,
         rst,
     );
-    let data_uart = inst async_uart_monitor::<8, 4, 3, 400_000_000, 100_000_000>(
+    let data_uart = inst async_uart_monitor::<
+        8,
+        UART_MONITOR_DIVISOR,
+        UART_MONITOR_OVERSAMPLE,
+        UART_MONITOR_CLK_HZ,
+        UART_MONITOR_CLK_UART_HZ,
+    >(
         clk,
         rst,
         sample_data_value(samples.data),
@@ -290,7 +307,13 @@ pub(lib) entity organizer_monitor_uarts(
         clk_uart,
         rst,
     );
-    let misc_uart = inst async_uart_monitor::<11, 4, 3, 400_000_000, 100_000_000>(
+    let misc_uart = inst async_uart_monitor::<
+        11,
+        UART_MONITOR_DIVISOR,
+        UART_MONITOR_OVERSAMPLE,
+        UART_MONITOR_CLK_HZ,
+        UART_MONITOR_CLK_UART_HZ,
+    >(
         clk,
         rst,
         sample_misc_value(samples.misc),
