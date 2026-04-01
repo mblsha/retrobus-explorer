@@ -31,11 +31,6 @@ type AddrSampleState = StableSampleState<20, 32>;
 type DataSampleState = StableSampleState<8, 32>;
 type MiscSampleState = StableSampleState<11, 32>;
 
-const UART_MONITOR_CLK_HZ: int = 400_000_000;
-const UART_MONITOR_CLK_UART_HZ: int = 100_000_000;
-const UART_MONITOR_DIVISOR: int = 4;
-const UART_MONITOR_OVERSAMPLE: int = 3;
-
 struct QueuedSample {
     valid: bool,
     sample: OrganizerSample,
@@ -89,6 +84,24 @@ pub(lib) struct OrganizerMonitorLines {
 
 pub(lib) fn stable_threshold() -> SampleCount {
     5
+}
+
+entity organizer_monitor_uart<#uint WIDTH>(
+    clk: clock,
+    rst: bool,
+    sample: uint<WIDTH>,
+    sample_valid: bool,
+    clk_uart: clock,
+) -> bool {
+    let uart = inst async_uart_monitor::<WIDTH, 4, 3, 400_000_000, 100_000_000>(
+        clk,
+        rst,
+        sample,
+        sample_valid,
+        clk_uart,
+        rst,
+    );
+    uart.line
 }
 
 fn empty_queued_sample() -> QueuedSample {
@@ -279,52 +292,31 @@ pub(lib) entity organizer_monitor_uarts(
     clk_uart: clock,
     samples: OrganizerMonitorSamples,
 ) -> OrganizerMonitorLines {
-    let addr_uart = inst async_uart_monitor::<
-        20,
-        UART_MONITOR_DIVISOR,
-        UART_MONITOR_OVERSAMPLE,
-        UART_MONITOR_CLK_HZ,
-        UART_MONITOR_CLK_UART_HZ,
-    >(
+    let addr_uart = inst organizer_monitor_uart::<20>(
         clk,
         rst,
         sample_addr_value(samples.addr),
         samples.addr.valid,
         clk_uart,
-        rst,
     );
-    let data_uart = inst async_uart_monitor::<
-        8,
-        UART_MONITOR_DIVISOR,
-        UART_MONITOR_OVERSAMPLE,
-        UART_MONITOR_CLK_HZ,
-        UART_MONITOR_CLK_UART_HZ,
-    >(
+    let data_uart = inst organizer_monitor_uart::<8>(
         clk,
         rst,
         sample_data_value(samples.data),
         samples.data.valid,
         clk_uart,
-        rst,
     );
-    let misc_uart = inst async_uart_monitor::<
-        11,
-        UART_MONITOR_DIVISOR,
-        UART_MONITOR_OVERSAMPLE,
-        UART_MONITOR_CLK_HZ,
-        UART_MONITOR_CLK_UART_HZ,
-    >(
+    let misc_uart = inst organizer_monitor_uart::<11>(
         clk,
         rst,
         sample_misc_value(samples.misc),
         samples.misc.valid,
         clk_uart,
-        rst,
     );
 
     OrganizerMonitorLines$(
-        addr: addr_uart.line,
-        data: data_uart.line,
-        misc: misc_uart.line,
+        addr: addr_uart,
+        data: data_uart,
+        misc: misc_uart,
     )
 }
