@@ -5,8 +5,6 @@ use super::super::{
     message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8},
 };
 
-const MSG_TEMPLATE_CAPACITY: uint = 64;
-
 pub enum Mode {
     ClockTester,
     Echo,
@@ -32,9 +30,9 @@ impl uint<4> {
     }
 }
 
-struct MsgTemplate {
+struct MsgTemplate<#uint CAPACITY> {
     len: uint<8>,
-    bytes: [uint<8>; MSG_TEMPLATE_CAPACITY],
+    bytes: [uint<8>; CAPACITY],
 }
 
 struct RxByteDecode {
@@ -74,13 +72,13 @@ entity decode_rx_byte(
     })
 }
 
-fn pad_message<#uint N>(message: [uint<8>; N]) -> [uint<8>; MSG_TEMPLATE_CAPACITY] {
-    concat_arrays(message, [0; MSG_TEMPLATE_CAPACITY - N])
+fn pad_message<#uint N, #uint CAPACITY>(message: [uint<8>; N]) -> [uint<8>; CAPACITY] {
+    concat_arrays(message, [0; CAPACITY - N])
 }
 
-fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate {
+fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate<64> {
     let len: uint<8> = N;
-    MsgTemplate$(len: len, bytes: pad_message(message))
+    MsgTemplate$(len: len, bytes: pad_message::<N, 64>(message))
 }
 
 fn mode_freq_suffix(mode: uint<8>, freq: uint<8>) -> [uint<8>; 10] {
@@ -116,12 +114,12 @@ impl MsgKind {
         if let Self::None = self { true } else { false }
     }
 
-    fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate {
+    fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate<64> {
         let m = mode.char();
         let f = freq_code.digit_char();
 
         match self {
-            Self::None => MsgTemplate$(len: 0, bytes: [0; MSG_TEMPLATE_CAPACITY]),
+            Self::None => MsgTemplate$(len: 0, bytes: [0; 64]),
             Self::Ready => msg_template_bytes(concat_arrays(b"RBX READY", mode_freq_suffix(m, f))),
             Self::Help => msg_template_bytes(b"RBX HELP !H !S !C !E !F0-5 M:CLOCK E:ECHO\r\n"),
             Self::Status => msg_template_bytes(concat_arrays(b"RBX STATUS", mode_freq_suffix(m, f))),
