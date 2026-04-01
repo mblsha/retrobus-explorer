@@ -169,37 +169,18 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
 
             match state {
                 UartTxState::Idle => {
-                    if !block_flag {
-                        if new_data {
-                            // Accept a new payload and move to start bit.
-                            UartTxRegs$(
-                                state: UartTxState::StartBit(),
-                                ctr: 0,
-                                bit_ctr: 0,
-                                saved_data: data,
-                                tx_reg: true,
-                                block_flag: block_flag_next,
-                            )
-                        } else {
-                            UartTxRegs$(
-                                state: UartTxState::Idle(),
-                                ctr: 0,
-                                bit_ctr: 0,
-                                saved_data: saved_data,
-                                tx_reg: true,
-                                block_flag: block_flag_next,
-                            )
-                        }
-                    } else {
-                        UartTxRegs$(
-                            state: UartTxState::Idle(),
-                            ctr: ctr,
-                            bit_ctr: bit_ctr,
-                            saved_data: saved_data,
-                            tx_reg: true,
-                            block_flag: block_flag_next,
-                        )
-                    }
+                    let start_send = !block_flag && new_data;
+                    // Keep blocked idle state as-is; otherwise clear counters while idle.
+                    let idle_ctr = if block_flag { ctr } else { 0 };
+                    let idle_bit_ctr = if block_flag { bit_ctr } else { 0 };
+                    UartTxRegs$(
+                        state: if start_send { UartTxState::StartBit() } else { UartTxState::Idle() },
+                        ctr: idle_ctr,
+                        bit_ctr: idle_bit_ctr,
+                        saved_data: if start_send { data } else { saved_data },
+                        tx_reg: true,
+                        block_flag: block_flag_next,
+                    )
                 },
                 UartTxState::StartBit => {
                     if ctr == ctr_last {
