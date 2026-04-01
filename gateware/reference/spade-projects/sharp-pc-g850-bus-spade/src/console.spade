@@ -6,6 +6,7 @@ use shared_components::{
 };
 
 type ConsoleIdx = uint<16>;
+const MAX_WAIT_DIGIT: uint<8> = 9;
 
 pub(lib) enum ConsoleCmd {
     None,
@@ -90,7 +91,11 @@ pub(lib) struct ConsoleMsgContext {
 
 impl ConsoleMsgContext {
     fn wait_char(self) -> uint<8> {
-        let d = if self.wait_enabled > 9 { 9 } else { self.wait_enabled };
+        let d = if self.wait_enabled > MAX_WAIT_DIGIT {
+            MAX_WAIT_DIGIT
+        } else {
+            self.wait_enabled
+        };
         b'0' +. d
     }
 
