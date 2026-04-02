@@ -122,6 +122,39 @@ fn parser_event_to_ctrl_msg(
     }
 }
 
+struct NextMsgDecision {
+    offer_ctrl: bool,
+    offer_ft_rx: bool,
+    next_msg_valid: bool,
+    next_msg: BridgeMsg,
+}
+
+fn decide_next_msg(
+    pending_ctrl_msg: BridgeMsg,
+    parser_msg: BridgeMsg,
+    pending_stream_msg: BridgeMsg,
+    rx_empty: bool,
+    rx_dout: PackedFtWord,
+) -> NextMsgDecision {
+    let ctrl_msg = choose_ctrl_msg(pending_ctrl_msg, parser_msg);
+    let can_offer_msg = pending_stream_msg.is_none();
+    let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
+    let offer_ft_rx = can_offer_msg && ctrl_msg.is_none() && !rx_empty;
+
+    NextMsgDecision$(
+        offer_ctrl: offer_ctrl,
+        offer_ft_rx: offer_ft_rx,
+        next_msg_valid: offer_ctrl || offer_ft_rx,
+        next_msg: if offer_ctrl {
+            ctrl_msg
+        } else if offer_ft_rx {
+            BridgeMsg::FtRx(unpack_ft_word(rx_dout), unpack_ft_be(rx_dout))
+        } else {
+            BridgeMsg::None()
+        },
+    )
+}
+
 #[no_mangle(all)]
 entity main_core(
     clk: clock,
@@ -170,30 +203,25 @@ entity main_core(
             state.err_count,
             state.stall_count,
         );
-        let ctrl_msg = choose_ctrl_msg(state.pending_ctrl_msg, parser_msg);
-        let can_offer_msg = state.msg_stream.pending_msg.is_none();
-        let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
-        let offer_ft_rx = can_offer_msg && ctrl_msg.is_none() && !rx_empty;
-        let next_msg_valid = offer_ctrl || offer_ft_rx;
-        let next_msg = if offer_ctrl {
-            ctrl_msg
-        } else if offer_ft_rx {
-            BridgeMsg::FtRx(unpack_ft_word(rx_dout), unpack_ft_be(rx_dout))
-        } else {
-            BridgeMsg::None()
-        };
+        let msg_decision = decide_next_msg(
+            state.pending_ctrl_msg,
+            parser_msg,
+            state.msg_stream.pending_msg,
+            rx_empty,
+            rx_dout,
+        );
         let msg_stream = bridge_msg_stream_step(
             state.msg_stream,
             *usb_busy,
-            next_msg_valid,
-            next_msg,
+            msg_decision.next_msg_valid,
+            msg_decision.next_msg,
         );
         let parse_err_event = parse.event.is_parse_err();
         let tx_full_event = tx_queue_overflow;
         let rx_stall_now = !*ft_ui_dout_empty && rx_full;
         let rx_stall_event = rx_stall_now && !state.stall_active;
         let rx_write = !*ft_ui_dout_empty && !rx_full;
-        let rx_read = offer_ft_rx;
+        let rx_read = msg_decision.offer_ft_rx;
         let next_rx_storage = if rx_write {
             rx_queue_write_at(state.rx_storage, state.rx_waddr, pack_ft_word(*ft_ui_dout, *ft_ui_dout_be))
         } else {
@@ -222,7 +250,7 @@ entity main_core(
         MainState$(
             parser: parse.state,
             msg_stream: msg_stream.state,
-            pending_ctrl_msg: next_pending_ctrl(state.pending_ctrl_msg, parser_msg, offer_ctrl),
+            pending_ctrl_msg: next_pending_ctrl(state.pending_ctrl_msg, parser_msg, msg_decision.offer_ctrl),
             pending_tx_word: next_pending_tx_word,
             pending_tx_be: next_pending_tx_be,
             pending_tx_valid: next_pending_tx_valid,
@@ -265,23 +293,18 @@ entity main_core(
         state.err_count,
         state.stall_count,
     );
-    let ctrl_msg = choose_ctrl_msg(state.pending_ctrl_msg, parser_msg);
-    let can_offer_msg = state.msg_stream.pending_msg.is_none();
-    let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
-    let offer_ft_rx = can_offer_msg && ctrl_msg.is_none() && !rx_empty;
-    let next_msg_valid = offer_ctrl || offer_ft_rx;
-    let next_msg = if offer_ctrl {
-        ctrl_msg
-    } else if offer_ft_rx {
-        BridgeMsg::FtRx(unpack_ft_word(rx_dout), unpack_ft_be(rx_dout))
-    } else {
-        BridgeMsg::None()
-    };
+    let msg_decision = decide_next_msg(
+        state.pending_ctrl_msg,
+        parser_msg,
+        state.msg_stream.pending_msg,
+        rx_empty,
+        rx_dout,
+    );
     let msg_stream = bridge_msg_stream_step(
         state.msg_stream,
         *usb_busy,
-        next_msg_valid,
-        next_msg,
+        msg_decision.next_msg_valid,
+        msg_decision.next_msg,
     );
 
     let _usb_tx = inst au_usb_uart_tx8_tap(
