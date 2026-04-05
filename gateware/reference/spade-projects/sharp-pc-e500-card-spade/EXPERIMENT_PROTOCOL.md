@@ -96,6 +96,21 @@ Experiment payloads must not clobber those bytes unless they also restore them
 before returning. In practice, avoid `0x30` and `0x31` as temporary internal
 RAM destinations in measurement probes.
 
+When a probe needs scratch space that should not overlap the supervisor's fixed
+internal-memory state, prefer reserving a temporary window from a live external
+stack pointer and restoring the pointer before return, rather than hard-coding
+an absolute external RAM address.
+
+Observed hardware note:
+
+- a single-step `U`-backed probe at `0x3F880` was useful because FT600 showed
+  the real write-data bytes there
+- the same hard-coded `U = 0x3F880` target was not safe for repeated runs and
+  wedged the session
+- so fixed external stack-window addresses should be treated as exploratory
+  only; reusable probes should derive and restore their scratch window from the
+  live stack state
+
 ## CE6 Control Page Usage
 
 Use the existing write-only control page:
