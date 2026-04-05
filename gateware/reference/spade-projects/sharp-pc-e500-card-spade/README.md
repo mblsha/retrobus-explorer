@@ -225,6 +225,37 @@ The stable supervisor image writes `0x01` to `0x1FFF4` during startup so the
 calculator-side FT sampled-bus stream stays enabled by default. The intended
 host-side pairing is a dedicated FT reader thread during experiment runs.
 
+The daemon now returns two FT views for each captured run:
+
+- raw `ft_capture.words` for exact post-processing
+- `ft_capture.compact_preview` for a simplified first-pass event sequence that
+  hides most synthetic followups
+- `ft_capture.execution_preview` for the inferred experiment execution window
+- `ft_capture.measurement_preview` for the `MARK_START` / `MARK_STOP` window
+  when visible in FT capture
+
+For saved results, decode them with:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
+  path/to/result.json \
+  --compact
+```
+
+The decoder also supports:
+
+```sh
+# focus on the first experiment execution window
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
+  path/to/result.json \
+  --window execution --compact
+
+# emit a Markdown table suitable for docs
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
+  path/to/result.json \
+  --window execution --compact --markdown
+```
+
 ## Current Verified Flow
 
 This path is now proven on hardware with the current bitstream and ROM images:

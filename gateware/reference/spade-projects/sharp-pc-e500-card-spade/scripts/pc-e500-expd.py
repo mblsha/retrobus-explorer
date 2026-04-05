@@ -32,7 +32,7 @@ from pc_e500_experiment_common import (
     resolve_existing_dir,
     resolve_existing_file,
 )
-from pc_e500_ft600 import Ft600Capture, decode_sampled_word
+from pc_e500_ft600 import Ft600Capture, preview_event_stream
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -432,17 +432,24 @@ class ExperimentDaemon:
             },
         }
         if ft_capture_result is not None:
-            preview_words = [
-                {
-                    "raw_word": word,
-                    "raw_hex": f"{word:08X}",
-                    "addr": decoded.addr,
-                    "data": decoded.data,
-                    "status": decoded.status,
-                }
-                for word in ft_capture_result.words[:32]
-                for decoded in [decode_sampled_word(word)]
-            ]
+            start_tag = int(plan.get("start_tag", 0x11)) & 0xFF
+            stop_tag = int(plan.get("stop_tag", 0x12)) & 0xFF
+            preview_words = preview_event_stream(ft_capture_result.words, limit=32, compact=False)
+            compact_preview_words = preview_event_stream(ft_capture_result.words, limit=64, compact=True)
+            execution_preview_words = preview_event_stream(
+                ft_capture_result.words,
+                limit=64,
+                compact=True,
+                window="execution",
+            )
+            measurement_preview_words = preview_event_stream(
+                ft_capture_result.words,
+                limit=64,
+                compact=True,
+                window="measurement",
+                start_tag=start_tag,
+                stop_tag=stop_tag,
+            )
             result["ft_capture"] = {
                 "enabled": True,
                 "word_count": len(ft_capture_result.words),
@@ -455,6 +462,9 @@ class ExperimentDaemon:
                 "health": "ok" if all(m.ft_overflow == 0 for m in measurements) else "overflow",
                 "words": ft_capture_result.words,
                 "preview": preview_words,
+                "compact_preview": compact_preview_words,
+                "execution_preview": execution_preview_words,
+                "measurement_preview": measurement_preview_words,
             }
 
         parsed = self._parse_experiment_result(Path(plan["_script_path"]), list(plan["_script_args"]), result)

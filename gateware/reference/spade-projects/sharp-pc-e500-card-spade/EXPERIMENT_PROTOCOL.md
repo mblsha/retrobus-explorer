@@ -245,6 +245,42 @@ The daemon returns a JSON object containing:
 - measurement records
 - captured `XR,...` lines
 - metadata such as run id and timing configuration
+- raw FT600 sampled-bus words when `ft_capture=true`
+- `ft_capture.preview`: decoded first-word preview
+- `ft_capture.compact_preview`: a simplified event stream that drops most
+  synthetic followups and collapses repeated adjacent samples
+- `ft_capture.execution_preview`: a compacted inferred execution window from
+  first experiment-ROM activity through the first supervisor fetch after return
+- `ft_capture.measurement_preview`: a compacted window bracketed by
+  `MARK_START`/`MARK_STOP` when those control writes are present in the FT
+  stream
 
 The optional `parse` step can turn that into a smaller experiment-specific
 result.
+
+### FT decode helper
+
+For saved result JSON, use:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
+  path/to/result.json \
+  --compact
+```
+
+This reads `ft_capture.words` and prints a readable bus-event table with
+address, data, event kind, region labels, and status flags.
+
+Useful options:
+
+```sh
+# inferred experiment execution window only
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
+  path/to/result.json \
+  --window execution --compact
+
+# MARK_START..MARK_STOP window only, exported as Markdown
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
+  path/to/result.json \
+  --window measurement --compact --markdown
+```
