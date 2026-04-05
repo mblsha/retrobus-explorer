@@ -43,3 +43,4 @@ __pycache__/
 
 # Local C++ host-tool build output
 gateware/reference/spade-projects/sharp-pc-e500-card-spade/.cpp-build/
+gateware/reference/spade-projects/sharp-pc-e500-card-spade/scripts/pc_e500_ft600_native*.so
