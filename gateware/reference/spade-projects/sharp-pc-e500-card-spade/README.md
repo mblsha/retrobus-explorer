@@ -216,3 +216,94 @@ Timeout recovery is explicit:
 - the daemon reprograms the safe supervisor image
 - the daemon returns JSON with `needs_reset=true`
 - the user resets the PC-E500 and runs `CALL &10000` again
+
+## Current Verified Flow
+
+This path is now proven on hardware with the current bitstream and ROM images:
+
+1. Start the daemon:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expd.py \
+  --monitor-uart
+```
+
+2. Program the safe supervisor image:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  arm-safe
+```
+
+3. Reset the calculator and run:
+
+```basic
+CALL &10000
+```
+
+4. Wait for the supervisor ready line:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  wait-ready --timeout 30
+```
+
+Expected UART line:
+
+```text
+XR,READY,01,SAFE
+```
+
+5. Run the smallest verified experiment:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  run ./spade-projects/sharp-pc-e500-card-spade/experiments/return_immediately.py
+```
+
+That path is verified end-to-end:
+
+- supervisor enters idle after `CALL &10000`
+- daemon observes `XR,READY,01,SAFE`
+- experiment emits `XR,BEGIN,<seq>` and `XR,END,<seq>,OK`
+- experiment returns to the idle supervisor loop
+- daemon returns measurement JSON
+
+More aggressive experiments may still wedge the calculator and require reset.
+
+## UART Smoke Tests
+
+Use these when you want to prove the calculator-side `ECHO` path separately
+from the continuous supervisor.
+
+Direct raw UART listener:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py \
+  listen --duration 5 --expect "OK\r\n"
+```
+
+That `--expect` argument now decodes `\r`, `\n`, and `\xNN` escapes directly,
+so it works as shown in fish, zsh, and bash.
+
+Daemon-owned UART smoke test:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  debug-echo-short --timeout 10
+```
+
+While that command is waiting, run:
+
+```basic
+CALL &10100
+```
+
+The daemon programs
+[asm/card_rom_echo_short_retf.asm](./asm/card_rom_echo_short_retf.asm), waits
+for a fresh post-programming UART boundary, and then waits for the calculator
+to emit `OK\r\n` and `RETF` back to BASIC.

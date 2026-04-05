@@ -103,6 +103,33 @@ reset path starts in a known idle state.
 9. Daemon collects timing records plus `XR,...` lines and returns JSON.
 10. Repeat from step 5 until the device wedges or is reset.
 
+## Current Status
+
+The following pieces are now verified on real hardware:
+
+- `CALL &10000` can enter the CE6 supervisor and stay in the idle loop
+- the supervisor emits `XR,READY,01,SAFE`
+- the host daemon can observe that ready line while owning the shared UART
+- the trivial experiment
+  [experiments/return_immediately.py](./experiments/return_immediately.py)
+  runs end-to-end and returns to the idle supervisor loop
+- direct calculator-side `ECHO` also works through the shared UART using
+  [asm/card_rom_echo_short_retf.asm](./asm/card_rom_echo_short_retf.asm)
+
+The main remaining limitation is experiment safety, not the host/device control
+plane. A bad experiment can still wedge the calculator and force the reset path.
+
+## Operational Notes
+
+- Do not assume host command replies end with the last line being `OK`. Once
+  the supervisor is running, unsolicited `XR,...` lines may appear after a
+  `W...` or `m!` reply on the same UART.
+- For raw-byte waits such as the debug echo smoke test, the host must
+  synchronize to a fresh UART boundary after programming. Otherwise delayed
+  bytes from the previous host transaction can become false positives.
+- Early writes to `IMR` were removed from the startup path because they caused
+  unstable behavior on hardware during supervisor entry.
+
 ## Experiment Scripts
 
 Experiment scripts are small Python files that define the next run.

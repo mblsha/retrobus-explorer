@@ -150,6 +150,20 @@ Important caveat:
 - reprogramming CE6 ROM does not recover the already-running stuck CPU
 - it only ensures that the next reset + `CALL` returns to the safe supervisor
 
+## Host-Side Parsing Notes
+
+These are not protocol goals; they are observed realities of the current shared
+UART path and the host implementation must tolerate them.
+
+- Once the supervisor is alive, unsolicited `XR,...` lines can legally arrive
+  immediately after host command replies such as `W...` and `m!`.
+- Host helpers should therefore treat a reply as successful if the expected
+  acknowledgement line appears anywhere in the captured reply block, not only as
+  the final line.
+- Raw-byte waits used for smoke tests must start from a fresh UART boundary
+  after host programming traffic settles. Otherwise late bytes from the previous
+  transaction can be mistaken for experiment output.
+
 ## Experiment Script Contract
 
 An experiment script is a Python program used by the host daemon.

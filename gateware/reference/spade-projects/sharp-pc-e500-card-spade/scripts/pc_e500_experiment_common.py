@@ -148,6 +148,10 @@ def parse_measurement_lines(lines: list[str]) -> list[ParsedMeasurement]:
     return measurements
 
 
+def reply_contains_line(lines: list[str], expected: str) -> bool:
+    return any(line == expected for line in lines)
+
+
 def parse_hex_or_int(text: str) -> int:
     cleaned = text.strip().replace("_", "")
     if cleaned.lower().startswith("0x"):
@@ -508,7 +512,7 @@ class ExperimentUART:
     def write_rom_byte(self, address: int, value: int) -> None:
         offset = rom_offset_from_address(address)
         reply = self.run_raw(f"W{offset:03X}={value:02X}")
-        if not reply or reply[-1] != "OK":
+        if not reply_contains_line(reply, "OK"):
             raise RuntimeError(f"unexpected ROM write reply {reply!r}")
 
     def write_rom_bytes(self, start_address: int, data: bytes, *, fast: bool = True) -> None:
@@ -525,7 +529,7 @@ class ExperimentUART:
 
     def clear_measurements(self) -> None:
         reply = self.run_raw("m!")
-        if not reply or reply[-1] != "OK":
+        if not reply_contains_line(reply, "OK"):
             raise RuntimeError(f"unexpected measurement clear reply {reply!r}")
 
     def read_measure_status(self) -> ParsedMeasureStatus:
