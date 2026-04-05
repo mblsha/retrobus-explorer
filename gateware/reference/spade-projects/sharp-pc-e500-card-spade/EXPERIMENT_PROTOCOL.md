@@ -111,6 +111,19 @@ Observed hardware note:
   only; reusable probes should derive and restore their scratch window from the
   live stack state
 
+Recommended use of stack-backed windows:
+
+- use a reserved `U`- or `S`-backed external RAM window when a probe needs
+  trustworthy write-data observation on the FT stream
+- this is better than passive CE6 ROM-write targets, which often preserve
+  timing and address order but can show unreliable write-data bytes
+- good candidates include:
+  - multi-byte writes (`MVW`, `MVP`)
+  - read-modify-write probes where writeback value matters
+  - stack-order probes (`PUSH*`, `POP*`, `CALL*`, `RET*`)
+- derive the scratch window from the live stack pointer, use it briefly, then
+  restore the pointer before `RETF`
+
 ## CE6 Control Page Usage
 
 Use the existing write-only control page:
