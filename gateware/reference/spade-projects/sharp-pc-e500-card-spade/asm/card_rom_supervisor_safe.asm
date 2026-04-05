@@ -5,7 +5,8 @@
 ;
 ; After that the supervisor:
 ; - leaves IMR untouched
-; - emits XR,READY,01,SAFE
+; - enables FT sampled-bus capture through 0x1FFF4
+; - emits XR,READY,01,SAFEFT
 ; - polls the fixed command block at 0x107E0..0x107FF
 ; - CALLFs the fixed experiment entry at 0x10100 when the sequence byte changes
 ; - emits XR,BEGIN,<seq> and XR,END,<seq>,OK around each run
@@ -18,6 +19,9 @@
 
 start:
     MV (0x30), 0x00
+
+    MV A, 0x01
+    MV [0x1FFF4], A
 
     CALL init_uart
     MV X, ready_line
@@ -125,7 +129,7 @@ emit_char:
     RET
 
 ready_line:
-    defm "XR,READY,01,SAFE"
+    defm "XR,READY,01,SAFEFT"
     defb 0x0D, 0x0A, 0x00
 
 begin_prefix:

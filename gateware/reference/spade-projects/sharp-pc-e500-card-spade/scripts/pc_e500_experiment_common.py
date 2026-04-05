@@ -56,6 +56,7 @@ class ParsedMeasurement:
     ticks: int
     ce_events: int
     addr_uart: int
+    ft_overflow: int
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,7 @@ def parse_measurement_lines(lines: list[str]) -> list[ParsedMeasurement]:
                 ticks=int(values["TK"]),
                 ce_events=int(values["EV"]),
                 addr_uart=int(values["AU"]),
+                ft_overflow=int(values.get("FO", 0)),
             )
         )
     return measurements

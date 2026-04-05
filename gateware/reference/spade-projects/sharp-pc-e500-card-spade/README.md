@@ -13,6 +13,10 @@ interface when the measurement window is armed.
 - Timing and bus visibility: Saleae debug header outputs
 - Measurement-gated sampled-bus bulk capture: Au + Ft Element FT600 path
 
+FT600 sampled-bus capture is now the default experiment mode. The stable
+supervisor enables the calculator-side FT stream, and the host daemon drains it
+during experiment runs by default.
+
 ## Au1 USB-UART
 
 The Alchitry Au1 exposes two macOS serial ports. The slow control UART for this
@@ -217,6 +221,10 @@ Timeout recovery is explicit:
 - the daemon returns JSON with `needs_reset=true`
 - the user resets the PC-E500 and runs `CALL &10000` again
 
+The stable supervisor image writes `0x01` to `0x1FFF4` during startup so the
+calculator-side FT sampled-bus stream stays enabled by default. The intended
+host-side pairing is a dedicated FT reader thread during experiment runs.
+
 ## Current Verified Flow
 
 This path is now proven on hardware with the current bitstream and ROM images:
@@ -253,7 +261,7 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
 Expected UART line:
 
 ```text
-XR,READY,01,SAFE
+XR,READY,01,SAFEFT
 ```
 
 5. Run the smallest verified experiment:

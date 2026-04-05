@@ -23,10 +23,34 @@ def parse_count(argv: list[str], *, index: int = 2) -> int:
     return value
 
 
-def build_asm(count: int) -> str:
+def has_flag(argv: list[str], flag: str) -> bool:
+    return flag in argv[2:]
+
+
+def ft_capture_enabled(argv: list[str]) -> bool:
+    if has_flag(argv, "--no-ft-capture"):
+        return False
+    return True
+
+
+def build_asm(count: int, *, arm_ft_stream: bool = False) -> str:
     lines = [".ORG 0x10100", "", "start:"]
+    if arm_ft_stream:
+        lines.extend(
+            [
+                "    MV A, 0x01",
+                "    MV [0x1FFF4], A",
+            ]
+        )
     for idx in range(count):
         lines.append(f"    CALLF sub_{idx:03d}")
+    if arm_ft_stream:
+        lines.extend(
+            [
+                "    MV A, 0x00",
+                "    MV [0x1FFF4], A",
+            ]
+        )
     lines.append("    RETF")
     lines.append("")
     for idx in range(count):
@@ -36,10 +60,10 @@ def build_asm(count: int) -> str:
     return "\n".join(lines)
 
 
-def build_plan(count: int) -> dict[str, object]:
+def build_plan(count: int, *, ft_capture: bool = False, arm_ft_stream: bool = False) -> dict[str, object]:
     return {
         "name": "callf_retf_chain",
-        "asm_text": build_asm(count),
+        "asm_text": build_asm(count, arm_ft_stream=arm_ft_stream),
         "fill_experiment_region": False,
         "timing": 5,
         "control_timing": 10,
@@ -47,6 +71,8 @@ def build_plan(count: int) -> dict[str, object]:
         "start_tag": 0x41,
         "stop_tag": 0x42,
         "flags": 0,
+        "ft_capture": ft_capture,
+        "arm_ft_stream": arm_ft_stream,
         "args": [],
     }
 
@@ -64,6 +90,7 @@ def parse_result(raw_result_path: Path, count: int) -> dict[str, object]:
         "first_measurement": first,
         "ticks_per_step": ticks_per_step,
         "uart_lines": raw.get("uart_lines", []),
+        "ft_capture": raw.get("ft_capture"),
     }
 
 
@@ -72,7 +99,13 @@ def main(argv: list[str]) -> int:
         raise SystemExit("usage: callf_retf_chain.py plan|parse [args...]")
     command = argv[1]
     if command == "plan":
-        return emit_json(build_plan(parse_count(argv)))
+        return emit_json(
+            build_plan(
+                parse_count(argv),
+                ft_capture=ft_capture_enabled(argv),
+                arm_ft_stream=has_flag(argv, "--arm-ft-stream"),
+            )
+        )
     if command == "parse":
         if len(argv) < 3:
             raise SystemExit("usage: callf_retf_chain.py parse RESULT.json [count]")

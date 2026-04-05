@@ -25,7 +25,17 @@ def parse_loops(argv: list[str], *, index: int = 2) -> int:
     return value
 
 
-def build_plan(loops: int) -> dict[str, object]:
+def has_flag(argv: list[str], flag: str) -> bool:
+    return flag in argv[2:]
+
+
+def ft_capture_enabled(argv: list[str]) -> bool:
+    if has_flag(argv, "--no-ft-capture"):
+        return False
+    return True
+
+
+def build_plan(loops: int, *, ft_capture: bool = False) -> dict[str, object]:
     return {
         "name": "wait_probe",
         "asm_source": str(ASM_SOURCE),
@@ -35,6 +45,7 @@ def build_plan(loops: int) -> dict[str, object]:
         "start_tag": 0x21,
         "stop_tag": 0x22,
         "flags": 0,
+        "ft_capture": ft_capture,
         "args": [
             loops & 0xFF,
             (loops >> 8) & 0xFF,
@@ -55,6 +66,7 @@ def parse_result(raw_result_path: Path, loops: int) -> dict[str, object]:
         "first_measurement": first,
         "ticks_per_loop": ticks_per_loop,
         "uart_lines": raw.get("uart_lines", []),
+        "ft_capture": raw.get("ft_capture"),
     }
 
 
@@ -63,7 +75,7 @@ def main(argv: list[str]) -> int:
         raise SystemExit("usage: wait_probe.py plan|parse [args...]")
     command = argv[1]
     if command == "plan":
-        return emit_json(build_plan(parse_loops(argv)))
+        return emit_json(build_plan(parse_loops(argv), ft_capture=ft_capture_enabled(argv)))
     if command == "parse":
         if len(argv) < 3:
             raise SystemExit("usage: wait_probe.py parse RESULT.json [loops]")

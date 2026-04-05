@@ -32,12 +32,15 @@ from pc_e500_experiment_common import (
     resolve_existing_dir,
     resolve_existing_file,
 )
+from pc_e500_ft600 import Ft600Capture, decode_sampled_word
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SOCKET = Path.home() / ".cache" / "pc-e500-expd.sock"
 DEFAULT_SAFE_ASM = PROJECT_ROOT / "asm" / "card_rom_supervisor_safe.asm"
 DEFAULT_DEBUG_ECHO_ASM = PROJECT_ROOT / "asm" / "card_rom_echo_short_retf.asm"
+DEFAULT_SAFE_TIMING = 5
+DEFAULT_SAFE_CONTROL_TIMING = 10
 
 CMD_BASE = 0x107E0
 CMD_MAGIC0 = CMD_BASE + 0x00
@@ -49,6 +52,8 @@ CMD_STOP_TAG = CMD_BASE + 0x05
 CMD_ARGS_BASE = CMD_BASE + 0x06
 CMD_ARGS_COUNT = 10
 CMD_SEQ = 0x107FF
+
+CMD_FLAG_ENABLE_FT_CAPTURE = 0x01
 
 EXPERIMENT_MIN = 0x10100
 EXPERIMENT_MAX = 0x106FF
@@ -143,6 +148,9 @@ class ExperimentDaemon:
         return f"{time.strftime('%Y%m%d-%H%M%S')}-{self._run_counter:04d}"
 
     def _poll_unsolicited_lines(self) -> None:
+        current_line_count = self.uart.line_count()
+        if self._scan_index > current_line_count:
+            self._scan_index = current_line_count
         lines = self.uart.lines_since(self._scan_index)
         self._scan_index += len(lines)
         for line in lines:
@@ -170,6 +178,8 @@ class ExperimentDaemon:
 
     def program_safe_image(self) -> dict[str, Any]:
         start_address, image = self._assemble_image_from_source(self.safe_asm)
+        self.uart.set_timing(DEFAULT_SAFE_TIMING)
+        self.uart.set_control_timing(DEFAULT_SAFE_CONTROL_TIMING)
         self.uart.write_rom_bytes(start_address, image, fast=True)
         self.safe_image_programmed = True
         self.safe_image_path = str(self.safe_asm)
@@ -182,6 +192,8 @@ class ExperimentDaemon:
             "safe_image_programmed": True,
             "safe_image_path": str(self.safe_asm),
             "entry": start_address,
+            "timing": DEFAULT_SAFE_TIMING,
+            "control_timing": DEFAULT_SAFE_CONTROL_TIMING,
         }
 
     def debug_echo_short(self, timeout_s: float) -> dict[str, Any]:
@@ -285,7 +297,10 @@ class ExperimentDaemon:
         block[CMD_MAGIC0 - CMD_BASE] = 0x58
         block[CMD_MAGIC1 - CMD_BASE] = 0x52
         block[CMD_VERSION - CMD_BASE] = 0x01
-        block[CMD_FLAGS - CMD_BASE] = int(plan.get("flags", 0)) & 0xFF
+        flags = int(plan.get("flags", 0)) & 0xFF
+        if bool(plan.get("ft_capture", False)):
+            flags |= CMD_FLAG_ENABLE_FT_CAPTURE
+        block[CMD_FLAGS - CMD_BASE] = flags
         block[CMD_START_TAG - CMD_BASE] = int(plan.get("start_tag", 0x11)) & 0xFF
         block[CMD_STOP_TAG - CMD_BASE] = int(plan.get("stop_tag", 0x12)) & 0xFF
         args = plan.get("args", [])
@@ -339,6 +354,11 @@ class ExperimentDaemon:
         timing = int(plan.get("timing", 5))
         control_timing = int(plan.get("control_timing", 10))
         timeout_s = float(plan.get("timeout_s", 2.0))
+        ft_capture_enabled = bool(plan.get("ft_capture", True))
+        ft_read_size = int(plan.get("ft_read_size", 64 * 1024))
+        ft_read_timeout_ms = int(plan.get("ft_read_timeout_ms", 20))
+        ft_post_stop_idle_s = float(plan.get("ft_post_stop_idle_s", 0.1))
+        ft_post_stop_hard_s = float(plan.get("ft_post_stop_hard_s", 1.0))
 
         if "asm_source" in plan:
             start_address, image = self._assemble_image_from_source(Path(plan["asm_source"]))
@@ -359,6 +379,18 @@ class ExperimentDaemon:
         self.uart.write_rom_bytes(start_address if not fill_experiment_region else EXPERIMENT_MIN, image_to_program, fast=True)
         self.uart.synchronize_rx_boundary()
         line_index = self.uart.line_count()
+        ft_capture = (
+            Ft600Capture(
+                read_size=ft_read_size,
+                read_timeout_ms=ft_read_timeout_ms,
+                post_stop_idle_s=ft_post_stop_idle_s,
+                post_stop_hard_s=ft_post_stop_hard_s,
+            )
+            if ft_capture_enabled
+            else None
+        )
+        if ft_capture is not None:
+            ft_capture.start()
         self._commit_command_block(command_block)
         self.status = "running"
 
@@ -369,8 +401,14 @@ class ExperimentDaemon:
             begin_line = self.uart.wait_for_line(lambda text: text == begin_text, timeout_s, start_index=line_index)
             end_line = self.uart.wait_for_line(lambda text: text.startswith(end_prefix), timeout_s, start_index=line_index)
         except TimeoutError as exc:
+            if ft_capture is not None:
+                try:
+                    ft_capture.stop()
+                except Exception:
+                    pass
             return self._handle_timeout(run_id=run_id, reason=str(exc))
 
+        ft_capture_result = ft_capture.stop() if ft_capture is not None else None
         measurements = self.uart.dump_measurements()
         xr_lines = [line.text for line in self.uart.lines_since(line_index) if line.text.startswith("XR,")]
 
@@ -393,6 +431,31 @@ class ExperimentDaemon:
                 if not key.startswith("_")
             },
         }
+        if ft_capture_result is not None:
+            preview_words = [
+                {
+                    "raw_word": word,
+                    "raw_hex": f"{word:08X}",
+                    "addr": decoded.addr,
+                    "data": decoded.data,
+                    "status": decoded.status,
+                }
+                for word in ft_capture_result.words[:32]
+                for decoded in [decode_sampled_word(word)]
+            ]
+            result["ft_capture"] = {
+                "enabled": True,
+                "word_count": len(ft_capture_result.words),
+                "raw_bytes": ft_capture_result.raw_bytes,
+                "chunk_count": ft_capture_result.chunk_count,
+                "pending_bytes_hex": ft_capture_result.pending_bytes_hex,
+                "decode_swap_u16": ft_capture_result.decode_swap_u16,
+                "drain_idle_s": ft_capture_result.drain_idle_s,
+                "drain_hard_s": ft_capture_result.drain_hard_s,
+                "health": "ok" if all(m.ft_overflow == 0 for m in measurements) else "overflow",
+                "words": ft_capture_result.words,
+                "preview": preview_words,
+            }
 
         parsed = self._parse_experiment_result(Path(plan["_script_path"]), list(plan["_script_args"]), result)
         if parsed is not None:

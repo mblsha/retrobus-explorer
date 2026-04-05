@@ -22,6 +22,12 @@ It is intentionally small and rigid:
   - `MARK_START` / `MARK_STOP` measurement reports
   - sparse `XR,...` lines via `ECHO`
 
+Current default:
+
+- the standard supervisor image enables FT sampled-bus capture during startup
+- the host daemon drains FT600 during experiment runs by default
+- experiments may opt out only for explicit fallback/debug cases
+
 ## Device Layout
 
 ### CE6 ROM Regions
@@ -70,6 +76,12 @@ Rules:
 - the supervisor ignores a command if the sequence matches the last-seen value
 
 The host owns the meaning of `flags` and `arg0..arg9`.
+
+Current flag assignments:
+
+- `bit0`
+  - reserved for FT sampled-bus capture enable signalling in the command block
+    if a future per-run gating variant is needed
 
 ## CE6 Control Page Usage
 
@@ -202,6 +214,24 @@ Optional fields:
 - `stop_tag`
 - `flags`
 - `args`
+- `ft_capture`
+- `ft_read_size`
+- `ft_read_timeout_ms`
+- `ft_post_stop_idle_s`
+- `ft_post_stop_hard_s`
+
+If `ft_capture=true`, the daemon opens the FT600 side channel, drains it in a
+dedicated background thread, and return decoded sampled-bus words in the raw
+result. The reader keeps draining until either:
+
+- no new FT bytes arrive for `ft_post_stop_idle_s`, or
+- `ft_post_stop_hard_s` elapses after stop
+
+That models the expected bursty FT delivery and in-flight buffering on the
+separate channel.
+
+The intended default is `ft_capture=true`. Use `ft_capture=false` only when
+explicitly validating the non-FT fallback path.
 
 The CLI forwards extra arguments after `--` to both the `plan` and `parse`
 subcommands. That makes it possible to inject parameterized experiments without
