@@ -83,6 +83,19 @@ Current flag assignments:
   - reserved for FT sampled-bus capture enable signalling in the command block
     if a future per-run gating variant is needed
 
+## Supervisor Scratch State
+
+The current supervisor keeps scratch state in internal memory:
+
+- `0x30`
+  - last executed sequence
+- `0x31`
+  - current sequence scratch
+
+Experiment payloads must not clobber those bytes unless they also restore them
+before returning. In practice, avoid `0x30` and `0x31` as temporary internal
+RAM destinations in measurement probes.
+
 ## CE6 Control Page Usage
 
 Use the existing write-only control page:
