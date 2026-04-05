@@ -300,6 +300,7 @@ class ExperimentDaemon:
         body = block[:-1]
         seq = block[-1]
         self.uart.write_rom_bytes(CMD_BASE, body, fast=True)
+        self.uart.synchronize_rx_boundary()
         self.uart.write_rom_byte(CMD_SEQ, seq)
 
     def _handle_timeout(self, *, run_id: str, reason: str) -> dict[str, Any]:
