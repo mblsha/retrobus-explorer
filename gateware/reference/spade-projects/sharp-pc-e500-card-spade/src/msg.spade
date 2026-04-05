@@ -19,6 +19,7 @@ pub(lib) struct MeasureReport {
     delta_ticks: uint<32>,
     delta_events: uint<32>,
     delta_addr_uart: uint<32>,
+    delta_ft_overflow: uint<32>,
 }
 
 pub(lib) enum RespMsg {
@@ -261,9 +262,13 @@ impl MeasureMsg {
                 indexed_bytes(b",AU=", idx -. 36)
             } else if idx < 48 {
                 tx_req_byte(u32_hex_char(report.delta_addr_uart, trunc(idx -. 40)))
-            } else if idx == 48 {
+            } else if idx < 52 {
+                indexed_bytes(b",FO=", idx -. 48)
+            } else if idx < 60 {
+                tx_req_byte(u32_hex_char(report.delta_ft_overflow, trunc(idx -. 52)))
+            } else if idx == 60 {
                 tx_req_byte(b'\r')
-            } else if idx == 49 {
+            } else if idx == 61 {
                 tx_req_byte(b'\n')
             } else {
                 tx_req_none()

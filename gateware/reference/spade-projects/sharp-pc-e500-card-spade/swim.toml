@@ -10,6 +10,7 @@ extra_signals = ["data"]
 acf = [
     "../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/alchitry.acf",
     "../../../shared-constraints/saleae.acf",
+    "../../Alchitry-Labs-V2/src/main/resources/library/components/Constraints/ft_v1.acf",
     "constraints/pc-e500-ffc.acf",
 ]
 

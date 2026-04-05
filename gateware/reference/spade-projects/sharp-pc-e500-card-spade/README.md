@@ -5,10 +5,13 @@ and a CE6 control page exposed through the onboard USB-UART.
 
 ## Expected Host Interface
 
-Use the Au1 onboard USB-UART as the host control path.
+Use the Au1 onboard USB-UART as the host control path. Optional bulk capture of
+sampled bus words can also be routed through the Alchitry Ft Element FT600
+interface when the measurement window is armed.
 
 - Control, RAM/ROM access, and measurement dump: Au1 onboard USB-UART
 - Timing and bus visibility: Saleae debug header outputs
+- Measurement-gated sampled-bus bulk capture: Au + Ft Element FT600 path
 
 ## Au1 USB-UART
 
@@ -19,6 +22,9 @@ default.
 
 For the complete FPGA command and CE6 control-register reference, see
 [FPGA_PROTOCOL.md](./FPGA_PROTOCOL.md).
+
+For the approved FT capture implementation shape, see
+[IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md).
 
 From `gateware/reference`:
 
@@ -133,6 +139,8 @@ LOAD"COM:"
 
 ## Notes
 
-There is no separate bulk-streaming interface in this project anymore. Host
-interaction is through the USB-UART command set documented in
-[FPGA_PROTOCOL.md](./FPGA_PROTOCOL.md).
+Host control remains centered on the USB-UART command set documented in
+[FPGA_PROTOCOL.md](./FPGA_PROTOCOL.md). The FT600 path, when enabled through the
+CE6 control page, mirrors the existing `saleae[4]` sampled-bus words and is
+intended for bulk capture during a measurement window rather than for general
+interactive control.

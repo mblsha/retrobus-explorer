@@ -5,6 +5,7 @@ This document describes the PC-E500 card FPGA control surface:
 - USB-UART commands exposed by the FPGA
 - Special CE6 control-page registers handled by the FPGA
 - Saleae debug and bus-capture streams
+- FT600 bulk capture of sampled-bus words during a measurement window
 - Response formats and practical examples
 
 All timings below assume the current `100 MHz` FPGA clock.
@@ -17,6 +18,13 @@ The design exposes two separate control paths:
   - direct host control for RAM, ROM, timing, and measurement dump
 - CE6 special control page
   - calculator-visible write-only registers in the CE6 card-ROM region
+
+Optional bulk capture is exposed separately:
+
+- FT600 sampled-bus stream
+  - exact mirror of the `saleae[4]` sampled-bus words
+  - enabled by CE6 control-page configuration
+  - active only while the measurement interval is armed
 
 Normal CE1 RAM and CE6 ROM timing uses the shared `tNN` delay.
 CE6 control-page writes use the separate `cNN` delay.
@@ -278,7 +286,7 @@ Fields:
 `m` response:
 
 ```text
-MR,S=..,E=..,TK=........,EV=........,AU=........
+MR,S=..,E=..,TK=........,EV=........,AU=........,FO=........
 ...
 MEND
 ```
@@ -296,6 +304,8 @@ Fields:
   - CE event count delta
 - `AU`
   - address-UART emission count delta
+- `FO`
+  - FT sampled-bus words dropped because the FT capture FIFO was full
 
 `m!` response:
 
@@ -331,7 +341,8 @@ From calculator software, use the logical CE6 addresses in the `0x01xxxx` range.
 | `0x01FFF1` | `0xFFF1` | `ECHO` | write-only | send written byte to USB-UART |
 | `0x01FFF2` | `0xFFF2` | `MARK_STOP` | write-only | stop measurement and queue report |
 | `0x01FFF3` | `0xFFF3` | `MARK_ABORT` | write-only | clear armed measurement without report |
-| `0x01FFF4..0x01FFFF` | `0xFFF4..0xFFFF` | reserved | write-only | currently no action |
+| `0x01FFF4` | `0xFFF4` | `FT_STREAM_CFG` | write-only | configure measurement-gated FT sampled-bus capture |
+| `0x01FFF5..0x01FFFF` | `0xFFF5..0xFFFF` | reserved | write-only | currently no action |
 
 ### `ECHO` Register
 
@@ -395,6 +406,40 @@ Effect:
 - clears `ARM`
 - does not enqueue a report
 
+### `FT_STREAM_CFG`
+
+Write a config byte to `0x01FFF4`.
+
+Bit layout:
+
+```text
+bit 0     ft_enable
+bits 7:1  reserved
+```
+
+Rules:
+
+- `bit0 = 0`
+  - disable FT sampled-bus capture
+- `bit0 = 1`
+  - enable FT sampled-bus capture, but only while measurement `ARM` is active
+- reads from this register are passive like the rest of the control page
+- reserved bits are currently ignored
+
+When enabled, the FT stream carries the exact `saleae[4]` sampled-bus words:
+
+- one sampled-bus word is `32` bits
+- FT600 transport emits the low `16` bits first, then the high `16` bits
+- the measurement `MARK_START` write itself is not part of the FT capture window
+- `MARK_STOP` and `MARK_ABORT` close the FT capture window before their own
+  control-page writes are considered for FT capture
+
+If the dedicated FT capture FIFO fills:
+
+- new FT sampled-bus words are dropped
+- bus sampling continues
+- dropped-word count is reported in the measurement result as `FO`
+
 ### Measurement Example
 
 Calculator-side:
@@ -409,7 +454,7 @@ Host-side:
 
 ```text
 m
-MR,S=01,E=02,TK=0000002D,EV=00000005,AU=00000003
+MR,S=01,E=02,TK=0000002D,EV=00000005,AU=00000003,FO=00000000
 MEND
 ```
 
@@ -420,6 +465,7 @@ Interpretation:
 - elapsed time `0x2D` ticks = `45 * 10 ns = 450 ns`
 - `5` CE events
 - `3` address-UART emissions
+- `0` dropped FT sampled-bus words
 
 ## Error and Busy Responses
 
