@@ -5,11 +5,12 @@ mod protocol;
 use shared_components::{
     boot_banner::{BootBannerOut, BootBannerState, boot_banner_step, init_boot_banner},
     clocking::sampled_bool_clock,
-    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
+    config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    ft_stream::{FtWordStreamState, ft_word_stream_step},
     memory::sync_fifo,
     message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
     primitives::{reset_conditioner, sync_bundle, sync_delay},
-    serial::uart_tx_tap,
+    serial::{FtBe, FtData, uart_tx_tap},
 };
 use msg::{
     EchoStreamState,
@@ -37,7 +38,7 @@ type SampledBusStatus = uint<6>;
 type ClassifyCtr = uint<7>;
 type SampleCtr = uint<8>;
 type TickCount = uint<32>;
-type MeasurePacked = uint<112>;
+type MeasurePacked = uint<144>;
 type MeasureQueueLevel = uint<6>;
 type MeasureCount = uint<32>;
 type Ce6Low16 = uint<16>;
@@ -53,7 +54,7 @@ fn sampled_bus_cycle_cycles() -> SampleCtr { 131 }
 fn sampled_bus_cycle_last() -> SampleCtr { sampled_bus_cycle_cycles() -. 1 }
 fn sampled_bus_phase_timeout_cycles() -> SampleCtr { 64 }
 fn ns_to_cycles_ceil(duration_ns: uint<32>) -> uint<32> {
-    ((duration_ns * sample_clk_hz()) +. 999_999_999) `std::ops::comb_div` 1_000_000_000
+    trunc(((duration_ns * sample_clk_hz()) +. 999_999_999) `std::ops::comb_div` 1_000_000_000)
 }
 
 fn cooldown_last() -> uint<4> {
@@ -79,6 +80,7 @@ fn ce6_measure_start_port() -> Ce6Low16 { ce6_ctrl_port(0) }
 fn ce6_uart_port() -> Ce6Low16 { ce6_ctrl_port(1) }
 fn ce6_measure_stop_port() -> Ce6Low16 { ce6_ctrl_port(2) }
 fn ce6_measure_abort_port() -> Ce6Low16 { ce6_ctrl_port(3) }
+fn ce6_ft_stream_cfg_port() -> Ce6Low16 { ce6_ctrl_port(4) }
 
 enum Ce6CtrlAddr {
     None,
@@ -87,6 +89,7 @@ enum Ce6CtrlAddr {
     UartPort,
     MeasureStop,
     MeasureAbort,
+    FtStreamCfg,
 }
 
 struct Ce6AddrDecode {
@@ -115,6 +118,10 @@ impl Ce6CtrlAddr {
     fn is_measure_abort(self) -> bool {
         if let Self::MeasureAbort = self { true } else { false }
     }
+
+    fn is_ft_stream_cfg(self) -> bool {
+        if let Self::FtStreamCfg = self { true } else { false }
+    }
 }
 
 fn decode_ce6_addr(addr: BusAddr) -> Ce6AddrDecode {
@@ -130,6 +137,8 @@ fn decode_ce6_addr(addr: BusAddr) -> Ce6AddrDecode {
             Ce6CtrlAddr::MeasureStop()
         } else if low16 == ce6_measure_abort_port() {
             Ce6CtrlAddr::MeasureAbort()
+        } else if low16 == ce6_ft_stream_cfg_port() {
+            Ce6CtrlAddr::FtStreamCfg()
         } else if low16 >= ce6_ctrl_page_base() {
             Ce6CtrlAddr::Other()
         } else {
@@ -189,20 +198,22 @@ fn pack_sampled_bus_word(
 }
 
 fn pack_measure_report(report: MeasureReport) -> MeasurePacked {
-    (zext(report.start_tag) << 104) |
-    (zext(report.stop_tag) << 96) |
-    (zext(report.delta_ticks) << 64) |
-    (zext(report.delta_events) << 32) |
-    zext(report.delta_addr_uart)
+    (zext(report.start_tag) << 136) |
+    (zext(report.stop_tag) << 128) |
+    (zext(report.delta_ticks) << 96) |
+    (zext(report.delta_events) << 64) |
+    (zext(report.delta_addr_uart) << 32) |
+    zext(report.delta_ft_overflow)
 }
 
 fn unpack_measure_report(value: MeasurePacked) -> MeasureReport {
     MeasureReport$(
-        start_tag: trunc(value >> 104),
-        stop_tag: trunc(value >> 96),
-        delta_ticks: trunc(value >> 64),
-        delta_events: trunc(value >> 32),
-        delta_addr_uart: trunc(value),
+        start_tag: trunc(value >> 136),
+        stop_tag: trunc(value >> 128),
+        delta_ticks: trunc(value >> 96),
+        delta_events: trunc(value >> 64),
+        delta_addr_uart: trunc(value >> 32),
+        delta_ft_overflow: trunc(value),
     )
 }
 
@@ -325,6 +336,7 @@ struct MeasureCaptureState {
     start_tick: TickCount,
     start_event_count: MeasureCount,
     start_addr_uart_count: MeasureCount,
+    start_ft_overflow_count: MeasureCount,
 }
 
 struct PortOverrunOut {
@@ -335,6 +347,11 @@ struct PortOverrunOut {
 struct MeasureEngineState {
     dump_active: bool,
     stream: MeasureStreamState,
+}
+
+struct FtStreamRegs {
+    state: FtWordStreamState,
+    cur_value: SampledBusWord,
 }
 
 struct MeasureEngineOut {
@@ -412,6 +429,7 @@ fn init_measure_capture_state() -> MeasureCaptureState {
         start_tick: 0,
         start_event_count: 0,
         start_addr_uart_count: 0,
+        start_ft_overflow_count: 0,
     )
 }
 
@@ -419,6 +437,13 @@ fn init_measure_engine_state() -> MeasureEngineState {
     MeasureEngineState$(
         dump_active: false,
         stream: init_measure_stream(),
+    )
+}
+
+fn init_ft_stream_regs() -> FtStreamRegs {
+    FtStreamRegs$(
+        state: FtWordStreamState::GetFifo(),
+        cur_value: 0,
     )
 }
 
@@ -722,12 +747,11 @@ entity boot_banner_core<#uint IDX_W, #uint N>(
     banner: [uint<8>; N],
     block_tx: bool,
 ) -> BootBannerOut<IDX_W> {
-    let step = boot_banner_step(state, banner, block_tx);
     reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = {
-        step.state
+        boot_banner_step(state, banner, block_tx).state
     };
 
-    step
+    boot_banner_step(state, banner, block_tx)
 }
 
 entity parser_core(
@@ -737,12 +761,11 @@ entity parser_core(
     rx_parity_error: bool,
     rx_byte: uint<8>,
 ) -> ParserStepOut {
-    let step = parser_step(state, rx_valid, rx_parity_error, rx_byte);
     reg(clk) state: ParserState reset(rst: protocol::init_parser()) = {
-        step.state
+        parser_step(state, rx_valid, rx_parity_error, rx_byte).state
     };
 
-    step
+    parser_step(state, rx_valid, rx_parity_error, rx_byte)
 }
 
 entity echo_stream_core(
@@ -751,12 +774,11 @@ entity echo_stream_core(
     block_tx: bool,
     next_msg: Option<EchoMsg>,
 ) -> msg::EchoStreamOut {
-    let step = echo_stream_step(state, block_tx, next_msg);
     reg(clk) state: EchoStreamState reset(rst: init_echo_stream()) = {
-        step.state
+        echo_stream_step(state, block_tx, next_msg).state
     };
 
-    step
+    echo_stream_step(state, block_tx, next_msg)
 }
 
 entity resp_stream_core(
@@ -765,12 +787,11 @@ entity resp_stream_core(
     block_tx: bool,
     next_msg: Option<RespMsg>,
 ) -> msg::RespStreamOut {
-    let step = resp_stream_step(state, block_tx, next_msg);
     reg(clk) state: RespStreamState reset(rst: init_resp_stream()) = {
-        step.state
+        resp_stream_step(state, block_tx, next_msg).state
     };
 
-    step
+    resp_stream_step(state, block_tx, next_msg)
 }
 
 entity pending_uart_core<#uint WIDTH>(
@@ -780,10 +801,10 @@ entity pending_uart_core<#uint WIDTH>(
     busy: bool,
     settle_last: uint<4>,
 ) -> PendingUartEval<WIDTH> {
-    let step = pending_uart_step(state, now, busy, settle_last);
     reg(clk) state: PendingUartState<WIDTH> reset(rst: init_pending_uart_state()) = {
-        step.next_state
+        pending_uart_step(state, now, busy, settle_last).next_state
     };
+    let step = pending_uart_step(state, now, busy, settle_last);
 
     PendingUartEval$(state: state, step: step)
 }
@@ -798,10 +819,10 @@ entity access_cycle_core(
     tick: TickCount,
     classify_delay: ClassifyCtr,
 ) -> AccessCycleEval {
-    let step = access_cycle_step(state, ce, rw, addr, data, tick, classify_delay);
     reg(clk) state: AccessCycleState reset(rst: init_access_cycle_state()) = {
-        step.next_state
+        access_cycle_step(state, ce, rw, addr, data, tick, classify_delay).next_state
     };
+    let step = access_cycle_step(state, ce, rw, addr, data, tick, classify_delay);
 
     AccessCycleEval$(state: state, step: step)
 }
@@ -814,10 +835,10 @@ entity ctrl_write_core(
     data: CardData,
     ctrl_write_delay: ClassifyCtr,
 ) -> CtrlWriteStep {
-    let step = ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay);
     reg(clk) state: CtrlWriteState reset(rst: init_ctrl_write_state()) = {
-        step.next_state
+        ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay).next_state
     };
+    let step = ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay);
 
     step
 }
@@ -828,10 +849,10 @@ entity sampled_bus_core(
     cycle_start_now: bool,
     addr_pulse_fire: bool,
 ) -> SampledBusStep {
-    let step = sampled_bus_step(state, cycle_start_now, addr_pulse_fire);
     reg(clk) state: SampledBusState reset(rst: init_sampled_bus_state()) = {
-        step.next_state
+        sampled_bus_step(state, cycle_start_now, addr_pulse_fire).next_state
     };
+    let step = sampled_bus_step(state, cycle_start_now, addr_pulse_fire);
 
     step
 }
@@ -845,10 +866,10 @@ entity measure_engine_core(
     fifo_empty: bool,
     fifo_dout: MeasurePacked,
 ) -> MeasureEngineOut {
-    let step = measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout);
     reg(clk) state: MeasureEngineState reset(rst: init_measure_engine_state()) = {
-        step.next_state
+        measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout).next_state
     };
+    let step = measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout);
 
     step
 }
@@ -859,10 +880,10 @@ entity port_overrun_core(
     block_tx: bool,
     overrun_valid: bool,
 ) -> PortOverrunOut {
-    let step = port_overrun_step(state, block_tx, overrun_valid);
     reg(clk) state: PortOverrunState reset(rst: init_port_overrun_state()) = {
-        step.next_state
+        port_overrun_step(state, block_tx, overrun_valid).next_state
     };
+    let step = port_overrun_step(state, block_tx, overrun_valid);
 
     step
 }
@@ -874,6 +895,16 @@ entity main_core(
     led: inv &[bool; 8],
     usb_rx: bool,
     usb_tx: inv &bool,
+    ft_clk: bool,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: FtData,
+    ft_be: FtBe,
+    ft_data_drive: inv &FtData,
+    ft_be_drive: inv &FtBe,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
     saleae: inv &[bool; 8],
     rw: bool,
     addr: BusAddr,
@@ -889,6 +920,7 @@ entity main_core(
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
     // Reuse the card's spare NC pin as an optional external cycle-start strobe.
     let cycle_start_clock = unsafe { inst sampled_bool_clock(nc) };
+    let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
     let cooldown_last = cooldown_last();
     let default_classify_last = default_classify_last();
     let default_ctrl_write_last = default_ctrl_write_last();
@@ -919,6 +951,18 @@ entity main_core(
     let (measure_fifo_full, measure_fifo_full_w): (&bool, inv &bool) = port;
     let (measure_fifo_empty, measure_fifo_empty_w): (&bool, inv &bool) = port;
     let (measure_fifo_dout, measure_fifo_dout_w): (&MeasurePacked, inv &MeasurePacked) = port;
+    let (ft_data_out, ft_data_out_w): (&FtData, inv &FtData) = port;
+    let (ft_be_out, ft_be_out_w): (&FtBe, inv &FtBe) = port;
+    let (ft_rd_sig, ft_rd_sig_w): (&bool, inv &bool) = port;
+    let (ft_wr_sig, ft_wr_sig_w): (&bool, inv &bool) = port;
+    let (ft_oe_sig, ft_oe_sig_w): (&bool, inv &bool) = port;
+    let (ft_ui_din_full, ft_ui_din_full_w): (&bool, inv &bool) = port;
+    let (ft_ui_dout, ft_ui_dout_w): (&FtData, inv &FtData) = port;
+    let (ft_ui_dout_be, ft_ui_dout_be_w): (&FtBe, inv &FtBe) = port;
+    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (&bool, inv &bool) = port;
+    let (ft_stream_fifo_full, ft_stream_fifo_full_w): (&bool, inv &bool) = port;
+    let (ft_stream_fifo_empty, ft_stream_fifo_empty_w): (&bool, inv &bool) = port;
+    let (ft_stream_fifo_dout, ft_stream_fifo_dout_w): (&SampledBusWord, inv &SampledBusWord) = port;
     let (usb_tx_line, usb_tx_line_w): (&bool, inv &bool) = port;
     let (usb_tx_busy, usb_tx_busy_w): (&bool, inv &bool) = port;
 
@@ -1183,6 +1227,61 @@ entity main_core(
     let ce6_measure_start = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_start();
     let ce6_measure_stop = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_stop();
     let ce6_measure_abort = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_abort();
+    let ce6_ft_stream_cfg_write = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_ft_stream_cfg();
+
+    reg(clk) ft_stream_enabled: bool reset(rst: false) =
+        if ce6_ft_stream_cfg_write {
+            (ce6_ctrl_step.data & 0x01) != 0
+        } else {
+            ft_stream_enabled
+        };
+    reg(clk) ft_window_active: bool reset(rst: false) =
+        if ce6_measure_stop || ce6_measure_abort {
+            false
+        } else if ce6_ft_stream_cfg_write && ce6_ctrl_step.data == 0 {
+            false
+        } else if ce6_measure_start {
+            ft_stream_enabled
+        } else {
+            ft_window_active
+        };
+    let ft_capture_window = ft_window_active && !ce6_measure_stop && !ce6_measure_abort;
+    reg(clk) ft_stream_regs: FtStreamRegs reset(rst: init_ft_stream_regs()) = {
+        let step = ft_word_stream_step(
+            ft_stream_regs.state,
+            ft_stream_regs.cur_value,
+            *ft_ui_din_full,
+            *ft_ui_dout_empty,
+            *ft_stream_fifo_empty,
+            *ft_stream_fifo_dout,
+        );
+        FtStreamRegs$(
+            state: step.next_state,
+            cur_value: step.next_cur_value,
+        )
+    };
+    let ft_stream = ft_word_stream_step(
+        ft_stream_regs.state,
+        ft_stream_regs.cur_value,
+        *ft_ui_din_full,
+        *ft_ui_dout_empty,
+        *ft_stream_fifo_empty,
+        *ft_stream_fifo_dout,
+    );
+    let ft_stream_fifo_wput = sampled_bus_valid && ft_capture_window && !*ft_stream_fifo_full;
+    let ft_stream_fifo_drop = sampled_bus_valid && ft_capture_window && *ft_stream_fifo_full;
+    reg(clk) ft_overflow_total: MeasureCount reset(rst: 0) =
+        if ft_stream_fifo_drop { ft_overflow_total +. 1 } else { ft_overflow_total };
+    let ft_stream_fifo = inst sync_fifo::<32, 4096>(
+        clk,
+        rst,
+        sampled_bus_word,
+        ft_stream_fifo_wput,
+        ft_stream.stream_fifo_rget,
+    );
+    set ft_stream_fifo_full_w = &ft_stream_fifo.full;
+    set ft_stream_fifo_empty_w = &ft_stream_fifo.empty;
+    set ft_stream_fifo_dout_w = &ft_stream_fifo.dout;
 
     reg(clk) event_total: MeasureCount reset(rst: 0) =
         if event_valid { event_total +. 1 } else { event_total };
@@ -1197,6 +1296,7 @@ entity main_core(
                 start_tick: tick,
                 start_event_count: if event_valid { event_total +. 1 } else { event_total },
                 start_addr_uart_count: if addr_uart.step.send { addr_uart_total +. 1 } else { addr_uart_total },
+                start_ft_overflow_count: ft_overflow_total,
             )
         } else if ce6_measure_abort || (ce6_measure_stop && measure_capture.armed) {
             MeasureCaptureState$(
@@ -1205,6 +1305,7 @@ entity main_core(
                 start_tick: measure_capture.start_tick,
                 start_event_count: measure_capture.start_event_count,
                 start_addr_uart_count: measure_capture.start_addr_uart_count,
+                start_ft_overflow_count: measure_capture.start_ft_overflow_count,
             )
         } else {
             measure_capture
@@ -1215,6 +1316,7 @@ entity main_core(
         delta_ticks: tick -. measure_capture.start_tick,
         delta_events: event_total -. measure_capture.start_event_count,
         delta_addr_uart: addr_uart_total -. measure_capture.start_addr_uart_count,
+        delta_ft_overflow: ft_overflow_total -. measure_capture.start_ft_overflow_count,
     );
 
     let measure_report_wput = ce6_measure_stop && measure_capture.armed && !*measure_fifo_full;
@@ -1230,7 +1332,7 @@ entity main_core(
         *measure_fifo_dout,
     );
     let measure_fifo_rst = rst || measure_clear_request;
-    let measure_fifo = inst sync_fifo::<112, 32>(
+    let measure_fifo = inst sync_fifo::<144, 32>(
         clk,
         measure_fifo_rst,
         pack_measure_report(measure_report),
@@ -1369,6 +1471,28 @@ entity main_core(
         usb_tx_line_w,
         usb_tx_busy_w,
     );
+    let _ft = inst au_ft_tap_u16(
+        clk,
+        rst,
+        ft_clk_clock,
+        ft_rxf,
+        ft_txe,
+        ft_data,
+        ft_be,
+        ft_stream.ui_din,
+        ft_stream.ui_din_be,
+        ft_stream.ui_din_valid,
+        ft_stream.ui_dout_get,
+        ft_data_out_w,
+        ft_be_out_w,
+        ft_rd_sig_w,
+        ft_wr_sig_w,
+        ft_oe_sig_w,
+        ft_ui_din_full_w,
+        ft_ui_dout_w,
+        ft_ui_dout_be_w,
+        ft_ui_dout_empty_w,
+    );
 
     let saleae_lines: [bool; 8] = [
         ce1,
@@ -1394,8 +1518,15 @@ entity main_core(
     set saleae = &saleae_lines;
     set led = &led_lines;
     set usb_tx = &*usb_tx_line;
+    set ft_data_drive = &*ft_data_out;
+    set ft_be_drive = &*ft_be_out;
+    set ft_rd = &*ft_rd_sig;
+    set ft_wr = &*ft_wr_sig;
+    set ft_oe = &*ft_oe_sig;
     set data_drive = &bus_data_out;
     set data_oe = &bus_drive_cycle;
+    let _unused_ft_ui_dout = *ft_ui_dout;
+    let _unused_ft_ui_dout_be = *ft_ui_dout_be;
     let _unused_rst_n = rst_n;
     let _unused_vcc2 = vcc2;
     let _unused_nc = nc;

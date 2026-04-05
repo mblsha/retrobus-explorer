@@ -179,11 +179,74 @@ def _set_data_bus_z(dut):
     dut.data_host.value = 0
     dut.data_host_drive.value = 0
 
+
+def _set_ft_bus_z(dut):
+    dut.ft_data_host.value = 0
+    dut.ft_be_host.value = 0
+    dut.ft_host_drive.value = 0
+
+
+async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 4000) -> list[tuple[int, int]]:
+    observed: list[tuple[int, int]] = []
+    for _ in range(timeout_cycles):
+        await FallingEdge(dut.ft_clk)
+        will_write = int(dut.ft_oe.value) == 1 and int(dut.ft_wr.value) == 0 and int(dut.ft_txe.value) == 0
+        sampled = (int(dut.ft_data_drive.value) & 0xFFFF, int(dut.ft_be_drive.value) & 0x3)
+        await RisingEdge(dut.ft_clk)
+        await Timer(1, units="ps")
+        if will_write:
+            observed.append(sampled)
+            if len(observed) == count:
+                return observed
+    raise AssertionError(f"timeout waiting for {count} FT writes")
+
+
+async def _assert_no_ft_write(dut, timeout_cycles: int = 400) -> None:
+    for _ in range(timeout_cycles):
+        await FallingEdge(dut.ft_clk)
+        will_write = int(dut.ft_oe.value) == 1 and int(dut.ft_wr.value) == 0 and int(dut.ft_txe.value) == 0
+        await RisingEdge(dut.ft_clk)
+        await Timer(1, units="ps")
+        assert not will_write, "unexpected FT write"
+
+
+async def _ft_recv_stream_word(dut, timeout_cycles: int = 4000) -> int:
+    words = await _collect_ft_writes(dut, 2, timeout_cycles)
+    assert words[0][1] == 0x3
+    assert words[1][1] == 0x3
+    return words[0][0] | (words[1][0] << 16)
+
+
+async def _emit_sampled_ce1_write(dut, addr: int, value: int) -> None:
+    dut.addr.value = addr & 0x3FFFF
+    dut.ce1.value = 0
+    dut.ce6.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = value & 0xFF
+    dut.data_host_drive.value = 1
+
+    await _pulse_cycle_start(dut)
+    await tick(dut.clk, 58)
+    dut.ce1.value = 1
+    await tick(dut.clk, 4)
+    dut.rw.value = 0
+    await tick(dut.clk, 20)
+    dut.rw.value = 1
+    dut.ce1.value = 0
+    _set_data_bus_z(dut)
+    await tick(dut.clk, 2)
+
+
 async def _init(dut):
     start_clock(dut.clk)
+    start_clock(dut.ft_clk)
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1
+    dut.ft_rxf.value = 1
+    dut.ft_txe.value = 1
+    _set_ft_bus_z(dut)
     dut.rw.value = 1
     dut.oe.value = 1
     dut.ce1.value = 0
@@ -624,6 +687,7 @@ async def measurement_reports_can_be_dumped_and_cleared(dut):
     assert report["TK"] > 0
     assert report["EV"] == 0x00000002, report
     assert report["AU"] > 0
+    assert report["FO"] == 0x00000000
 
     assert await _uart_recv_line(dut) == "MEND\r\n"
 
@@ -660,11 +724,13 @@ async def measurement_dump_preserves_fifo_order_for_multiple_reports(dut):
     assert rec0["S"] == 0x21
     assert rec0["E"] == 0x22
     assert rec0["EV"] == 0x00000000
+    assert rec0["FO"] == 0x00000000
 
     assert prefix1 == "MR"
     assert rec1["S"] == 0x31
     assert rec1["E"] == 0x32
     assert rec1["EV"] == 0x00000001
+    assert rec1["FO"] == 0x00000000
 
     assert end == "MEND\r\n"
 
@@ -747,25 +813,7 @@ async def saleae4_streams_sampled_ce1_write_after_cycle_start(dut):
     await _init(dut)
 
     sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
-
-    dut.addr.value = 0x0012
-    dut.ce1.value = 0
-    dut.ce6.value = 1
-    dut.rw.value = 1
-    dut.oe.value = 1
-    dut.data_host.value = 0x5A
-    dut.data_host_drive.value = 1
-
-    await _pulse_cycle_start(dut)
-    await tick(dut.clk, 58)
-    dut.ce1.value = 1
-    await tick(dut.clk, 4)
-    dut.rw.value = 0
-    await tick(dut.clk, 20)
-    dut.rw.value = 1
-    dut.ce1.value = 0
-    _set_data_bus_z(dut)
-    await tick(dut.clk, 2)
+    await _emit_sampled_ce1_write(dut, 0x0012, 0x5A)
 
     word = await sampled_word
     assert sampled_write_addr(word) == 0x0012
@@ -776,6 +824,74 @@ async def saleae4_streams_sampled_ce1_write_after_cycle_start(dut):
     assert sampled_write_status_bit(word, 3) == 0
     assert sampled_write_status_bit(word, 4) == 1
     assert sampled_write_status_bit(word, 5) == 0
+
+
+@cocotb.test()
+async def ft_stream_tracks_saleae4_only_while_measurement_window_is_active(dut):
+    await _init(dut)
+
+    dut.ft_txe.value = 0
+
+    await _emit_sampled_ce1_write(dut, 0x0012, 0x5A)
+    await _assert_no_ft_write(dut, 300)
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
+    assert await _ce6_write(dut, 0x1FFF0, 0x12) == 0
+
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
+    await _emit_sampled_ce1_write(dut, 0x0034, 0xA5)
+    assert await ft_word == await saleae_word
+
+    assert await _ce6_write(dut, 0x1FFF2, 0x34) == 0
+
+    await _emit_sampled_ce1_write(dut, 0x0056, 0x3C)
+    await _assert_no_ft_write(dut, 300)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"m\r\n")))
+    await _uart_send_text(dut, "m\r")
+    assert await rx == b"m\r\n"
+    prefix, report = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "MR"
+    assert report["S"] == 0x12
+    assert report["E"] == 0x34
+    assert report["FO"] == 0x00000000
+    assert await _uart_recv_line(dut) == "MEND\r\n"
+
+
+@cocotb.test()
+async def ft_stream_overflow_is_reported_in_measurement_results(dut):
+    await _init(dut)
+
+    dut.ft_txe.value = 1
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
+    assert await _ce6_write(dut, 0x1FFF0, 0x56) == 0
+
+    dut.ce1.value = 0
+    dut.ce6.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = 0x96
+    dut.data_host_drive.value = 1
+
+    for seed_idx in range(129):
+        dut.addr.value = (0x0200 + seed_idx) & 0x3FFFF
+        await tick(dut.clk, (SAMPLED_BUS_CYCLE_CYCLES * SAMPLED_BUS_PHASE_TIMEOUT_CYCLES) + 20)
+
+    _set_data_bus_z(dut)
+
+    assert await _ce6_write(dut, 0x1FFF2, 0x78) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"m\r\n")))
+    await _uart_send_text(dut, "m\r")
+    assert await rx == b"m\r\n"
+    prefix, report = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "MR"
+    assert report["S"] == 0x56
+    assert report["E"] == 0x78
+    assert report["FO"] > 0
+    assert await _uart_recv_line(dut) == "MEND\r\n"
 
 
 @cocotb.test()
