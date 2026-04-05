@@ -119,6 +119,21 @@ class ExperimentDaemon:
         self._scan_index = 0
         self._run_counter = 0
 
+    def _observe_sequence_from_line(self, text: str) -> None:
+        if not text.startswith((BEGIN_PREFIX + ",", END_PREFIX + ",")):
+            return
+        parts = text.split(",")
+        if len(parts) < 2:
+            return
+        try:
+            value = int(parts[1], 16) & 0xFF
+        except ValueError:
+            return
+        if value == 0:
+            return
+        if self._next_seq <= value:
+            self._next_seq = value + 1
+
     def close(self) -> None:
         self.uart.close()
         self.ser.close()
@@ -136,6 +151,7 @@ class ExperimentDaemon:
                 self.needs_reset = False
                 self.last_error = None
                 self.last_ready_line = line.text
+            self._observe_sequence_from_line(line.text)
 
     def _next_sequence(self) -> int:
         value = self._next_seq & 0xFF
@@ -330,7 +346,8 @@ class ExperimentDaemon:
         else:
             raise RuntimeError("experiment plan must provide asm_source or asm_text")
 
-        full_region = self._build_full_experiment_region(start_address, image)
+        fill_experiment_region = bool(plan.get("fill_experiment_region", True))
+        image_to_program = self._build_full_experiment_region(start_address, image) if fill_experiment_region else image
         sequence = self._next_sequence()
         command_block = self._compose_command_block(plan, sequence)
 
@@ -338,8 +355,9 @@ class ExperimentDaemon:
         self.uart.set_control_timing(control_timing)
         self.uart.clear_measurements()
 
+        self.uart.write_rom_bytes(start_address if not fill_experiment_region else EXPERIMENT_MIN, image_to_program, fast=True)
+        self.uart.synchronize_rx_boundary()
         line_index = self.uart.line_count()
-        self.uart.write_rom_bytes(EXPERIMENT_MIN, full_region, fast=True)
         self._commit_command_block(command_block)
         self.status = "running"
 
@@ -409,6 +427,7 @@ class ExperimentDaemon:
         except TimeoutError as exc:
             raise RuntimeError(str(exc)) from exc
         self.last_ready_line = line.text
+        self._poll_unsolicited_lines()
         self.status = "idle"
         self.needs_reset = False
         return self.status_payload()

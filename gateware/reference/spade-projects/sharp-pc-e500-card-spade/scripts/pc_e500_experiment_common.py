@@ -522,7 +522,8 @@ class ExperimentUART:
         if fast:
             payload = build_write_payload(start_offset, data)
             wire_time = len(payload) * 10 / DEFAULT_BAUD
-            self.send_payload(payload, timeout=max(DEFAULT_COMMAND_TIMEOUT, wire_time + 0.5))
+            processing_margin = max(1.0, len(data) * 0.002)
+            self.send_payload(payload, timeout=max(DEFAULT_COMMAND_TIMEOUT, wire_time + processing_margin))
             return
         for index, value in enumerate(data):
             self.write_rom_byte(absolute_address(start_offset + index), value)
@@ -536,7 +537,16 @@ class ExperimentUART:
         return parse_measure_status_lines(self.run_raw("m?"))
 
     def dump_measurements(self) -> list[ParsedMeasurement]:
-        reply = self.run_raw("m")
+        with self._command_lock:
+            self.wait_until_quiet()
+            line_index = self.line_count()
+            self.ser.write(b"m\r")
+            self.ser.flush()
+            with self._cv:
+                self._tx_total += 2
+            self.wait_for_line(lambda text: text == MEASURE_END_LINE, 2.0, start_index=line_index)
+            self.wait_until_quiet(timeout=2.0)
+            reply = [line.text for line in self.lines_since(line_index)]
         if MEASURE_END_LINE not in reply:
             raise RuntimeError(f"measurement dump missing MEND terminator: {reply!r}")
         return parse_measurement_lines(reply)
