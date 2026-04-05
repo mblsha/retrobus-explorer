@@ -339,6 +339,11 @@ struct MeasureCaptureState {
     start_ft_overflow_count: MeasureCount,
 }
 
+struct MeasurePendingState {
+    pending_valid: bool,
+    pending_report: MeasureReport,
+}
+
 struct PortOverrunOut {
     next_state: PortOverrunState,
     tx_req: TxReq8,
@@ -347,6 +352,11 @@ struct PortOverrunOut {
 struct MeasureEngineState {
     dump_active: bool,
     stream: MeasureStreamState,
+}
+
+struct FtIngressState {
+    pending_valid: bool,
+    pending_word: SampledBusWord,
 }
 
 struct FtStreamRegs {
@@ -433,10 +443,31 @@ fn init_measure_capture_state() -> MeasureCaptureState {
     )
 }
 
+fn init_measure_pending_state() -> MeasurePendingState {
+    MeasurePendingState$(
+        pending_valid: false,
+        pending_report: MeasureReport$(
+            start_tag: 0,
+            stop_tag: 0,
+            delta_ticks: 0,
+            delta_events: 0,
+            delta_addr_uart: 0,
+            delta_ft_overflow: 0,
+        ),
+    )
+}
+
 fn init_measure_engine_state() -> MeasureEngineState {
     MeasureEngineState$(
         dump_active: false,
         stream: init_measure_stream(),
+    )
+}
+
+fn init_ft_ingress_state() -> FtIngressState {
+    FtIngressState$(
+        pending_valid: false,
+        pending_word: 0,
     )
 }
 
@@ -1246,6 +1277,21 @@ entity main_core(
             ft_window_active
         };
     let ft_capture_window = ft_window_active && !ce6_measure_stop && !ce6_measure_abort;
+    let ft_capture_sample = sampled_bus_valid && ft_capture_window;
+    reg(clk) ft_ingress: FtIngressState reset(rst: init_ft_ingress_state()) = {
+        let dequeue = ft_ingress.pending_valid && !*ft_stream_fifo_full;
+        let accept_new = ft_capture_sample && (!ft_ingress.pending_valid || dequeue);
+        FtIngressState$(
+            pending_valid: if accept_new {
+                true
+            } else if dequeue {
+                false
+            } else {
+                ft_ingress.pending_valid
+            },
+            pending_word: if accept_new { sampled_bus_word } else { ft_ingress.pending_word },
+        )
+    };
     reg(clk) ft_stream_regs: FtStreamRegs reset(rst: init_ft_stream_regs()) = {
         let step = ft_word_stream_step(
             ft_stream_regs.state,
@@ -1268,14 +1314,14 @@ entity main_core(
         *ft_stream_fifo_empty,
         *ft_stream_fifo_dout,
     );
-    let ft_stream_fifo_wput = sampled_bus_valid && ft_capture_window && !*ft_stream_fifo_full;
-    let ft_stream_fifo_drop = sampled_bus_valid && ft_capture_window && *ft_stream_fifo_full;
+    let ft_stream_fifo_wput = ft_ingress.pending_valid && !*ft_stream_fifo_full;
+    let ft_stream_fifo_drop = ft_capture_sample && ft_ingress.pending_valid && *ft_stream_fifo_full;
     reg(clk) ft_overflow_total: MeasureCount reset(rst: 0) =
         if ft_stream_fifo_drop { ft_overflow_total +. 1 } else { ft_overflow_total };
     let ft_stream_fifo = inst sync_fifo::<32, 4096>(
         clk,
         rst,
-        sampled_bus_word,
+        ft_ingress.pending_word,
         ft_stream_fifo_wput,
         ft_stream.stream_fifo_rget,
     );
@@ -1319,8 +1365,23 @@ entity main_core(
         delta_ft_overflow: ft_overflow_total -. measure_capture.start_ft_overflow_count,
     );
 
-    let measure_report_wput = ce6_measure_stop && measure_capture.armed && !*measure_fifo_full;
-    let measure_report_drop = ce6_measure_stop && measure_capture.armed && *measure_fifo_full;
+    let measure_report_capture = ce6_measure_stop && measure_capture.armed;
+    reg(clk) measure_pending: MeasurePendingState reset(rst: init_measure_pending_state()) = {
+        let dequeue = measure_pending.pending_valid && !*measure_fifo_full;
+        let accept_new = measure_report_capture && (!measure_pending.pending_valid || dequeue);
+        MeasurePendingState$(
+            pending_valid: if accept_new {
+                true
+            } else if dequeue {
+                false
+            } else {
+                measure_pending.pending_valid
+            },
+            pending_report: if accept_new { measure_report } else { measure_pending.pending_report },
+        )
+    };
+    let measure_report_wput = measure_pending.pending_valid && !*measure_fifo_full;
+    let measure_report_drop = measure_report_capture && measure_pending.pending_valid && *measure_fifo_full;
     let measure_block_tx = boot_tx_busy || echo_out.tx_req.valid;
     let measure_eval = inst measure_engine_core(
         clk,
@@ -1335,7 +1396,7 @@ entity main_core(
     let measure_fifo = inst sync_fifo::<144, 32>(
         clk,
         measure_fifo_rst,
-        pack_measure_report(measure_report),
+        pack_measure_report(measure_pending.pending_report),
         measure_report_wput,
         measure_eval.fifo_rget,
     );
