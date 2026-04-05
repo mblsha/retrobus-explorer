@@ -165,6 +165,7 @@ def build_subprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     env.pop("VIRTUAL_ENV", None)
     env["FORCE_BINJA_MOCK"] = "1"
+    env["UV_NO_CONFIG"] = "1"
     return env
 
 

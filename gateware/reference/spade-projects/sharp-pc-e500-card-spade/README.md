@@ -20,11 +20,34 @@ project is the second `/dev/cu.usbserial-*` device, which
 `sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py` auto-selects by
 default.
 
+For long-lived experiment sessions on the shared USB-UART, use:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-experiment-session.py
+```
+
+That tool continuously monitors UART output and waits for a quiet line before
+sending FPGA control/programming commands, which helps avoid collisions with
+calculator-side `ECHO` traffic.
+
 For the complete FPGA command and CE6 control-register reference, see
 [FPGA_PROTOCOL.md](./FPGA_PROTOCOL.md).
 
+For long-lived experiment sessions on the shared USB-UART, use:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-experiment-session.py
+```
+
+That tool continuously monitors UART output and waits for a quiet line before
+sending FPGA control/programming commands, which helps avoid collisions with
+calculator-side `ECHO` traffic.
+
 For the approved FT capture implementation shape, see
 [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md).
+
+For the fixed continuous-experiment host/device protocol and CE6 ROM layout,
+see [EXPERIMENT_PROTOCOL.md](./EXPERIMENT_PROTOCOL.md).
 
 From `gateware/reference`:
 
@@ -144,3 +167,52 @@ Host control remains centered on the USB-UART command set documented in
 CE6 control page, mirrors the existing `saleae[4]` sampled-bus words and is
 intended for bulk capture during a measurement window rather than for general
 interactive control.
+
+For the current "single CALL after reset, then keep iterating from the host"
+approach, see [CONTINUOUS_EXPERIMENT_PLAN.md](./CONTINUOUS_EXPERIMENT_PLAN.md).
+
+## Continuous Experiment Supervisor
+
+The implemented continuous-test path splits responsibilities between:
+
+- a CE6 ROM supervisor image:
+  - [asm/card_rom_supervisor_safe.asm](./asm/card_rom_supervisor_safe.asm)
+- a long-lived host daemon that owns the shared USB-UART:
+  - [scripts/pc-e500-expd.py](./scripts/pc-e500-expd.py)
+- a small JSON CLI for injecting experiment scripts:
+  - [scripts/pc-e500-expctl.py](./scripts/pc-e500-expctl.py)
+
+Typical flow from `gateware/reference`:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expd.py \
+  --arm-safe-on-start \
+  --monitor-uart
+```
+
+Reset the calculator once, then run:
+
+```basic
+CALL &10000
+```
+
+After `XR,READY,01,SAFE` appears, use the CLI from another shell:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  wait-ready --timeout 30
+
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  run ./spade-projects/sharp-pc-e500-card-spade/experiments/return_immediately.py
+
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  run ./spade-projects/sharp-pc-e500-card-spade/experiments/wait_probe.py -- 0x0400
+```
+
+Timeout recovery is explicit:
+
+- the daemon reprograms the safe supervisor image
+- the daemon returns JSON with `needs_reset=true`
+- the user resets the PC-E500 and runs `CALL &10000` again

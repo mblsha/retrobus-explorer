@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import codecs
 import os
 import re
 import sys
@@ -56,6 +57,17 @@ def parse_hex(text: str) -> int:
         raise argparse.ArgumentTypeError(f"invalid hexadecimal value {text!r}") from exc
 
 
+def decode_expect_text(text: str) -> bytes:
+    """Decode CLI expect strings like \"OK\\r\\n\" into raw bytes."""
+    decoded = codecs.decode(text, "unicode_escape")
+    try:
+        return decoded.encode("latin-1")
+    except UnicodeEncodeError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected text must decode to single-byte characters: {text!r}"
+        ) from exc
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -94,7 +106,7 @@ def parse_args() -> argparse.Namespace:
     probe_parser.add_argument(
         "--expect",
         default=DEFAULT_EXPECT,
-        help=f"substring expected in the reply (default: {DEFAULT_EXPECT!r})",
+        help=f"substring expected in the reply (supports \\\\r/\\\\n escapes; default: {DEFAULT_EXPECT!r})",
     )
 
     raw_parser = subparsers.add_parser(
@@ -104,7 +116,7 @@ def parse_args() -> argparse.Namespace:
     raw_parser.add_argument("text", help="command text to send before carriage return")
     raw_parser.add_argument(
         "--expect",
-        help="optional substring expected in the reply",
+        help="optional substring expected in the reply; supports \\r/\\n escapes",
     )
 
     timing_parser = subparsers.add_parser(
@@ -136,7 +148,7 @@ def parse_args() -> argparse.Namespace:
     )
     listen_parser.add_argument(
         "--expect",
-        help="ASCII string expected from the device; succeeds once received",
+        help="expected bytes from the device; supports \\r/\\n/\\xNN escapes",
     )
     listen_parser.add_argument(
         "--duration",
@@ -340,7 +352,8 @@ def exchange(ser: serial.Serial, command: str, timeout: float) -> bytes:
 def run_probe(ser: serial.Serial, *, command: str, expect: str, timeout: float) -> int:
     reply = exchange(ser, command, timeout)
     print_reply(reply)
-    if expect.encode("ascii") not in reply:
+    expect_bytes = decode_expect_text(expect)
+    if expect_bytes not in reply:
         print(f"did not receive expected reply {expect!r}", file=sys.stderr)
         return 1
     print(f"received expected reply {expect!r}", file=sys.stderr)
@@ -358,7 +371,8 @@ def run_raw(
     print_reply(reply)
     if expect is None:
         return 0
-    if expect.encode("ascii") not in reply:
+    expect_bytes = decode_expect_text(expect)
+    if expect_bytes not in reply:
         print(f"did not receive expected reply {expect!r}", file=sys.stderr)
         return 1
     print(f"received expected reply {expect!r}", file=sys.stderr)
@@ -385,7 +399,7 @@ def run_control_timing(ser: serial.Serial, *, cycles: int, timeout: float) -> in
         f"C={cycles * 10}ns",
     )
     for expect in expected_replies:
-        if expect.encode("ascii") in reply:
+        if decode_expect_text(expect) in reply:
             print(f"received expected reply {expect!r}", file=sys.stderr)
             return 0
 
@@ -848,7 +862,7 @@ def main() -> int:
 
         if command == "listen":
             expect = getattr(args, "expect", None)
-            expect_bytes = expect.encode("ascii") if expect is not None else None
+            expect_bytes = decode_expect_text(expect) if expect is not None else None
             print(f"listening for raw UART bytes for {args.duration:.1f}s", file=sys.stderr)
             return listen_for_bytes(
                 ser,
