@@ -262,10 +262,15 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
   --call 0x42,bl=0,bh=0,text=HELLO
 ```
 
-The convenience `text` and `clear-text` subcommands use repeated IOCS `41h`
-single-character draws at explicit `(x,y)` positions and set the full 16-bit
-`I` register for each IOCS call. Use generic `run --call ...` when you want to
-exercise raw `42h` / `44h` sequences directly.
+The convenience `text` subcommand uses repeated IOCS `41h` single-character
+draws at explicit `(x,y)` positions and sets the full 16-bit `I` register plus
+`(cx)=0000h` for each IOCS call.
+
+The convenience `clear` and `clear-text` subcommands avoid IOCS `51h` and clear
+the text area by issuing IOCS `49h` once per text row before any `41h` draws.
+This is the most stable path on current hardware. Use generic `run --call ...`
+when you want to exercise raw `40h` / `41h` / `42h` / `44h` / `49h` / `51h`
+sequences directly.
 
 The helper also still supports JSON specs as an escape hatch:
 

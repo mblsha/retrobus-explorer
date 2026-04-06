@@ -12,6 +12,7 @@ EXPERIMENT_BASE = 0x10100
 IOCS_ENTRY = 0xFFFE8
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
+PCE500_TEXT_ROWS = 4
 
 BYTE_REGS = {
     "a": "A",
@@ -95,6 +96,26 @@ def build_data_block(label: str, data_spec: Any) -> tuple[str, list[int]]:
                 raise SystemExit(f"data.{label}.bytes must be a list")
             return label, [parse_int(item) & 0xFF for item in values]
     raise SystemExit(f"unsupported data block for {label!r}: {data_spec!r}")
+
+
+def build_putchar_calls(x: int, y: int, text: str, cx: int) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for offset, byte in enumerate(normalize_text_bytes(text)):
+        calls.append({
+            "i": 0x0041,
+            "cx": cx,
+            "bl": x + offset,
+            "bh": y,
+            "a": byte,
+        })
+    return calls
+
+
+def build_clear_calls(cx: int) -> list[dict[str, Any]]:
+    return [
+        {"i": 0x0049, "cx": cx, "bh": row}
+        for row in range(PCE500_TEXT_ROWS)
+    ]
 
 
 def emit_loads(lines: list[str], call_spec: dict[str, Any], data_labels: set[str]) -> None:
@@ -264,32 +285,30 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
 
     if args.mode == "clear":
         spec = dict(common)
-        spec["calls"] = [{"i": 0x0051}]
+        spec["timeout_s"] = max(spec["timeout_s"], 5.0)
+        spec["calls"] = build_clear_calls(0)
         return spec, "<generated:clear>"
 
     if args.mode == "cursor":
         spec = dict(common)
-        spec["defaults"] = {"cx": args.cx}
-        spec["calls"] = [{"i": 0x0044, "bl": args.x, "bh": args.y}]
+        spec["calls"] = [{"i": 0x0044, "cx": args.cx, "bl": args.x, "bh": args.y}]
         return spec, "<generated:cursor>"
 
     if args.mode == "text":
         spec = dict(common)
-        spec["defaults"] = {"cx": args.cx}
         calls: list[dict[str, Any]] = []
         if args.clear_first:
-            calls.append({"i": 0x0051})
-        for offset, byte in enumerate(normalize_text_bytes(args.text)):
-            calls.append({"i": 0x0041, "bl": args.x + offset, "bh": args.y, "a": byte})
+            spec["timeout_s"] = max(spec["timeout_s"], 5.0)
+            calls.extend(build_clear_calls(args.cx))
+        calls.extend(build_putchar_calls(args.x, args.y, args.text, args.cx))
         spec["calls"] = calls
         return spec, "<generated:text>"
 
     if args.mode == "clear-text":
         spec = dict(common)
-        spec["defaults"] = {"cx": args.cx}
-        calls: list[dict[str, Any]] = [{"i": 0x0051}]
-        for offset, byte in enumerate(normalize_text_bytes(args.text)):
-            calls.append({"i": 0x0041, "bl": args.x + offset, "bh": args.y, "a": byte})
+        spec["timeout_s"] = max(spec["timeout_s"], 5.0)
+        calls = build_clear_calls(args.cx)
+        calls.extend(build_putchar_calls(args.x, args.y, args.text, args.cx))
         spec["calls"] = calls
         return spec, "<generated:clear-text>"
 
@@ -297,12 +316,11 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
         if not args.call:
             raise SystemExit("run mode requires at least one --call")
         spec = dict(common)
-        defaults: dict[str, Any] = {}
+        calls = [parse_call_argument(item) for item in args.call]
         if args.cx is not None:
-            defaults["cx"] = args.cx
-        if defaults:
-            spec["defaults"] = defaults
-        spec["calls"] = [parse_call_argument(item) for item in args.call]
+            for call in calls:
+                call.setdefault("cx", args.cx)
+        spec["calls"] = calls
         return spec, "<generated:run>"
 
     raise SystemExit(f"unknown IOCS mode {args.mode!r}")
@@ -364,7 +382,7 @@ def build_plan_parser() -> argparse.ArgumentParser:
     cursor_parser.add_argument("--y", required=True, type=lambda value: int(value, 0))
     cursor_parser.add_argument("--cx", type=lambda value: int(value, 0), default=0)
 
-    text_parser = subparsers.add_parser("text", help="set cursor and print text via IOCS 42h")
+    text_parser = subparsers.add_parser("text", help="print text via repeated IOCS 41h calls")
     text_parser.add_argument("--x", required=True, type=lambda value: int(value, 0))
     text_parser.add_argument("--y", required=True, type=lambda value: int(value, 0))
     text_parser.add_argument("--text", required=True)
