@@ -38,6 +38,13 @@ LCD_WRITE_ADDR_MIN = 0x0A000
 LCD_WRITE_ADDR_MAX = 0x0A010
 
 
+def append_asm_line(lines: list[str], code: str, comment: str | None = None) -> None:
+    if comment:
+        lines.append(f"{code} ; {comment}")
+    else:
+        lines.append(code)
+
+
 def emit_json(payload: object) -> int:
     print(json.dumps(payload, sort_keys=True))
     return 0
@@ -132,31 +139,55 @@ def emit_loads(lines: list[str], call_spec: dict[str, Any], data_labels: set[str
     for key, operand in BYTE_REGS.items():
         if key in call_spec:
             value = parse_int(call_spec[key]) & 0xFF
-            lines.append(f"    MV {operand}, 0x{value:02X}")
+            append_asm_line(
+                lines,
+                f"    MV {operand}, 0x{value:02X}",
+                f"load {key} with 0x{value:02X}",
+            )
 
     for key, operand in WORD_MVW_REGS.items():
         if key in call_spec:
             value = parse_int(call_spec[key]) & 0xFFFF
-            lines.append(f"    MVW {operand}, 0x{value:04X}")
+            append_asm_line(
+                lines,
+                f"    MVW {operand}, 0x{value:04X}",
+                f"load {key} with 0x{value:04X}",
+            )
 
     for key, operand in WORD_MV_REGS.items():
         if key in call_spec:
             value = parse_int(call_spec[key]) & 0xFFFF
-            lines.append(f"    MV {operand}, 0x{value:04X}")
+            append_asm_line(
+                lines,
+                f"    MV {operand}, 0x{value:04X}",
+                f"load {key} with IOCS function 0x{value:04X}",
+            )
 
     for key, operand in PTR_REGS.items():
         if key not in call_spec:
             continue
         target = call_spec[key]
         if isinstance(target, str) and target in data_labels:
-            lines.append(f"    MV {operand}, {target}")
+            append_asm_line(
+                lines,
+                f"    MV {operand}, {target}",
+                f"point {key} at data block {target}",
+            )
             continue
         value = parse_int(target) & 0xFFFFFF
-        lines.append(f"    MV {operand}, 0x{value:06X}")
+        append_asm_line(
+            lines,
+            f"    MV {operand}, 0x{value:06X}",
+            f"load {key} with 0x{value:06X}",
+        )
 
     if "y" in call_spec:
         value = parse_int(call_spec["y"]) & 0xFFFF
-        lines.append(f"    MV Y, 0x{value:04X}")
+        append_asm_line(
+            lines,
+            f"    MV Y, 0x{value:04X}",
+            f"load Y with 0x{value:04X}",
+        )
 
 
 def emit_synthetic_op(lines: list[str], call_spec: dict[str, Any]) -> bool:
@@ -164,16 +195,16 @@ def emit_synthetic_op(lines: list[str], call_spec: dict[str, Any]) -> bool:
     if op == "seed_stdio_cursor":
         x = parse_int(call_spec.get("bl", 0)) & 0xFF
         y = parse_int(call_spec.get("bh", 0)) & 0xFF
-        lines.append(f"    MV (BL), 0x{x:02X}")
-        lines.append(f"    MV (BH), 0x{y:02X}")
-        lines.append("    MV X, (0x28)")
-        lines.append("    MVW (CL), 0x0273")
-        lines.append("    MV BA, (CL)")
-        lines.append("    ADD X, BA")
-        lines.append("    MV A, (BL)")
-        lines.append("    MV [X], A")
-        lines.append("    MV A, (BH)")
-        lines.append("    MV [X+1], A")
+        append_asm_line(lines, f"    MV (BL), 0x{x:02X}", f"stage cursor X byte 0x{x:02X}")
+        append_asm_line(lines, f"    MV (BH), 0x{y:02X}", f"stage cursor Y byte 0x{y:02X}")
+        append_asm_line(lines, "    MV X, (0x28)", "load JP IOCS workspace base pointer from IMEM[0x28..0x2A]")
+        append_asm_line(lines, "    MVW (CL), 0x0273", "stage the STDO cursor-shadow offset 0x0273")
+        append_asm_line(lines, "    MV BA, (CL)", "load the offset word into BA")
+        append_asm_line(lines, "    ADD X, BA", "advance X to the STDO cursor-shadow bytes")
+        append_asm_line(lines, "    MV A, (BL)", "copy the staged cursor X byte into A")
+        append_asm_line(lines, "    MV [X], A", "write cursor X to the shadow cursor low byte")
+        append_asm_line(lines, "    MV A, (BH)", "copy the staged cursor Y byte into A")
+        append_asm_line(lines, "    MV [X+1], A", "write cursor Y to the shadow cursor high byte")
         return True
     return False
 
@@ -196,12 +227,11 @@ def build_asm_text(spec: dict[str, Any]) -> str:
         data_blocks.append((normalized_label, payload))
         data_labels.add(normalized_label)
 
-    lines = [f".ORG 0x{EXPERIMENT_BASE:05X}", "", "start:"]
+    lines = [f".ORG 0x{EXPERIMENT_BASE:05X}", ""]
+    append_asm_line(lines, "start:", "generated experiment entry point")
     if bool(spec.get("mask_interrupts", False)):
-        lines.extend([
-            "    PUSHU IMR",
-            "    MV (IMR), 0x00",
-        ])
+        append_asm_line(lines, "    PUSHU IMR", "save IMR on the user stack")
+        append_asm_line(lines, "    MV (IMR), 0x00", "mask interrupts during IOCS setup and draw")
 
     defaults = spec.get("defaults", {})
     if defaults:
@@ -232,18 +262,18 @@ def build_asm_text(spec: dict[str, Any]) -> str:
             raise SystemExit(f"spec.calls[{index}] is missing required field 'i' or 'il'")
 
         emit_loads(lines, call_spec, data_labels)
-        lines.append(f"    CALLF 0x{IOCS_ENTRY:05X}")
+        append_asm_line(lines, f"    CALLF 0x{IOCS_ENTRY:05X}", "call the IOCS dispatcher")
 
     if bool(spec.get("mask_interrupts", False)):
-        lines.append("    POPU IMR")
-    lines.append("    RETF")
+        append_asm_line(lines, "    POPU IMR", "restore the saved IMR value")
+    append_asm_line(lines, "    RETF", "return to the experiment supervisor")
 
     if data_blocks:
         lines.append("")
     for label, payload in data_blocks:
-        lines.append(f"{label}:")
+        append_asm_line(lines, f"{label}:", f"inline data for generated call {label}")
         byte_text = ", ".join(f"0x{value:02X}" for value in payload) if payload else "0x00"
-        lines.append(f"    DEFB {byte_text}")
+        append_asm_line(lines, f"    DEFB {byte_text}", "ASCII/text payload bytes")
 
     return "\n".join(lines) + "\n"
 
