@@ -185,6 +185,8 @@ The implemented continuous-test path splits responsibilities between:
   - [scripts/pc-e500-expd.py](./scripts/pc-e500-expd.py)
 - a small JSON CLI for injecting experiment scripts:
   - [scripts/pc-e500-expctl.py](./scripts/pc-e500-expctl.py)
+- a sweep/fitting helper for repeated count experiments:
+  - [scripts/pc-e500-expfit.py](./scripts/pc-e500-expfit.py)
 
 Typical flow from `gateware/reference`:
 
@@ -214,6 +216,24 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
   --pretty \
   run ./spade-projects/sharp-pc-e500-card-spade/experiments/wait_probe.py -- 0x0400
 ```
+
+For the common timing-sweep workflow, use the fitting helper instead of
+hand-running six counts and computing the line manually:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expfit.py \
+  --pretty \
+  --counts 64,128,192,224,255,256 \
+  ./spade-projects/sharp-pc-e500-card-spade/experiments/mvp_imem_imem_chain.py \
+  -- --no-ft-capture
+```
+
+That returns:
+
+- one entry per count
+- retry count per point
+- linear fits for `ticks`, `ce_events`, `addr_uart`, and `ft_overflow`
+- `ticks.slope_over_quantum` normalized to the current `NOP` quantum
 
 Timeout recovery is explicit:
 

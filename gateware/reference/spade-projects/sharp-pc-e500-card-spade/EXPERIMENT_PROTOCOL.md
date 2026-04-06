@@ -10,6 +10,8 @@ Implemented host-side components:
   - [scripts/pc-e500-expd.py](./scripts/pc-e500-expd.py)
 - CLI:
   - [scripts/pc-e500-expctl.py](./scripts/pc-e500-expctl.py)
+- sweep helper:
+  - [scripts/pc-e500-expfit.py](./scripts/pc-e500-expfit.py)
 - default device image:
   - [asm/card_rom_supervisor_safe.asm](./asm/card_rom_supervisor_safe.asm)
 
@@ -325,3 +327,26 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
   path/to/result.json \
   --window measurement --compact --markdown
 ```
+
+### Sweep helper
+
+For count-based timing rows, use the sweep helper instead of manually running a
+series of `expctl run` commands and fitting the line afterward.
+
+Example:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expfit.py \
+  --pretty \
+  --counts 64,128,192,224,255,256 \
+  ./spade-projects/sharp-pc-e500-card-spade/experiments/mvp_imem_imem_chain.py \
+  -- --no-ft-capture
+```
+
+It returns:
+
+- raw per-count results
+- retry count per point
+- linear fits for `ticks`, `ce_events`, `addr_uart`, and `ft_overflow`
+- `ticks.slope_over_quantum`, which normalizes the measured slope to the
+  current `NOP` baseline
