@@ -1,0 +1,22 @@
+{
+  "name": "iocs_hello_top_left",
+  "defaults": {
+    "cx": 0
+  },
+  "calls": [
+    {
+      "il": "0x51"
+    },
+    {
+      "il": "0x44",
+      "bl": 0,
+      "bh": 0
+    },
+    {
+      "il": "0x42",
+      "bl": 0,
+      "bh": 0,
+      "text": "HELLO"
+    }
+  ]
+}

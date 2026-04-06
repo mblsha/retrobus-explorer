@@ -242,6 +242,44 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/experiments/catalog_experiment.
   list
 ```
 
+For native IOCS experiments, use the structured JSON wrapper instead of
+hand-writing a one-off `.asm` payload:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  run ./spade-projects/sharp-pc-e500-card-spade/experiments/iocs_sequence.py \
+  -- ./spade-projects/sharp-pc-e500-card-spade/experiments/specs/iocs_clear_display.json
+
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
+  --pretty \
+  run ./spade-projects/sharp-pc-e500-card-spade/experiments/iocs_sequence.py \
+  -- ./spade-projects/sharp-pc-e500-card-spade/experiments/specs/iocs_hello_top_left.json
+```
+
+The spec file names the IOCS command sequence in a structured form:
+
+```json
+{
+  "name": "iocs_hello_top_left",
+  "defaults": { "cx": 0 },
+  "calls": [
+    { "il": "0x51" },
+    { "il": "0x44", "bl": 0, "bh": 0 },
+    { "il": "0x42", "bl": 0, "bh": 0, "text": "HELLO" }
+  ]
+}
+```
+
+Current wrapper support:
+
+- one or more IOCS calls per experiment
+- byte register fields: `a`, `bl`, `bh`, `cl`, `ch`, `il`
+- word fields: `cx`, `y`
+- pointer field: `x`
+- inline text payloads via `text`
+- shared register defaults via top-level `defaults`
+
 For the common timing-sweep workflow, use the fitting helper instead of
 hand-running six counts and computing the line manually:
 
