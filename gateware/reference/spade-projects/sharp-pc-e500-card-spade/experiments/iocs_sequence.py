@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -35,14 +36,6 @@ def emit_json(payload: object) -> int:
     return 0
 
 
-def usage() -> str:
-    return (
-        "usage:\n"
-        "  iocs_sequence.py plan SPEC.json\n"
-        "  iocs_sequence.py parse RESULT.json\n"
-    )
-
-
 def parse_int(value: Any) -> int:
     if isinstance(value, bool):
         raise SystemExit(f"boolean is not a valid integer value: {value!r}")
@@ -61,15 +54,6 @@ def normalize_text_bytes(text: str) -> list[int]:
     return list(encoded)
 
 
-def load_spec(spec_path: Path) -> dict[str, Any]:
-    resolved_path = resolve_spec_path(spec_path)
-    raw = json.loads(resolved_path.read_text())
-    if not isinstance(raw, dict):
-        raise SystemExit("top-level spec must be a JSON object")
-    raw["_resolved_spec_path"] = str(resolved_path)
-    return raw
-
-
 def resolve_spec_path(spec_path: Path) -> Path:
     candidates = []
     if spec_path.is_absolute():
@@ -82,6 +66,15 @@ def resolve_spec_path(spec_path: Path) -> Path:
         if candidate.is_file():
             return candidate.resolve()
     raise SystemExit(f"spec file not found: {spec_path}")
+
+
+def load_spec(spec_path: Path) -> dict[str, Any]:
+    resolved_path = resolve_spec_path(spec_path)
+    raw = json.loads(resolved_path.read_text())
+    if not isinstance(raw, dict):
+        raise SystemExit("top-level spec must be a JSON object")
+    raw["_resolved_spec_path"] = str(resolved_path)
+    return raw
 
 
 def build_data_block(label: str, data_spec: Any) -> tuple[str, list[int]]:
@@ -180,20 +173,16 @@ def build_asm_text(spec: dict[str, Any]) -> str:
         lines.append("")
     for label, payload in data_blocks:
         lines.append(f"{label}:")
-        if payload:
-            byte_text = ", ".join(f"0x{value:02X}" for value in payload)
-            lines.append(f"    DEFB {byte_text}")
-        else:
-            lines.append("    DEFB 0x00")
+        byte_text = ", ".join(f"0x{value:02X}" for value in payload) if payload else "0x00"
+        lines.append(f"    DEFB {byte_text}")
 
     return "\n".join(lines) + "\n"
 
 
-def build_plan(spec_path: Path) -> dict[str, object]:
-    spec = load_spec(spec_path)
+def build_plan_from_spec(spec: dict[str, Any], spec_label: str) -> dict[str, object]:
     asm_text = build_asm_text(spec)
     return {
-        "name": spec.get("name", spec_path.stem),
+        "name": spec.get("name", Path(spec_label).stem),
         "asm_text": asm_text,
         "timing": parse_int(spec.get("timing", 5)),
         "control_timing": parse_int(spec.get("control_timing", 10)),
@@ -204,8 +193,102 @@ def build_plan(spec_path: Path) -> dict[str, object]:
         "ft_capture": bool(spec.get("ft_capture", True)),
         "fill_experiment_region": bool(spec.get("fill_experiment_region", True)),
         "args": [],
-        "source_spec": str(spec.get("_resolved_spec_path", spec_path)),
+        "source_spec": spec_label,
     }
+
+
+def parse_call_argument(text: str) -> dict[str, Any]:
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    if not parts:
+        raise SystemExit("empty --call argument")
+    call_spec: dict[str, Any] = {"il": parse_int(parts[0])}
+    for item in parts[1:]:
+        if "=" not in item:
+            raise SystemExit(f"invalid call field {item!r}; expected key=value")
+        key, raw_value = item.split("=", 1)
+        key = key.strip().lower()
+        raw_value = raw_value.strip()
+        if key == "text":
+            call_spec[key] = raw_value
+        else:
+            call_spec[key] = parse_int(raw_value)
+    return call_spec
+
+
+def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
+    default_name_map = {
+        "clear": "iocs_clear",
+        "cursor": "iocs_cursor",
+        "text": "iocs_text",
+        "clear-text": "iocs_clear_text",
+        "run": "iocs_run",
+        "spec": "iocs_spec",
+    }
+    experiment_name = args.name
+    if experiment_name == "iocs_sequence":
+        experiment_name = default_name_map.get(args.mode, experiment_name)
+
+    common: dict[str, Any] = {
+        "name": experiment_name,
+        "timing": args.timing,
+        "control_timing": args.control_timing,
+        "timeout_s": args.timeout_s,
+        "start_tag": args.start_tag,
+        "stop_tag": args.stop_tag,
+        "flags": args.flags,
+        "ft_capture": not args.no_ft_capture,
+    }
+
+    if args.mode == "spec":
+        spec = load_spec(Path(args.spec_path))
+        spec.setdefault("name", args.name)
+        return spec, str(spec.get("_resolved_spec_path", args.spec_path))
+
+    if args.mode == "clear":
+        spec = dict(common)
+        spec["calls"] = [{"il": 0x51}]
+        return spec, "<generated:clear>"
+
+    if args.mode == "cursor":
+        spec = dict(common)
+        spec["defaults"] = {"cx": args.cx}
+        spec["calls"] = [{"il": 0x44, "bl": args.x, "bh": args.y}]
+        return spec, "<generated:cursor>"
+
+    if args.mode == "text":
+        spec = dict(common)
+        spec["defaults"] = {"cx": args.cx}
+        calls: list[dict[str, Any]] = []
+        if args.clear_first:
+            calls.append({"il": 0x51})
+        calls.append({"il": 0x44, "bl": args.x, "bh": args.y})
+        calls.append({"il": 0x42, "bl": args.x, "bh": args.y, "text": args.text})
+        spec["calls"] = calls
+        return spec, "<generated:text>"
+
+    if args.mode == "clear-text":
+        spec = dict(common)
+        spec["defaults"] = {"cx": args.cx}
+        spec["calls"] = [
+            {"il": 0x51},
+            {"il": 0x44, "bl": args.x, "bh": args.y},
+            {"il": 0x42, "bl": args.x, "bh": args.y, "text": args.text},
+        ]
+        return spec, "<generated:clear-text>"
+
+    if args.mode == "run":
+        if not args.call:
+            raise SystemExit("run mode requires at least one --call")
+        spec = dict(common)
+        defaults: dict[str, Any] = {}
+        if args.cx is not None:
+            defaults["cx"] = args.cx
+        if defaults:
+            spec["defaults"] = defaults
+        spec["calls"] = [parse_call_argument(item) for item in args.call]
+        return spec, "<generated:run>"
+
+    raise SystemExit(f"unknown IOCS mode {args.mode!r}")
 
 
 def parse_result(raw_result_path: Path) -> dict[str, object]:
@@ -240,13 +323,68 @@ def parse_result(raw_result_path: Path) -> dict[str, object]:
     }
 
 
+def build_plan_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--name", default="iocs_sequence", help="experiment name")
+    parser.add_argument("--timing", type=lambda value: int(value, 0), default=5)
+    parser.add_argument("--control-timing", type=lambda value: int(value, 0), default=10)
+    parser.add_argument("--timeout-s", type=float, default=2.0)
+    parser.add_argument("--start-tag", type=lambda value: int(value, 0), default=0xC1)
+    parser.add_argument("--stop-tag", type=lambda value: int(value, 0), default=0xC2)
+    parser.add_argument("--flags", type=lambda value: int(value, 0), default=0)
+    parser.add_argument("--no-ft-capture", action="store_true")
+
+    subparsers = parser.add_subparsers(dest="mode", required=True)
+
+    spec_parser = subparsers.add_parser("spec", help="load IOCS sequence from JSON spec")
+    spec_parser.add_argument("spec_path")
+
+    subparsers.add_parser("clear", help="invoke IOCS 51h clear display")
+
+    cursor_parser = subparsers.add_parser("cursor", help="invoke IOCS 44h set cursor")
+    cursor_parser.add_argument("--x", required=True, type=lambda value: int(value, 0))
+    cursor_parser.add_argument("--y", required=True, type=lambda value: int(value, 0))
+    cursor_parser.add_argument("--cx", type=lambda value: int(value, 0), default=0)
+
+    text_parser = subparsers.add_parser("text", help="set cursor and print text via IOCS 42h")
+    text_parser.add_argument("--x", required=True, type=lambda value: int(value, 0))
+    text_parser.add_argument("--y", required=True, type=lambda value: int(value, 0))
+    text_parser.add_argument("--text", required=True)
+    text_parser.add_argument("--cx", type=lambda value: int(value, 0), default=0)
+    text_parser.add_argument("--clear-first", action="store_true")
+
+    clear_text_parser = subparsers.add_parser("clear-text", help="clear display then print text")
+    clear_text_parser.add_argument("--x", required=True, type=lambda value: int(value, 0))
+    clear_text_parser.add_argument("--y", required=True, type=lambda value: int(value, 0))
+    clear_text_parser.add_argument("--text", required=True)
+    clear_text_parser.add_argument("--cx", type=lambda value: int(value, 0), default=0)
+
+    run_parser = subparsers.add_parser("run", help="generic IOCS sequence")
+    run_parser.add_argument("--call", action="append", default=[], help="call spec like 0x42,bl=0,bh=0,text=HELLO")
+    run_parser.add_argument("--cx", type=lambda value: int(value, 0))
+
+    return parser
+
+
+def usage() -> str:
+    return (
+        "usage:\n"
+        "  iocs_sequence.py plan MODE ...\n"
+        "  iocs_sequence.py parse RESULT.json\n"
+    )
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) < 3:
+    if len(argv) < 2:
         raise SystemExit(usage())
     command = argv[1]
     if command == "plan":
-        return emit_json(build_plan(Path(argv[2])))
+        args = build_plan_parser().parse_args(argv[2:])
+        spec, spec_label = build_spec_from_mode(args)
+        return emit_json(build_plan_from_spec(spec, spec_label))
     if command == "parse":
+        if len(argv) < 3:
+            raise SystemExit(usage())
         return emit_json(parse_result(Path(argv[2])))
     raise SystemExit(usage())
 

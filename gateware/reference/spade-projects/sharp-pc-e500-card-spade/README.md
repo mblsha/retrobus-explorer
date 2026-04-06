@@ -242,43 +242,47 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/experiments/catalog_experiment.
   list
 ```
 
-For native IOCS experiments, use the structured JSON wrapper instead of
-hand-writing a one-off `.asm` payload:
+For native IOCS experiments, use the IOCS runner instead of hand-writing a
+one-off `.asm` payload. It prints a short summary by default; use `--verbose`
+for the full JSON response.
 
 ```sh
-uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
-  --pretty \
-  run ./spade-projects/sharp-pc-e500-card-spade/experiments/iocs_sequence.py \
-  -- ./spade-projects/sharp-pc-e500-card-spade/experiments/specs/iocs_clear_display.json
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py clear
 
-uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
-  --pretty \
-  run ./spade-projects/sharp-pc-e500-card-spade/experiments/iocs_sequence.py \
-  -- ./spade-projects/sharp-pc-e500-card-spade/experiments/specs/iocs_hello_top_left.json
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
+  text --x 0 --y 0 --text HELLO
+
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
+  clear-text --x 0 --y 0 --text HELLO
+
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
+  run --cx 0 \
+  --call 0x51 \
+  --call 0x44,bl=0,bh=0 \
+  --call 0x42,bl=0,bh=0,text=HELLO
 ```
 
-The spec file names the IOCS command sequence in a structured form:
+The helper also still supports JSON specs as an escape hatch:
 
-```json
-{
-  "name": "iocs_hello_top_left",
-  "defaults": { "cx": 0 },
-  "calls": [
-    { "il": "0x51" },
-    { "il": "0x44", "bl": 0, "bh": 0 },
-    { "il": "0x42", "bl": 0, "bh": 0, "text": "HELLO" }
-  ]
-}
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
+  spec ./spade-projects/sharp-pc-e500-card-spade/experiments/specs/iocs_hello_top_left.json
 ```
 
-Current wrapper support:
+Current IOCS wrapper support:
 
-- one or more IOCS calls per experiment
+- hybrid CLI:
+  - `clear`
+  - `cursor`
+  - `text`
+  - `clear-text`
+  - generic `run --call ...`
+  - `spec path.json`
 - byte register fields: `a`, `bl`, `bh`, `cl`, `ch`, `il`
 - word fields: `cx`, `y`
 - pointer field: `x`
 - inline text payloads via `text`
-- shared register defaults via top-level `defaults`
+- shared register defaults via top-level `defaults` in spec mode
 
 For the common timing-sweep workflow, use the fitting helper instead of
 hand-running six counts and computing the line manually:
