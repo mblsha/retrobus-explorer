@@ -113,6 +113,8 @@ def summarize_result(count: int, response: dict[str, object]) -> dict[str, objec
             "word_count": ft_capture.get("word_count"),
             "raw_bytes": ft_capture.get("raw_bytes"),
             "chunk_count": ft_capture.get("chunk_count"),
+            "max_retained_words": ft_capture.get("max_retained_words"),
+            "truncated_head": ft_capture.get("truncated_head"),
         }
     return summary
 

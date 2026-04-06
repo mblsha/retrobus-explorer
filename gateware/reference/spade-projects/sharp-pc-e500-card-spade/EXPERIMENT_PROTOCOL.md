@@ -262,9 +262,10 @@ Optional fields:
 - `ft_read_timeout_ms`
 - `ft_post_stop_idle_s`
 - `ft_post_stop_hard_s`
+- `ft_max_retained_words`
 
-If `ft_capture=true`, the daemon opens the FT600 side channel, drains it in a
-dedicated background thread, and return decoded sampled-bus words in the raw
+If `ft_capture=true`, the daemon starts a capture session on top of an already
+running FT600 drain thread and returns decoded sampled-bus words in the raw
 result. The reader keeps draining until either:
 
 - no new FT bytes arrive for `ft_post_stop_idle_s`, or
@@ -272,6 +273,19 @@ result. The reader keeps draining until either:
 
 That models the expected bursty FT delivery and in-flight buffering on the
 separate channel.
+
+The FT path now uses a bounded ring buffer:
+
+- old words are discarded from the head once retained history exceeds
+  `ft_max_retained_words`
+- the primary goal is to avoid FPGA overflow by keeping the host-side drain
+  thread running continuously
+- bounding the retained history is a separate memory-management decision and
+  should not interfere with draining
+
+Default:
+
+- `ft_max_retained_words = 262144`
 
 The intended default is `ft_capture=true`. Use `ft_capture=false` only when
 explicitly validating the non-FT fallback path.
@@ -297,6 +311,11 @@ The daemon returns a JSON object containing:
 - `ft_capture.measurement_preview`: a compacted window bracketed by
   `MARK_START`/`MARK_STOP` when those control writes are present in the FT
   stream
+- `ft_capture.max_retained_words`: configured ring-buffer retention limit
+- `ft_capture.retained_words`: currently retained word count after trimming
+- `ft_capture.total_words_seen`: total sampled words seen during the session
+- `ft_capture.truncated_head`: whether the oldest part of the per-experiment
+  capture had already been dropped by the retention limit
 
 The optional `parse` step can turn that into a smaller experiment-specific
 result.

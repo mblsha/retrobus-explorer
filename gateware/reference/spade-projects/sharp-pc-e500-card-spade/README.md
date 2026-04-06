@@ -14,8 +14,10 @@ interface when the measurement window is armed.
 - Measurement-gated sampled-bus bulk capture: Au + Ft Element FT600 path
 
 FT600 sampled-bus capture is now the default experiment mode. The stable
-supervisor enables the calculator-side FT stream, and the host daemon drains it
-during experiment runs by default.
+supervisor enables the calculator-side FT stream, and the host daemon now keeps
+a persistent FT600 drain thread alive by default. Per-experiment captures are
+cut out of that continuously drained stream instead of repeatedly opening and
+closing the FT side channel.
 
 ## Au1 USB-UART
 
@@ -247,8 +249,11 @@ Timeout recovery is explicit:
 - the user resets the PC-E500 and runs `CALL &10000` again
 
 The stable supervisor image writes `0x01` to `0x1FFF4` during startup so the
-calculator-side FT sampled-bus stream stays enabled by default. The intended
-host-side pairing is a dedicated FT reader thread during experiment runs.
+calculator-side FT sampled-bus stream stays enabled by default. The host-side
+pairing is now a persistent FT reader thread plus a bounded ring buffer.
+Very old FT words are discarded from the head once the configured retention
+limit is exceeded, which keeps the host draining aggressively without trying to
+retain unlimited history.
 
 The daemon now returns two FT views for each captured run:
 
@@ -258,6 +263,19 @@ The daemon now returns two FT views for each captured run:
 - `ft_capture.execution_preview` for the inferred experiment execution window
 - `ft_capture.measurement_preview` for the `MARK_START` / `MARK_STOP` window
   when visible in FT capture
+- retention metadata:
+  - `ft_capture.max_retained_words`
+  - `ft_capture.retained_words`
+  - `ft_capture.total_words_seen`
+  - `ft_capture.truncated_head`
+
+Experiment plans may override the default retention window with:
+
+- `ft_max_retained_words`
+
+Use that when you want to keep only the newest portion of a long FT capture
+while still ensuring the host drains the always-on FT stream fast enough to
+avoid FPGA overflow.
 
 For saved results, decode them with:
 

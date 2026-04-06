@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import array
+import collections
 import importlib.util
 import subprocess
 import sys
@@ -86,6 +87,7 @@ DEFAULT_READ_TIMEOUT_MS = 20
 DEFAULT_STREAM_SIZE = 4
 DEFAULT_POST_STOP_IDLE_S = 0.1
 DEFAULT_POST_STOP_HARD_S = 1.0
+DEFAULT_MAX_RETAINED_WORDS = 262_144
 SUPERVISOR_ROM_MIN = 0x10000
 SUPERVISOR_ROM_MAX = 0x100FF
 EXPERIMENT_ROM_MIN = 0x10100
@@ -123,6 +125,17 @@ class FtCaptureResult:
     decode_swap_u16: bool
     drain_idle_s: float
     drain_hard_s: float
+    retained_words: int
+    total_words_seen: int
+    max_retained_words: int
+    truncated_head: bool
+
+
+@dataclass(frozen=True)
+class FtCaptureSession:
+    start_word_index: int
+    start_raw_bytes: int
+    start_chunk_count: int
 
 
 @dataclass(frozen=True)
@@ -358,6 +371,7 @@ class Ft600Capture:
         swap_bytes_within_u16: bool = False,
         post_stop_idle_s: float = DEFAULT_POST_STOP_IDLE_S,
         post_stop_hard_s: float = DEFAULT_POST_STOP_HARD_S,
+        max_retained_words: int = DEFAULT_MAX_RETAINED_WORDS,
     ) -> None:
         self.pipe_id = pipe_id & 0xFF
         self.read_size = read_size
@@ -366,8 +380,11 @@ class Ft600Capture:
         self.swap_bytes_within_u16 = swap_bytes_within_u16
         self.post_stop_idle_s = post_stop_idle_s
         self.post_stop_hard_s = post_stop_hard_s
+        self.max_retained_words = max(1, int(max_retained_words))
         self._device = None
-        self._word_bytes = bytearray()
+        self._segments: collections.deque[tuple[int, bytes]] = collections.deque()
+        self._retained_word_count = 0
+        self._total_word_count = 0
         self._raw_bytes = 0
         self._chunk_count = 0
         self._thread: threading.Thread | None = None
@@ -375,6 +392,8 @@ class Ft600Capture:
         self._error: Exception | None = None
         self._lock = threading.Lock()
         self._pending_bytes = b""
+        self._session: FtCaptureSession | None = None
+        self._stale_drained = False
 
     def _open_device(self) -> None:
         if self._device is not None:
@@ -413,6 +432,53 @@ class Ft600Capture:
             return bytes(result)
         return b""
 
+    def _retained_start_word_index_locked(self) -> int:
+        if self._segments:
+            return self._segments[0][0]
+        return self._total_word_count
+
+    def _append_decoded_bytes_locked(self, decoded_bytes: bytes) -> None:
+        if not decoded_bytes:
+            return
+        word_count = len(decoded_bytes) // 4
+        if word_count <= 0:
+            return
+        self._segments.append((self._total_word_count, bytes(decoded_bytes)))
+        self._total_word_count += word_count
+        self._retained_word_count += word_count
+        while self._retained_word_count > self.max_retained_words and self._segments:
+            segment_start, segment_bytes = self._segments[0]
+            segment_words = len(segment_bytes) // 4
+            overflow_words = self._retained_word_count - self.max_retained_words
+            if overflow_words >= segment_words:
+                self._segments.popleft()
+                self._retained_word_count -= segment_words
+                continue
+            trim_words = overflow_words
+            trim_bytes = trim_words * 4
+            self._segments[0] = (segment_start + trim_words, segment_bytes[trim_bytes:])
+            self._retained_word_count -= trim_words
+            break
+
+    def set_max_retained_words(self, max_retained_words: int) -> None:
+        if max_retained_words < 1:
+            raise ValueError("max_retained_words must be >= 1")
+        with self._lock:
+            self.max_retained_words = int(max_retained_words)
+            while self._retained_word_count > self.max_retained_words and self._segments:
+                segment_start, segment_bytes = self._segments[0]
+                segment_words = len(segment_bytes) // 4
+                overflow_words = self._retained_word_count - self.max_retained_words
+                if overflow_words >= segment_words:
+                    self._segments.popleft()
+                    self._retained_word_count -= segment_words
+                    continue
+                trim_words = overflow_words
+                trim_bytes = trim_words * 4
+                self._segments[0] = (segment_start + trim_words, segment_bytes[trim_bytes:])
+                self._retained_word_count -= trim_words
+                break
+
     def _drain_stale_data(self) -> None:
         deadline = time.monotonic() + 0.25
         while time.monotonic() < deadline:
@@ -420,12 +486,30 @@ class Ft600Capture:
             if not chunk:
                 break
 
+    def _wait_for_quiet_or_deadline(self, idle_s: float, hard_s: float) -> int:
+        stable_deadline: float | None = None
+        hard_deadline = time.monotonic() + hard_s
+        with self._lock:
+            last_words = self._total_word_count
+        while True:
+            time.sleep(min(0.01, idle_s if idle_s > 0 else 0.01))
+            with self._lock:
+                current_words = self._total_word_count
+            now = time.monotonic()
+            if current_words != last_words:
+                last_words = current_words
+                stable_deadline = now + idle_s
+            elif stable_deadline is None:
+                stable_deadline = now + idle_s
+            elif now >= stable_deadline:
+                return current_words
+            if now >= hard_deadline:
+                return current_words
+
     def _read_loop(self) -> None:
         assert self._device is not None
-        idle_after_stop_deadline: float | None = None
-        hard_after_stop_deadline: float | None = None
         try:
-            while True:
+            while not self._stop_event.is_set():
                 chunk = self._read_chunk()
                 if chunk:
                     decoded_bytes, self._pending_bytes = native.decode_words_packed(
@@ -436,58 +520,96 @@ class Ft600Capture:
                     with self._lock:
                         self._raw_bytes += len(chunk)
                         self._chunk_count += 1
-                        self._word_bytes.extend(decoded_bytes)
-                    idle_after_stop_deadline = None
-                    continue
-
-                if self._stop_event.is_set():
-                    if idle_after_stop_deadline is None:
-                        idle_after_stop_deadline = time.monotonic() + self.post_stop_idle_s
-                    if hard_after_stop_deadline is None:
-                        hard_after_stop_deadline = time.monotonic() + self.post_stop_hard_s
-                    elif time.monotonic() >= idle_after_stop_deadline:
-                        break
-                    if hard_after_stop_deadline is not None and time.monotonic() >= hard_after_stop_deadline:
-                        break
+                        self._append_decoded_bytes_locked(decoded_bytes)
         except Exception as exc:  # noqa: BLE001
             self._error = exc
 
-    def start(self) -> None:
-        if self._thread is not None:
-            raise RuntimeError("FT capture already started")
-        self._word_bytes.clear()
-        self._raw_bytes = 0
-        self._chunk_count = 0
-        self._error = None
-        self._pending_bytes = b""
-        self._stop_event.clear()
-        self._open_device()
-        self._drain_stale_data()
-        self._thread = threading.Thread(target=self._read_loop, name="pc-e500-ft600", daemon=True)
-        self._thread.start()
-
-    def stop(self) -> FtCaptureResult:
+    def ensure_running(self) -> None:
         if self._thread is None:
-            raise RuntimeError("FT capture was not started")
+            self._error = None
+            self._pending_bytes = b""
+            self._stop_event.clear()
+            self._open_device()
+            if not self._stale_drained:
+                self._drain_stale_data()
+                self._stale_drained = True
+            self._thread = threading.Thread(target=self._read_loop, name="pc-e500-ft600", daemon=True)
+            self._thread.start()
+
+    def start(self) -> None:
+        self.ensure_running()
+        if self._session is not None:
+            raise RuntimeError("FT capture session already started")
+        with self._lock:
+            self._session = FtCaptureSession(
+                start_word_index=self._total_word_count,
+                start_raw_bytes=self._raw_bytes,
+                start_chunk_count=self._chunk_count,
+            )
+
+    def shutdown(self) -> None:
+        if self._thread is None:
+            self._close_device()
+            return
         self._stop_event.set()
         self._thread.join(timeout=5.0)
         if self._thread.is_alive():
             raise RuntimeError("timed out waiting for FT capture thread to stop")
         self._thread = None
-        try:
-            if self._error is not None:
-                raise RuntimeError(f"FT capture failed: {self._error}") from self._error
-            with self._lock:
-                words = array.array("I")
-                words.frombytes(self._word_bytes)
-                return FtCaptureResult(
-                    words=words.tolist(),
-                    raw_bytes=self._raw_bytes,
-                    chunk_count=self._chunk_count,
-                    pending_bytes_hex=self._pending_bytes.hex(),
-                    decode_swap_u16=self.swap_bytes_within_u16,
-                    drain_idle_s=self.post_stop_idle_s,
-                    drain_hard_s=self.post_stop_hard_s,
-                )
-        finally:
-            self._close_device()
+        self._session = None
+        self._close_device()
+
+    def _snapshot_words_locked(self, start_word_index: int, end_word_index: int) -> tuple[list[int], bool]:
+        retained_start = self._retained_start_word_index_locked()
+        effective_start = max(start_word_index, retained_start)
+        effective_end = min(end_word_index, self._total_word_count)
+        truncated_head = start_word_index < retained_start
+        if effective_end <= effective_start:
+            return [], truncated_head
+        chunks: list[bytes] = []
+        for segment_start, segment_bytes in self._segments:
+            segment_words = len(segment_bytes) // 4
+            segment_end = segment_start + segment_words
+            if segment_end <= effective_start:
+                continue
+            if segment_start >= effective_end:
+                break
+            slice_start_words = max(effective_start - segment_start, 0)
+            slice_end_words = min(effective_end - segment_start, segment_words)
+            start_byte = slice_start_words * 4
+            end_byte = slice_end_words * 4
+            chunks.append(segment_bytes[start_byte:end_byte])
+        words = array.array("I")
+        for chunk in chunks:
+            words.frombytes(chunk)
+        return words.tolist(), truncated_head
+
+    def stop(self) -> FtCaptureResult:
+        if self._thread is None or self._session is None:
+            raise RuntimeError("FT capture session was not started")
+        end_word_index = self._wait_for_quiet_or_deadline(self.post_stop_idle_s, self.post_stop_hard_s)
+        if self._error is not None:
+            raise RuntimeError(f"FT capture failed: {self._error}") from self._error
+        with self._lock:
+            session = self._session
+            assert session is not None
+            words, truncated_head = self._snapshot_words_locked(session.start_word_index, end_word_index)
+            raw_bytes = self._raw_bytes - session.start_raw_bytes
+            chunk_count = self._chunk_count - session.start_chunk_count
+            retained_words = self._retained_word_count
+            total_words_seen = self._total_word_count
+            max_retained_words = self.max_retained_words
+            self._session = None
+        return FtCaptureResult(
+            words=words,
+            raw_bytes=raw_bytes,
+            chunk_count=chunk_count,
+            pending_bytes_hex=self._pending_bytes.hex(),
+            decode_swap_u16=self.swap_bytes_within_u16,
+            drain_idle_s=self.post_stop_idle_s,
+            drain_hard_s=self.post_stop_hard_s,
+            retained_words=retained_words,
+            total_words_seen=total_words_seen,
+            max_retained_words=max_retained_words,
+            truncated_head=truncated_head,
+        )

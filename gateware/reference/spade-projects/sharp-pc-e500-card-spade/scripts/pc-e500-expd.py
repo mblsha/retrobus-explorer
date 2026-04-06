@@ -41,6 +41,7 @@ DEFAULT_SAFE_ASM = PROJECT_ROOT / "asm" / "card_rom_supervisor_safe.asm"
 DEFAULT_DEBUG_ECHO_ASM = PROJECT_ROOT / "asm" / "card_rom_echo_short_retf.asm"
 DEFAULT_SAFE_TIMING = 5
 DEFAULT_SAFE_CONTROL_TIMING = 10
+DEFAULT_FT_MAX_RETAINED_WORDS = 262_144
 
 CMD_BASE = 0x107E0
 CMD_MAGIC0 = CMD_BASE + 0x00
@@ -123,6 +124,8 @@ class ExperimentDaemon:
         self._next_seq = 1
         self._scan_index = 0
         self._run_counter = 0
+        self.ft_capture = Ft600Capture(max_retained_words=DEFAULT_FT_MAX_RETAINED_WORDS)
+        self.ft_capture.ensure_running()
 
     def _observe_sequence_from_line(self, text: str) -> None:
         if not text.startswith((BEGIN_PREFIX + ",", END_PREFIX + ",")):
@@ -140,6 +143,7 @@ class ExperimentDaemon:
             self._next_seq = value + 1
 
     def close(self) -> None:
+        self.ft_capture.shutdown()
         self.uart.close()
         self.ser.close()
 
@@ -359,6 +363,7 @@ class ExperimentDaemon:
         ft_read_timeout_ms = int(plan.get("ft_read_timeout_ms", 20))
         ft_post_stop_idle_s = float(plan.get("ft_post_stop_idle_s", 0.1))
         ft_post_stop_hard_s = float(plan.get("ft_post_stop_hard_s", 1.0))
+        ft_max_retained_words = int(plan.get("ft_max_retained_words", DEFAULT_FT_MAX_RETAINED_WORDS))
 
         if "asm_source" in plan:
             start_address, image = self._assemble_image_from_source(Path(plan["asm_source"]))
@@ -379,17 +384,13 @@ class ExperimentDaemon:
         self.uart.write_rom_bytes(start_address if not fill_experiment_region else EXPERIMENT_MIN, image_to_program, fast=True)
         self.uart.synchronize_rx_boundary()
         line_index = self.uart.line_count()
-        ft_capture = (
-            Ft600Capture(
-                read_size=ft_read_size,
-                read_timeout_ms=ft_read_timeout_ms,
-                post_stop_idle_s=ft_post_stop_idle_s,
-                post_stop_hard_s=ft_post_stop_hard_s,
-            )
-            if ft_capture_enabled
-            else None
-        )
+        ft_capture = self.ft_capture if ft_capture_enabled else None
         if ft_capture is not None:
+            ft_capture.read_size = ft_read_size
+            ft_capture.read_timeout_ms = ft_read_timeout_ms
+            ft_capture.post_stop_idle_s = ft_post_stop_idle_s
+            ft_capture.post_stop_hard_s = ft_post_stop_hard_s
+            ft_capture.set_max_retained_words(ft_max_retained_words)
             ft_capture.start()
         self._commit_command_block(command_block)
         self.status = "running"
@@ -459,6 +460,10 @@ class ExperimentDaemon:
                 "decode_swap_u16": ft_capture_result.decode_swap_u16,
                 "drain_idle_s": ft_capture_result.drain_idle_s,
                 "drain_hard_s": ft_capture_result.drain_hard_s,
+                "retained_words": ft_capture_result.retained_words,
+                "total_words_seen": ft_capture_result.total_words_seen,
+                "max_retained_words": ft_capture_result.max_retained_words,
+                "truncated_head": ft_capture_result.truncated_head,
                 "health": "ok" if all(m.ft_overflow == 0 for m in measurements) else "overflow",
                 "words": ft_capture_result.words,
                 "preview": preview_words,
@@ -488,6 +493,9 @@ class ExperimentDaemon:
             "safe_image_programmed": self.safe_image_programmed,
             "safe_image_path": self.safe_image_path,
             "safe_image_entry": self.safe_image_entry,
+            "ft_capture": {
+                "max_retained_words": self.ft_capture.max_retained_words,
+            },
             "uart": self.uart.stats(),
             "recent_uart_lines": self.uart.last_lines(),
         }
