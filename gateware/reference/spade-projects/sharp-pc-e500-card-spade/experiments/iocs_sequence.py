@@ -113,7 +113,7 @@ def build_putchar_calls(x: int, y: int, text: str, cx: int) -> list[dict[str, An
 
 def build_clear_calls(cx: int) -> list[dict[str, Any]]:
     return [
-        {"i": 0x0049, "cx": cx, "bh": row}
+        {"i": 0x0049, "cx": cx, "bl": 0, "bh": row}
         for row in range(PCE500_TEXT_ROWS)
     ]
 
