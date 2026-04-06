@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import array
 import importlib.util
 import subprocess
 import sys
@@ -366,7 +367,7 @@ class Ft600Capture:
         self.post_stop_idle_s = post_stop_idle_s
         self.post_stop_hard_s = post_stop_hard_s
         self._device = None
-        self._words: list[int] = []
+        self._word_bytes = bytearray()
         self._raw_bytes = 0
         self._chunk_count = 0
         self._thread: threading.Thread | None = None
@@ -427,7 +428,7 @@ class Ft600Capture:
             while True:
                 chunk = self._read_chunk()
                 if chunk:
-                    decoded, self._pending_bytes = native.decode_words(
+                    decoded_bytes, self._pending_bytes = native.decode_words_packed(
                         chunk,
                         pending=self._pending_bytes,
                         swap_bytes_within_u16=self.swap_bytes_within_u16,
@@ -435,7 +436,7 @@ class Ft600Capture:
                     with self._lock:
                         self._raw_bytes += len(chunk)
                         self._chunk_count += 1
-                        self._words.extend(decoded)
+                        self._word_bytes.extend(decoded_bytes)
                     idle_after_stop_deadline = None
                     continue
 
@@ -454,7 +455,7 @@ class Ft600Capture:
     def start(self) -> None:
         if self._thread is not None:
             raise RuntimeError("FT capture already started")
-        self._words.clear()
+        self._word_bytes.clear()
         self._raw_bytes = 0
         self._chunk_count = 0
         self._error = None
@@ -477,8 +478,10 @@ class Ft600Capture:
             if self._error is not None:
                 raise RuntimeError(f"FT capture failed: {self._error}") from self._error
             with self._lock:
+                words = array.array("I")
+                words.frombytes(self._word_bytes)
                 return FtCaptureResult(
-                    words=list(self._words),
+                    words=words.tolist(),
                     raw_bytes=self._raw_bytes,
                     chunk_count=self._chunk_count,
                     pending_bytes_hex=self._pending_bytes.hex(),

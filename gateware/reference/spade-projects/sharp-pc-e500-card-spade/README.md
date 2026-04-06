@@ -235,6 +235,11 @@ That returns:
 - linear fits for `ticks`, `ce_events`, `addr_uart`, and `ft_overflow`
 - `ticks.slope_over_quantum` normalized to the current `NOP` quantum
 
+If any run reports `ft_overflow > 0`, treat that point as degraded rather than
+as a valid timing result. The sweep helper now surfaces that explicitly so we
+can use those runs as a prompt to make the host-side FT600 capture path faster
+and avoid future overflow.
+
 Timeout recovery is explicit:
 
 - the daemon reprograms the safe supervisor image

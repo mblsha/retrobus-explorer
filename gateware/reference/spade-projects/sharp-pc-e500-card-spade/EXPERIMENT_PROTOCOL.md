@@ -350,3 +350,8 @@ It returns:
 - linear fits for `ticks`, `ce_events`, `addr_uart`, and `ft_overflow`
 - `ticks.slope_over_quantum`, which normalizes the measured slope to the
   current `NOP` baseline
+
+If any successful run reports `measurement.ft_overflow > 0`, the helper marks
+that in the JSON result and emits a note explaining that the point should be
+treated as degraded. Those runs are useful as a prompt to improve the
+host-side FT600 draining path so future captures can keep up without overflow.

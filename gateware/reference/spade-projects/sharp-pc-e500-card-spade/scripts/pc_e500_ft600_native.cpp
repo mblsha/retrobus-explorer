@@ -13,7 +13,7 @@ static std::uint16_t load_u16(const unsigned char* src, int swap_bytes_within_u1
            (static_cast<std::uint16_t>(src[1]) << 8);
 }
 
-static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kwargs) {
+static PyObject* decode_words_packed(PyObject* /* self */, PyObject* args, PyObject* kwargs) {
     Py_buffer data = {};
     Py_buffer pending = {};
     int swap_bytes_within_u16 = 0;
@@ -22,7 +22,7 @@ static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kw
     if (!PyArg_ParseTupleAndKeywords(
             args,
             kwargs,
-            "y*|y*p:decode_words",
+            "y*|y*p:decode_words_packed",
             const_cast<char**>(kwlist),
             &data,
             &pending,
@@ -38,14 +38,16 @@ static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kw
     merged.insert(merged.end(), data_bytes, data_bytes + data.len);
 
     const Py_ssize_t word_count = static_cast<Py_ssize_t>(merged.size() / 4);
-    PyObject* words = PyList_New(word_count);
-    if (words == nullptr) {
+    const Py_ssize_t packed_size = word_count * 4;
+    PyObject* packed = PyBytes_FromStringAndSize(nullptr, packed_size);
+    if (packed == nullptr) {
         PyBuffer_Release(&data);
         if (pending.buf != nullptr) {
             PyBuffer_Release(&pending);
         }
         return nullptr;
     }
+    auto* out = reinterpret_cast<unsigned char*>(PyBytes_AS_STRING(packed));
 
     for (Py_ssize_t index = 0; index < word_count; ++index) {
         const auto offset = static_cast<std::size_t>(index) * 4;
@@ -53,16 +55,11 @@ static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kw
         const std::uint16_t hi = load_u16(&merged[offset + 2], swap_bytes_within_u16);
         const std::uint32_t word =
             static_cast<std::uint32_t>(lo) | (static_cast<std::uint32_t>(hi) << 16);
-        PyObject* value = PyLong_FromUnsignedLong(word);
-        if (value == nullptr) {
-            Py_DECREF(words);
-            PyBuffer_Release(&data);
-            if (pending.buf != nullptr) {
-                PyBuffer_Release(&pending);
-            }
-            return nullptr;
-        }
-        PyList_SET_ITEM(words, index, value);
+        const auto out_offset = static_cast<std::size_t>(index) * 4;
+        out[out_offset + 0] = static_cast<unsigned char>(word & 0xFF);
+        out[out_offset + 1] = static_cast<unsigned char>((word >> 8) & 0xFF);
+        out[out_offset + 2] = static_cast<unsigned char>((word >> 16) & 0xFF);
+        out[out_offset + 3] = static_cast<unsigned char>((word >> 24) & 0xFF);
     }
 
     const auto remainder_offset = static_cast<std::size_t>(word_count) * 4;
@@ -70,7 +67,7 @@ static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kw
         reinterpret_cast<const char*>(merged.data() + remainder_offset),
         static_cast<Py_ssize_t>(merged.size() - remainder_offset));
     if (remainder == nullptr) {
-        Py_DECREF(words);
+        Py_DECREF(packed);
         PyBuffer_Release(&data);
         if (pending.buf != nullptr) {
             PyBuffer_Release(&pending);
@@ -80,7 +77,7 @@ static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kw
 
     PyObject* result = PyTuple_New(2);
     if (result == nullptr) {
-        Py_DECREF(words);
+        Py_DECREF(packed);
         Py_DECREF(remainder);
         PyBuffer_Release(&data);
         if (pending.buf != nullptr) {
@@ -88,7 +85,7 @@ static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kw
         }
         return nullptr;
     }
-    PyTuple_SET_ITEM(result, 0, words);
+    PyTuple_SET_ITEM(result, 0, packed);
     PyTuple_SET_ITEM(result, 1, remainder);
 
     PyBuffer_Release(&data);
@@ -100,10 +97,10 @@ static PyObject* decode_words(PyObject* /* self */, PyObject* args, PyObject* kw
 
 static PyMethodDef module_methods[] = {
     {
-        "decode_words",
-        reinterpret_cast<PyCFunction>(decode_words),
+        "decode_words_packed",
+        reinterpret_cast<PyCFunction>(decode_words_packed),
         METH_VARARGS | METH_KEYWORDS,
-        "Decode FT600 byte stream into 32-bit sampled-bus words.",
+        "Decode FT600 byte stream into packed 32-bit sampled-bus words.",
     },
     {nullptr, nullptr, 0, nullptr},
 };

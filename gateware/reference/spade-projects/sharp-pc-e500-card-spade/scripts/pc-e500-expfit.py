@@ -101,6 +101,7 @@ def summarize_result(count: int, response: dict[str, object]) -> dict[str, objec
     if isinstance(measurements, list) and measurements:
         measurement = measurements[0]
         summary["measurement"] = measurement
+        summary["ft_overflow_detected"] = bool(measurement.get("ft_overflow", 0))
     parsed = response.get("parsed")
     if isinstance(parsed, dict):
         summary["parsed"] = parsed
@@ -124,6 +125,7 @@ def main() -> int:
 
     runs: list[dict[str, object]] = []
     failures = 0
+    overflow_runs: list[dict[str, object]] = []
     for count in args.counts:
         last_response: dict[str, object] | None = None
         for attempt in range(1, args.retries + 1):
@@ -140,6 +142,14 @@ def main() -> int:
         runs.append(summary)
         if summary.get("status") != "ok":
             failures += 1
+        elif summary.get("ft_overflow_detected"):
+            overflow_runs.append(
+                {
+                    "count": summary["count"],
+                    "attempts": summary["attempts"],
+                    "ft_overflow": summary["measurement"]["ft_overflow"],
+                }
+            )
 
     tick_points: list[tuple[int, float]] = []
     ce_points: list[tuple[int, float]] = []
@@ -172,9 +182,17 @@ def main() -> int:
         "retries": args.retries,
         "quantum": args.quantum,
         "failures": failures,
+        "overflow_detected": bool(overflow_runs),
+        "overflow_runs": overflow_runs,
         "fits": fits,
         "runs": runs,
     }
+    if overflow_runs:
+        payload["note"] = (
+            "FT overflow was observed in one or more runs. Treat those points as degraded, "
+            "exclude them from timing fits, and use this as a signal to improve host-side "
+            "FT600 capture throughput so future runs drain the stream fast enough to avoid overflow."
+        )
     encoded = json.dumps(payload, indent=2 if args.pretty else None, sort_keys=True)
     print(encoded)
     if args.save:
