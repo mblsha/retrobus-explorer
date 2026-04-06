@@ -36,6 +36,8 @@ PTR_REGS = {
 
 LCD_WRITE_ADDR_MIN = 0x0A000
 LCD_WRITE_ADDR_MAX = 0x0A010
+JP_IOCS_WORKSPACE_PTR_IMEM = 0x28
+JP_STDO_WORKING_CURSOR_OFFSET = 0x0273
 
 
 def append_asm_line(lines: list[str], code: str, comment: str | None = None) -> None:
@@ -197,10 +199,18 @@ def emit_synthetic_op(lines: list[str], call_spec: dict[str, Any]) -> bool:
         y = parse_int(call_spec.get("bh", 0)) & 0xFF
         append_asm_line(lines, f"    MV (BL), 0x{x:02X}", f"stage cursor X byte 0x{x:02X}")
         append_asm_line(lines, f"    MV (BH), 0x{y:02X}", f"stage cursor Y byte 0x{y:02X}")
-        append_asm_line(lines, "    MV X, (0x28)", "load JP IOCS workspace base pointer from IMEM[0x28..0x2A]")
-        append_asm_line(lines, "    MVW (CL), 0x0273", "stage the STDO cursor-shadow offset 0x0273")
+        append_asm_line(
+            lines,
+            f"    MV X, (0x{JP_IOCS_WORKSPACE_PTR_IMEM:02X})",
+            f"load JP IOCS workspace base pointer from IMEM[0x{JP_IOCS_WORKSPACE_PTR_IMEM:02X}..0x{JP_IOCS_WORKSPACE_PTR_IMEM + 2:02X}]",
+        )
+        append_asm_line(
+            lines,
+            f"    MVW (CL), 0x{JP_STDO_WORKING_CURSOR_OFFSET:04X}",
+            f"stage the STDO working-cursor offset 0x{JP_STDO_WORKING_CURSOR_OFFSET:04X}",
+        )
         append_asm_line(lines, "    MV BA, (CL)", "load the offset word into BA")
-        append_asm_line(lines, "    ADD X, BA", "advance X to the STDO cursor-shadow bytes")
+        append_asm_line(lines, "    ADD X, BA", "advance X to the JP STDO working-cursor shadow bytes")
         append_asm_line(lines, "    MV A, (BL)", "copy the staged cursor X byte into A")
         append_asm_line(lines, "    MV [X], A", "write cursor X to the shadow cursor low byte")
         append_asm_line(lines, "    MV A, (BH)", "copy the staged cursor Y byte into A")
