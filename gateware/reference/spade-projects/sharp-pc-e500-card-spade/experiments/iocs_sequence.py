@@ -182,9 +182,9 @@ def build_asm_text(spec: dict[str, Any]) -> str:
         lines.append(f"{label}:")
         if payload:
             byte_text = ", ".join(f"0x{value:02X}" for value in payload)
-            lines.append(f"    .DB {byte_text}")
+            lines.append(f"    DEFB {byte_text}")
         else:
-            lines.append("    .DB")
+            lines.append("    DEFB 0x00")
 
     return "\n".join(lines) + "\n"
 
