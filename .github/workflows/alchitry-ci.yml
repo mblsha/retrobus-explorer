@@ -1,6 +1,7 @@
 name: Alchitry Labs V2 CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [ master, main ]
     paths:
