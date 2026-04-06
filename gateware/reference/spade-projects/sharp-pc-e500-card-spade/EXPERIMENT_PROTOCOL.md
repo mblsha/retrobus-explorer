@@ -352,14 +352,20 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-ftdecode.py \
 For count-based timing rows, use the sweep helper instead of manually running a
 series of `expctl run` commands and fitting the line afterward.
 
+The count-based chain probes now live behind the generic catalog runner:
+
+```sh
+uv run ./spade-projects/sharp-pc-e500-card-spade/experiments/catalog_experiment.py list
+```
+
 Example:
 
 ```sh
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expfit.py \
   --pretty \
   --counts 64,128,192,224,255,256 \
-  ./spade-projects/sharp-pc-e500-card-spade/experiments/mvp_imem_imem_chain.py \
-  -- --no-ft-capture
+  ./spade-projects/sharp-pc-e500-card-spade/experiments/catalog_experiment.py \
+  -- --experiment mvp_imem_imem_chain --no-ft-capture
 ```
 
 It returns:

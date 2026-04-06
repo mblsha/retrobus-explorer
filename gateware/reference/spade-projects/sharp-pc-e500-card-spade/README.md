@@ -217,6 +217,9 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expctl.py \
   --pretty \
   run ./spade-projects/sharp-pc-e500-card-spade/experiments/wait_probe.py -- 0x0400
+
+uv run ./spade-projects/sharp-pc-e500-card-spade/experiments/catalog_experiment.py \
+  list
 ```
 
 For the common timing-sweep workflow, use the fitting helper instead of
@@ -226,8 +229,8 @@ hand-running six counts and computing the line manually:
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-expfit.py \
   --pretty \
   --counts 64,128,192,224,255,256 \
-  ./spade-projects/sharp-pc-e500-card-spade/experiments/mvp_imem_imem_chain.py \
-  -- --no-ft-capture
+  ./spade-projects/sharp-pc-e500-card-spade/experiments/catalog_experiment.py \
+  -- --experiment mvp_imem_imem_chain --no-ft-capture
 ```
 
 That returns:
