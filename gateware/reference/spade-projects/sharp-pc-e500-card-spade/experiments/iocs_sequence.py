@@ -102,6 +102,12 @@ def build_putchar_calls(x: int, y: int, text: str, cx: int) -> list[dict[str, An
     calls: list[dict[str, Any]] = []
     for offset, byte in enumerate(normalize_text_bytes(text)):
         calls.append({
+            "i": 0x0044,
+            "cx": cx,
+            "bl": x + offset,
+            "bh": y,
+        })
+        calls.append({
             "i": 0x0041,
             "cx": cx,
             "bl": x + offset,
@@ -116,6 +122,10 @@ def build_clear_calls(cx: int) -> list[dict[str, Any]]:
         {"i": 0x0049, "cx": cx, "bl": 0, "bh": row}
         for row in range(PCE500_TEXT_ROWS)
     ]
+
+
+def build_hide_cursor_calls(cx: int) -> list[dict[str, Any]]:
+    return [{"i": 0x0045, "cx": cx, "a": 0}]
 
 
 def emit_loads(lines: list[str], call_spec: dict[str, Any], data_labels: set[str]) -> None:
@@ -286,7 +296,7 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
     if args.mode == "clear":
         spec = dict(common)
         spec["timeout_s"] = max(spec["timeout_s"], 5.0)
-        spec["calls"] = build_clear_calls(0)
+        spec["calls"] = build_hide_cursor_calls(0) + build_clear_calls(0) + build_hide_cursor_calls(0)
         return spec, "<generated:clear>"
 
     if args.mode == "cursor":
@@ -297,18 +307,22 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
     if args.mode == "text":
         spec = dict(common)
         calls: list[dict[str, Any]] = []
+        calls.extend(build_hide_cursor_calls(args.cx))
         if args.clear_first:
             spec["timeout_s"] = max(spec["timeout_s"], 5.0)
             calls.extend(build_clear_calls(args.cx))
         calls.extend(build_putchar_calls(args.x, args.y, args.text, args.cx))
+        calls.extend(build_hide_cursor_calls(args.cx))
         spec["calls"] = calls
         return spec, "<generated:text>"
 
     if args.mode == "clear-text":
         spec = dict(common)
         spec["timeout_s"] = max(spec["timeout_s"], 5.0)
-        calls = build_clear_calls(args.cx)
+        calls = build_hide_cursor_calls(args.cx)
+        calls.extend(build_clear_calls(args.cx))
         calls.extend(build_putchar_calls(args.x, args.y, args.text, args.cx))
+        calls.extend(build_hide_cursor_calls(args.cx))
         spec["calls"] = calls
         return spec, "<generated:clear-text>"
 
