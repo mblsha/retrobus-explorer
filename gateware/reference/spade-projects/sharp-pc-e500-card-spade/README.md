@@ -264,13 +264,17 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
 
 The convenience `text` subcommand uses the stable shadow-backed text path:
 IOCS `44h` to set the cursor, then repeated IOCS `0Dh` writes for each
-character. The helper sets the full 16-bit `I` register plus `(cx)=0000h` for
-each IOCS call.
+character. On the PC-E500 ROM, IOCS `0Dh` consumes the default STDO cursor
+workspace bytes at `0xBFC27/0xBFC28`, not the logical cursor tuple written by
+IOCS `44h` at `0xBFC9B`. The helper therefore seeds those default workspace
+bytes before text output. The helper sets the full 16-bit `I` register plus
+`(cx)=0000h` for each IOCS call.
 
 The convenience `clear` and `clear-text` subcommands use IOCS `40h` level `0`
 to reset and clear the LCD driver before any text output, then drive text via
 the same `44h` + repeated `0Dh` path. This is the most stable path on current
-hardware. Use generic `run --call ...` when you want to exercise raw
+hardware. The CLI also decodes FT-captured LCD controller writes and prints the
+resulting text rows in its summary when display traffic is detected. Use generic `run --call ...` when you want to exercise raw
 `40h` / `41h` / `42h` / `44h` / `49h` / `51h` sequences directly.
 
 The helper also still supports JSON specs as an escape hatch:
