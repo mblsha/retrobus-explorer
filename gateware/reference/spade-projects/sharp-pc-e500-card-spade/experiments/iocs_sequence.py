@@ -12,8 +12,6 @@ EXPERIMENT_BASE = 0x10100
 IOCS_ENTRY = 0xFFFE8
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
-PCE500_TEXT_ROWS = 4
-
 BYTE_REGS = {
     "a": "A",
     "bl": "(BL)",
@@ -98,40 +96,24 @@ def build_data_block(label: str, data_spec: Any) -> tuple[str, list[int]]:
     raise SystemExit(f"unsupported data block for {label!r}: {data_spec!r}")
 
 
-def build_putchar_calls(x: int, y: int, text: str, cx: int) -> list[dict[str, Any]]:
-    calls: list[dict[str, Any]] = []
-    for offset, byte in enumerate(normalize_text_bytes(text)):
+def build_text_output_calls(x: int, y: int, text: str, cx: int) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = [{
+        "i": 0x0044,
+        "cx": cx,
+        "bl": x,
+        "bh": y,
+    }]
+    for byte in normalize_text_bytes(text):
         calls.append({
-            "i": 0x0044,
+            "i": 0x000D,
             "cx": cx,
-            "bl": x + offset,
-            "bh": y,
-        })
-        calls.append({
-            "i": 0x0045,
-            "cx": cx,
-            "a": 1,
-        })
-        calls.append({
-            "i": 0x0045,
-            "cx": cx,
-            "a": 0,
-        })
-        calls.append({
-            "i": 0x0041,
-            "cx": cx,
-            "bl": x + offset,
-            "bh": y,
             "a": byte,
         })
     return calls
 
 
 def build_clear_calls(cx: int) -> list[dict[str, Any]]:
-    return [
-        {"i": 0x0049, "cx": cx, "bl": 0, "bh": row}
-        for row in range(PCE500_TEXT_ROWS)
-    ]
+    return [{"i": 0x0040, "cx": cx, "a": 0}]
 
 
 def build_hide_cursor_calls(cx: int) -> list[dict[str, Any]]:
@@ -321,7 +303,7 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
         if args.clear_first:
             spec["timeout_s"] = max(spec["timeout_s"], 5.0)
             calls.extend(build_clear_calls(args.cx))
-        calls.extend(build_putchar_calls(args.x, args.y, args.text, args.cx))
+        calls.extend(build_text_output_calls(args.x, args.y, args.text, args.cx))
         calls.extend(build_hide_cursor_calls(args.cx))
         spec["calls"] = calls
         return spec, "<generated:text>"
@@ -331,7 +313,7 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
         spec["timeout_s"] = max(spec["timeout_s"], 5.0)
         calls = build_hide_cursor_calls(args.cx)
         calls.extend(build_clear_calls(args.cx))
-        calls.extend(build_putchar_calls(args.x, args.y, args.text, args.cx))
+        calls.extend(build_text_output_calls(args.x, args.y, args.text, args.cx))
         calls.extend(build_hide_cursor_calls(args.cx))
         spec["calls"] = calls
         return spec, "<generated:clear-text>"
@@ -406,7 +388,7 @@ def build_plan_parser() -> argparse.ArgumentParser:
     cursor_parser.add_argument("--y", required=True, type=lambda value: int(value, 0))
     cursor_parser.add_argument("--cx", type=lambda value: int(value, 0), default=0)
 
-    text_parser = subparsers.add_parser("text", help="print text via repeated IOCS 41h calls")
+    text_parser = subparsers.add_parser("text", help="set cursor, then print text via IOCS 0Dh")
     text_parser.add_argument("--x", required=True, type=lambda value: int(value, 0))
     text_parser.add_argument("--y", required=True, type=lambda value: int(value, 0))
     text_parser.add_argument("--text", required=True)
