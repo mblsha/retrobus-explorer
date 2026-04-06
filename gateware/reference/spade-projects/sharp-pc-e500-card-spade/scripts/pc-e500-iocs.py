@@ -123,6 +123,7 @@ def build_script_args(args: argparse.Namespace) -> list[str]:
 def format_summary(response: dict[str, object]) -> str:
     parsed = response.get("parsed") or {}
     measurement = parsed.get("first_measurement") or {}
+    display_summary = parsed.get("display_summary") or {}
     lines = [
         f"experiment: {response.get('experiment', '<unknown>')}",
         f"status: {response.get('status', '<unknown>')}",
@@ -146,6 +147,12 @@ def format_summary(response: dict[str, object]) -> str:
             f"bytes={parsed.get('ft_raw_bytes')} "
             f"chunks={parsed.get('ft_chunk_count')}"
         )
+    if display_summary:
+        lines.append(f"lcd: writes={display_summary.get('lcd_write_count')}")
+        text_lines = display_summary.get("lcd_text_lines") or []
+        for index, line in enumerate(text_lines):
+            if line:
+                lines.append(f"lcd_row{index}: {line}")
     return "\n".join(lines)
 
 

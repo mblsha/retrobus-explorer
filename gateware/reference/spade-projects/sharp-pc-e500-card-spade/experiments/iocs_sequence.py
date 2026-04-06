@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,9 @@ WORD_MV_REGS = {
 PTR_REGS = {
     "x": "X",
 }
+
+LCD_WRITE_ADDR_MIN = 0x0A000
+LCD_WRITE_ADDR_MAX = 0x0A010
 
 
 def emit_json(payload: object) -> int:
@@ -102,6 +106,10 @@ def build_text_output_calls(x: int, y: int, text: str, cx: int) -> list[dict[str
         "cx": cx,
         "bl": x,
         "bh": y,
+    }, {
+        "op": "seed_stdio_cursor",
+        "bl": x,
+        "bh": y,
     }]
     for byte in normalize_text_bytes(text):
         calls.append({
@@ -151,6 +159,18 @@ def emit_loads(lines: list[str], call_spec: dict[str, Any], data_labels: set[str
         lines.append(f"    MV Y, 0x{value:04X}")
 
 
+def emit_synthetic_op(lines: list[str], call_spec: dict[str, Any]) -> bool:
+    op = call_spec.get("op")
+    if op == "seed_stdio_cursor":
+        x = parse_int(call_spec.get("bl", 0)) & 0xFF
+        y = parse_int(call_spec.get("bh", 0)) & 0xFF
+        lines.append(f"    MV (BL), 0x{x:02X}")
+        lines.append(f"    MV (BH), 0x{y:02X}")
+        lines.append("    MVW [0x0BFC27], (BL)")
+        return True
+    return False
+
+
 def build_asm_text(spec: dict[str, Any]) -> str:
     calls = spec.get("calls")
     if not isinstance(calls, list) or not calls:
@@ -186,6 +206,9 @@ def build_asm_text(spec: dict[str, Any]) -> str:
         if not isinstance(item, dict):
             raise SystemExit(f"spec.calls[{index}] must be an object")
         call_spec = dict(item)
+
+        if emit_synthetic_op(lines, call_spec):
+            continue
 
         text_value = call_spec.pop("text", None)
         if text_value is not None:
@@ -353,6 +376,7 @@ def parse_result(raw_result_path: Path) -> dict[str, object]:
         )
         if len(execution_preview) >= 24:
             break
+    display_summary = summarize_display_writes(raw)
     return {
         "measurement_count": len(measurements),
         "first_measurement": first,
@@ -361,7 +385,172 @@ def parse_result(raw_result_path: Path) -> dict[str, object]:
         "ft_raw_bytes": ft_capture.get("raw_bytes"),
         "ft_chunk_count": ft_capture.get("chunk_count"),
         "execution_preview": execution_preview,
+        "display_summary": display_summary,
     }
+
+
+def _find_public_src() -> Path | None:
+    env_candidates = [
+        Path(value)
+        for key in ("PCE500_PUBLIC_SRC", "PUBLIC_SRC")
+        if (value := os.environ.get(key))
+    ]
+    path_candidates = list(env_candidates)
+    for parent in SCRIPT_DIR.parents:
+        path_candidates.append(parent / "public-src")
+        path_candidates.append(parent.parent / "binja-esr-tests" / "public-src")
+    for candidate in path_candidates:
+        if (candidate / "pce500" / "display" / "text_decoder.py").is_file():
+            return candidate.resolve()
+    return None
+
+
+def _find_rom_path(public_src: Path) -> Path | None:
+    candidates = [
+        public_src.parent / "roms" / "pc-e500-en.bin",
+        public_src / "data" / "pc-e500-en.bin",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def _load_display_modules(public_src: Path):
+    import importlib.util
+    import types
+
+    display_root = public_src / "pce500" / "display"
+    if "PIL" not in sys.modules:
+        pil_module = types.ModuleType("PIL")
+        pil_module.Image = types.SimpleNamespace(Image=object, NEAREST=0, new=lambda *args, **kwargs: None)
+        sys.modules["PIL"] = pil_module
+    package = types.ModuleType("iocs_display")
+    package.__path__ = [str(display_root)]
+    sys.modules["iocs_display"] = package
+    modules = {}
+    for name in ("hd61202", "pipeline", "font", "text_decoder"):
+        spec = importlib.util.spec_from_file_location(
+            f"iocs_display.{name}",
+            display_root / f"{name}.py",
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"failed to load display module {name}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[f"iocs_display.{name}"] = module
+        spec.loader.exec_module(module)
+        modules[name] = module
+    return modules
+
+
+class _RomBytesMemory:
+    def __init__(self, rom: bytes) -> None:
+        self._rom = rom
+
+    def read_byte(self, address: int) -> int:
+        if 0 <= address < len(self._rom):
+            return self._rom[address]
+        return 0
+
+
+class _TraceDisplayController:
+    def __init__(self, modules) -> None:
+        self._hd = modules["hd61202"]
+        self._pipeline_mod = modules["pipeline"]
+        self.pipeline = self._pipeline_mod.LCDPipeline()
+        self.chips = self.pipeline.chips
+
+    def write(self, address: int, value: int) -> None:
+        self.pipeline.apply_raw(address, value, None)
+
+    def get_display_buffer(self):
+        def pixel_on(byte: int, bit: int) -> int:
+            return 1 if not ((byte >> bit) & 1) else 0
+
+        class _SimpleBuffer:
+            def __init__(self, height: int, width: int) -> None:
+                self.shape = (height, width)
+                self._rows = [[0 for _ in range(width)] for _ in range(height)]
+
+            def __getitem__(self, key):
+                row, col = key
+                return self._rows[row][col]
+
+            def __setitem__(self, key, value) -> None:
+                row, col = key
+                self._rows[row][col] = value
+
+        buffer = _SimpleBuffer(32, 240)
+        left_chip, right_chip = self.chips[0], self.chips[1]
+
+        def copy_region(chip, start_page: int, column_range: range, dest_start_col: int, *, mirror: bool) -> None:
+            for row in range(32):
+                page = start_page + row // 8
+                bit = row % 8
+                if mirror:
+                    for dest_offset, src_col in enumerate(reversed(column_range)):
+                        byte = chip.vram[page][src_col]
+                        buffer[row, dest_start_col + dest_offset] = pixel_on(byte, bit)
+                else:
+                    for dest_offset, src_col in enumerate(column_range):
+                        byte = chip.vram[page][src_col]
+                        buffer[row, dest_start_col + dest_offset] = pixel_on(byte, bit)
+
+        copy_region(right_chip, 0, range(64), 0, mirror=False)
+        copy_region(left_chip, 0, range(56), 64, mirror=False)
+        copy_region(left_chip, 4, range(56), 120, mirror=True)
+        copy_region(right_chip, 4, range(64), 176, mirror=True)
+        return buffer
+
+
+def summarize_display_writes(raw: dict[str, Any]) -> dict[str, Any] | None:
+    ft_capture = raw.get("ft_capture") or {}
+    words = ft_capture.get("words") or []
+    if not isinstance(words, list) or not words:
+        return None
+
+    scripts_dir = PROJECT_DIR / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from pc_e500_ft600 import decode_word_stream
+
+    lcd_writes = [
+        event
+        for event in decode_word_stream(words)
+        if (not event.rw) and LCD_WRITE_ADDR_MIN <= event.addr < LCD_WRITE_ADDR_MAX
+    ]
+    if not lcd_writes:
+        return None
+
+    summary: dict[str, Any] = {
+        "lcd_write_count": len(lcd_writes),
+        "lcd_write_preview": [
+            {"addr": f"0x{event.addr:05X}", "data": f"0x{event.data:02X}", "kind": event.kind}
+            for event in lcd_writes[:16]
+        ],
+    }
+
+    public_src = _find_public_src()
+    if public_src is None:
+        return summary
+    rom_path = _find_rom_path(public_src)
+    if rom_path is None:
+        return summary
+
+    try:
+        modules = _load_display_modules(public_src)
+        controller = _TraceDisplayController(modules)
+        for event in lcd_writes:
+            controller.write(event.addr, event.data)
+        memory = _RomBytesMemory(rom_path.read_bytes())
+        lines = modules["text_decoder"].decode_display_text(controller, memory)
+    except Exception as exc:
+        summary["decode_error"] = str(exc)
+        return summary
+
+    summary["lcd_text_lines"] = lines
+    return summary
 
 
 def build_plan_parser() -> argparse.ArgumentParser:
