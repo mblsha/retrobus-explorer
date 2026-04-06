@@ -108,6 +108,16 @@ def build_putchar_calls(x: int, y: int, text: str, cx: int) -> list[dict[str, An
             "bh": y,
         })
         calls.append({
+            "i": 0x0045,
+            "cx": cx,
+            "a": 1,
+        })
+        calls.append({
+            "i": 0x0045,
+            "cx": cx,
+            "a": 0,
+        })
+        calls.append({
             "i": 0x0041,
             "cx": cx,
             "bl": x + offset,
