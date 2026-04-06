@@ -48,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--stop-tag", type=lambda value: int(value, 0), default=0xC2)
     common.add_argument("--flags", type=lambda value: int(value, 0), default=0)
     common.add_argument("--no-ft-capture", action="store_true")
+    common.add_argument("--no-mask-interrupts", action="store_true", help="leave interrupts enabled during IOCS sequence")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -93,6 +94,8 @@ def build_script_args(args: argparse.Namespace) -> list[str]:
     ]
     if args.no_ft_capture:
         script_args.append("--no-ft-capture")
+    if args.no_mask_interrupts:
+        script_args.append("--no-mask-interrupts")
 
     if args.command == "clear":
         return script_args + ["clear"]
