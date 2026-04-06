@@ -262,6 +262,11 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
   --call 0x42,bl=0,bh=0,text=HELLO
 ```
 
+The convenience `text` and `clear-text` subcommands use repeated IOCS `41h`
+single-character draws at explicit `(x,y)` positions and set the full 16-bit
+`I` register for each IOCS call. Use generic `run --call ...` when you want to
+exercise raw `42h` / `44h` sequences directly.
+
 The helper also still supports JSON specs as an escape hatch:
 
 ```sh
@@ -279,6 +284,7 @@ Current IOCS wrapper support:
   - generic `run --call ...`
   - `spec path.json`
 - byte register fields: `a`, `bl`, `bh`, `cl`, `ch`, `il`
+- 16-bit IOCS register field: `i`
 - word fields: `cx`, `y`
 - pointer field: `x`
 - inline text payloads via `text`

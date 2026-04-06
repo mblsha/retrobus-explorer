@@ -26,6 +26,10 @@ WORD_MVW_REGS = {
     "cx": "(CL)",
 }
 
+WORD_MV_REGS = {
+    "i": "I",
+}
+
 PTR_REGS = {
     "x": "X",
 }
@@ -104,6 +108,11 @@ def emit_loads(lines: list[str], call_spec: dict[str, Any], data_labels: set[str
             value = parse_int(call_spec[key]) & 0xFFFF
             lines.append(f"    MVW {operand}, 0x{value:04X}")
 
+    for key, operand in WORD_MV_REGS.items():
+        if key in call_spec:
+            value = parse_int(call_spec[key]) & 0xFFFF
+            lines.append(f"    MV {operand}, 0x{value:04X}")
+
     for key, operand in PTR_REGS.items():
         if key not in call_spec:
             continue
@@ -138,6 +147,11 @@ def build_asm_text(spec: dict[str, Any]) -> str:
         data_labels.add(normalized_label)
 
     lines = [f".ORG 0x{EXPERIMENT_BASE:05X}", "", "start:"]
+    if bool(spec.get("mask_interrupts", False)):
+        lines.extend([
+            "    PUSHU IMR",
+            "    MV (IMR), 0x00",
+        ])
 
     defaults = spec.get("defaults", {})
     if defaults:
@@ -161,12 +175,14 @@ def build_asm_text(spec: dict[str, Any]) -> str:
             call_spec.setdefault("x", data_label)
             call_spec.setdefault("y", len(payload))
 
-        if "il" not in call_spec:
-            raise SystemExit(f"spec.calls[{index}] is missing required field 'il'")
+        if "i" not in call_spec and "il" not in call_spec:
+            raise SystemExit(f"spec.calls[{index}] is missing required field 'i' or 'il'")
 
         emit_loads(lines, call_spec, data_labels)
         lines.append(f"    CALLF 0x{IOCS_ENTRY:05X}")
 
+    if bool(spec.get("mask_interrupts", False)):
+        lines.append("    POPU IMR")
     lines.append("    RETF")
 
     if data_blocks:
@@ -192,6 +208,7 @@ def build_plan_from_spec(spec: dict[str, Any], spec_label: str) -> dict[str, obj
         "flags": parse_int(spec.get("flags", 0)),
         "ft_capture": bool(spec.get("ft_capture", True)),
         "fill_experiment_region": bool(spec.get("fill_experiment_region", True)),
+        "mask_interrupts": bool(spec.get("mask_interrupts", False)),
         "args": [],
         "source_spec": spec_label,
     }
@@ -201,7 +218,7 @@ def parse_call_argument(text: str) -> dict[str, Any]:
     parts = [part.strip() for part in text.split(",") if part.strip()]
     if not parts:
         raise SystemExit("empty --call argument")
-    call_spec: dict[str, Any] = {"il": parse_int(parts[0])}
+    call_spec: dict[str, Any] = {"i": parse_int(parts[0])}
     for item in parts[1:]:
         if "=" not in item:
             raise SystemExit(f"invalid call field {item!r}; expected key=value")
@@ -237,6 +254,7 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
         "stop_tag": args.stop_tag,
         "flags": args.flags,
         "ft_capture": not args.no_ft_capture,
+        "mask_interrupts": not args.no_mask_interrupts,
     }
 
     if args.mode == "spec":
@@ -246,13 +264,13 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
 
     if args.mode == "clear":
         spec = dict(common)
-        spec["calls"] = [{"il": 0x51}]
+        spec["calls"] = [{"i": 0x0051}]
         return spec, "<generated:clear>"
 
     if args.mode == "cursor":
         spec = dict(common)
         spec["defaults"] = {"cx": args.cx}
-        spec["calls"] = [{"il": 0x44, "bl": args.x, "bh": args.y}]
+        spec["calls"] = [{"i": 0x0044, "bl": args.x, "bh": args.y}]
         return spec, "<generated:cursor>"
 
     if args.mode == "text":
@@ -260,20 +278,19 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
         spec["defaults"] = {"cx": args.cx}
         calls: list[dict[str, Any]] = []
         if args.clear_first:
-            calls.append({"il": 0x51})
-        calls.append({"il": 0x44, "bl": args.x, "bh": args.y})
-        calls.append({"il": 0x42, "bl": args.x, "bh": args.y, "text": args.text})
+            calls.append({"i": 0x0051})
+        for offset, byte in enumerate(normalize_text_bytes(args.text)):
+            calls.append({"i": 0x0041, "bl": args.x + offset, "bh": args.y, "a": byte})
         spec["calls"] = calls
         return spec, "<generated:text>"
 
     if args.mode == "clear-text":
         spec = dict(common)
         spec["defaults"] = {"cx": args.cx}
-        spec["calls"] = [
-            {"il": 0x51},
-            {"il": 0x44, "bl": args.x, "bh": args.y},
-            {"il": 0x42, "bl": args.x, "bh": args.y, "text": args.text},
-        ]
+        calls: list[dict[str, Any]] = [{"i": 0x0051}]
+        for offset, byte in enumerate(normalize_text_bytes(args.text)):
+            calls.append({"i": 0x0041, "bl": args.x + offset, "bh": args.y, "a": byte})
+        spec["calls"] = calls
         return spec, "<generated:clear-text>"
 
     if args.mode == "run":
@@ -333,6 +350,7 @@ def build_plan_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stop-tag", type=lambda value: int(value, 0), default=0xC2)
     parser.add_argument("--flags", type=lambda value: int(value, 0), default=0)
     parser.add_argument("--no-ft-capture", action="store_true")
+    parser.add_argument("--no-mask-interrupts", action="store_true")
 
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
