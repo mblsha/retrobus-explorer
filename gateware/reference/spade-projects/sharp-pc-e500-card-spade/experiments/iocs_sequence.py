@@ -166,7 +166,14 @@ def emit_synthetic_op(lines: list[str], call_spec: dict[str, Any]) -> bool:
         y = parse_int(call_spec.get("bh", 0)) & 0xFF
         lines.append(f"    MV (BL), 0x{x:02X}")
         lines.append(f"    MV (BH), 0x{y:02X}")
-        lines.append("    MVW [0x0BFC27], (BL)")
+        lines.append("    MV X, (0x28)")
+        lines.append("    MVW (CL), 0x0273")
+        lines.append("    MV BA, (CL)")
+        lines.append("    ADD X, BA")
+        lines.append("    MV A, (BL)")
+        lines.append("    MV [X], A")
+        lines.append("    MV A, (BH)")
+        lines.append("    MV [X+1], A")
         return True
     return False
 

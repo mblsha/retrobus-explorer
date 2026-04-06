@@ -264,10 +264,11 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
 
 The convenience `text` subcommand uses the stable shadow-backed text path:
 IOCS `44h` to set the cursor, then repeated IOCS `0Dh` writes for each
-character. On the PC-E500 ROM, IOCS `0Dh` consumes the default STDO cursor
-workspace bytes at `0xBFC27/0xBFC28`, not the logical cursor tuple written by
-IOCS `44h` at `0xBFC9B`. The helper therefore seeds those default workspace
-bytes before text output. The helper sets the full 16-bit `I` register plus
+character. On the JP PC-E500 ROM, IOCS `0Dh` follows the STDO cursor state
+reached through the IMEM pointer triple at `0x28..0x2A`, not the stale
+`IOCS_WS` alias at `0xE6..0xE8`. The helper therefore seeds the cursor shadow
+through `[(0x28)+0x27]` before text output instead of hardcoding absolute
+`0xBFC27/0xBFC28`. The helper sets the full 16-bit `I` register plus
 `(cx)=0000h` for each IOCS call.
 
 The convenience `clear` and `clear-text` subcommands use IOCS `40h` level `0`
