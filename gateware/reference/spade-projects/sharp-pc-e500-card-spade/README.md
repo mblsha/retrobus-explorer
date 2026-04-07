@@ -263,18 +263,17 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/pc-e500-iocs.py \
 ```
 
 The convenience `text` subcommand uses the stable shadow-backed text path:
-IOCS `44h` to set the cursor, then repeated IOCS `0Dh` writes for each
-character. On the JP PC-E500 ROM, IOCS `0Dh` follows the STDO cursor state
-reached through the IMEM pointer triple at `0x28..0x2A`, not the stale
-`IOCS_WS` alias at `0xE6..0xE8`. The helper therefore seeds the cursor shadow
-through `[(0x28)+0x27]` before text output instead of hardcoding absolute
-`0xBFC27/0xBFC28`. The helper sets the full 16-bit `I` register plus
+IOCS `40h` level `0` first resets and clears the LCD driver, then IOCS `44h`
+sets the cursor and repeated IOCS `0Dh` writes emit each character. On the JP
+PC-E500 ROM, IOCS `0Dh` reads its working cursor from the STDO bytes at
+`0xBFC27/0xBFC28`, so the helper seeds those bytes explicitly before issuing
+the byte-write loop. The helper sets the full 16-bit `I` register plus
 `(cx)=0000h` for each IOCS call.
 
 The convenience `clear` and `clear-text` subcommands use IOCS `40h` level `0`
 to reset and clear the LCD driver before any text output, then drive text via
-the same `44h` + repeated `0Dh` path. This is the most stable path on current
-hardware. The CLI also decodes FT-captured LCD controller writes and prints the
+the same `44h` + seeded `0Dh` path. `clear-text` is therefore an explicit alias
+for the same reset-before-draw behavior that `text` now uses by default. The CLI also decodes FT-captured LCD controller writes and prints the
 resulting text rows in its summary when display traffic is detected. Use generic `run --call ...` when you want to exercise raw
 `40h` / `41h` / `42h` / `44h` / `49h` / `51h` sequences directly.
 
