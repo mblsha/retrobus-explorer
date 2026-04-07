@@ -36,8 +36,7 @@ PTR_REGS = {
 
 LCD_WRITE_ADDR_MIN = 0x0A000
 LCD_WRITE_ADDR_MAX = 0x0A010
-JP_IOCS_WORKSPACE_PTR_IMEM = 0x28
-JP_STDO_WORKING_CURSOR_OFFSET = 0x0273
+STDO_WORKING_CURSOR_ABS = 0x0BFC27
 
 
 def append_asm_line(lines: list[str], code: str, comment: str | None = None) -> None:
@@ -199,22 +198,10 @@ def emit_synthetic_op(lines: list[str], call_spec: dict[str, Any]) -> bool:
         y = parse_int(call_spec.get("bh", 0)) & 0xFF
         append_asm_line(lines, f"    MV (BL), 0x{x:02X}", f"stage cursor X byte 0x{x:02X}")
         append_asm_line(lines, f"    MV (BH), 0x{y:02X}", f"stage cursor Y byte 0x{y:02X}")
-        append_asm_line(
-            lines,
-            f"    MV X, (0x{JP_IOCS_WORKSPACE_PTR_IMEM:02X})",
-            f"load JP IOCS workspace base pointer from IMEM[0x{JP_IOCS_WORKSPACE_PTR_IMEM:02X}..0x{JP_IOCS_WORKSPACE_PTR_IMEM + 2:02X}]",
-        )
-        append_asm_line(
-            lines,
-            f"    MVW (CL), 0x{JP_STDO_WORKING_CURSOR_OFFSET:04X}",
-            f"stage the STDO working-cursor offset 0x{JP_STDO_WORKING_CURSOR_OFFSET:04X}",
-        )
-        append_asm_line(lines, "    MV BA, (CL)", "load the offset word into BA")
-        append_asm_line(lines, "    ADD X, BA", "advance X to the JP STDO working-cursor shadow bytes")
         append_asm_line(lines, "    MV A, (BL)", "copy the staged cursor X byte into A")
-        append_asm_line(lines, "    MV [X], A", "write cursor X to the shadow cursor low byte")
+        append_asm_line(lines, f"    MV [0x{STDO_WORKING_CURSOR_ABS:05X}], A", "write cursor X to the STDO working cursor")
         append_asm_line(lines, "    MV A, (BH)", "copy the staged cursor Y byte into A")
-        append_asm_line(lines, "    MV [X+1], A", "write cursor Y to the shadow cursor high byte")
+        append_asm_line(lines, f"    MV [0x{STDO_WORKING_CURSOR_ABS + 1:05X}], A", "write cursor Y to the STDO working cursor")
         return True
     return False
 
@@ -368,11 +355,10 @@ def build_spec_from_mode(args: argparse.Namespace) -> tuple[dict[str, Any], str]
 
     if args.mode == "text":
         spec = dict(common)
+        spec["timeout_s"] = max(spec["timeout_s"], 5.0)
         calls: list[dict[str, Any]] = []
         calls.extend(build_hide_cursor_calls(args.cx))
-        if args.clear_first:
-            spec["timeout_s"] = max(spec["timeout_s"], 5.0)
-            calls.extend(build_clear_calls(args.cx))
+        calls.extend(build_clear_calls(args.cx))
         calls.extend(build_text_output_calls(args.x, args.y, args.text, args.cx))
         calls.extend(build_hide_cursor_calls(args.cx))
         spec["calls"] = calls
@@ -507,8 +493,8 @@ class _TraceDisplayController:
         self.pipeline = self._pipeline_mod.LCDPipeline()
         self.chips = self.pipeline.chips
 
-    def write(self, address: int, value: int) -> None:
-        self.pipeline.apply_raw(address, value, None)
+    def write(self, address: int, value: int, source_index: int | None = None) -> None:
+        self.pipeline.apply_raw(address, value, source_index)
 
     def get_display_buffer(self):
         def pixel_on(byte: int, bit: int) -> int:
@@ -548,6 +534,121 @@ class _TraceDisplayController:
         copy_region(left_chip, 4, range(56), 120, mirror=True)
         copy_region(right_chip, 4, range(64), 176, mirror=True)
         return buffer
+
+    def get_display_source_buffer(self):
+        class _SimpleSourceBuffer:
+            def __init__(self, height: int, width: int) -> None:
+                self.shape = (height, width)
+                self._rows = [[None for _ in range(width)] for _ in range(height)]
+
+            def __getitem__(self, key):
+                row, col = key
+                return self._rows[row][col]
+
+            def __setitem__(self, key, value) -> None:
+                row, col = key
+                self._rows[row][col] = value
+
+        buffer = _SimpleSourceBuffer(32, 240)
+        left_chip, right_chip = self.chips[0], self.chips[1]
+
+        def copy_region(chip, start_page: int, column_range: range, dest_start_col: int, *, mirror: bool) -> None:
+            for row in range(32):
+                page = start_page + row // 8
+                if mirror:
+                    for dest_offset, src_col in enumerate(reversed(column_range)):
+                        buffer[row, dest_start_col + dest_offset] = chip.vram_pc_source[page][src_col]
+                else:
+                    for dest_offset, src_col in enumerate(column_range):
+                        buffer[row, dest_start_col + dest_offset] = chip.vram_pc_source[page][src_col]
+
+        copy_region(right_chip, 0, range(64), 0, mirror=False)
+        copy_region(left_chip, 0, range(56), 64, mirror=False)
+        copy_region(left_chip, 4, range(56), 120, mirror=True)
+        copy_region(right_chip, 4, range(64), 176, mirror=True)
+        return buffer
+
+
+def _extract_helper_text_request(raw: dict[str, Any]) -> tuple[int, int, str] | None:
+    experiment = raw.get("experiment")
+    if experiment not in {"iocs_text", "iocs_clear_text"}:
+        return None
+    args = raw.get("script_args")
+    if not isinstance(args, list):
+        return None
+    try:
+        mode_index = next(index for index, value in enumerate(args) if value in {"text", "clear-text"})
+    except StopIteration:
+        return None
+    x = y = None
+    text = None
+    cursor = mode_index + 1
+    while cursor < len(args):
+        key = args[cursor]
+        if key == "--x" and cursor + 1 < len(args):
+            x = parse_int(args[cursor + 1])
+            cursor += 2
+            continue
+        if key == "--y" and cursor + 1 < len(args):
+            y = parse_int(args[cursor + 1])
+            cursor += 2
+            continue
+        if key == "--text" and cursor + 1 < len(args):
+            text = str(args[cursor + 1])
+            cursor += 2
+            continue
+        cursor += 1
+    if x is None or y is None or text is None:
+        return None
+    return x, y, text
+
+
+def _helper_row_last_write_maxima(controller: _TraceDisplayController) -> list[int | None]:
+    source_buffer = controller.get_display_source_buffer()
+    height, width = source_buffer.shape
+    row_maxima: list[int | None] = []
+    for row_index in range(4):
+        row_base = row_index * 8
+        if row_base + 7 > height:
+            row_maxima.append(None)
+            continue
+        max_source: int | None = None
+        for row in range(row_base, row_base + 7):
+            for col in range(width):
+                source = source_buffer[row, col]
+                if source is None:
+                    continue
+                if max_source is None or source > max_source:
+                    max_source = source
+        row_maxima.append(max_source)
+    return row_maxima
+
+
+def _filter_helper_lines_by_last_write(
+    raw: dict[str, Any],
+    controller: _TraceDisplayController,
+    lines: list[str],
+) -> list[str]:
+    request = _extract_helper_text_request(raw)
+    if request is None or not lines:
+        return lines
+    _, target_row, _ = request
+    if target_row >= len(lines) or not lines[target_row]:
+        return lines
+
+    row_maxima = _helper_row_last_write_maxima(controller)
+    target_max = row_maxima[target_row] if target_row < len(row_maxima) else None
+    if target_max is None:
+        return lines
+
+    filtered = list(lines)
+    for row_index, line in enumerate(filtered):
+        if row_index == target_row or not line:
+            continue
+        row_max = row_maxima[row_index] if row_index < len(row_maxima) else None
+        if row_max is None or (target_max - row_max) >= 0x1000:
+            filtered[row_index] = ""
+    return filtered
 
 
 def summarize_display_writes(raw: dict[str, Any]) -> dict[str, Any] | None:
@@ -589,9 +690,10 @@ def summarize_display_writes(raw: dict[str, Any]) -> dict[str, Any] | None:
         modules = _load_display_modules(public_src)
         controller = _TraceDisplayController(modules)
         for event in lcd_writes:
-            controller.write(event.addr, event.data)
+            controller.write(event.addr, event.data, event.index)
         memory = _RomBytesMemory(rom_path.read_bytes())
         lines = modules["text_decoder"].decode_display_text(controller, memory)
+        lines = _filter_helper_lines_by_last_write(raw, controller, lines)
     except Exception as exc:
         summary["decode_error"] = str(exc)
         return summary
