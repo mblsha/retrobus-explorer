@@ -195,17 +195,13 @@ fn idle_step(rx_byte: uint<8>) -> ParserStepOut {
     if rx_byte.is_line_end() {
         parser_out(ParserState::Idle(), ParserEvent::None(), EchoMsg::None())
     } else {
-        match rx_byte {
-            b'r' => parser_idle_cmd(ParserState::ReadAddr(0, 0, false), rx_byte),
-            b'R' => parser_idle_cmd(ParserState::ReadAddr(0, 0, true), rx_byte),
-            b'w' => parser_idle_cmd(ParserState::WriteAddr(0, 0, false), rx_byte),
-            b'W' => parser_idle_cmd(ParserState::WriteAddr(0, 0, true), rx_byte),
+        let upper = rx_byte.to_upper();
+        match upper {
+            b'R' => parser_idle_cmd(ParserState::ReadAddr(0, 0, rx_byte == b'R'), rx_byte),
+            b'W' => parser_idle_cmd(ParserState::WriteAddr(0, 0, rx_byte == b'W'), rx_byte),
             b'T' => parser_idle_cmd(ParserState::TimingHi(false), rx_byte),
-            b't' => parser_idle_cmd(ParserState::TimingHi(false), rx_byte),
             b'C' => parser_idle_cmd(ParserState::TimingHi(true), rx_byte),
-            b'c' => parser_idle_cmd(ParserState::TimingHi(true), rx_byte),
             b'M' => parser_idle_cmd(ParserState::Measure(), rx_byte),
-            b'm' => parser_idle_cmd(ParserState::Measure(), rx_byte),
             _ => parser_error(rx_byte),
         }
     }
