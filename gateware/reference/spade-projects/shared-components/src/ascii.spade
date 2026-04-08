@@ -8,6 +8,26 @@ pub struct DigitDecode {
     value: uint<4>,
 }
 
+impl HexDecode {
+    pub fn valid(value: uint<4>) -> HexDecode {
+        HexDecode$(valid: true, value)
+    }
+
+    pub fn invalid() -> HexDecode {
+        HexDecode$(valid: false, value: 0)
+    }
+}
+
+impl DigitDecode {
+    pub fn valid(value: uint<4>) -> DigitDecode {
+        DigitDecode$(valid: true, value)
+    }
+
+    pub fn invalid() -> DigitDecode {
+        DigitDecode$(valid: false, value: 0)
+    }
+}
+
 pub fn hex_char(value: uint<4>) -> uint<8> {
     let value_u8: uint<8> = zext(value);
     if value < 10 {
@@ -37,9 +57,9 @@ impl uint<8> {
 
     pub fn decode_digit(self) -> DigitDecode {
         if self.is_digit() {
-            DigitDecode$(valid: true, value: self.digit_value())
+            DigitDecode::valid(self.digit_value())
         } else {
-            DigitDecode$(valid: false, value: 0)
+            DigitDecode::invalid()
         }
     }
 
@@ -48,7 +68,7 @@ impl uint<8> {
         if decoded.valid && decoded.value <= max_value {
             decoded
         } else {
-            DigitDecode$(valid: false, value: 0)
+            DigitDecode::invalid()
         }
     }
 
@@ -59,12 +79,12 @@ impl uint<8> {
     pub fn decode_hex(self) -> HexDecode {
         let upper = self.to_upper();
         if upper.is_digit() {
-            HexDecode$(valid: true, value: upper.digit_value())
+            HexDecode::valid(upper.digit_value())
         } else if upper >= b'A' && upper <= b'F' {
             let alpha_value: uint<4> = trunc((upper -. b'A') +. 10);
-            HexDecode$(valid: true, value: alpha_value)
+            HexDecode::valid(alpha_value)
         } else {
-            HexDecode$(valid: false, value: 0)
+            HexDecode::invalid()
         }
     }
 }
