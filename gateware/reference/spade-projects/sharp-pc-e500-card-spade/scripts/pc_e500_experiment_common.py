@@ -156,12 +156,12 @@ def reply_contains_line(lines: list[str], expected: str) -> bool:
 
 def parse_hex_or_int(text: str) -> int:
     cleaned = text.strip().replace("_", "")
-    if cleaned.lower().startswith("0x"):
-        cleaned = cleaned[2:]
-        return int(cleaned, 16)
-    if cleaned.startswith(("0X",)):
-        cleaned = cleaned[2:]
-        return int(cleaned, 16)
+    if not cleaned:
+        raise ValueError("empty numeric value")
+
+    if cleaned[:2].lower() == "0x":
+        return int(cleaned[2:], 16)
+
     if all(ch in "0123456789abcdefABCDEF" for ch in cleaned) and any(ch.isalpha() for ch in cleaned):
         return int(cleaned, 16)
     return int(cleaned, 0)
