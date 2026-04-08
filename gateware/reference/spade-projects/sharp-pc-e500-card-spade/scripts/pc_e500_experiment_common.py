@@ -404,7 +404,8 @@ class ExperimentUART:
     def lines_since(self, index: int) -> list[UARTLine]:
         with self._cv:
             start = max(index - self._line_start, 0)
-            return list(list(self._lines)[start:])
+            lines = list(self._lines)
+            return lines[start:]
 
     def last_lines(self, limit: int = 20) -> list[str]:
         with self._cv:
