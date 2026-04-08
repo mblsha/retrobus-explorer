@@ -159,9 +159,6 @@ def parse_hex_or_int(text: str) -> int:
     if cleaned.lower().startswith("0x"):
         cleaned = cleaned[2:]
         return int(cleaned, 16)
-    if cleaned.startswith(("0X",)):
-        cleaned = cleaned[2:]
-        return int(cleaned, 16)
     if all(ch in "0123456789abcdefABCDEF" for ch in cleaned) and any(ch.isalpha() for ch in cleaned):
         return int(cleaned, 16)
     return int(cleaned, 0)
