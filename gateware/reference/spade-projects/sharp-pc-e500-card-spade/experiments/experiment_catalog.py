@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+FT_STREAM_ARM_ADDR = 0x1FFF4
+
 
 @dataclass(frozen=True)
 class CatalogExperiment:
@@ -21,6 +23,29 @@ class CatalogExperiment:
     include_ft_capture_in_parse: bool
     ft_max_retained_words: int | None = None
     supports_arm_ft_stream: bool = False
+
+
+def _append_ft_stream_arm(lines: list[str], *, enabled: bool) -> None:
+    if not enabled:
+        return
+    lines.extend(
+        [
+            "    MV A, 0x01",
+            f"    MV [0x{FT_STREAM_ARM_ADDR:05X}], A",
+        ]
+    )
+
+
+def _append_ft_stream_disarm(lines: list[str], *, enabled: bool) -> None:
+    if not enabled:
+        return
+    lines.extend(
+        [
+            "    MV A, 0x00",
+            f"    MV [0x{FT_STREAM_ARM_ADDR:05X}], A",
+        ]
+    )
+
 
 def build_asm_and_abs_imm_ce1_rmw_chain(count: int) -> str:
     lines = [
@@ -84,22 +109,10 @@ def build_asm_and_ustack_reserved_imm_chain(count: int) -> str:
 
 def build_asm_call_ret_chain(count: int, *, arm_ft_stream: bool = False) -> str:
     lines = [".ORG 0x10100", "", "start:"]
-    if arm_ft_stream:
-        lines.extend(
-            [
-                "    MV A, 0x01",
-                "    MV [0x1FFF4], A",
-            ]
-        )
+    _append_ft_stream_arm(lines, enabled=arm_ft_stream)
     for idx in range(count):
         lines.append(f"    CALL sub_{idx:03d}")
-    if arm_ft_stream:
-        lines.extend(
-            [
-                "    MV A, 0x00",
-                "    MV [0x1FFF4], A",
-            ]
-        )
+    _append_ft_stream_disarm(lines, enabled=arm_ft_stream)
     lines.append("    RETF")
     lines.append("")
     for idx in range(count):
@@ -110,22 +123,10 @@ def build_asm_call_ret_chain(count: int, *, arm_ft_stream: bool = False) -> str:
 
 def build_asm_callf_retf_chain(count: int, *, arm_ft_stream: bool = False) -> str:
     lines = [".ORG 0x10100", "", "start:"]
-    if arm_ft_stream:
-        lines.extend(
-            [
-                "    MV A, 0x01",
-                "    MV [0x1FFF4], A",
-            ]
-        )
+    _append_ft_stream_arm(lines, enabled=arm_ft_stream)
     for idx in range(count):
         lines.append(f"    CALLF sub_{idx:03d}")
-    if arm_ft_stream:
-        lines.extend(
-            [
-                "    MV A, 0x00",
-                "    MV [0x1FFF4], A",
-            ]
-        )
+    _append_ft_stream_disarm(lines, enabled=arm_ft_stream)
     lines.append("    RETF")
     lines.append("")
     for idx in range(count):
