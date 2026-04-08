@@ -21,14 +21,14 @@ pub entity wait_hold_n<#uint RELOAD>(
 ) -> bool {
     let _ = require_positive::<RELOAD>();
 
-    let wait_reload: uint<{uint_bits_to_fit(RELOAD)}> = RELOAD;
-    let wait_zero: uint<{uint_bits_to_fit(RELOAD)}> = 0;
-    reg(clk) wait_counter: uint<{uint_bits_to_fit(RELOAD)}> reset(rst: 0) = if mreq_fall || iorq_fall {
+    type wait_counter_t = uint<{uint_bits_to_fit(RELOAD)}>;
+    let wait_reload: wait_counter_t = RELOAD;
+    reg(clk) wait_counter: wait_counter_t reset(rst: 0) = if mreq_fall || iorq_fall {
         wait_reload
     } else if wait_counter != 0 {
         wait_counter -. 1
     } else {
-        wait_zero
+        0
     };
     wait_counter != 0
 }
