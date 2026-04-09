@@ -169,15 +169,12 @@ def build_subprocess_env() -> dict[str, str]:
     return env
 
 
-def assemble_segments(source_path: Path, assembler_dir: Path) -> list[tuple[int, bytes]]:
-    if shutil.which("uv") is None:
-        raise SystemExit("uv was not found in PATH")
-
+def run_checked(command: list[str], *, cwd: Path | None = None, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
     completed = subprocess.run(
-        ["uv", "run", "python", "-c", ASSEMBLER_SNIPPET, str(source_path)],
-        cwd=assembler_dir,
+        command,
+        cwd=cwd,
         env=build_subprocess_env(),
-        capture_output=True,
+        capture_output=capture_output,
         text=True,
     )
     if completed.returncode != 0:
@@ -185,7 +182,19 @@ def assemble_segments(source_path: Path, assembler_dir: Path) -> list[tuple[int,
             sys.stdout.write(completed.stdout)
         if completed.stderr:
             sys.stderr.write(completed.stderr)
-        raise SystemExit("assembly failed")
+        raise SystemExit(completed.returncode)
+    return completed
+
+
+def assemble_segments(source_path: Path, assembler_dir: Path) -> list[tuple[int, bytes]]:
+    if shutil.which("uv") is None:
+        raise SystemExit("uv was not found in PATH")
+
+    completed = run_checked(
+        ["uv", "run", "python", "-c", ASSEMBLER_SNIPPET, str(source_path)],
+        cwd=assembler_dir,
+        capture_output=True,
+    )
 
     try:
         payload = json.loads(completed.stdout)
@@ -253,9 +262,7 @@ def run_au1_subcommand(
         command.extend(["--port", common_args.port])
     command.extend(subcommand)
 
-    completed = subprocess.run(command, env=build_subprocess_env(), text=True)
-    if completed.returncode != 0:
-        raise SystemExit(completed.returncode)
+    run_checked(command)
 
 
 def main() -> int:
