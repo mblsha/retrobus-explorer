@@ -23,16 +23,19 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+TOOL_BY_ACTION = {
+    "test-with-vcd": "run_tb.py",
+    "build-with-spadeforge": "build_with_spadeforge.py",
+    "flash-with-spadeloader": "flash_with_spadeloader.py",
+}
+
+
 def main() -> int:
     args = parse_args()
     project = args.project.resolve()
     tools_dir = Path(__file__).resolve().parent
-    if args.action == "test-with-vcd":
-        tool = tools_dir / "run_tb.py"
-    elif args.action == "build-with-spadeforge":
-        tool = tools_dir / "build_with_spadeforge.py"
-    else:
-        tool = tools_dir / "flash_with_spadeloader.py"
+    tool_name = TOOL_BY_ACTION[args.action]
+    tool = tools_dir / tool_name
 
     cmd = [sys.executable, str(tool), "--project", str(project), *args.extra]
     return subprocess.run(cmd, check=False).returncode
