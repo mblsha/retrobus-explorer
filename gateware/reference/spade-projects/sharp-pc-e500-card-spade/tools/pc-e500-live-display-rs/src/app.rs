@@ -47,9 +47,9 @@ impl LiveDisplayApp {
             .iter()
             .map(|value| {
                 if *value == 0 {
-                    Color32::from_gray(15)
-                } else {
                     Color32::from_gray(235)
+                } else {
+                    Color32::from_gray(15)
                 }
             })
             .collect();

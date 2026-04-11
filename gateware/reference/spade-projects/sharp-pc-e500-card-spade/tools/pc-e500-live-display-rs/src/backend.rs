@@ -25,6 +25,7 @@ pub struct BackendConfig {
     pub ft_library_path: Option<PathBuf>,
     pub serial_port: Option<String>,
     pub baud_rate: u32,
+    pub use_uart: bool,
     pub pipe_id: u8,
     pub read_size: usize,
     pub read_timeout_ms: u32,
@@ -37,6 +38,7 @@ impl Default for BackendConfig {
             ft_library_path: None,
             serial_port: None,
             baud_rate: 1_000_000,
+            use_uart: true,
             pipe_id: DEFAULT_PIPE_ID,
             read_size: DEFAULT_READ_SIZE,
             read_timeout_ms: DEFAULT_READ_TIMEOUT_MS,
@@ -67,6 +69,7 @@ impl BackendConfig {
                         .parse()
                         .context("invalid --baud value")?
                 }
+                "--no-uart" => config.use_uart = false,
                 other => return Err(anyhow!("unknown argument: {other}")),
             }
         }
@@ -151,10 +154,18 @@ fn run_session(
     commands: &Receiver<BackendCommand>,
     updates: &Sender<BackendSnapshot>,
 ) -> Result<()> {
-    let serial_port = config.serial_port.clone().unwrap_or_else(|| {
-        detect_second_usb_serial_port().unwrap_or_else(|_| "/dev/cu.usbserial-UNKNOWN".to_string())
-    });
-    let mut uart = open_serial(&serial_port, config.baud_rate)?;
+    let serial_port = if config.use_uart {
+        Some(config.serial_port.clone().unwrap_or_else(|| {
+            detect_second_usb_serial_port().unwrap_or_else(|_| "/dev/cu.usbserial-UNKNOWN".to_string())
+        }))
+    } else {
+        None
+    };
+    let mut uart = if let Some(serial_port) = &serial_port {
+        Some(open_serial(serial_port, config.baud_rate)?)
+    } else {
+        None
+    };
     let mut ft = Device::open_default(
         config.ft_library_path.as_deref(),
         config.pipe_id,
@@ -166,14 +177,22 @@ fn run_session(
     let mut recent_lines: VecDeque<String> = VecDeque::with_capacity(20);
     let mut snapshot = BackendSnapshot {
         connected: true,
-        last_uart_line: Some(format!("connected to {serial_port}")),
+        last_uart_line: serial_port
+            .as_ref()
+            .map(|serial_port| format!("connected to {serial_port}")),
         ..Default::default()
     };
 
-    send_uart_command(&mut uart, "F1")?;
-    snapshot.stream_enabled = true;
-    let _ = updates.send(snapshot.clone());
-    send_uart_command(&mut uart, "F?")?;
+    if let Some(uart) = uart.as_mut() {
+        send_uart_command(uart, "F1")?;
+        snapshot.stream_enabled = true;
+        let _ = updates.send(snapshot.clone());
+        send_uart_command(uart, "F?")?;
+    } else {
+        snapshot.stream_enabled = true;
+        snapshot.last_uart_line = Some("FT-only mode".to_string());
+        let _ = updates.send(snapshot.clone());
+    }
 
     let mut last_publish = Instant::now();
     let mut last_status_poll = Instant::now();
@@ -182,20 +201,28 @@ fn run_session(
         while let Ok(command) = commands.try_recv() {
             match command {
                 BackendCommand::EnableStream => {
-                    send_uart_command(&mut uart, "F1")?;
+                    if let Some(uart) = uart.as_mut() {
+                        send_uart_command(uart, "F1")?;
+                    }
                     snapshot.stream_enabled = true;
                 }
                 BackendCommand::DisableStream => {
-                    send_uart_command(&mut uart, "F0")?;
+                    if let Some(uart) = uart.as_mut() {
+                        send_uart_command(uart, "F0")?;
+                    }
                     snapshot.stream_enabled = false;
                 }
-                BackendCommand::PollStatus => send_uart_command(&mut uart, "F?")?,
+                BackendCommand::PollStatus => {
+                    if let Some(uart) = uart.as_mut() {
+                        send_uart_command(uart, "F?")?;
+                    }
+                }
                 BackendCommand::Stop => return Ok(()),
             }
         }
 
-        if last_status_poll.elapsed() >= Duration::from_secs(1) {
-            let _ = send_uart_command(&mut uart, "F?");
+        if uart.is_some() && last_status_poll.elapsed() >= Duration::from_secs(1) {
+            let _ = send_uart_command(uart.as_mut().expect("uart present"), "F?");
             last_status_poll = Instant::now();
         }
 
@@ -216,7 +243,9 @@ fn run_session(
             }
         }
 
-        drain_uart(&mut uart, &mut uart_buf, &mut snapshot, &mut recent_lines)?;
+        if let Some(uart) = uart.as_mut() {
+            drain_uart(uart, &mut uart_buf, &mut snapshot, &mut recent_lines)?;
+        }
 
         if last_publish.elapsed() >= Duration::from_millis(33) {
             snapshot.frame = lcd.render_monochrome();
