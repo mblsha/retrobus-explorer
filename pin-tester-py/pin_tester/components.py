@@ -90,19 +90,19 @@ class PinHeader2x8(Component):
             pitch=2.54,
         )
         rows = [
-            Row(left=PinGroup([self.p[4 + row]]), right=PinGroup([self.p[row]]))
+            Row(left=PinGroup([self.p[row]]), right=PinGroup([self.p[4 + row]]))
             for row in range(4)
         ]
         self.symbol = BoxSymbol(rows=rows, config=BoxConfig(group_spacing=2))
         self.pad_mapping = PadMapping({
-            self.p[0]: self.landpattern.p[1],
-            self.p[1]: self.landpattern.p[3],
-            self.p[2]: self.landpattern.p[5],
-            self.p[3]: self.landpattern.p[7],
-            self.p[4]: self.landpattern.p[2],
-            self.p[5]: self.landpattern.p[4],
-            self.p[6]: self.landpattern.p[6],
-            self.p[7]: self.landpattern.p[8],
+            self.p[0]: self.landpattern.p[8],
+            self.p[1]: self.landpattern.p[6],
+            self.p[2]: self.landpattern.p[4],
+            self.p[3]: self.landpattern.p[2],
+            self.p[4]: self.landpattern.p[7],
+            self.p[5]: self.landpattern.p[5],
+            self.p[6]: self.landpattern.p[3],
+            self.p[7]: self.landpattern.p[1],
         })
 
 
