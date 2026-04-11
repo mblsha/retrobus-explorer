@@ -17,6 +17,7 @@ fn main() -> Result<()> {
     let mut safe_asm = default_safe_asm();
     let mut arm_safe_on_start = false;
     let mut monitor_uart = false;
+    let mut enable_ft = true;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -39,6 +40,7 @@ fn main() -> Result<()> {
             }
             "--arm-safe-on-start" => arm_safe_on_start = true,
             "--monitor-uart" => monitor_uart = true,
+            "--no-ft" => enable_ft = false,
             other => anyhow::bail!("unknown argument: {other}"),
         }
     }
@@ -51,6 +53,7 @@ fn main() -> Result<()> {
         assembler_dir,
         safe_asm,
         monitor_uart,
+        enable_ft,
     )?;
     if arm_safe_on_start {
         daemon.program_safe_image()?;

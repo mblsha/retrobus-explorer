@@ -28,6 +28,7 @@ pub struct ExperimentDaemon {
     next_seq: u32,
     scan_index: usize,
     run_counter: u32,
+    enable_ft: bool,
     pub ft_capture: Ft600Capture,
 }
 
@@ -40,6 +41,7 @@ impl ExperimentDaemon {
         assembler_dir: PathBuf,
         safe_asm: PathBuf,
         monitor_uart: bool,
+        enable_ft: bool,
     ) -> Result<Self> {
         let assembler_dir = resolve_existing_dir(&assembler_dir, "assembler checkout")?;
         let safe_asm = resolve_existing_file(&safe_asm, "safe supervisor assembly")?;
@@ -47,7 +49,9 @@ impl ExperimentDaemon {
             resolve_existing_file(&default_debug_echo_asm(), "debug echo assembly")?;
         let uart = ExperimentUart::open(port, baud, idle_gap_s, quiet_timeout_s, monitor_uart)?;
         let mut ft_capture = Ft600Capture::new(DEFAULT_FT_MAX_RETAINED_WORDS);
-        ft_capture.ensure_running()?;
+        if enable_ft {
+            ft_capture.ensure_running()?;
+        }
         Ok(Self {
             assembler_dir,
             safe_asm,
@@ -64,6 +68,7 @@ impl ExperimentDaemon {
             next_seq: 1,
             scan_index: 0,
             run_counter: 0,
+            enable_ft,
             ft_capture,
         })
     }
@@ -223,6 +228,18 @@ impl ExperimentDaemon {
         }))
     }
 
+    pub fn stream_command(&mut self, command: &str) -> Result<Value> {
+        let reply = self.uart.send_command(command, Some(1.0))?;
+        self.poll_unsolicited_lines();
+        Ok(json!({
+            "status": "ok",
+            "action": command,
+            "reply_text": render_terminal_bytes(&reply),
+            "reply_hex": hex::encode(&reply),
+            "recent_uart_lines": self.uart.last_lines(20),
+        }))
+    }
+
     pub fn run_experiment(
         &mut self,
         script_path: PathBuf,
@@ -276,6 +293,9 @@ impl ExperimentDaemon {
         self.ft_capture
             .set_max_retained_words(plan.ft_max_retained_words);
         let ft_session = if plan.ft_capture {
+            if !self.enable_ft {
+                anyhow::bail!("FT capture requested but daemon started with FT disabled");
+            }
             Some(self.ft_capture.start())
         } else {
             None
@@ -371,6 +391,9 @@ impl ExperimentDaemon {
     pub fn handle_request(&mut self, request: Value) -> Result<Value> {
         match request["action"].as_str().unwrap_or_default() {
             "status" => self.status_payload(),
+            "stream_on" => self.stream_command("F1"),
+            "stream_off" => self.stream_command("F0"),
+            "stream_status" => self.stream_command("F?"),
             "arm_safe" => self.program_safe_image(),
             "debug_echo_short" => {
                 self.debug_echo_short(request["timeout_s"].as_f64().unwrap_or(10.0))
