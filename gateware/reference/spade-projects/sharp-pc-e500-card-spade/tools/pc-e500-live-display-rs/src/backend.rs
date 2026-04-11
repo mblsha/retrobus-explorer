@@ -3,12 +3,14 @@ use std::ffi::CString;
 use std::fs;
 use std::io::{Read, Write};
 use std::os::fd::RawFd;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
+use serde_json::{json, Value};
 use crate::d3xx::Device;
 use crate::lcd::{LcdModel, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 use crate::protocol::{
@@ -24,6 +26,7 @@ const IOSSIOSPEED: libc::c_ulong = 0x8004_5402;
 pub struct BackendConfig {
     pub ft_library_path: Option<PathBuf>,
     pub serial_port: Option<String>,
+    pub daemon_socket: Option<PathBuf>,
     pub baud_rate: u32,
     pub use_uart: bool,
     pub pipe_id: u8,
@@ -37,6 +40,7 @@ impl Default for BackendConfig {
         Self {
             ft_library_path: None,
             serial_port: None,
+            daemon_socket: None,
             baud_rate: 1_000_000,
             use_uart: true,
             pipe_id: DEFAULT_PIPE_ID,
@@ -60,6 +64,11 @@ impl BackendConfig {
                 "--ftd3xx" => {
                     config.ft_library_path = Some(PathBuf::from(
                         args.next().context("missing value for --ftd3xx")?,
+                    ))
+                }
+                "--daemon-socket" => {
+                    config.daemon_socket = Some(PathBuf::from(
+                        args.next().context("missing value for --daemon-socket")?,
                     ))
                 }
                 "--baud" => {
@@ -183,14 +192,17 @@ fn run_session(
         ..Default::default()
     };
 
-    if let Some(uart) = uart.as_mut() {
-        send_uart_command(uart, "F1")?;
-        snapshot.stream_enabled = true;
+    if uart.is_some() || config.daemon_socket.is_some() {
+        enable_stream_and_refresh(
+            uart.as_mut(),
+            config.daemon_socket.as_deref(),
+            &mut snapshot,
+            &mut recent_lines,
+        )?;
         let _ = updates.send(snapshot.clone());
-        send_uart_command(uart, "F?")?;
     } else {
-        snapshot.stream_enabled = true;
-        snapshot.last_uart_line = Some("FT-only mode".to_string());
+        snapshot.stream_enabled = false;
+        snapshot.last_uart_line = Some("FT-only mode (no control plane)".to_string());
         let _ = updates.send(snapshot.clone());
     }
 
@@ -201,28 +213,48 @@ fn run_session(
         while let Ok(command) = commands.try_recv() {
             match command {
                 BackendCommand::EnableStream => {
-                    if let Some(uart) = uart.as_mut() {
-                        send_uart_command(uart, "F1")?;
-                    }
-                    snapshot.stream_enabled = true;
+                    enable_stream_and_refresh(
+                        uart.as_mut(),
+                        config.daemon_socket.as_deref(),
+                        &mut snapshot,
+                        &mut recent_lines,
+                    )?;
                 }
                 BackendCommand::DisableStream => {
                     if let Some(uart) = uart.as_mut() {
                         send_uart_command(uart, "F0")?;
+                    } else if let Some(socket_path) = config.daemon_socket.as_deref() {
+                        apply_daemon_response(
+                            &daemon_request(socket_path, "stream_off")?,
+                            &mut snapshot,
+                            &mut recent_lines,
+                        );
                     }
                     snapshot.stream_enabled = false;
                 }
                 BackendCommand::PollStatus => {
                     if let Some(uart) = uart.as_mut() {
                         send_uart_command(uart, "F?")?;
+                    } else if let Some(socket_path) = config.daemon_socket.as_deref() {
+                        apply_daemon_response(
+                            &daemon_request(socket_path, "stream_status")?,
+                            &mut snapshot,
+                            &mut recent_lines,
+                        );
                     }
                 }
                 BackendCommand::Stop => return Ok(()),
             }
         }
 
-        if uart.is_some() && last_status_poll.elapsed() >= Duration::from_secs(1) {
-            let _ = send_uart_command(uart.as_mut().expect("uart present"), "F?");
+        if last_status_poll.elapsed() >= Duration::from_secs(1) {
+            if let Some(uart) = uart.as_mut() {
+                let _ = send_uart_command(uart, "F?");
+            } else if let Some(socket_path) = config.daemon_socket.as_deref() {
+                if let Ok(response) = daemon_request(socket_path, "stream_status") {
+                    apply_daemon_response(&response, &mut snapshot, &mut recent_lines);
+                }
+            }
             last_status_poll = Instant::now();
         }
 
@@ -290,6 +322,86 @@ fn send_uart_command(port: &mut PortHandle, command: &str) -> Result<()> {
     Ok(())
 }
 
+fn enable_stream_and_refresh(
+    uart: Option<&mut PortHandle>,
+    daemon_socket: Option<&std::path::Path>,
+    snapshot: &mut BackendSnapshot,
+    recent_lines: &mut VecDeque<String>,
+) -> Result<()> {
+    if let Some(uart) = uart {
+        // F0 -> F1 gives the FPGA a clean stream re-arm and clears session-local SOVF.
+        send_uart_command(uart, "F0")?;
+        send_uart_command(uart, "F1")?;
+        send_uart_command(uart, "F?")?;
+    } else if let Some(socket_path) = daemon_socket {
+        apply_daemon_response(
+            &daemon_request(socket_path, "stream_off")?,
+            snapshot,
+            recent_lines,
+        );
+        apply_daemon_response(
+            &daemon_request(socket_path, "stream_on")?,
+            snapshot,
+            recent_lines,
+        );
+        apply_daemon_response(
+            &daemon_request(socket_path, "stream_status")?,
+            snapshot,
+            recent_lines,
+        );
+    }
+    snapshot.stream_enabled = true;
+    Ok(())
+}
+
+fn daemon_request(socket_path: &std::path::Path, action: &str) -> Result<Value> {
+    let mut stream = UnixStream::connect(socket_path)
+        .with_context(|| format!("failed to connect to daemon socket {}", socket_path.display()))?;
+    let request = json!({ "action": action });
+    stream.write_all(request.to_string().as_bytes())?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+    serde_json::from_str(&response)
+        .with_context(|| format!("invalid daemon response for {action}: {response}"))
+}
+
+fn apply_daemon_response(
+    response: &Value,
+    snapshot: &mut BackendSnapshot,
+    recent_lines: &mut VecDeque<String>,
+) {
+    if let Some(lines) = response.get("recent_uart_lines").and_then(|value| value.as_array()) {
+        for line in lines.iter().filter_map(|value| value.as_str()) {
+            push_uart_line(snapshot, recent_lines, line);
+        }
+    }
+    if let Some(reply_text) = response.get("reply_text").and_then(|value| value.as_str()) {
+        for line in reply_text.lines() {
+            let line = line.trim();
+            if !line.is_empty() {
+                push_uart_line(snapshot, recent_lines, line);
+            }
+        }
+    }
+}
+
+fn push_uart_line(
+    snapshot: &mut BackendSnapshot,
+    recent_lines: &mut VecDeque<String>,
+    line: &str,
+) {
+    snapshot.last_uart_line = Some(line.to_string());
+    if let Some(status) = parse_stream_status_line(line) {
+        snapshot.last_status = Some(status);
+    }
+    if recent_lines.len() == 20 {
+        recent_lines.pop_front();
+    }
+    recent_lines.push_back(line.to_string());
+}
+
 fn drain_uart(
     port: &mut PortHandle,
     buffer: &mut Vec<u8>,
@@ -308,14 +420,7 @@ fn drain_uart(
                     if line.is_empty() {
                         continue;
                     }
-                    snapshot.last_uart_line = Some(line.clone());
-                    if let Some(status) = parse_stream_status_line(&line) {
-                        snapshot.last_status = Some(status);
-                    }
-                    if recent_lines.len() == 20 {
-                        recent_lines.pop_front();
-                    }
-                    recent_lines.push_back(line);
+                    push_uart_line(snapshot, recent_lines, &line);
                 }
             }
             Err(err) if err.kind() == std::io::ErrorKind::TimedOut => break,
