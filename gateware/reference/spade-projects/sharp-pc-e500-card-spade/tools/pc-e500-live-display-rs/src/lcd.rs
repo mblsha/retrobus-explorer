@@ -201,3 +201,46 @@ fn parse_command(address: u32, value: u8) -> Result<Command> {
         data,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pixel(frame: &[u8], x: usize, y: usize) -> u8 {
+        frame[y * DISPLAY_WIDTH + x]
+    }
+
+    #[test]
+    fn right_chip_write_renders_top_left_pixel() {
+        let mut lcd = LcdModel::default();
+        lcd.apply_raw(0x0A004, 0x01).unwrap();
+        lcd.apply_raw(0x0A004, 0x80).unwrap();
+        lcd.apply_raw(0x0A004, 0x40).unwrap();
+        lcd.apply_raw(0x0A006, 0x01).unwrap();
+
+        let frame = lcd.render_monochrome();
+        assert_eq!(pixel(&frame, 0, 0), 0xff);
+        assert_eq!(pixel(&frame, 1, 0), 0x00);
+    }
+
+    #[test]
+    fn start_line_shifts_visible_row() {
+        let mut lcd = LcdModel::default();
+        lcd.apply_raw(0x0A004, 0x01).unwrap();
+        lcd.apply_raw(0x0A004, 0x80).unwrap();
+        lcd.apply_raw(0x0A004, 0x40).unwrap();
+        lcd.apply_raw(0x0A006, 0x01).unwrap();
+        lcd.apply_raw(0x0A004, 0xE1).unwrap();
+
+        let frame = lcd.render_monochrome();
+        assert_eq!(pixel(&frame, 0, 0), 0x00);
+        assert_eq!(pixel(&frame, 0, 31), 0xff);
+    }
+
+    #[test]
+    fn invalid_non_lcd_address_is_rejected() {
+        let mut lcd = LcdModel::default();
+        let err = lcd.apply_raw(0x00345, 0x00).unwrap_err().to_string();
+        assert!(err.contains("not an LCD controller address"));
+    }
+}

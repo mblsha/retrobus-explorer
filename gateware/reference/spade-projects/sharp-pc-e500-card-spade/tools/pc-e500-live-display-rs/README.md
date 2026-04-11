@@ -34,3 +34,14 @@ Defaults:
 - The app assumes the FT600 stream is carrying sampled-bus words sourced from the UART FT stream path introduced in PR 148.
 - If `F?` shows `SOVF` or `OVF` increasing, the display should be treated as desynced until the calculator redraws the screen.
 - This app does not own calculator-side `FT_STREAM_CFG` programming. It enables streaming with `F1`, but it still depends on the FPGA/calculator side being configured to mirror the desired source into FT600.
+
+## Tests
+
+```sh
+cargo test
+```
+
+Current automated coverage is pure unit coverage only:
+
+- FT word packing/status decode
+- LCD controller write replay into the local framebuffer

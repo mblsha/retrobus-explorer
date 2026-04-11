@@ -463,3 +463,44 @@ fn compact_event_stream(events: &[FtDecodedEvent]) -> Vec<FtDecodedEvent> {
     }
     compacted
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_packed_words_preserves_partial_tail() {
+        let mut pending = vec![0x10, 0x20, 0x30];
+        let words = decode_packed_words(&[0x40, 0x50, 0x60], &mut pending);
+
+        assert_eq!(words, vec![0x4030_2010]);
+        assert_eq!(pending, vec![0x50, 0x60]);
+    }
+
+    #[test]
+    fn classify_decoded_word_detects_ce6_control_write() {
+        let addr = 0x1fff0;
+        let data = 0xa5u8;
+        let status = 0b10_0100u8;
+        let raw = addr | ((data as u32) << 18) | ((status as u32) << 26);
+        let event = classify_decoded_word(raw, 7);
+
+        assert_eq!(event.index, 7);
+        assert_eq!(event.addr, addr);
+        assert_eq!(event.data, data);
+        assert!(!event.rw);
+        assert!(event.ce6_active);
+        assert!(event.ctrl_range);
+        assert_eq!(event.kind, "ce6_ctrl_write");
+    }
+
+    #[test]
+    fn preview_event_stream_all_window_is_non_empty() {
+        let raw = 0x0a006 | ((0x5a_u32) << 18);
+        let preview = preview_event_stream(&[raw], 8, true, "all", None, None);
+
+        assert_eq!(preview.len(), 1);
+        assert_eq!(preview[0]["addr"].as_u64(), Some(0x0a006));
+        assert_eq!(preview[0]["kind"].as_str(), Some("addr_only_write"));
+    }
+}

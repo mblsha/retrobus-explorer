@@ -365,3 +365,64 @@ impl ExpandUser for Path {
         self.to_path_buf()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_measure_status_line_parses_hex_and_bool() {
+        let lines = vec!["MS,CNT=00000002,OVF=00000001,ARM=1".to_string()];
+        let status = parse_measure_status_lines(&lines).expect("measure status should parse");
+
+        assert_eq!(status.count, 2);
+        assert_eq!(status.overflow, 1);
+        assert!(status.armed);
+    }
+
+    #[test]
+    fn parse_measurement_lines_collects_multiple_rows() {
+        let lines = vec![
+            "MR,S=11,E=12,TK=00000C45,EV=0000000E,AU=00000017,FO=00000000".to_string(),
+            "MEND".to_string(),
+            "MR,S=21,E=22,TK=00000002,EV=00000003,AU=00000004,FO=00000005".to_string(),
+        ];
+        let measurements = parse_measurement_lines(&lines).expect("measurements should parse");
+
+        assert_eq!(measurements.len(), 2);
+        assert_eq!(measurements[0].ticks, 0x0c45);
+        assert_eq!(measurements[0].ft_overflow, 0);
+        assert_eq!(measurements[1].start_tag, 0x21);
+        assert_eq!(measurements[1].ft_overflow, 5);
+    }
+
+    #[test]
+    fn build_write_payload_emits_rom_commands() {
+        let payload = build_write_payload(0x120, &[0xaa, 0x55]);
+        assert_eq!(payload, b"W120=AA\rW121=55\r");
+    }
+
+    #[test]
+    fn build_card_rom_image_rejects_conflicting_overlap() {
+        let segments = vec![
+            (CARD_ROM_BASE, vec![0xaa, 0xbb]),
+            (CARD_ROM_BASE + 1, vec![0xcc]),
+        ];
+        let err = build_card_rom_image(&segments, DEFAULT_FILL_BYTE)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("overlapping segments disagree"));
+    }
+
+    #[test]
+    fn build_card_rom_image_keeps_holes_filled() {
+        let segments = vec![
+            (CARD_ROM_BASE + 2, vec![0xaa]),
+            (CARD_ROM_BASE + 4, vec![0xbb]),
+        ];
+        let (start, image) = build_card_rom_image(&segments, 0xff).expect("image should build");
+
+        assert_eq!(start, CARD_ROM_BASE + 2);
+        assert_eq!(image, vec![0xaa, 0xff, 0xbb]);
+    }
+}
