@@ -10,4 +10,5 @@ eframe = { version = "0.31", default-features = false, features = ["default_font
 egui = "0.31"
 libc = "0.2"
 libloading = "0.8"
+serde_json = "1.0"
 serialport = "4.8"

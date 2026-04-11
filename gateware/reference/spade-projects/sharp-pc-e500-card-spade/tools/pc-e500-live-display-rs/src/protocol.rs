@@ -22,7 +22,7 @@ pub struct StreamStatus {
 
 impl StreamStatus {
     pub fn desynced(&self) -> bool {
-        self.sovf.unwrap_or(0) != 0 || self.ovf.unwrap_or(0) != 0
+        self.sovf.unwrap_or(0) != 0
     }
 }
 
@@ -122,7 +122,7 @@ mod tests {
         assert_eq!(status.cap, Some(true));
         assert_eq!(status.sovf, Some(0));
         assert_eq!(status.ovf, Some(0x10));
-        assert!(status.desynced());
+        assert!(!status.desynced());
         assert_eq!(status.fields.get("CFG").map(String::as_str), Some("02"));
     }
 
