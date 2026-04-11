@@ -152,7 +152,9 @@ fn draw_lcd_panel(ui: &mut egui::Ui, texture: Option<&TextureHandle>) {
         }
 
         ui.add_space(8.0);
-        ui.label("Requires calculator-side FT stream source selection for UART-mirrored sampled words.");
+        ui.label(
+            "Requires calculator-side FT stream source selection for UART-mirrored sampled words.",
+        );
     });
 }
 
@@ -171,7 +173,11 @@ fn draw_transport_panel(ui: &mut egui::Ui, snapshot: &BackendSnapshot) {
                 ui.end_row();
 
                 ui.monospace("stream");
-                ui.monospace(if snapshot.stream_enabled { "enabled" } else { "disabled" });
+                ui.monospace(if snapshot.stream_enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                });
                 ui.end_row();
             });
 
