@@ -1,0 +1,428 @@
+# JITX Python Migration Plan
+
+This plan is grounded in the current Stanza code under `jitx/` and in the working Python JITX project structure used in `~/src/jitx/ld2450-radar-adapter`.
+
+## Goal
+
+Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from Stanza to Python JITX in a way that:
+
+- preserves the existing board designs and connector pin mappings
+- keeps KiCad export working through the current `jitx-tooling` flow
+- avoids a direct 1:1 transliteration where Stanza depends on `ocdb/...` helpers that do not map cleanly to the Python style we are already using
+- gives us a staged path with early end-to-end wins before touching the highest-risk boards
+
+## Golden Output Reference
+
+We now have a concrete reference archive at `/tmp/kicad.zip`. This should be treated as the primary migration target for exported outputs.
+
+What the archive contains:
+
+- Stanza-generated KiCad project exports for many boards
+- Gerber zip bundles for multiple revisions of several boards
+- a mix of current and historical revisions, including some `-old` directories and duplicate gerber zips
+- a small amount of archive noise such as `__MACOSX/` entries and `.DS_Store` files
+
+This means the migration should not be judged only by whether the Python port builds. It should be judged by how closely the Python-generated KiCad and Gerber outputs match these archived Stanza outputs.
+
+### Canonical Reference Targets
+
+The archive is broad, but the cleanest initial golden references appear to be:
+
+- `kicad/pin-tester/`
+- `kicad/sharp-pc-g850-bus/`
+- `kicad/rpi-pico-40-pin-adapter/`
+- `kicad/sharp-organizer-card/`
+- `kicad/sharp-organizer-host/`
+- `kicad/sharp-pc-e500-ram-card/`
+- `kicad/sharp-sc61860-interposer/`
+- `kicad/sharp-sc62015-interposer/`
+- `kicad/saleae-dslab-adapter/`
+- `kicad/espi-debug-breakout/`
+- `kicad/alchitry-level-shifter-au1-v2/` for the newer level-shifter reference
+
+Historical references still matter, but should be treated as secondary unless we explicitly decide to target them:
+
+- `kicad/alchitry-level-shifter/`
+- `kicad/alchitry-level-shifter-au1-v2-old/`
+- `kicad/sharp-sc62015-interposer-old/`
+
+## Output Parity Standard
+
+For each migrated board, the Python port should be compared against the Stanza-generated reference export at three levels:
+
+1. Design structure parity
+- board outline dimensions and corner radii
+- connector count and placement
+- reference designator set
+- named nets / pin mappings
+
+2. KiCad PCB parity
+- footprint selection or equivalent landpattern geometry
+- pad counts, ordering, drill sizes, and key pad dimensions
+- board text / silkscreen placement where intentionally preserved
+- copper layer count and obvious pours
+- overall bounding box and component placement relationships
+
+3. Gerber parity
+- same exported layer set
+- same board outline
+- same drill count and general drill map
+- close copper/silkscreen/mask geometry
+
+The goal is not byte-for-byte identity. The goal is manufacturing-equivalent output that is visually and structurally close to the Stanza result.
+
+## Audit of `/tmp/kicad.zip`
+
+Important findings from the archive:
+
+- the archive contains reference KiCad PCBs for nearly all of the top-level Stanza boards we care about
+- several boards also include zipped gerber outputs either inside the board directory or as top-level `gerber-*.zip` files
+- `alchitry-level-shifter-au1-v2/` also includes `F_Paste` and `B_Paste` SVG exports, which may be useful later for stencil-style parity checks
+- multiple revisions exist for some boards, especially organizer-card, level-shifter, and interposer work
+- because of those duplicates, we should explicitly record which archived revision is the target before porting each board
+
+## Migration Rule Change
+
+The original migration plan focused on porting order and buildability. The archive changes the standard:
+
+- every completed Python board should produce a KiCad export and a Gerber export
+- those outputs should be diffed against the chosen Stanza reference before the port is considered complete
+- if the Python board diverges intentionally from the Stanza version, that deviation should be recorded explicitly
+
+## Current Surface Area
+
+### Shared infrastructure
+
+- `helpers.stanza`
+- `pose-helpers.stanza`
+- `stackups/`
+
+### Reusable components
+
+Representative component files under `components/`:
+
+- `AlchitryAu.stanza`
+- `FFCConnector.stanza`
+- `FPGAHeader.stanza`
+- `GndTestpads.stanza`
+- `HED40LP03BK.stanza`
+- `JC20-C45S-F1-A1.stanza`
+- `JUSHUO/AFA01-S10FCA-00.stanza`
+- `LevelShifter.stanza`
+- `PCG850Bus.stanza`
+- `RPiPico.stanza`
+- `Saleae.stanza`
+- `SC61860D4x.stanza`
+- `SC62015B02.stanza`
+- `SharpOrganizerHostDBZ.stanza`
+- `TXB0108PWR.stanza`
+- `TXS0108EQPWRQ1.stanza`
+- `VccSelectHeader.stanza`
+- `_0_5K-1_2X-60PWB.stanza`
+
+### Top-level board designs
+
+- `alchitry-au1-level-shifter.stanza`
+- `espi-debug-breakout.stanza`
+- `pin-tester.stanza`
+- `rpi-pico-40-pin-adapter.stanza`
+- `saleae-dslab-adapter.stanza`
+- `sharp-organizer-card.stanza`
+- `sharp-organizer-host.stanza`
+- `sharp-pc-e500-ram-card.stanza`
+- `sharp-pc-g850-bus.stanza`
+- `sharp-sc61860-interposer.stanza`
+- `sharp-sc62015-interposer.stanza`
+
+## Audit Summary
+
+### Shared bootstrap
+
+`helpers.stanza` is the main design bootstrap. It currently owns:
+
+- board setup
+- stackup selection
+- rule selection
+- BOM setup
+- part-query defaults
+- KiCad export defaults
+
+This should become a small Python helper module, not a huge compatibility layer.
+
+### Utility code
+
+`pose-helpers.stanza` contains helper routines for:
+
+- pin ordering by physical location
+- pad pose lookup
+- pad type lookup
+- net naming / lookup helpers
+
+Some of this may be unnecessary in Python for the first porting wave. It should be ported only when a board actually needs it.
+
+### Low-risk component patterns
+
+These files are mostly wrappers or straightforward modules and are good early port targets:
+
+- `FFCConnector.stanza`
+- `GndTestpads.stanza`
+- `VccSelectHeader.stanza`
+- `Saleae.stanza`
+- `FPGAHeader.stanza`
+
+### Medium-risk component patterns
+
+These are custom connectors or parts with nontrivial pin naming or landpatterns:
+
+- `PCG850Bus.stanza`
+- `RPiPico.stanza`
+- `SharpOrganizerHostDBZ.stanza`
+- `HED40LP03BK.stanza`
+- `JC20-C45S-F1-A1.stanza`
+- `JUSHUO/AFA01-S10FCA-00.stanza`
+
+### High-risk component patterns
+
+These are the real custom-landpattern / platform-enabling files:
+
+- `AlchitryAu.stanza`
+- `SC61860D4x.stanza`
+- `SC62015B02.stanza`
+- `_0_5K-1_2X-60PWB.stanza`
+- `TXB0108PWR.stanza`
+- `TXS0108EQPWRQ1.stanza`
+- `LevelShifter.stanza`
+
+### Low-risk full-board ports
+
+These should be the first complete boards we port because they validate the workflow with limited geometry risk:
+
+- `pin-tester.stanza`
+- `sharp-pc-g850-bus.stanza`
+- `rpi-pico-40-pin-adapter.stanza`
+
+### Highest-risk board
+
+`alchitry-au1-level-shifter.stanza` is the highest-risk and should not be first.
+
+Reasons:
+
+- depends on `AlchitryAu`
+- depends on `FFCConnector`
+- depends on `LevelShifter`
+- includes repeated placement / mapping logic
+- includes board text and custom power selection wiring
+- is central enough that mistakes here will compound quickly
+
+## Main Porting Constraint
+
+The largest difficulty is not Stanza syntax. It is replacement of Stanza/OCDB helper usage.
+
+The Stanza code uses helpers such as:
+
+- `ocdb/utils/box-symbol`
+- `ocdb/utils/generic-components`
+- `ocdb/utils/landpatterns`
+- `ocdb/artwork/board-text/text`
+- cookbook-style placement / pose helpers
+
+The Python style already proven in `ld2450-radar-adapter` is much more explicit and self-contained. The migration should follow that style instead of trying to preserve every helper abstraction.
+
+## Recommended Python Project Shape
+
+Inside `retrobus-explorer`, create a dedicated Python JITX package for hardware, modeled after `ld2450-radar-adapter`:
+
+- `retrobus_explorer_hw/__init__.py`
+- `retrobus_explorer_hw/helpers.py`
+- `retrobus_explorer_hw/components/`
+- `retrobus_explorer_hw/designs/`
+- root `main.py`
+- `.vscode/tasks.json`
+- `.vscode/launch.json`
+- `.vscode/settings.json`
+- `pyproject.toml` for the hardware package if needed
+
+This should be treated as the new source of truth for JITX Python designs. The existing Stanza tree stays as reference during the migration.
+
+## Phased Migration Plan
+
+### Phase 0: Project scaffold
+
+Use `~/src/jitx/ld2450-radar-adapter` as the template and create a working Python JITX project structure in `retrobus-explorer`.
+
+Deliverables:
+
+- root `main.py`
+- package directory for hardware modules
+- VS Code JITX files
+- buildable placeholder design
+
+### Phase 1: Shared bootstrap
+
+Port only the minimum useful subset of `helpers.stanza`:
+
+- `setup_design()` equivalent
+- KiCad export defaults
+- board/rules defaults for rigid boards
+- optional board text/date helper
+
+Do not try to port all BOM/query behavior at first unless Python JITX actually needs it for these designs.
+
+### Phase 2: First reusable components
+
+Port the smallest components that unlock several boards:
+
+- `FFCConnector`
+- `GndTestpads`
+- `VccSelectHeader`
+- `Saleae`
+
+This is the lowest-friction foundation layer.
+
+### Phase 3: First end-to-end board
+
+Port `pin-tester.stanza` first.
+
+Why:
+
+- simple board outline
+- repeated headers
+- one FFC-based mapping path
+- board text
+- GND pours
+- good validation of the overall Python design pattern
+
+Success criteria:
+
+- Python build works
+- KiCad export works
+- Gerber export works
+- board can be inspected with current `jitx-tooling`
+- output is compared against the Stanza reference in `/tmp/kicad.zip`
+
+### Phase 4: First connector-driven adapter
+
+Port `PCG850Bus` and then `sharp-pc-g850-bus.stanza`.
+
+Why:
+
+- validates a custom bus connector
+- reuses the already ported FFC path
+- has straightforward mapping logic
+- still much simpler than the Alchitry board
+- has a clean archived KiCad reference to compare against
+
+### Phase 5: Level shifter platform pieces
+
+Port the platform-enabling parts in this order:
+
+1. `TXB0108PWR`
+2. `LevelShifter`
+3. `AlchitryAu`
+4. `alchitry-au1-level-shifter`
+
+This sequence keeps the high-risk board until after all major dependencies exist and have been exercised elsewhere.
+
+### Phase 6: Remaining adapters and interposers
+
+Once the platform parts are stable, port the remaining boards:
+
+- `saleae-dslab-adapter`
+- `sharp-organizer-card`
+- `sharp-organizer-host`
+- `sharp-pc-e500-ram-card`
+- `sharp-sc61860-interposer`
+- `sharp-sc62015-interposer`
+- `espi-debug-breakout`
+
+### Phase 7: Flex stackups and advanced rules
+
+Only after the rigid-board path is stable, port:
+
+- `stackups/materials-flex.stanza`
+- `stackups/vias-flex.stanza`
+- `stackups/rules-flex.stanza`
+- `stackups/JLC-Flex-2L.stanza`
+
+These are valid migration targets, but they should not be on the critical path for the first successful Python boards.
+
+## Proposed Initial Port Order
+
+Recommended order of actual implementation:
+
+1. scaffold Python hardware package
+2. port minimal `helpers`
+3. port `FFCConnector`
+4. port `GndTestpads`
+5. port `VccSelectHeader`
+6. port `Saleae`
+7. port `pin-tester`
+8. port `PCG850Bus`
+9. port `sharp-pc-g850-bus`
+10. port `TXB0108PWR`
+11. port `LevelShifter`
+12. port `AlchitryAu`
+13. port `alchitry-au1-level-shifter`
+14. port remaining adapters/interposers
+15. port flex stackups
+
+## Immediate Grounding Milestone
+
+The best first checkpoint is:
+
+- create the Python hardware package in `retrobus-explorer`
+- port the minimal helper/bootstrap layer
+- port `FFCConnector`
+- port `GndTestpads`
+- port `pin-tester`
+- verify KiCad export with `jitx-tooling`
+- verify Gerber export with `jitx-tooling`
+- compare the generated outputs against `kicad/pin-tester/` and the archived pin-tester Gerber bundle in `/tmp/kicad.zip`
+
+This gives an end-to-end proof that the Python migration direction is sound before touching the more coupled boards.
+
+## Practical Notes
+
+- Do not attempt a mechanical transliteration of every Stanza helper into Python.
+- Prefer explicit Python component definitions and explicit placement logic.
+- Keep Stanza files as reference until the equivalent Python design builds and exports successfully.
+- Use one board as a porting harness at a time; avoid partially porting many boards in parallel.
+- Reuse the current `jitx-tooling` scripts for build/export/render/status checks as soon as each Python board is alive.
+
+## Recommended Next Step
+
+Start Phase 0 and Phase 1 immediately, then port `pin-tester` as the first real board.
+
+## Board-by-Board Acceptance Workflow
+
+For each board we port, use this workflow:
+
+1. Choose the canonical archived reference directory or gerber zip from `/tmp/kicad.zip`.
+2. Build the Python JITX design.
+3. Export KiCad from Python JITX.
+4. Export Gerbers from the Python JITX KiCad output.
+5. Compare against the archived Stanza reference:
+   - board dimensions
+   - component placements
+   - footprint geometry and drills
+   - silkscreen and board text
+   - copper layers and pours
+   - Gerber layer set and obvious visual differences
+6. Record any intentional deviations before calling the port complete.
+
+## Updated Recommended Starting Sequence
+
+Given the existence of `/tmp/kicad.zip`, the practical starting order should be:
+
+1. `pin-tester`
+2. `sharp-pc-g850-bus`
+3. `rpi-pico-40-pin-adapter`
+4. `saleae-dslab-adapter`
+5. `sharp-organizer-card`
+6. `sharp-organizer-host`
+7. `sharp-pc-e500-ram-card`
+8. `sharp-sc61860-interposer`
+9. `sharp-sc62015-interposer`
+10. `alchitry-au1-level-shifter`
+
+This order is now preferred not just because of technical risk, but because these boards have concrete archived outputs that can be used as migration acceptance tests.
