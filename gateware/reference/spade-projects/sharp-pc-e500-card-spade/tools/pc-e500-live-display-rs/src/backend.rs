@@ -9,17 +9,16 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
-use crossbeam_channel::{unbounded, Receiver, Sender};
-use serde_json::{json, Value};
 use crate::d3xx::Device;
 use crate::lcd::{LcdModel, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 use crate::protocol::{
-    decode_packed_words, is_lcd_write_address, parse_stream_status_line, SampledWord,
-    StreamStatus, DEFAULT_PIPE_ID, DEFAULT_READ_SIZE, DEFAULT_READ_TIMEOUT_MS,
-    DEFAULT_STREAM_SIZE,
+    decode_packed_words, is_lcd_write_address, parse_stream_status_line, SampledWord, StreamStatus,
+    DEFAULT_PIPE_ID, DEFAULT_READ_SIZE, DEFAULT_READ_TIMEOUT_MS, DEFAULT_STREAM_SIZE,
 };
 use crate::text::Pce500FontMap;
+use anyhow::{anyhow, Context, Result};
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use serde_json::{json, Value};
 
 #[cfg(target_os = "macos")]
 const IOSSIOSPEED: libc::c_ulong = 0x8004_5402;
@@ -170,7 +169,8 @@ fn run_session(
 ) -> Result<()> {
     let serial_port = if config.use_uart {
         Some(config.serial_port.clone().unwrap_or_else(|| {
-            detect_second_usb_serial_port().unwrap_or_else(|_| "/dev/cu.usbserial-UNKNOWN".to_string())
+            detect_second_usb_serial_port()
+                .unwrap_or_else(|_| "/dev/cu.usbserial-UNKNOWN".to_string())
         }))
     } else {
         None
@@ -463,6 +463,12 @@ fn send_uart_command(port: &mut PortHandle, command: &str) -> Result<()> {
     Ok(())
 }
 
+fn set_safe_timing_defaults(port: &mut PortHandle) -> Result<()> {
+    send_uart_command(port, "t05")?;
+    send_uart_command(port, "c10")?;
+    Ok(())
+}
+
 fn enable_stream_and_refresh(
     uart: Option<&mut PortHandle>,
     daemon_socket: Option<&std::path::Path>,
@@ -470,6 +476,7 @@ fn enable_stream_and_refresh(
     recent_lines: &mut VecDeque<String>,
 ) -> Result<()> {
     if let Some(uart) = uart {
+        set_safe_timing_defaults(uart)?;
         // F0 -> F1 gives the FPGA a clean stream re-arm and clears session-local SOVF.
         send_uart_command(uart, "F0")?;
         send_uart_command(uart, "F1")?;
@@ -508,14 +515,18 @@ fn daemon_request(socket_path: &std::path::Path, action: &str) -> Result<Value> 
 }
 
 fn daemon_json_request(socket_path: &std::path::Path, request: Value) -> Result<Value> {
-    let mut stream = UnixStream::connect(socket_path)
-        .with_context(|| format!("failed to connect to daemon socket {}", socket_path.display()))?;
+    let mut stream = UnixStream::connect(socket_path).with_context(|| {
+        format!(
+            "failed to connect to daemon socket {}",
+            socket_path.display()
+        )
+    })?;
     stream.write_all(request.to_string().as_bytes())?;
     stream.write_all(b"\n")?;
     stream.flush()?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
-    serde_json::from_str(&response).with_context(|| {
+    let response_json: Value = serde_json::from_str(&response).with_context(|| {
         format!(
             "invalid daemon response for {}: {response}",
             request
@@ -523,7 +534,24 @@ fn daemon_json_request(socket_path: &std::path::Path, request: Value) -> Result<
                 .and_then(|value| value.as_str())
                 .unwrap_or("<unknown>")
         )
-    })
+    })?;
+    match response_json.get("status").and_then(|value| value.as_str()) {
+        Some("ok") => Ok(response_json),
+        Some(other) => Err(anyhow!(
+            "daemon action {} failed with status {other}: {response_json}",
+            request
+                .get("action")
+                .and_then(|value| value.as_str())
+                .unwrap_or("<unknown>")
+        )),
+        None => Err(anyhow!(
+            "daemon action {} returned response without status: {response_json}",
+            request
+                .get("action")
+                .and_then(|value| value.as_str())
+                .unwrap_or("<unknown>")
+        )),
+    }
 }
 
 fn apply_daemon_response(
@@ -531,7 +559,10 @@ fn apply_daemon_response(
     snapshot: &mut BackendSnapshot,
     recent_lines: &mut VecDeque<String>,
 ) {
-    if let Some(lines) = response.get("recent_uart_lines").and_then(|value| value.as_array()) {
+    if let Some(lines) = response
+        .get("recent_uart_lines")
+        .and_then(|value| value.as_array())
+    {
         for line in lines.iter().filter_map(|value| value.as_str()) {
             push_uart_line(snapshot, recent_lines, line);
         }
@@ -546,11 +577,7 @@ fn apply_daemon_response(
     }
 }
 
-fn push_uart_line(
-    snapshot: &mut BackendSnapshot,
-    recent_lines: &mut VecDeque<String>,
-    line: &str,
-) {
+fn push_uart_line(snapshot: &mut BackendSnapshot, recent_lines: &mut VecDeque<String>, line: &str) {
     snapshot.last_uart_line = Some(line.to_string());
     if let Some(status) = parse_stream_status_line(line) {
         snapshot.last_status = Some(status);

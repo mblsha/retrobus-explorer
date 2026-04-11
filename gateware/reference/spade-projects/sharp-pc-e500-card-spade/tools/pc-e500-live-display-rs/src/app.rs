@@ -24,6 +24,8 @@ struct UiExportState {
     connected: bool,
     stream_enabled: bool,
     decoded_text_lines: Vec<String>,
+    total_words: u64,
+    lcd_writes: u64,
     last_error: Option<String>,
     last_status_raw: Option<String>,
 }
@@ -34,8 +36,13 @@ impl From<&BackendSnapshot> for UiExportState {
             connected: snapshot.connected,
             stream_enabled: snapshot.stream_enabled,
             decoded_text_lines: snapshot.decoded_text_lines.clone(),
+            total_words: snapshot.total_words,
+            lcd_writes: snapshot.lcd_writes,
             last_error: snapshot.last_error.clone(),
-            last_status_raw: snapshot.last_status.as_ref().map(|status| status.raw.clone()),
+            last_status_raw: snapshot
+                .last_status
+                .as_ref()
+                .map(|status| status.raw.clone()),
         }
     }
 }
@@ -122,7 +129,12 @@ fn spawn_ui_socket_server(socket_path: PathBuf, state: Arc<Mutex<UiExportState>>
             let _ = BufReader::new(&stream).read_line(&mut request);
             let action = serde_json::from_str::<serde_json::Value>(&request)
                 .ok()
-                .and_then(|value| value.get("action").and_then(|v| v.as_str()).map(str::to_string))
+                .and_then(|value| {
+                    value
+                        .get("action")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
                 .unwrap_or_else(|| "status".to_string());
             let payload = build_ui_socket_response(&action, &state);
             let _ = stream.write_all(payload.to_string().as_bytes());
@@ -134,19 +146,26 @@ fn spawn_ui_socket_server(socket_path: PathBuf, state: Arc<Mutex<UiExportState>>
 }
 
 fn build_ui_socket_response(action: &str, state: &Arc<Mutex<UiExportState>>) -> serde_json::Value {
-    let snapshot = state.lock().map(|guard| guard.clone()).unwrap_or(UiExportState {
-        connected: false,
-        stream_enabled: false,
-        decoded_text_lines: Vec::new(),
-        last_error: Some("failed to lock UI state".to_string()),
-        last_status_raw: None,
-    });
+    let snapshot = state
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or(UiExportState {
+            connected: false,
+            stream_enabled: false,
+            decoded_text_lines: Vec::new(),
+            total_words: 0,
+            lcd_writes: 0,
+            last_error: Some("failed to lock UI state".to_string()),
+            last_status_raw: None,
+        });
     match action {
         "get_text" => json!({
             "status": "ok",
             "connected": snapshot.connected,
             "stream_enabled": snapshot.stream_enabled,
             "lines": snapshot.decoded_text_lines,
+            "total_words": snapshot.total_words,
+            "lcd_writes": snapshot.lcd_writes,
             "last_error": snapshot.last_error,
             "last_status": snapshot.last_status_raw,
         }),
@@ -155,6 +174,8 @@ fn build_ui_socket_response(action: &str, state: &Arc<Mutex<UiExportState>>) -> 
             "connected": snapshot.connected,
             "stream_enabled": snapshot.stream_enabled,
             "line_count": snapshot.decoded_text_lines.len(),
+            "total_words": snapshot.total_words,
+            "lcd_writes": snapshot.lcd_writes,
             "last_error": snapshot.last_error,
             "last_status": snapshot.last_status_raw,
         }),

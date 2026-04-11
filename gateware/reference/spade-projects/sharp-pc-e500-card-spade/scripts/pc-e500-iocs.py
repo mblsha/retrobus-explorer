@@ -7,59 +7,65 @@ from __future__ import annotations
 
 import argparse
 import json
-import socket
 import sys
 import time
 from pathlib import Path
 
+from pc_e500_supervisor_client import DEFAULT_SOCKET, send_request
 
-DEFAULT_SOCKET = Path.home() / ".cache" / "pc-e500-expd.sock"
-RUST_DAEMON_SOCKET = Path("/tmp/pc-e500-expd-rs.sock")
 DEFAULT_UI_SOCKET = Path("/tmp/pc-e500-live-display.sock")
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 EXPERIMENT_SCRIPT = PROJECT_DIR / "experiments" / "iocs_sequence.py"
 
 
-def send_request(socket_path: Path, payload: dict[str, object]) -> dict[str, object]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(socket_path))
-        client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-        response = bytearray()
-        while True:
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            response.extend(chunk)
-            if b"\n" in chunk:
-                break
-    if not response:
-        raise RuntimeError("daemon returned no response")
-    return json.loads(response.decode("utf-8"))
+def read_ui_state(socket_path: Path) -> dict[str, object] | None:
+    if not socket_path.exists():
+        return None
+    try:
+        return send_request(socket_path, {"action": "get_text"})
+    except OSError:
+        return None
 
 
-def resolve_socket(socket_path: Path) -> Path:
-    if socket_path.exists():
-        return socket_path
-    if socket_path == DEFAULT_SOCKET and RUST_DAEMON_SOCKET.exists():
-        return RUST_DAEMON_SOCKET
-    return socket_path
+def ui_state_fresh_enough(
+    current: dict[str, object],
+    baseline: dict[str, object] | None,
+) -> bool:
+    if current.get("status") != "ok":
+        return False
+    if baseline is None:
+        return True
+    current_words = current.get("total_words")
+    baseline_words = baseline.get("total_words")
+    current_writes = current.get("lcd_writes")
+    baseline_writes = baseline.get("lcd_writes")
+    if isinstance(current_words, int) and isinstance(baseline_words, int) and current_words > baseline_words:
+        return True
+    if isinstance(current_writes, int) and isinstance(baseline_writes, int) and current_writes > baseline_writes:
+        return True
+    return False
 
 
-def try_ui_render(socket_path: Path, *, retries: int = 5, delay_s: float = 0.1) -> dict[str, object] | None:
+def try_ui_render(
+    socket_path: Path,
+    *,
+    baseline: dict[str, object] | None,
+    retries: int = 5,
+    delay_s: float = 0.1,
+) -> dict[str, object] | None:
     if not socket_path.exists():
         return None
     last = None
     for _ in range(retries):
-        try:
-            last = send_request(socket_path, {"action": "get_text"})
-        except OSError:
-            last = None
-        if last and last.get("status") == "ok":
+        last = read_ui_state(socket_path)
+        if last and ui_state_fresh_enough(last, baseline):
             lines = last.get("lines")
             if isinstance(lines, list) and any(isinstance(line, str) and line for line in lines):
                 return last
         time.sleep(delay_s)
-    return last
+    if last and ui_state_fresh_enough(last, baseline):
+        return last
+    return None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -208,7 +214,8 @@ def format_summary(response: dict[str, object]) -> str:
 
 def main() -> int:
     args = build_parser().parse_args()
-    socket_path = resolve_socket(args.socket)
+    socket_path = args.socket
+    ui_before = read_ui_state(DEFAULT_UI_SOCKET)
     script_args = build_script_args(args)
     request = {
         "action": "run",
@@ -231,7 +238,7 @@ def main() -> int:
             },
         )
     if response.get("status") == "ok":
-        ui_render = try_ui_render(DEFAULT_UI_SOCKET)
+        ui_render = try_ui_render(DEFAULT_UI_SOCKET, baseline=ui_before)
         if ui_render is not None:
             response["ui_render"] = ui_render
     if args.verbose:

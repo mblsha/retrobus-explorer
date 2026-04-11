@@ -30,7 +30,8 @@ pub struct Pce500FontMap {
 
 impl Pce500FontMap {
     pub fn load_default() -> Result<Self> {
-        let rom_path = default_rom_path().context("could not locate a PC-E500 ROM for text decode")?;
+        let rom_path =
+            default_rom_path().context("could not locate a PC-E500 ROM for text decode")?;
         let rom = fs::read(&rom_path)
             .with_context(|| format!("failed to read ROM {}", rom_path.display()))?;
         Ok(Self::from_pce500_rom(&rom, ROM_WINDOW_START))
@@ -163,7 +164,11 @@ fn default_rom_path() -> Option<PathBuf> {
     None
 }
 
-fn insert_pattern(glyphs: &mut HashMap<[u8; GLYPH_WIDTH], char>, pattern: [u8; GLYPH_WIDTH], ch: char) {
+fn insert_pattern(
+    glyphs: &mut HashMap<[u8; GLYPH_WIDTH], char>,
+    pattern: [u8; GLYPH_WIDTH],
+    ch: char,
+) {
     if pattern.iter().all(|byte| (byte & 0x7F) == 0) && ch != ' ' {
         return;
     }
@@ -188,7 +193,11 @@ fn external_addr_offset(rom: &[u8], absolute_addr: u32, rom_window_start: u32) -
     None
 }
 
-fn read_pattern_at(rom: &[u8], absolute_addr: u32, rom_window_start: u32) -> Option<[u8; GLYPH_WIDTH]> {
+fn read_pattern_at(
+    rom: &[u8],
+    absolute_addr: u32,
+    rom_window_start: u32,
+) -> Option<[u8; GLYPH_WIDTH]> {
     let start = external_addr_offset(rom, absolute_addr, rom_window_start)?;
     if start + GLYPH_WIDTH > rom.len() {
         return None;
