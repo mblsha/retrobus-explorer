@@ -1,5 +1,7 @@
+.socket.jitx
 .venv/
+.venv_sync_last
 __pycache__/
 *.pyc
-.socket.jitx
 designs/
+parts-db/

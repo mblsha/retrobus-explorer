@@ -15,6 +15,7 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
+from jitx.via import Via, ViaType
 
 from pin_tester.components import (
     GroundCornerTestPad,
@@ -47,6 +48,13 @@ DATA_HEADER_MARKER_OFFSET_Y = 5.08
 class PinTesterSubstrate(Substrate):
     stackup = SampleStackup(4)
     constraints = SampleFabConstraints()
+
+    class StandardThroughVia(Via):
+        start_layer = 0
+        stop_layer = 3
+        diameter = 0.6
+        hole_diameter = 0.3
+        type = ViaType.MechanicalDrill
 
 
 class PowerPins(Circuit):
