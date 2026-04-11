@@ -40,6 +40,10 @@ pub struct Device {
     handle: FtHandle,
 }
 
+// The FT handle is process-local and only ever moved to a single owner thread.
+// We do not share a Device concurrently across threads.
+unsafe impl Send for Device {}
+
 impl Device {
     pub fn open_default(
         library_path: Option<&Path>,

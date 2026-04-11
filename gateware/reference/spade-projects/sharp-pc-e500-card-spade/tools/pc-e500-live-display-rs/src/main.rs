@@ -3,6 +3,7 @@ mod backend;
 mod d3xx;
 mod lcd;
 mod protocol;
+mod text;
 
 use anyhow::Result;
 use app::LiveDisplayApp;

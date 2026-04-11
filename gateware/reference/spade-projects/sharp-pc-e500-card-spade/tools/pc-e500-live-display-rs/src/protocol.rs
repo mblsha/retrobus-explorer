@@ -4,8 +4,15 @@ pub const DEFAULT_PIPE_ID: u8 = 0x00;
 pub const DEFAULT_READ_SIZE: usize = 64 * 1024;
 pub const DEFAULT_READ_TIMEOUT_MS: u32 = 20;
 pub const DEFAULT_STREAM_SIZE: u32 = 4;
-pub const LCD_WRITE_ADDR_MIN: u32 = 0x0A000;
-pub const LCD_WRITE_ADDR_MAX: u32 = 0x0A010;
+
+pub fn is_lcd_write_address(addr: u32) -> bool {
+    let addr_hi = addr & 0xf000;
+    if addr_hi != 0x2000 && addr_hi != 0xa000 {
+        return false;
+    }
+    let addr_lo = addr & 0x000f;
+    addr_lo <= 0x000e && (addr_lo & 0x01) == 0
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct StreamStatus {
@@ -135,5 +142,16 @@ mod tests {
         assert_eq!(word.data, ((raw >> 18) & 0xff) as u8);
         assert_eq!(word.status, ((raw >> 26) & 0x3f) as u8);
         assert_eq!(word.rw(), (word.status & 0x01) != 0);
+    }
+
+    #[test]
+    fn lcd_write_address_matches_both_controller_mirrors() {
+        assert!(is_lcd_write_address(0x0A004));
+        assert!(is_lcd_write_address(0x02004));
+        assert!(is_lcd_write_address(0x0A006));
+        assert!(is_lcd_write_address(0x02006));
+        assert!(!is_lcd_write_address(0x0A005));
+        assert!(!is_lcd_write_address(0x02005));
+        assert!(!is_lcd_write_address(0x01234));
     }
 }

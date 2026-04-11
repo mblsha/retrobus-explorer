@@ -322,7 +322,66 @@ class ExperimentDaemon:
         self.uart.synchronize_rx_boundary()
         self.uart.write_rom_byte(CMD_SEQ, seq)
 
-    def _handle_timeout(self, *, run_id: str, reason: str) -> dict[str, Any]:
+    def _build_ft_capture_payload(
+        self,
+        *,
+        plan: dict[str, Any],
+        ft_capture_result: Any,
+        measurements: list[Any],
+    ) -> dict[str, Any]:
+        start_tag = int(plan.get("start_tag", 0x11)) & 0xFF
+        stop_tag = int(plan.get("stop_tag", 0x12)) & 0xFF
+        preview_words = preview_event_stream(ft_capture_result.words, limit=32, compact=False)
+        compact_preview_words = preview_event_stream(ft_capture_result.words, limit=64, compact=True)
+        execution_preview_words = preview_event_stream(
+            ft_capture_result.words,
+            limit=64,
+            compact=True,
+            window="execution",
+        )
+        measurement_preview_words = preview_event_stream(
+            ft_capture_result.words,
+            limit=64,
+            compact=True,
+            window="measurement",
+            start_tag=start_tag,
+            stop_tag=stop_tag,
+        )
+        return {
+            "enabled": True,
+            "word_count": len(ft_capture_result.words),
+            "raw_bytes": ft_capture_result.raw_bytes,
+            "chunk_count": ft_capture_result.chunk_count,
+            "pending_bytes_hex": ft_capture_result.pending_bytes_hex,
+            "decode_swap_u16": ft_capture_result.decode_swap_u16,
+            "drain_idle_s": ft_capture_result.drain_idle_s,
+            "drain_hard_s": ft_capture_result.drain_hard_s,
+            "retained_words": ft_capture_result.retained_words,
+            "total_words_seen": ft_capture_result.total_words_seen,
+            "max_retained_words": ft_capture_result.max_retained_words,
+            "truncated_head": ft_capture_result.truncated_head,
+            "health": "ok" if all(m.ft_overflow == 0 for m in measurements) else "overflow",
+            "words": ft_capture_result.words,
+            "preview": preview_words,
+            "compact_preview": compact_preview_words,
+            "execution_preview": execution_preview_words,
+            "measurement_preview": measurement_preview_words,
+        }
+
+    def _handle_timeout(
+        self,
+        *,
+        run_id: str,
+        reason: str,
+        plan: dict[str, Any] | None = None,
+        script_path: Path | None = None,
+        script_args: list[str] | None = None,
+        timing: int | None = None,
+        control_timing: int | None = None,
+        measurements: list[Any] | None = None,
+        uart_lines: list[str] | None = None,
+        ft_capture_result: Any | None = None,
+    ) -> dict[str, Any]:
         self.status = "needs_reset"
         self.needs_reset = True
         self.last_error = reason
@@ -345,6 +404,25 @@ class ExperimentDaemon:
             "message": "Reset the PC-E500 and run CALL &10000 again.",
             "error": reason,
         }
+        if plan is not None:
+            payload["experiment"] = plan.get("name", Path(script_path or "<unknown>").stem)
+            payload["script_path"] = str(script_path) if script_path is not None else None
+            payload["script_args"] = list(script_args or [])
+            payload["timing"] = timing
+            payload["control_timing"] = control_timing
+            payload["measurement"] = [measurement.__dict__ for measurement in (measurements or [])]
+            payload["uart_lines"] = list(uart_lines or [])
+            payload["plan"] = {
+                key: value
+                for key, value in plan.items()
+                if not key.startswith("_")
+            }
+        if plan is not None and ft_capture_result is not None:
+            payload["ft_capture"] = self._build_ft_capture_payload(
+                plan=plan,
+                ft_capture_result=ft_capture_result,
+                measurements=measurements or [],
+            )
         self.last_result = payload
         return payload
 
@@ -402,12 +480,26 @@ class ExperimentDaemon:
             begin_line = self.uart.wait_for_line(lambda text: text == begin_text, timeout_s, start_index=line_index)
             end_line = self.uart.wait_for_line(lambda text: text.startswith(end_prefix), timeout_s, start_index=line_index)
         except TimeoutError as exc:
+            ft_capture_result = None
             if ft_capture is not None:
                 try:
-                    ft_capture.stop()
+                    ft_capture_result = ft_capture.stop()
                 except Exception:
                     pass
-            return self._handle_timeout(run_id=run_id, reason=str(exc))
+            measurements = self.uart.dump_measurements()
+            xr_lines = [line.text for line in self.uart.lines_since(line_index) if line.text.startswith("XR,")]
+            return self._handle_timeout(
+                run_id=run_id,
+                reason=str(exc),
+                plan=plan,
+                script_path=Path(plan["_script_path"]),
+                script_args=list(plan["_script_args"]),
+                timing=timing,
+                control_timing=control_timing,
+                measurements=measurements,
+                uart_lines=xr_lines,
+                ft_capture_result=ft_capture_result,
+            )
 
         ft_capture_result = ft_capture.stop() if ft_capture is not None else None
         measurements = self.uart.dump_measurements()
@@ -433,44 +525,11 @@ class ExperimentDaemon:
             },
         }
         if ft_capture_result is not None:
-            start_tag = int(plan.get("start_tag", 0x11)) & 0xFF
-            stop_tag = int(plan.get("stop_tag", 0x12)) & 0xFF
-            preview_words = preview_event_stream(ft_capture_result.words, limit=32, compact=False)
-            compact_preview_words = preview_event_stream(ft_capture_result.words, limit=64, compact=True)
-            execution_preview_words = preview_event_stream(
-                ft_capture_result.words,
-                limit=64,
-                compact=True,
-                window="execution",
+            result["ft_capture"] = self._build_ft_capture_payload(
+                plan=plan,
+                ft_capture_result=ft_capture_result,
+                measurements=measurements,
             )
-            measurement_preview_words = preview_event_stream(
-                ft_capture_result.words,
-                limit=64,
-                compact=True,
-                window="measurement",
-                start_tag=start_tag,
-                stop_tag=stop_tag,
-            )
-            result["ft_capture"] = {
-                "enabled": True,
-                "word_count": len(ft_capture_result.words),
-                "raw_bytes": ft_capture_result.raw_bytes,
-                "chunk_count": ft_capture_result.chunk_count,
-                "pending_bytes_hex": ft_capture_result.pending_bytes_hex,
-                "decode_swap_u16": ft_capture_result.decode_swap_u16,
-                "drain_idle_s": ft_capture_result.drain_idle_s,
-                "drain_hard_s": ft_capture_result.drain_hard_s,
-                "retained_words": ft_capture_result.retained_words,
-                "total_words_seen": ft_capture_result.total_words_seen,
-                "max_retained_words": ft_capture_result.max_retained_words,
-                "truncated_head": ft_capture_result.truncated_head,
-                "health": "ok" if all(m.ft_overflow == 0 for m in measurements) else "overflow",
-                "words": ft_capture_result.words,
-                "preview": preview_words,
-                "compact_preview": compact_preview_words,
-                "execution_preview": execution_preview_words,
-                "measurement_preview": measurement_preview_words,
-            }
 
         parsed = self._parse_experiment_result(Path(plan["_script_path"]), list(plan["_script_args"]), result)
         if parsed is not None:

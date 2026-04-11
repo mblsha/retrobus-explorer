@@ -9,10 +9,13 @@ import argparse
 import json
 import socket
 import sys
+import time
 from pathlib import Path
 
 
 DEFAULT_SOCKET = Path.home() / ".cache" / "pc-e500-expd.sock"
+RUST_DAEMON_SOCKET = Path("/tmp/pc-e500-expd-rs.sock")
+DEFAULT_UI_SOCKET = Path("/tmp/pc-e500-live-display.sock")
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 EXPERIMENT_SCRIPT = PROJECT_DIR / "experiments" / "iocs_sequence.py"
 
@@ -32,6 +35,31 @@ def send_request(socket_path: Path, payload: dict[str, object]) -> dict[str, obj
     if not response:
         raise RuntimeError("daemon returned no response")
     return json.loads(response.decode("utf-8"))
+
+
+def resolve_socket(socket_path: Path) -> Path:
+    if socket_path.exists():
+        return socket_path
+    if socket_path == DEFAULT_SOCKET and RUST_DAEMON_SOCKET.exists():
+        return RUST_DAEMON_SOCKET
+    return socket_path
+
+
+def try_ui_render(socket_path: Path, *, retries: int = 5, delay_s: float = 0.1) -> dict[str, object] | None:
+    if not socket_path.exists():
+        return None
+    last = None
+    for _ in range(retries):
+        try:
+            last = send_request(socket_path, {"action": "get_text"})
+        except OSError:
+            last = None
+        if last and last.get("status") == "ok":
+            lines = last.get("lines")
+            if isinstance(lines, list) and any(isinstance(line, str) and line for line in lines):
+                return last
+        time.sleep(delay_s)
+    return last
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -120,10 +148,23 @@ def build_script_args(args: argparse.Namespace) -> list[str]:
     raise RuntimeError(f"unknown command {args.command!r}")
 
 
+def has_flag(script_args: list[str], flag: str) -> bool:
+    return flag in script_args
+
+
+def insert_global_flag(script_args: list[str], flag: str) -> list[str]:
+    commands = {"clear", "cursor", "text", "clear-text", "spec", "run"}
+    for index, value in enumerate(script_args):
+        if value in commands:
+            return [*script_args[:index], flag, *script_args[index:]]
+    return [*script_args, flag]
+
+
 def format_summary(response: dict[str, object]) -> str:
     parsed = response.get("parsed") or {}
     measurement = parsed.get("first_measurement") or {}
     display_summary = parsed.get("display_summary") or {}
+    ui_render = response.get("ui_render") or {}
     lines = [
         f"experiment: {response.get('experiment', '<unknown>')}",
         f"status: {response.get('status', '<unknown>')}",
@@ -147,6 +188,15 @@ def format_summary(response: dict[str, object]) -> str:
             f"bytes={parsed.get('ft_raw_bytes')} "
             f"chunks={parsed.get('ft_chunk_count')}"
         )
+    rendered_lines = ui_render.get("lines") if isinstance(ui_render, dict) else None
+    if isinstance(rendered_lines, list):
+        actual_lines = [line for line in rendered_lines if isinstance(line, str)]
+        if actual_lines:
+            lines.append("render: rust-ui")
+            for index, line in enumerate(actual_lines):
+                if line:
+                    lines.append(f"lcd_row{index}: {line}")
+            return "\n".join(lines)
     if display_summary:
         lines.append(f"lcd: writes={display_summary.get('lcd_write_count')}")
         text_lines = display_summary.get("lcd_text_lines") or []
@@ -158,12 +208,32 @@ def format_summary(response: dict[str, object]) -> str:
 
 def main() -> int:
     args = build_parser().parse_args()
+    socket_path = resolve_socket(args.socket)
+    script_args = build_script_args(args)
     request = {
         "action": "run",
         "script": str(EXPERIMENT_SCRIPT),
-        "script_args": build_script_args(args),
+        "script_args": script_args,
     }
-    response = send_request(args.socket, request)
+    response = send_request(socket_path, request)
+    if (
+        response.get("status") == "error"
+        and response.get("error") == "FT capture requested but daemon started with FT disabled"
+        and not has_flag(script_args, "--no-ft-capture")
+    ):
+        retry_args = insert_global_flag(script_args, "--no-ft-capture")
+        response = send_request(
+            socket_path,
+            {
+                "action": "run",
+                "script": str(EXPERIMENT_SCRIPT),
+                "script_args": retry_args,
+            },
+        )
+    if response.get("status") == "ok":
+        ui_render = try_ui_render(DEFAULT_UI_SOCKET)
+        if ui_render is not None:
+            response["ui_render"] = ui_render
     if args.verbose:
         print(json.dumps(response, indent=2, sort_keys=True))
     else:
