@@ -26,6 +26,7 @@ struct UiExportState {
     decoded_text_lines: Vec<String>,
     total_words: u64,
     lcd_writes: u64,
+    render_generation: u64,
     last_error: Option<String>,
     last_status_raw: Option<String>,
 }
@@ -38,6 +39,7 @@ impl From<&BackendSnapshot> for UiExportState {
             decoded_text_lines: snapshot.decoded_text_lines.clone(),
             total_words: snapshot.total_words,
             lcd_writes: snapshot.lcd_writes,
+            render_generation: snapshot.render_generation,
             last_error: snapshot.last_error.clone(),
             last_status_raw: snapshot
                 .last_status
@@ -155,6 +157,7 @@ fn build_ui_socket_response(action: &str, state: &Arc<Mutex<UiExportState>>) -> 
             decoded_text_lines: Vec::new(),
             total_words: 0,
             lcd_writes: 0,
+            render_generation: 0,
             last_error: Some("failed to lock UI state".to_string()),
             last_status_raw: None,
         });
@@ -166,6 +169,7 @@ fn build_ui_socket_response(action: &str, state: &Arc<Mutex<UiExportState>>) -> 
             "lines": snapshot.decoded_text_lines,
             "total_words": snapshot.total_words,
             "lcd_writes": snapshot.lcd_writes,
+            "render_generation": snapshot.render_generation,
             "last_error": snapshot.last_error,
             "last_status": snapshot.last_status_raw,
         }),
@@ -176,6 +180,7 @@ fn build_ui_socket_response(action: &str, state: &Arc<Mutex<UiExportState>>) -> 
             "line_count": snapshot.decoded_text_lines.len(),
             "total_words": snapshot.total_words,
             "lcd_writes": snapshot.lcd_writes,
+            "render_generation": snapshot.render_generation,
             "last_error": snapshot.last_error,
             "last_status": snapshot.last_status_raw,
         }),

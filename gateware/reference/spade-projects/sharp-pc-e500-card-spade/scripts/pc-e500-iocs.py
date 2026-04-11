@@ -146,11 +146,11 @@ def format_summary(response: dict[str, object]) -> str:
     rendered_lines = ui_render.get("lines") if isinstance(ui_render, dict) else None
     if isinstance(rendered_lines, list):
         actual_lines = [line for line in rendered_lines if isinstance(line, str)]
-        if actual_lines:
+        nonempty_lines = [(index, line) for index, line in enumerate(actual_lines) if line]
+        if nonempty_lines:
             lines.append("render: rust-ui")
-            for index, line in enumerate(actual_lines):
-                if line:
-                    lines.append(f"lcd_row{index}: {line}")
+            for index, line in nonempty_lines:
+                lines.append(f"lcd_row{index}: {line}")
             return "\n".join(lines)
     if display_summary:
         lines.append(f"lcd: writes={display_summary.get('lcd_write_count')}")

@@ -17,7 +17,7 @@ use crate::protocol::{
 };
 use crate::text::Pce500FontMap;
 use anyhow::{anyhow, Context, Result};
-use crossbeam_channel::{unbounded, Receiver, Sender};
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use serde_json::{json, Value};
 
 #[cfg(target_os = "macos")]
@@ -95,6 +95,7 @@ pub struct BackendSnapshot {
     pub decoded_text_lines: Vec<String>,
     pub total_words: u64,
     pub lcd_writes: u64,
+    pub render_generation: u64,
     pub last_status: Option<StreamStatus>,
     pub last_uart_line: Option<String>,
     pub recent_uart_lines: Vec<String>,
@@ -110,6 +111,7 @@ impl Default for BackendSnapshot {
             decoded_text_lines: Vec::new(),
             total_words: 0,
             lcd_writes: 0,
+            render_generation: 0,
             last_status: None,
             last_uart_line: None,
             recent_uart_lines: Vec::new(),
@@ -187,6 +189,10 @@ fn run_session(
     )?;
     let mut ft_reader =
         spawn_ft_reader(ft, config.pipe_id, config.read_size, config.read_timeout_ms);
+    let mut daemon_controller = config
+        .daemon_socket
+        .as_ref()
+        .map(|socket_path| spawn_daemon_controller(socket_path.clone()));
     let mut lcd = LcdModel::default();
     let font = Pce500FontMap::load_default().ok();
     let mut pending = Vec::new();
@@ -204,7 +210,7 @@ fn run_session(
         if uart.is_some() || config.daemon_socket.is_some() {
             enable_stream_and_refresh(
                 uart.as_mut(),
-                config.daemon_socket.as_deref(),
+                daemon_controller.as_ref(),
                 &mut snapshot,
                 &mut recent_lines,
             )?;
@@ -220,18 +226,34 @@ fn run_session(
         let mut last_publish = Instant::now();
         let mut last_status_poll = Instant::now();
         let mut desired_stream_enabled = uart.is_some() || config.daemon_socket.is_some();
+        let mut daemon_requests_in_flight: usize = if daemon_controller.is_some() { 4 } else { 0 };
         let mut stop_requested = false;
 
         loop {
+            if let Some(controller) = daemon_controller.as_ref() {
+                for response in controller.response_rx.try_iter() {
+                    daemon_requests_in_flight = daemon_requests_in_flight.saturating_sub(1);
+                    match response {
+                        Ok(payload) => {
+                            apply_daemon_response(&payload, &mut snapshot, &mut recent_lines)
+                        }
+                        Err(err) => snapshot.last_error = Some(err),
+                    }
+                }
+            }
+
             while let Ok(command) = commands.try_recv() {
                 match command {
                     BackendCommand::EnableStream => {
                         enable_stream_and_refresh(
                             uart.as_mut(),
-                            config.daemon_socket.as_deref(),
+                            daemon_controller.as_ref(),
                             &mut snapshot,
                             &mut recent_lines,
                         )?;
+                        if daemon_controller.is_some() {
+                            daemon_requests_in_flight += 4;
+                        }
                         reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
                         discard_ft_backlog(&ft_reader.rx, &mut pending);
                         desired_stream_enabled = true;
@@ -239,12 +261,9 @@ fn run_session(
                     BackendCommand::DisableStream => {
                         if let Some(uart) = uart.as_mut() {
                             send_uart_command(uart, "F0")?;
-                        } else if let Some(socket_path) = config.daemon_socket.as_deref() {
-                            apply_daemon_response(
-                                &daemon_request(socket_path, "stream_off")?,
-                                &mut snapshot,
-                                &mut recent_lines,
-                            );
+                        } else if let Some(controller) = daemon_controller.as_ref() {
+                            controller.enqueue(json!({ "action": "stream_off" }))?;
+                            daemon_requests_in_flight += 1;
                         }
                         snapshot.stream_enabled = false;
                         desired_stream_enabled = false;
@@ -252,12 +271,11 @@ fn run_session(
                     BackendCommand::PollStatus => {
                         if let Some(uart) = uart.as_mut() {
                             send_uart_command(uart, "F?")?;
-                        } else if let Some(socket_path) = config.daemon_socket.as_deref() {
-                            apply_daemon_response(
-                                &daemon_request(socket_path, "stream_status")?,
-                                &mut snapshot,
-                                &mut recent_lines,
-                            );
+                        } else if let Some(controller) = daemon_controller.as_ref() {
+                            if daemon_requests_in_flight == 0 {
+                                controller.enqueue(json!({ "action": "stream_status" }))?;
+                                daemon_requests_in_flight += 1;
+                            }
                         }
                     }
                     BackendCommand::Stop => {
@@ -278,9 +296,13 @@ fn run_session(
             if last_status_poll.elapsed() >= Duration::from_secs(1) {
                 if let Some(uart) = uart.as_mut() {
                     let _ = send_uart_command(uart, "F?");
-                } else if let Some(socket_path) = config.daemon_socket.as_deref() {
-                    if let Ok(response) = daemon_request(socket_path, "stream_status") {
-                        apply_daemon_response(&response, &mut snapshot, &mut recent_lines);
+                } else if let Some(controller) = daemon_controller.as_ref() {
+                    if daemon_requests_in_flight == 0
+                        && controller
+                            .enqueue(json!({ "action": "stream_status" }))
+                            .is_ok()
+                    {
+                        daemon_requests_in_flight += 1;
                     }
                 }
                 last_status_poll = Instant::now();
@@ -298,10 +320,13 @@ fn run_session(
             if desired_stream_enabled && (stream_latch_missing || continuous_source_missing) {
                 enable_stream_and_refresh(
                     uart.as_mut(),
-                    config.daemon_socket.as_deref(),
+                    daemon_controller.as_ref(),
                     &mut snapshot,
                     &mut recent_lines,
                 )?;
+                if daemon_controller.is_some() {
+                    daemon_requests_in_flight += 4;
+                }
                 reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
                 discard_ft_backlog(&ft_reader.rx, &mut pending);
             }
@@ -334,6 +359,9 @@ fn run_session(
     })();
 
     ft_reader.stop();
+    if let Some(controller) = daemon_controller.as_mut() {
+        controller.stop();
+    }
     session_result
 }
 
@@ -342,6 +370,32 @@ struct FtReaderHandle {
     error_rx: Receiver<anyhow::Error>,
     stop_tx: Sender<()>,
     join_handle: Option<JoinHandle<()>>,
+}
+
+enum DaemonControlRequest {
+    Json(Value),
+    Stop,
+}
+
+struct DaemonControllerHandle {
+    response_rx: Receiver<Result<Value, String>>,
+    request_tx: Sender<DaemonControlRequest>,
+    join_handle: Option<JoinHandle<()>>,
+}
+
+impl DaemonControllerHandle {
+    fn enqueue(&self, request: Value) -> Result<()> {
+        self.request_tx
+            .send(DaemonControlRequest::Json(request))
+            .map_err(|_| anyhow!("daemon control thread is not available"))
+    }
+
+    fn stop(&mut self) {
+        let _ = self.request_tx.send(DaemonControlRequest::Stop);
+        if let Some(join_handle) = self.join_handle.take() {
+            let _ = join_handle.join();
+        }
+    }
 }
 
 impl FtReaderHandle {
@@ -389,6 +443,30 @@ fn spawn_ft_reader(
     }
 }
 
+fn spawn_daemon_controller(socket_path: PathBuf) -> DaemonControllerHandle {
+    let (request_tx, request_rx) = bounded::<DaemonControlRequest>(32);
+    let (response_tx, response_rx) = unbounded::<Result<Value, String>>();
+    let join_handle = thread::spawn(move || {
+        while let Ok(request) = request_rx.recv() {
+            match request {
+                DaemonControlRequest::Json(payload) => {
+                    let response =
+                        daemon_json_request(&socket_path, payload).map_err(|err| err.to_string());
+                    if response_tx.send(response).is_err() {
+                        break;
+                    }
+                }
+                DaemonControlRequest::Stop => break,
+            }
+        }
+    });
+    DaemonControllerHandle {
+        response_rx,
+        request_tx,
+        join_handle: Some(join_handle),
+    }
+}
+
 fn reset_local_display_state(
     lcd: &mut LcdModel,
     pending: &mut Vec<u8>,
@@ -425,6 +503,7 @@ fn process_ft_chunk(
         }
         if lcd.apply_raw(word.addr, word.data).is_ok() {
             snapshot.lcd_writes += 1;
+            snapshot.render_generation += 1;
         }
     }
 }
@@ -471,7 +550,7 @@ fn set_safe_timing_defaults(port: &mut PortHandle) -> Result<()> {
 
 fn enable_stream_and_refresh(
     uart: Option<&mut PortHandle>,
-    daemon_socket: Option<&std::path::Path>,
+    daemon_controller: Option<&DaemonControllerHandle>,
     snapshot: &mut BackendSnapshot,
     recent_lines: &mut VecDeque<String>,
 ) -> Result<()> {
@@ -481,37 +560,15 @@ fn enable_stream_and_refresh(
         send_uart_command(uart, "F0")?;
         send_uart_command(uart, "F1")?;
         send_uart_command(uart, "F?")?;
-    } else if let Some(socket_path) = daemon_socket {
-        apply_daemon_response(
-            &daemon_json_request(
-                socket_path,
-                json!({ "action": "stream_config", "cfg": 0x03, "mode": 0x00 }),
-            )?,
-            snapshot,
-            recent_lines,
-        );
-        apply_daemon_response(
-            &daemon_request(socket_path, "stream_off")?,
-            snapshot,
-            recent_lines,
-        );
-        apply_daemon_response(
-            &daemon_request(socket_path, "stream_on")?,
-            snapshot,
-            recent_lines,
-        );
-        apply_daemon_response(
-            &daemon_request(socket_path, "stream_status")?,
-            snapshot,
-            recent_lines,
-        );
+    } else if let Some(controller) = daemon_controller {
+        controller.enqueue(json!({ "action": "stream_config", "cfg": 0x03, "mode": 0x00 }))?;
+        controller.enqueue(json!({ "action": "stream_off" }))?;
+        controller.enqueue(json!({ "action": "stream_on" }))?;
+        controller.enqueue(json!({ "action": "stream_status" }))?;
+        push_uart_line(snapshot, recent_lines, "queued F0/F1/F? via daemon");
     }
     snapshot.stream_enabled = true;
     Ok(())
-}
-
-fn daemon_request(socket_path: &std::path::Path, action: &str) -> Result<Value> {
-    daemon_json_request(socket_path, json!({ "action": action }))
 }
 
 fn daemon_json_request(socket_path: &std::path::Path, request: Value) -> Result<Value> {
