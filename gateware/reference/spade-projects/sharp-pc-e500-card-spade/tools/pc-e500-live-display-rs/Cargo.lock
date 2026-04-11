@@ -1443,6 +1443,7 @@ dependencies = [
  "crossbeam-channel",
  "eframe",
  "egui",
+ "libc",
  "libloading",
  "serialport",
 ]

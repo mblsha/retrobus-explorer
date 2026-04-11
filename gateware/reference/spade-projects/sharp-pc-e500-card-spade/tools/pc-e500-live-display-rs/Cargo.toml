@@ -8,5 +8,6 @@ anyhow = "1.0"
 crossbeam-channel = "0.5"
 eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
 egui = "0.31"
+libc = "0.2"
 libloading = "0.8"
 serialport = "4.8"
