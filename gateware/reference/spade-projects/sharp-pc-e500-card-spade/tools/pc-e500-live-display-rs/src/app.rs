@@ -1,30 +1,64 @@
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use eframe::egui::{
     self, Align, Color32, ColorImage, CornerRadius, Frame, Grid, RichText, ScrollArea, Sense,
     Stroke, TextureHandle, TextureOptions,
 };
+use serde_json::json;
 
 use crate::backend::{
     spawn_backend, BackendCommand, BackendConfig, BackendHandle, BackendSnapshot,
 };
 use crate::lcd::{DISPLAY_HEIGHT, DISPLAY_WIDTH};
 
+const DEFAULT_UI_SOCKET: &str = "/tmp/pc-e500-live-display.sock";
+
+#[derive(Clone, Debug)]
+struct UiExportState {
+    connected: bool,
+    stream_enabled: bool,
+    decoded_text_lines: Vec<String>,
+    last_error: Option<String>,
+    last_status_raw: Option<String>,
+}
+
+impl From<&BackendSnapshot> for UiExportState {
+    fn from(snapshot: &BackendSnapshot) -> Self {
+        Self {
+            connected: snapshot.connected,
+            stream_enabled: snapshot.stream_enabled,
+            decoded_text_lines: snapshot.decoded_text_lines.clone(),
+            last_error: snapshot.last_error.clone(),
+            last_status_raw: snapshot.last_status.as_ref().map(|status| status.raw.clone()),
+        }
+    }
+}
+
 pub struct LiveDisplayApp {
     backend_config: BackendConfig,
     backend: BackendHandle,
     snapshot: BackendSnapshot,
     texture: Option<TextureHandle>,
+    export_state: Arc<Mutex<UiExportState>>,
 }
 
 impl LiveDisplayApp {
     pub fn new(config: BackendConfig) -> Self {
         let backend = spawn_backend(config.clone());
+        let export_state = Arc::new(Mutex::new(UiExportState::from(&BackendSnapshot::default())));
+        spawn_ui_socket_server(PathBuf::from(DEFAULT_UI_SOCKET), export_state.clone());
         Self {
             backend_config: config,
             backend,
             snapshot: BackendSnapshot::default(),
             texture: None,
+            export_state,
         }
     }
 
@@ -36,6 +70,9 @@ impl LiveDisplayApp {
     fn pump_updates(&mut self, ctx: &egui::Context) {
         while let Ok(snapshot) = self.backend.updates.try_recv() {
             self.snapshot = snapshot;
+            if let Ok(mut export_state) = self.export_state.lock() {
+                *export_state = UiExportState::from(&self.snapshot);
+            }
             self.upload_texture(ctx);
         }
     }
@@ -68,6 +105,59 @@ impl LiveDisplayApp {
 
     fn send(&self, command: BackendCommand) {
         let _ = self.backend.commands.send(command);
+    }
+}
+
+fn spawn_ui_socket_server(socket_path: PathBuf, state: Arc<Mutex<UiExportState>>) {
+    thread::spawn(move || {
+        if socket_path.exists() {
+            let _ = fs::remove_file(&socket_path);
+        }
+        let listener = match UnixListener::bind(&socket_path) {
+            Ok(listener) => listener,
+            Err(_) => return,
+        };
+        while let Ok((mut stream, _)) = listener.accept() {
+            let mut request = String::new();
+            let _ = BufReader::new(&stream).read_line(&mut request);
+            let action = serde_json::from_str::<serde_json::Value>(&request)
+                .ok()
+                .and_then(|value| value.get("action").and_then(|v| v.as_str()).map(str::to_string))
+                .unwrap_or_else(|| "status".to_string());
+            let payload = build_ui_socket_response(&action, &state);
+            let _ = stream.write_all(payload.to_string().as_bytes());
+            let _ = stream.write_all(b"\n");
+            let _ = stream.flush();
+        }
+        let _ = fs::remove_file(&socket_path);
+    });
+}
+
+fn build_ui_socket_response(action: &str, state: &Arc<Mutex<UiExportState>>) -> serde_json::Value {
+    let snapshot = state.lock().map(|guard| guard.clone()).unwrap_or(UiExportState {
+        connected: false,
+        stream_enabled: false,
+        decoded_text_lines: Vec::new(),
+        last_error: Some("failed to lock UI state".to_string()),
+        last_status_raw: None,
+    });
+    match action {
+        "get_text" => json!({
+            "status": "ok",
+            "connected": snapshot.connected,
+            "stream_enabled": snapshot.stream_enabled,
+            "lines": snapshot.decoded_text_lines,
+            "last_error": snapshot.last_error,
+            "last_status": snapshot.last_status_raw,
+        }),
+        _ => json!({
+            "status": "ok",
+            "connected": snapshot.connected,
+            "stream_enabled": snapshot.stream_enabled,
+            "line_count": snapshot.decoded_text_lines.len(),
+            "last_error": snapshot.last_error,
+            "last_status": snapshot.last_status_raw,
+        }),
     }
 }
 
@@ -134,7 +224,7 @@ fn draw_lcd_panel(ui: &mut egui::Ui, texture: Option<&TextureHandle>) {
         ui.label("Local decoded 240x32 framebuffer");
         ui.add_space(8.0);
 
-        let scale = 4.0;
+        let scale = 2.0;
         let size = egui::vec2(DISPLAY_WIDTH as f32 * scale, DISPLAY_HEIGHT as f32 * scale);
         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
         ui.painter()
@@ -164,15 +254,27 @@ fn draw_transport_panel(ui: &mut egui::Ui, snapshot: &BackendSnapshot) {
             .num_columns(2)
             .spacing([12.0, 6.0])
             .show(ui, |ui| {
-                ui.monospace("words");
+                tooltip_label(
+                    ui,
+                    "words",
+                    "Total sampled-bus words consumed from FT600 since this UI session started.",
+                );
                 ui.monospace(snapshot.total_words.to_string());
                 ui.end_row();
 
-                ui.monospace("lcd writes");
+                tooltip_label(
+                    ui,
+                    "lcd writes",
+                    "Subset of sampled-bus words that decoded as LCD controller write operations and were replayed into the local LCD model.",
+                );
                 ui.monospace(snapshot.lcd_writes.to_string());
                 ui.end_row();
 
-                ui.monospace("stream");
+                tooltip_label(
+                    ui,
+                    "stream",
+                    "Host-side desired stream state. This means the UI is trying to keep FT streaming enabled; actual FPGA state is shown below in UART / WIN / CAP.",
+                );
                 ui.monospace(if snapshot.stream_enabled {
                     "enabled"
                 } else {
@@ -190,31 +292,59 @@ fn draw_transport_panel(ui: &mut egui::Ui, snapshot: &BackendSnapshot) {
                 .num_columns(2)
                 .spacing([12.0, 4.0])
                 .show(ui, |ui| {
-                    ui.monospace("CFG");
+                    tooltip_label(
+                        ui,
+                        "CFG",
+                        "FT_STREAM_CFG source-enable mask. bit0 = measurement-window source, bit1 = UART-latched always-stream source. 03 means both sources are enabled.",
+                    );
                     ui.monospace(fmt_hex_opt(status.cfg));
                     ui.end_row();
 
-                    ui.monospace("MODE");
+                    tooltip_label(
+                        ui,
+                        "MODE",
+                        "FT_STREAM_MODE behavior mask. bit0 controls whether the measurement FT source follows live CFG changes or holds the start-of-window policy for a whole measurement window. 00 means live-following.",
+                    );
                     ui.monospace(fmt_hex_opt(status.mode));
                     ui.end_row();
 
-                    ui.monospace("UART");
+                    tooltip_label(
+                        ui,
+                        "UART",
+                        "UART FT source latch from F1/F0. 1 means the always-stream UART source is armed; 0 means it is inactive even if CFG.bit1 is enabled.",
+                    );
                     ui.monospace(fmt_bool_opt(status.uart));
                     ui.end_row();
 
-                    ui.monospace("WIN");
+                    tooltip_label(
+                        ui,
+                        "WIN",
+                        "Measurement-window FT source currently active. 1 means an experiment measurement window is open; 0 means no measurement window is active.",
+                    );
                     ui.monospace(fmt_bool_opt(status.win));
                     ui.end_row();
 
-                    ui.monospace("CAP");
+                    tooltip_label(
+                        ui,
+                        "CAP",
+                        "Effective FT capture-active flag after OR-ing all enabled FT sources. If CAP=1 outside a measurement window, the UART-latched always-stream source is feeding FT600.",
+                    );
                     ui.monospace(fmt_bool_opt(status.cap));
                     ui.end_row();
 
-                    ui.monospace("SOVF");
+                    tooltip_label(
+                        ui,
+                        "SOVF",
+                        "Session-local FT overflow counter for the current or most recent UART streaming session. F1 starts a new session baseline; nonzero means the live display may be desynced.",
+                    );
                     ui.monospace(fmt_u32_opt(status.sovf));
                     ui.end_row();
 
-                    ui.monospace("OVF");
+                    tooltip_label(
+                        ui,
+                        "OVF",
+                        "Cumulative FT overflow counter since FPGA reset. This is historical and can stay nonzero even when the current session is healthy.",
+                    );
                     ui.monospace(fmt_u32_opt(status.ovf));
                     ui.end_row();
                 });
@@ -259,6 +389,10 @@ fn framed_panel(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut e
             ui.add_space(8.0);
             add_contents(ui);
         });
+}
+
+fn tooltip_label(ui: &mut egui::Ui, text: &str, tooltip: &str) {
+    ui.monospace(text).on_hover_text(tooltip);
 }
 
 fn fmt_hex_opt(value: Option<u8>) -> String {

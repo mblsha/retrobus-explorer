@@ -240,6 +240,92 @@ impl ExperimentDaemon {
         }))
     }
 
+    pub fn set_stream_config(&mut self, cfg: u8, mode: Option<u8>) -> Result<Value> {
+        self.poll_unsolicited_lines();
+        if self.status != "idle" || self.needs_reset {
+            anyhow::bail!("device is not idle; wait for XR,READY or reset + CALL &10000");
+        }
+
+        let mut asm_text = String::from(
+            ".ORG 0x10100\n\nstart:\n    MV A, 0x",
+        );
+        asm_text.push_str(&format!("{cfg:02X}\n"));
+        asm_text.push_str("    MV [0x1FFF4], A\n");
+        if let Some(mode) = mode {
+            asm_text.push_str(&format!("    MV A, 0x{mode:02X}\n"));
+            asm_text.push_str("    MV [0x1FFF5], A\n");
+        }
+        asm_text.push_str("    RETF\n");
+
+        let (start_address, image) = assemble_image_from_text(&asm_text, &self.assembler_dir)?;
+        let image_to_program = self.build_full_experiment_region(start_address, &image)?;
+        let plan = RunPlan {
+            name: Some("set_ft_stream_config".into()),
+            asm_source: None,
+            asm_text: Some(asm_text.clone()),
+            timing: DEFAULT_SAFE_TIMING,
+            control_timing: DEFAULT_SAFE_CONTROL_TIMING,
+            timeout_s: 2.0,
+            start_tag: 0xF0,
+            stop_tag: 0xF1,
+            flags: 0,
+            args: Vec::new(),
+            ft_capture: false,
+            fill_experiment_region: true,
+            ft_read_size: 64 * 1024,
+            ft_read_timeout_ms: 20,
+            ft_post_stop_idle_s: 0.1,
+            ft_post_stop_hard_s: 1.0,
+            ft_max_retained_words: DEFAULT_FT_MAX_RETAINED_WORDS,
+            extra: serde_json::Map::new(),
+        };
+        let sequence = self.next_sequence();
+        let command_block = self.compose_command_block(&plan, sequence)?;
+
+        self.uart.set_timing(DEFAULT_SAFE_TIMING)?;
+        self.uart.set_control_timing(DEFAULT_SAFE_CONTROL_TIMING)?;
+        self.uart.clear_measurements()?;
+        self.uart
+            .write_rom_bytes(EXPERIMENT_MIN, &image_to_program, true)?;
+        self.uart.synchronize_rx_boundary(0.2, 2.0)?;
+        let line_index = self.uart.line_count();
+        self.commit_command_block(&command_block)?;
+        self.status = "running".into();
+
+        let begin_text = format!("{BEGIN_PREFIX},{sequence:02X}");
+        let end_prefix = format!("{END_PREFIX},{sequence:02X},");
+        let begin_line = self
+            .uart
+            .wait_for_line(|text| text == begin_text, plan.timeout_s, line_index)?;
+        let end_line = self
+            .uart
+            .wait_for_line(|text| text.starts_with(&end_prefix), plan.timeout_s, line_index)?;
+        let measurements = self.uart.dump_measurements()?;
+        let xr_lines: Vec<String> = self
+            .uart
+            .lines_since(line_index)
+            .into_iter()
+            .filter(|line| line.text.starts_with("XR,"))
+            .map(|line| line.text)
+            .collect();
+        self.status = "idle".into();
+        self.needs_reset = false;
+        self.last_error = None;
+        let result = json!({
+            "status": "ok",
+            "action": "stream_config",
+            "cfg": cfg,
+            "mode": mode,
+            "begin_line": begin_line.text,
+            "end_line": end_line.text,
+            "measurement": measurements,
+            "uart_lines": xr_lines,
+            "recent_uart_lines": self.uart.last_lines(20),
+        });
+        self.last_result = Some(result.clone());
+        Ok(result)
+    }
+
     pub fn run_experiment(
         &mut self,
         script_path: PathBuf,
@@ -394,6 +480,13 @@ impl ExperimentDaemon {
             "stream_on" => self.stream_command("F1"),
             "stream_off" => self.stream_command("F0"),
             "stream_status" => self.stream_command("F?"),
+            "stream_config" => {
+                let cfg = request["cfg"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow!("missing cfg"))? as u8;
+                let mode = request.get("mode").and_then(|value| value.as_u64()).map(|v| v as u8);
+                self.set_stream_config(cfg, mode)
+            }
             "arm_safe" => self.program_safe_image(),
             "debug_echo_short" => {
                 self.debug_echo_short(request["timeout_s"].as_f64().unwrap_or(10.0))

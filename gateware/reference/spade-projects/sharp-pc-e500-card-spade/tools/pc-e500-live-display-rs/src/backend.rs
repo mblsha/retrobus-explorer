@@ -6,6 +6,7 @@ use std::os::fd::RawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
@@ -14,13 +15,15 @@ use serde_json::{json, Value};
 use crate::d3xx::Device;
 use crate::lcd::{LcdModel, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 use crate::protocol::{
-    decode_packed_words, parse_stream_status_line, SampledWord, StreamStatus, DEFAULT_PIPE_ID,
-    DEFAULT_READ_SIZE, DEFAULT_READ_TIMEOUT_MS, DEFAULT_STREAM_SIZE, LCD_WRITE_ADDR_MAX,
-    LCD_WRITE_ADDR_MIN,
+    decode_packed_words, is_lcd_write_address, parse_stream_status_line, SampledWord,
+    StreamStatus, DEFAULT_PIPE_ID, DEFAULT_READ_SIZE, DEFAULT_READ_TIMEOUT_MS,
+    DEFAULT_STREAM_SIZE,
 };
+use crate::text::Pce500FontMap;
 
 #[cfg(target_os = "macos")]
 const IOSSIOSPEED: libc::c_ulong = 0x8004_5402;
+const BACKEND_IDLE_SLEEP_MS: u64 = 2;
 
 #[derive(Clone, Debug)]
 pub struct BackendConfig {
@@ -90,6 +93,7 @@ impl BackendConfig {
 pub struct BackendSnapshot {
     pub connected: bool,
     pub frame: Vec<u8>,
+    pub decoded_text_lines: Vec<String>,
     pub total_words: u64,
     pub lcd_writes: u64,
     pub last_status: Option<StreamStatus>,
@@ -104,6 +108,7 @@ impl Default for BackendSnapshot {
         Self {
             connected: false,
             frame: vec![0; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+            decoded_text_lines: Vec::new(),
             total_words: 0,
             lcd_writes: 0,
             last_status: None,
@@ -175,12 +180,15 @@ fn run_session(
     } else {
         None
     };
-    let mut ft = Device::open_default(
+    let ft = Device::open_default(
         config.ft_library_path.as_deref(),
         config.pipe_id,
         config.stream_size,
     )?;
+    let mut ft_reader =
+        spawn_ft_reader(ft, config.pipe_id, config.read_size, config.read_timeout_ms);
     let mut lcd = LcdModel::default();
+    let font = Pce500FontMap::load_default().ok();
     let mut pending = Vec::new();
     let mut uart_buf = Vec::new();
     let mut recent_lines: VecDeque<String> = VecDeque::with_capacity(20);
@@ -192,93 +200,8 @@ fn run_session(
         ..Default::default()
     };
 
-    if uart.is_some() || config.daemon_socket.is_some() {
-        enable_stream_and_refresh(
-            uart.as_mut(),
-            config.daemon_socket.as_deref(),
-            &mut snapshot,
-            &mut recent_lines,
-        )?;
-        reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
-        discard_ft_backlog(
-            &mut ft,
-            config.pipe_id,
-            config.read_size,
-            config.read_timeout_ms,
-            &mut pending,
-        )?;
-        let _ = updates.send(snapshot.clone());
-    } else {
-        snapshot.stream_enabled = false;
-        snapshot.last_uart_line = Some("FT-only mode (no control plane)".to_string());
-        let _ = updates.send(snapshot.clone());
-    }
-
-    let mut last_publish = Instant::now();
-    let mut last_status_poll = Instant::now();
-    let mut desired_stream_enabled = uart.is_some() || config.daemon_socket.is_some();
-
-    loop {
-        while let Ok(command) = commands.try_recv() {
-            match command {
-                BackendCommand::EnableStream => {
-                    enable_stream_and_refresh(
-                        uart.as_mut(),
-                        config.daemon_socket.as_deref(),
-                        &mut snapshot,
-                        &mut recent_lines,
-                    )?;
-                    reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
-                    discard_ft_backlog(
-                        &mut ft,
-                        config.pipe_id,
-                        config.read_size,
-                        config.read_timeout_ms,
-                        &mut pending,
-                    )?;
-                    desired_stream_enabled = true;
-                }
-                BackendCommand::DisableStream => {
-                    if let Some(uart) = uart.as_mut() {
-                        send_uart_command(uart, "F0")?;
-                    } else if let Some(socket_path) = config.daemon_socket.as_deref() {
-                        apply_daemon_response(
-                            &daemon_request(socket_path, "stream_off")?,
-                            &mut snapshot,
-                            &mut recent_lines,
-                        );
-                    }
-                    snapshot.stream_enabled = false;
-                    desired_stream_enabled = false;
-                }
-                BackendCommand::PollStatus => {
-                    if let Some(uart) = uart.as_mut() {
-                        send_uart_command(uart, "F?")?;
-                    } else if let Some(socket_path) = config.daemon_socket.as_deref() {
-                        apply_daemon_response(
-                            &daemon_request(socket_path, "stream_status")?,
-                            &mut snapshot,
-                            &mut recent_lines,
-                        );
-                    }
-                }
-                BackendCommand::Stop => return Ok(()),
-            }
-        }
-
-        if last_status_poll.elapsed() >= Duration::from_secs(1) {
-            if let Some(uart) = uart.as_mut() {
-                let _ = send_uart_command(uart, "F?");
-            } else if let Some(socket_path) = config.daemon_socket.as_deref() {
-                if let Ok(response) = daemon_request(socket_path, "stream_status") {
-                    apply_daemon_response(&response, &mut snapshot, &mut recent_lines);
-                }
-            }
-            last_status_poll = Instant::now();
-        }
-
-        if desired_stream_enabled && snapshot.last_status.as_ref().and_then(|status| status.uart) == Some(false)
-        {
+    let session_result: Result<()> = (|| {
+        if uart.is_some() || config.daemon_socket.is_some() {
             enable_stream_and_refresh(
                 uart.as_mut(),
                 config.daemon_socket.as_deref(),
@@ -286,42 +209,183 @@ fn run_session(
                 &mut recent_lines,
             )?;
             reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
-            discard_ft_backlog(
-                &mut ft,
-                config.pipe_id,
-                config.read_size,
-                config.read_timeout_ms,
-                &mut pending,
-            )?;
+            discard_ft_backlog(&ft_reader.rx, &mut pending);
+            let _ = updates.send(snapshot.clone());
+        } else {
+            snapshot.stream_enabled = false;
+            snapshot.last_uart_line = Some("FT-only mode (no control plane)".to_string());
+            let _ = updates.send(snapshot.clone());
         }
 
-        let chunk = ft.read_pipe(config.pipe_id, config.read_size, config.read_timeout_ms)?;
-        if !chunk.is_empty() {
-            for raw in decode_packed_words(&chunk, &mut pending) {
-                snapshot.total_words += 1;
-                let word = SampledWord::from_raw(raw);
-                if word.rw() {
-                    continue;
-                }
-                if !(LCD_WRITE_ADDR_MIN..=LCD_WRITE_ADDR_MAX).contains(&word.addr) {
-                    continue;
-                }
-                if lcd.apply_raw(word.addr, word.data).is_ok() {
-                    snapshot.lcd_writes += 1;
+        let mut last_publish = Instant::now();
+        let mut last_status_poll = Instant::now();
+        let mut desired_stream_enabled = uart.is_some() || config.daemon_socket.is_some();
+        let mut stop_requested = false;
+
+        loop {
+            while let Ok(command) = commands.try_recv() {
+                match command {
+                    BackendCommand::EnableStream => {
+                        enable_stream_and_refresh(
+                            uart.as_mut(),
+                            config.daemon_socket.as_deref(),
+                            &mut snapshot,
+                            &mut recent_lines,
+                        )?;
+                        reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
+                        discard_ft_backlog(&ft_reader.rx, &mut pending);
+                        desired_stream_enabled = true;
+                    }
+                    BackendCommand::DisableStream => {
+                        if let Some(uart) = uart.as_mut() {
+                            send_uart_command(uart, "F0")?;
+                        } else if let Some(socket_path) = config.daemon_socket.as_deref() {
+                            apply_daemon_response(
+                                &daemon_request(socket_path, "stream_off")?,
+                                &mut snapshot,
+                                &mut recent_lines,
+                            );
+                        }
+                        snapshot.stream_enabled = false;
+                        desired_stream_enabled = false;
+                    }
+                    BackendCommand::PollStatus => {
+                        if let Some(uart) = uart.as_mut() {
+                            send_uart_command(uart, "F?")?;
+                        } else if let Some(socket_path) = config.daemon_socket.as_deref() {
+                            apply_daemon_response(
+                                &daemon_request(socket_path, "stream_status")?,
+                                &mut snapshot,
+                                &mut recent_lines,
+                            );
+                        }
+                    }
+                    BackendCommand::Stop => {
+                        stop_requested = true;
+                        break;
+                    }
                 }
             }
-        }
 
-        if let Some(uart) = uart.as_mut() {
-            drain_uart(uart, &mut uart_buf, &mut snapshot, &mut recent_lines)?;
-        }
+            if stop_requested {
+                break Ok(());
+            }
 
-        if last_publish.elapsed() >= Duration::from_millis(33) {
-            snapshot.frame = lcd.render_monochrome();
-            snapshot.recent_uart_lines = recent_lines.iter().cloned().collect();
-            let _ = updates.send(snapshot.clone());
-            last_publish = Instant::now();
+            if let Some(error) = ft_reader.error_rx.try_iter().last() {
+                break Err(error);
+            }
+
+            if last_status_poll.elapsed() >= Duration::from_secs(1) {
+                if let Some(uart) = uart.as_mut() {
+                    let _ = send_uart_command(uart, "F?");
+                } else if let Some(socket_path) = config.daemon_socket.as_deref() {
+                    if let Ok(response) = daemon_request(socket_path, "stream_status") {
+                        apply_daemon_response(&response, &mut snapshot, &mut recent_lines);
+                    }
+                }
+                last_status_poll = Instant::now();
+            }
+
+            let stream_latch_missing =
+                snapshot.last_status.as_ref().and_then(|status| status.uart) == Some(false);
+            let continuous_source_missing = config.daemon_socket.is_some()
+                && snapshot
+                    .last_status
+                    .as_ref()
+                    .and_then(|status| status.cfg)
+                    .map(|cfg| (cfg & 0x02) == 0)
+                    .unwrap_or(false);
+            if desired_stream_enabled && (stream_latch_missing || continuous_source_missing) {
+                enable_stream_and_refresh(
+                    uart.as_mut(),
+                    config.daemon_socket.as_deref(),
+                    &mut snapshot,
+                    &mut recent_lines,
+                )?;
+                reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
+                discard_ft_backlog(&ft_reader.rx, &mut pending);
+            }
+
+            let mut saw_chunk = false;
+            for chunk in ft_reader.rx.try_iter() {
+                saw_chunk = true;
+                process_ft_chunk(&chunk, &mut pending, &mut snapshot, &mut lcd);
+            }
+
+            if let Some(uart) = uart.as_mut() {
+                drain_uart(uart, &mut uart_buf, &mut snapshot, &mut recent_lines)?;
+            }
+
+            if last_publish.elapsed() >= Duration::from_millis(33) {
+                snapshot.frame = lcd.render_monochrome();
+                snapshot.decoded_text_lines = font
+                    .as_ref()
+                    .map(|font| font.decode_frame(&snapshot.frame))
+                    .unwrap_or_default();
+                snapshot.recent_uart_lines = recent_lines.iter().cloned().collect();
+                let _ = updates.send(snapshot.clone());
+                last_publish = Instant::now();
+            }
+
+            if !saw_chunk {
+                thread::sleep(Duration::from_millis(BACKEND_IDLE_SLEEP_MS));
+            }
         }
+    })();
+
+    ft_reader.stop();
+    session_result
+}
+
+struct FtReaderHandle {
+    rx: Receiver<Vec<u8>>,
+    error_rx: Receiver<anyhow::Error>,
+    stop_tx: Sender<()>,
+    join_handle: Option<JoinHandle<()>>,
+}
+
+impl FtReaderHandle {
+    fn stop(&mut self) {
+        let _ = self.stop_tx.send(());
+        if let Some(join_handle) = self.join_handle.take() {
+            let _ = join_handle.join();
+        }
+    }
+}
+
+fn spawn_ft_reader(
+    mut ft: Device,
+    pipe_id: u8,
+    read_size: usize,
+    read_timeout_ms: u32,
+) -> FtReaderHandle {
+    let (chunk_tx, chunk_rx) = unbounded();
+    let (error_tx, error_rx) = unbounded();
+    let (stop_tx, stop_rx) = unbounded();
+    let join_handle = thread::spawn(move || loop {
+        if stop_rx.try_recv().is_ok() {
+            break;
+        }
+        match ft.read_pipe(pipe_id, read_size, read_timeout_ms) {
+            Ok(chunk) => {
+                if chunk.is_empty() {
+                    continue;
+                }
+                if chunk_tx.send(chunk).is_err() {
+                    break;
+                }
+            }
+            Err(err) => {
+                let _ = error_tx.send(err.context("FT reader thread failed"));
+                break;
+            }
+        }
+    });
+    FtReaderHandle {
+        rx: chunk_rx,
+        error_rx,
+        stop_tx,
+        join_handle: Some(join_handle),
     }
 }
 
@@ -333,25 +397,36 @@ fn reset_local_display_state(
     *lcd = LcdModel::default();
     pending.clear();
     snapshot.frame = lcd.render_monochrome();
+    snapshot.decoded_text_lines.clear();
     snapshot.lcd_writes = 0;
 }
 
-fn discard_ft_backlog(
-    ft: &mut Device,
-    pipe_id: u8,
-    read_size: usize,
-    read_timeout_ms: u32,
-    pending: &mut Vec<u8>,
-) -> Result<()> {
-    loop {
-        let chunk = ft.read_pipe(pipe_id, read_size, read_timeout_ms)?;
-        if chunk.is_empty() {
-            break;
-        }
+fn discard_ft_backlog(ft_rx: &Receiver<Vec<u8>>, pending: &mut Vec<u8>) {
+    while let Ok(chunk) = ft_rx.try_recv() {
         let _ = decode_packed_words(&chunk, pending);
     }
     pending.clear();
-    Ok(())
+}
+
+fn process_ft_chunk(
+    chunk: &[u8],
+    pending: &mut Vec<u8>,
+    snapshot: &mut BackendSnapshot,
+    lcd: &mut LcdModel,
+) {
+    for raw in decode_packed_words(chunk, pending) {
+        snapshot.total_words += 1;
+        let word = SampledWord::from_raw(raw);
+        if word.rw() {
+            continue;
+        }
+        if !is_lcd_write_address(word.addr) {
+            continue;
+        }
+        if lcd.apply_raw(word.addr, word.data).is_ok() {
+            snapshot.lcd_writes += 1;
+        }
+    }
 }
 
 fn detect_second_usb_serial_port() -> Result<String> {
@@ -401,6 +476,14 @@ fn enable_stream_and_refresh(
         send_uart_command(uart, "F?")?;
     } else if let Some(socket_path) = daemon_socket {
         apply_daemon_response(
+            &daemon_json_request(
+                socket_path,
+                json!({ "action": "stream_config", "cfg": 0x03, "mode": 0x00 }),
+            )?,
+            snapshot,
+            recent_lines,
+        );
+        apply_daemon_response(
             &daemon_request(socket_path, "stream_off")?,
             snapshot,
             recent_lines,
@@ -421,16 +504,26 @@ fn enable_stream_and_refresh(
 }
 
 fn daemon_request(socket_path: &std::path::Path, action: &str) -> Result<Value> {
+    daemon_json_request(socket_path, json!({ "action": action }))
+}
+
+fn daemon_json_request(socket_path: &std::path::Path, request: Value) -> Result<Value> {
     let mut stream = UnixStream::connect(socket_path)
         .with_context(|| format!("failed to connect to daemon socket {}", socket_path.display()))?;
-    let request = json!({ "action": action });
     stream.write_all(request.to_string().as_bytes())?;
     stream.write_all(b"\n")?;
     stream.flush()?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
-    serde_json::from_str(&response)
-        .with_context(|| format!("invalid daemon response for {action}: {response}"))
+    serde_json::from_str(&response).with_context(|| {
+        format!(
+            "invalid daemon response for {}: {response}",
+            request
+                .get("action")
+                .and_then(|value| value.as_str())
+                .unwrap_or("<unknown>")
+        )
+    })
 }
 
 fn apply_daemon_response(

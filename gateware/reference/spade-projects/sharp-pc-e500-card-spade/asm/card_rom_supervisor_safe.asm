@@ -20,7 +20,7 @@
 start:
     MV (0x30), 0x00
 
-    MV A, 0x01
+    MV A, 0x03
     MV [0x1FFF4], A
 
     CALL init_uart
