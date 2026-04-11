@@ -10,7 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-from pc_e500_supervisor_client import DEFAULT_SOCKET, send_request
+from pce500_host.supervisor_client import DEFAULT_SOCKET, send_request
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PC-E500 experiment supervisor client")

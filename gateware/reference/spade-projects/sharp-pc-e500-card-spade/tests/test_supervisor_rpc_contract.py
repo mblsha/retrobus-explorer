@@ -7,14 +7,17 @@ import types
 import unittest
 from pathlib import Path
 
+from pce500_host.contract import SUPERVISOR_RPC_ACTIONS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = PROJECT_ROOT / "tests" / "supervisor_rpc_contract.json"
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "pc-e500-expd.py"
 
+if str(SCRIPT_PATH.parent) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_PATH.parent))
+
 
 def load_python_supervisor_module():
-    sys.path.insert(0, str(SCRIPT_PATH.parent))
     sys.modules.setdefault("serial", types.SimpleNamespace())
     spec = importlib.util.spec_from_file_location("pc_e500_expd_script", SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -59,7 +62,7 @@ class SupervisorRpcContractTest(unittest.TestCase):
     def test_python_action_list_matches_contract(self):
         self.assertEqual(
             list(self.contract["actions"]),
-            list(self.module.SUPPORTED_RPC_ACTIONS),
+            list(SUPERVISOR_RPC_ACTIONS),
         )
 
     def test_python_handle_request_supports_every_contract_action(self):
