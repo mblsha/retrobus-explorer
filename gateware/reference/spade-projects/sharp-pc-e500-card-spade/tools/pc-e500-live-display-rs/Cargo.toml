@@ -1,0 +1,12 @@
+[package]
+name = "pc-e500-live-display-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+crossbeam-channel = "0.5"
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.31"
+libloading = "0.8"
+serialport = "4.8"
