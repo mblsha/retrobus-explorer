@@ -1,18 +1,22 @@
 use std::collections::VecDeque;
-use std::io::{Read, Write};
+use std::ffi::CString;
+use std::io::Write;
+use std::os::fd::RawFd;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use serde_json::json;
-use serialport::SerialPort;
 
 use crate::protocol::{
     absolute_address, build_write_payload, normalize_reply_lines, parse_measure_status_lines,
     parse_measurement_lines, render_terminal_bytes, rom_offset_from_address, ParsedMeasureStatus,
     ParsedMeasurement, DEFAULT_BAUD, DEFAULT_COMMAND_TIMEOUT_S, MEASURE_END_LINE,
 };
+
+#[cfg(target_os = "macos")]
+const IOSSIOSPEED: libc::c_ulong = 0x8004_5402;
 
 #[derive(Clone, Debug)]
 pub struct UartLine {
@@ -47,7 +51,7 @@ impl Default for SharedState {
 }
 
 pub struct ExperimentUart {
-    port: Arc<Mutex<Box<dyn SerialPort>>>,
+    port: Arc<Mutex<PortHandle>>,
     shared: Arc<(Mutex<SharedState>, Condvar)>,
     reader: Option<thread::JoinHandle<()>>,
     idle_gap: Duration,
@@ -64,15 +68,13 @@ impl ExperimentUart {
         monitor_uart: bool,
     ) -> Result<Self> {
         let port_name = port_name.unwrap_or_else(|| detect_second_usb_serial_port().unwrap());
-        let port = serialport::new(&port_name, baud)
-            .timeout(Duration::from_millis(50))
-            .open()
+        let port = PortHandle::open(&port_name, baud)
             .map_err(|err| anyhow!("failed to open serial port {port_name}: {err}"))?;
         let port = Arc::new(Mutex::new(port));
         {
             let port_lock = port.lock().unwrap();
-            let _ = port_lock.clear(serialport::ClearBuffer::Input);
-            let _ = port_lock.clear(serialport::ClearBuffer::Output);
+            let _ = port_lock.clear_input();
+            let _ = port_lock.clear_output();
         }
 
         let shared = Arc::new((Mutex::new(SharedState::default()), Condvar::new()));
@@ -156,7 +158,7 @@ impl ExperimentUart {
         let _guard = self.command_lock.lock().unwrap();
         {
             let port = self.port.lock().unwrap();
-            let _ = port.clear(serialport::ClearBuffer::Input);
+            let _ = port.clear_input();
         }
         let (state, cv) = &*self.shared;
         let mut state = state.lock().unwrap();
@@ -451,7 +453,7 @@ impl Drop for ExperimentUart {
 }
 
 fn reader_loop(
-    port: Arc<Mutex<Box<dyn SerialPort>>>,
+    port: Arc<Mutex<PortHandle>>,
     shared: Arc<(Mutex<SharedState>, Condvar)>,
     monitor: bool,
 ) {
@@ -467,7 +469,12 @@ fn reader_loop(
             match port.read(&mut chunk) {
                 Ok(0) => continue,
                 Ok(read) => read,
-                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => continue,
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::TimedOut
+                        || err.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    continue
+                }
                 Err(_) => return,
             }
         };
@@ -525,4 +532,151 @@ fn detect_second_usb_serial_port() -> Result<String> {
         .get(1)
         .cloned()
         .ok_or_else(|| anyhow!("expected at least two /dev/cu.usbserial-* devices"))
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct PortHandle {
+    fd: RawFd,
+}
+
+#[cfg(target_os = "macos")]
+impl PortHandle {
+    fn open(path: &str, baud: u32) -> Result<Self> {
+        let c_path = CString::new(path)?;
+        let fd = unsafe {
+            libc::open(
+                c_path.as_ptr(),
+                libc::O_RDWR | libc::O_NOCTTY | libc::O_NONBLOCK,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+
+        let mut termios = unsafe {
+            let mut termios = std::mem::zeroed::<libc::termios>();
+            if libc::tcgetattr(fd, &mut termios) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+            termios
+        };
+
+        unsafe { libc::cfmakeraw(&mut termios) };
+        termios.c_cflag |= libc::CREAD | libc::CLOCAL;
+        termios.c_cflag &= !libc::CSIZE;
+        termios.c_cflag |= libc::CS8;
+        termios.c_cflag &= !libc::CSTOPB;
+        termios.c_cflag &= !(libc::PARENB | libc::PARODD);
+        termios.c_iflag &= !(libc::IXON | libc::IXOFF | libc::IXANY);
+        termios.c_cc[libc::VMIN] = 0;
+        termios.c_cc[libc::VTIME] = 0;
+
+        unsafe {
+            if libc::cfsetispeed(&mut termios, libc::B9600) != 0
+                || libc::cfsetospeed(&mut termios, libc::B9600) != 0
+            {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+            if libc::tcsetattr(fd, libc::TCSANOW, &termios) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+            let speed = baud as libc::speed_t;
+            if libc::ioctl(fd, IOSSIOSPEED, &speed) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+        }
+
+        Ok(Self { fd })
+    }
+
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = unsafe { libc::read(self.fd, buffer.as_mut_ptr().cast(), buffer.len()) };
+        if read < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(read as usize)
+    }
+
+    fn write_all(&mut self, mut buffer: &[u8]) -> std::io::Result<()> {
+        while !buffer.is_empty() {
+            let wrote = unsafe { libc::write(self.fd, buffer.as_ptr().cast(), buffer.len()) };
+            if wrote < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::WouldBlock {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                return Err(err);
+            }
+            buffer = &buffer[wrote as usize..];
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let rc = unsafe { libc::tcdrain(self.fd) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+
+    fn clear_input(&self) -> std::io::Result<()> {
+        let rc = unsafe { libc::tcflush(self.fd, libc::TCIFLUSH) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+
+    fn clear_output(&self) -> std::io::Result<()> {
+        let rc = unsafe { libc::tcflush(self.fd, libc::TCOFLUSH) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for PortHandle {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+type PortHandle = serialport::TTYPort;
+
+#[cfg(not(target_os = "macos"))]
+impl PortHandle {
+    fn open(path: &str, baud: u32) -> Result<Self> {
+        serialport::new(path, baud)
+            .timeout(Duration::from_millis(50))
+            .exclusive(false)
+            .open_native()
+            .map_err(Into::into)
+    }
+
+    fn clear_input(&self) -> std::io::Result<()> {
+        self.clear(serialport::ClearBuffer::Input)
+    }
+
+    fn clear_output(&self) -> std::io::Result<()> {
+        self.clear(serialport::ClearBuffer::Output)
+    }
 }
