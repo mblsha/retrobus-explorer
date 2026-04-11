@@ -7,11 +7,11 @@ and a CE6 control page exposed through the onboard USB-UART.
 
 Use the Au1 onboard USB-UART as the host control path. Optional bulk capture of
 sampled bus words can also be routed through the Alchitry Ft Element FT600
-interface when the measurement window is armed.
+interface when at least one enabled FT source is active.
 
 - Control, RAM/ROM access, and measurement dump: Au1 onboard USB-UART
 - Timing and bus visibility: Saleae debug header outputs
-- Measurement-gated sampled-bus bulk capture: Au + Ft Element FT600 path
+- FT sampled-bus bulk capture: Au + Ft Element FT600 path
 
 FT600 sampled-bus capture is now the default experiment mode. The stable
 supervisor enables the calculator-side FT stream, and the host daemon now keeps
@@ -61,6 +61,9 @@ From `gateware/reference`:
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py probe
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py timing 5
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py control-timing 10
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py ft-status
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py ft-on
+uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py ft-off
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py read 0x10000
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py write 0x10000 0x5A
 uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py \
@@ -88,6 +91,22 @@ uv run ./spade-projects/sharp-pc-e500-card-spade/scripts/au1_usb_uart_probe.py c
 
 `tNN` controls normal CE1/CE6 memory classify timing, while `cNN` controls only
 CE6 control-page writes in `0x1FFF0..0x1FFFF`.
+
+FT capture source selection is split between the CE6 control page and the host
+UART:
+
+- `FT_STREAM_CFG` at `0x1FFF4`
+  - `bit0`: enable the measurement-window FT source
+  - `bit1`: enable the USB-UART FT source
+- `FT_STREAM_MODE` at `0x1FFF5`
+  - `bit0`: hold the measurement-source policy captured at `MARK_START` until
+    `MARK_STOP` / `MARK_ABORT`
+- USB-UART commands
+  - `F1`: set the USB-UART FT source latch
+  - `F0`: clear the USB-UART FT source latch
+  - `F?`: print `FS,CFG=..,MODE=..,UART=.,WIN=.,CAP=.,SOVF=........,OVF=........`
+
+The FT stream is active whenever any enabled source is active.
 
 ## Card-ROM Assembly
 
@@ -170,9 +189,10 @@ LOAD"COM:"
 
 Host control remains centered on the USB-UART command set documented in
 [FPGA_PROTOCOL.md](./FPGA_PROTOCOL.md). The FT600 path, when enabled through the
-CE6 control page, mirrors the existing `saleae[4]` sampled-bus words and is
-intended for bulk capture during a measurement window rather than for general
-interactive control.
+CE6 control page plus the optional `F0` / `F1` UART latch, mirrors the existing
+`saleae[4]` sampled-bus words and is intended for bulk capture rather than for
+general interactive control. `F?` also reports both cumulative FT drops and the
+most recent UART-session drop count.
 
 For the current "single CALL after reset, then keep iterating from the host"
 approach, see [CONTINUOUS_EXPERIMENT_PLAN.md](./CONTINUOUS_EXPERIMENT_PLAN.md).

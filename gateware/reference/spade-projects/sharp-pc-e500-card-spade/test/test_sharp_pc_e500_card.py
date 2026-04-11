@@ -238,6 +238,22 @@ async def _emit_sampled_ce1_write(dut, addr: int, value: int) -> None:
     await tick(dut.clk, 2)
 
 
+async def _force_ft_overflow_seed_burst(dut, *, start_addr: int = 0x0200, count: int = 129, data: int = 0x96) -> None:
+    dut.ce1.value = 0
+    dut.ce6.value = 1
+    dut.rw.value = 1
+    dut.oe.value = 1
+    dut.data_host.value = data & 0xFF
+    dut.data_host_drive.value = 1
+
+    for seed_idx in range(count):
+        dut.addr.value = (start_addr + seed_idx) & 0x3FFFF
+        await tick(dut.clk, (SAMPLED_BUS_CYCLE_CYCLES * SAMPLED_BUS_PHASE_TIMEOUT_CYCLES) + 20)
+
+    dut.ce1.value = 1
+    _set_data_bus_z(dut)
+
+
 async def _init(dut):
     start_clock(dut.clk)
     start_clock(dut.ft_clk)
@@ -268,7 +284,7 @@ def _parse_key_value_csv(line: str) -> tuple[str, dict[str, int]]:
     values: dict[str, int] = {}
     for part in parts[1:]:
         key, value = part.split("=", 1)
-        if key == "ARM":
+        if key in {"ARM", "UART", "WIN", "CAP"}:
             values[key] = int(value, 10)
         else:
             values[key] = int(value, 16)
@@ -860,6 +876,52 @@ async def ft_stream_tracks_saleae4_only_while_measurement_window_is_active(dut):
 
 
 @cocotb.test()
+async def ft_stream_measure_source_is_live_by_default_within_measurement_window(dut):
+    await _init(dut)
+
+    dut.ft_txe.value = 0
+
+    assert await _ce6_write(dut, 0x1FFF0, 0x11) == 0
+
+    await _emit_sampled_ce1_write(dut, 0x0012, 0x5A)
+    await _assert_no_ft_write(dut, 300)
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
+
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
+    await _emit_sampled_ce1_write(dut, 0x0034, 0xA5)
+    assert await ft_word == await saleae_word
+
+    assert await _ce6_write(dut, 0x1FFF2, 0x22) == 0
+
+
+@cocotb.test()
+async def ft_stream_mode_can_hold_measure_source_policy_for_one_window(dut):
+    await _init(dut)
+
+    dut.ft_txe.value = 0
+
+    assert await _ce6_write(dut, 0x1FFF5, 0x01) == 0
+    assert await _ce6_write(dut, 0x1FFF4, 0x00) == 0
+    assert await _ce6_write(dut, 0x1FFF0, 0x31) == 0
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
+    await _emit_sampled_ce1_write(dut, 0x0044, 0xC3)
+    await _assert_no_ft_write(dut, 300)
+
+    assert await _ce6_write(dut, 0x1FFF2, 0x32) == 0
+    assert await _ce6_write(dut, 0x1FFF0, 0x33) == 0
+
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
+    await _emit_sampled_ce1_write(dut, 0x0055, 0x7E)
+    assert await ft_word == await saleae_word
+
+    assert await _ce6_write(dut, 0x1FFF2, 0x34) == 0
+
+
+@cocotb.test()
 async def ft_stream_overflow_is_reported_in_measurement_results(dut):
     await _init(dut)
 
@@ -868,18 +930,7 @@ async def ft_stream_overflow_is_reported_in_measurement_results(dut):
     assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
     assert await _ce6_write(dut, 0x1FFF0, 0x56) == 0
 
-    dut.ce1.value = 0
-    dut.ce6.value = 1
-    dut.rw.value = 1
-    dut.oe.value = 1
-    dut.data_host.value = 0x96
-    dut.data_host_drive.value = 1
-
-    for seed_idx in range(129):
-        dut.addr.value = (0x0200 + seed_idx) & 0x3FFFF
-        await tick(dut.clk, (SAMPLED_BUS_CYCLE_CYCLES * SAMPLED_BUS_PHASE_TIMEOUT_CYCLES) + 20)
-
-    _set_data_bus_z(dut)
+    await _force_ft_overflow_seed_burst(dut)
 
     assert await _ce6_write(dut, 0x1FFF2, 0x78) == 0
 
@@ -892,6 +943,136 @@ async def ft_stream_overflow_is_reported_in_measurement_results(dut):
     assert report["E"] == 0x78
     assert report["FO"] > 0
     assert await _uart_recv_line(dut) == "MEND\r\n"
+
+
+@cocotb.test()
+async def ft_stream_uart_latch_can_enable_capture_outside_measurement_window(dut):
+    await _init(dut)
+
+    dut.ft_txe.value = 0
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x02) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F1\r\nOK\r\n")))
+    await _uart_send_text(dut, "F1\r")
+    assert await rx == b"F1\r\nOK\r\n"
+
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
+    await _emit_sampled_ce1_write(dut, 0x0034, 0xA5)
+    assert await ft_word == await saleae_word
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F0\r\nOK\r\n")))
+    await _uart_send_text(dut, "F0\r")
+    assert await rx == b"F0\r\nOK\r\n"
+
+    await _emit_sampled_ce1_write(dut, 0x0056, 0x3C)
+    await _assert_no_ft_write(dut, 300)
+
+
+@cocotb.test()
+async def ft_status_reports_source_mask_and_effective_capture_state(dut):
+    await _init(dut)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F?\r\n")))
+    await _uart_send_text(dut, "F?\r")
+    assert await rx == b"F?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "FS"
+    assert status == {"CFG": 0x00, "MODE": 0x00, "UART": 0, "WIN": 0, "CAP": 0, "SOVF": 0x00000000, "OVF": 0x00000000}
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x03) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F1\r\nOK\r\n")))
+    await _uart_send_text(dut, "F1\r")
+    assert await rx == b"F1\r\nOK\r\n"
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F?\r\n")))
+    await _uart_send_text(dut, "F?\r")
+    assert await rx == b"F?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "FS"
+    assert status == {"CFG": 0x03, "MODE": 0x00, "UART": 1, "WIN": 0, "CAP": 1, "SOVF": 0x00000000, "OVF": 0x00000000}
+
+    assert await _ce6_write(dut, 0x1FFF0, 0x12) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F?\r\n")))
+    await _uart_send_text(dut, "F?\r")
+    assert await rx == b"F?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "FS"
+    assert status == {"CFG": 0x03, "MODE": 0x00, "UART": 1, "WIN": 1, "CAP": 1, "SOVF": 0x00000000, "OVF": 0x00000000}
+
+    assert await _ce6_write(dut, 0x1FFF2, 0x34) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F?\r\n")))
+    await _uart_send_text(dut, "F?\r")
+    assert await rx == b"F?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "FS"
+    assert status == {"CFG": 0x03, "MODE": 0x00, "UART": 1, "WIN": 0, "CAP": 1, "SOVF": 0x00000000, "OVF": 0x00000000}
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x00) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F?\r\n")))
+    await _uart_send_text(dut, "F?\r")
+    assert await rx == b"F?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "FS"
+    assert status == {"CFG": 0x00, "MODE": 0x00, "UART": 0, "WIN": 0, "CAP": 0, "SOVF": 0x00000000, "OVF": 0x00000000}
+
+
+@cocotb.test()
+async def ft_status_tracks_uart_session_overflow_separately_from_total(dut):
+    await _init(dut)
+
+    dut.ft_txe.value = 1
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x02) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F1\r\nOK\r\n")))
+    await _uart_send_text(dut, "F1\r")
+    assert await rx == b"F1\r\nOK\r\n"
+
+    await _force_ft_overflow_seed_burst(dut, start_addr=0x0300)
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F?\r\n")))
+    await _uart_send_text(dut, "F?\r")
+    assert await rx == b"F?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "FS"
+    assert status["CFG"] == 0x02
+    assert status["MODE"] == 0x00
+    assert status["UART"] == 1
+    assert status["WIN"] == 0
+    assert status["CAP"] == 1
+    assert status["SOVF"] > 0
+    assert status["OVF"] == status["SOVF"]
+
+    session_overflow = status["SOVF"]
+    total_overflow = status["OVF"]
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F0\r\nOK\r\n")))
+    await _uart_send_text(dut, "F0\r")
+    assert await rx == b"F0\r\nOK\r\n"
+
+    assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
+    assert await _ce6_write(dut, 0x1FFF0, 0x41) == 0
+    await _force_ft_overflow_seed_burst(dut, start_addr=0x0400)
+    assert await _ce6_write(dut, 0x1FFF2, 0x42) == 0
+
+    rx = cocotb.start_soon(_uart_recv_exact(dut, len(b"F?\r\n")))
+    await _uart_send_text(dut, "F?\r")
+    assert await rx == b"F?\r\n"
+    prefix, status = _parse_key_value_csv(await _uart_recv_line(dut))
+    assert prefix == "FS"
+    assert status["CFG"] == 0x01
+    assert status["MODE"] == 0x00
+    assert status["UART"] == 0
+    assert status["WIN"] == 0
+    assert status["CAP"] == 0
+    assert status["SOVF"] == session_overflow
+    assert status["OVF"] > total_overflow
 
 
 @cocotb.test()

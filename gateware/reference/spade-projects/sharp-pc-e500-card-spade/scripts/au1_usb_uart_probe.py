@@ -142,6 +142,24 @@ def parse_args() -> argparse.Namespace:
         help="control-write timing value in 10 ns units; 10 means 100 ns",
     )
 
+    subparsers.add_parser(
+        "ft-on",
+        help=(
+            "set the USB-UART FT source latch with F1; it only contributes to "
+            "capture when FT_STREAM_CFG bit1 is enabled from the CE6 control page"
+        ),
+    )
+
+    subparsers.add_parser(
+        "ft-off",
+        help="clear the USB-UART FT source latch with F0",
+    )
+
+    subparsers.add_parser(
+        "ft-status",
+        help="query FT source/mode masks, latch state, and overflow counters with F?",
+    )
+
     listen_parser = subparsers.add_parser(
         "listen",
         help="listen for raw bytes on the USB-UART and optionally verify an expected string",
@@ -409,6 +427,15 @@ def run_control_timing(ser: serial.Serial, *, cycles: int, timeout: float) -> in
         file=sys.stderr,
     )
     return 1
+
+
+def run_ft_uart_latch(ser: serial.Serial, *, enabled: bool, timeout: float) -> int:
+    command = "F1" if enabled else "F0"
+    return run_raw(ser, command=command, timeout=timeout, expect="OK")
+
+
+def run_ft_status(ser: serial.Serial, *, timeout: float) -> int:
+    return run_raw(ser, command="F?", timeout=timeout, expect="FS,")
 
 
 def listen_for_bytes(
@@ -859,6 +886,18 @@ def main() -> int:
                 file=sys.stderr,
             )
             return run_control_timing(ser, cycles=cycles, timeout=args.timeout)
+
+        if command == "ft-on":
+            print("setting USB-UART FT source latch", file=sys.stderr)
+            return run_ft_uart_latch(ser, enabled=True, timeout=args.timeout)
+
+        if command == "ft-off":
+            print("clearing USB-UART FT source latch", file=sys.stderr)
+            return run_ft_uart_latch(ser, enabled=False, timeout=args.timeout)
+
+        if command == "ft-status":
+            print("querying FT source state", file=sys.stderr)
+            return run_ft_status(ser, timeout=args.timeout)
 
         if command == "listen":
             expect = getattr(args, "expect", None)

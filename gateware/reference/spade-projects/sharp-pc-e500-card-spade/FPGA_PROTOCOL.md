@@ -5,7 +5,7 @@ This document describes the PC-E500 card FPGA control surface:
 - USB-UART commands exposed by the FPGA
 - Special CE6 control-page registers handled by the FPGA
 - Saleae debug and bus-capture streams
-- FT600 bulk capture of sampled-bus words during a measurement window
+- FT600 bulk capture of sampled-bus words
 - Response formats and practical examples
 
 All timings below assume the current `100 MHz` FPGA clock.
@@ -24,7 +24,10 @@ Optional bulk capture is exposed separately:
 - FT600 sampled-bus stream
   - exact mirror of the `saleae[4]` sampled-bus words
   - enabled by CE6 control-page configuration
-  - active only while the measurement interval is armed
+  - active whenever any enabled FT source is active
+  - current sources:
+    - measurement window
+    - USB-UART latch
 
 Normal CE1 RAM and CE6 ROM timing uses the shared `tNN` delay.
 CE6 control-page writes use the separate `cNN` delay.
@@ -258,6 +261,54 @@ What they control:
 - `cNN`
   - CE6 control-page writes in low16 `0xFFF0..0xFFFF`
 
+### FT Commands
+
+These control the USB-UART FT source latch and query FT stream state.
+
+| Command | Meaning |
+| --- | --- |
+| `F0` | clear the USB-UART FT source latch |
+| `F1` | set the USB-UART FT source latch |
+| `F?` | print FT stream status |
+
+Rules:
+
+- `F0` and `F1` only affect the UART source latch
+- FT sampled-bus capture runs when any enabled FT source is active
+- the USB-UART source only contributes to capture if `FT_STREAM_CFG.bit1 = 1`
+- if the UART source is cleared or disabled, the current UART-session overflow
+  count is frozen until the next `F1`
+
+`F0` and `F1` response:
+
+```text
+OK
+```
+
+`F?` response:
+
+```text
+FS,CFG=..,MODE=..,UART=0,WIN=0,CAP=0,SOVF=........,OVF=........
+```
+
+Fields:
+
+- `CFG`
+  - current `FT_STREAM_CFG` source mask
+- `MODE`
+  - current `FT_STREAM_MODE` behavior mask
+- `UART`
+  - `1` if the USB-UART FT source latch is currently set
+- `WIN`
+  - `1` if the measurement-window FT source is currently active
+- `CAP`
+  - `1` if FT sampled-bus capture is currently active after OR-ing enabled sources
+- `SOVF`
+  - dropped FT sampled-bus words counted in the current or most recent UART
+    session, where `F1` starts a new session baseline
+- `OVF`
+  - cumulative FT sampled-bus words dropped because the FT capture FIFO was full
+
 ### Measurement Commands
 
 These dump measurement reports created by CE6 control-page writes.
@@ -341,8 +392,9 @@ From calculator software, use the logical CE6 addresses in the `0x01xxxx` range.
 | `0x01FFF1` | `0xFFF1` | `ECHO` | write-only | send written byte to USB-UART |
 | `0x01FFF2` | `0xFFF2` | `MARK_STOP` | write-only | stop measurement and queue report |
 | `0x01FFF3` | `0xFFF3` | `MARK_ABORT` | write-only | clear armed measurement without report |
-| `0x01FFF4` | `0xFFF4` | `FT_STREAM_CFG` | write-only | configure measurement-gated FT sampled-bus capture |
-| `0x01FFF5..0x01FFFF` | `0xFFF5..0xFFFF` | reserved | write-only | currently no action |
+| `0x01FFF4` | `0xFFF4` | `FT_STREAM_CFG` | write-only | configure FT sampled-bus capture sources |
+| `0x01FFF5` | `0xFFF5` | `FT_STREAM_MODE` | write-only | configure FT capture behavior |
+| `0x01FFF6..0x01FFFF` | `0xFFF6..0xFFFF` | reserved | write-only | currently no action |
 
 ### `ECHO` Register
 
@@ -413,16 +465,46 @@ Write a config byte to `0x01FFF4`.
 Bit layout:
 
 ```text
-bit 0     ft_enable
+bit 0     enable measurement-window FT source
+bit 1     enable USB-UART-latch FT source
+bits 7:2  reserved
+```
+
+Rules:
+
+- `bit0 = 1`
+  - the measurement window contributes to FT sampled-bus capture
+- `bit1 = 1`
+  - the USB-UART FT latch contributes to FT sampled-bus capture
+- FT sampled-bus capture is active when any enabled source is active
+- `bit1 = 0`
+  - clears the USB-UART FT latch
+  - ends the current UART overflow session
+- `FT_STREAM_CFG = 0`
+  - disables all FT sampled-bus capture sources
+  - clears the USB-UART FT latch
+- reads from this register are passive like the rest of the control page
+- reserved bits are currently ignored
+
+### `FT_STREAM_MODE`
+
+Write a mode byte to `0x01FFF5`.
+
+Bit layout:
+
+```text
+bit 0     hold measurement-source policy sampled at MARK_START
 bits 7:1  reserved
 ```
 
 Rules:
 
 - `bit0 = 0`
-  - disable FT sampled-bus capture
+  - while the measurement window is armed, the measurement FT source follows the
+    live `FT_STREAM_CFG.bit0` value
 - `bit0 = 1`
-  - enable FT sampled-bus capture, but only while measurement `ARM` is active
+  - `MARK_START` snapshots whether `FT_STREAM_CFG.bit0` was enabled and holds
+    that policy until `MARK_STOP` / `MARK_ABORT`
 - reads from this register are passive like the rest of the control page
 - reserved bits are currently ignored
 
@@ -430,8 +512,8 @@ When enabled, the FT stream carries the exact `saleae[4]` sampled-bus words:
 
 - one sampled-bus word is `32` bits
 - FT600 transport emits the low `16` bits first, then the high `16` bits
-- the measurement `MARK_START` write itself is not part of the FT capture window
-- `MARK_STOP` and `MARK_ABORT` close the FT capture window before their own
+- the measurement `MARK_START` write itself is not part of the measurement-window FT source
+- `MARK_STOP` and `MARK_ABORT` close the measurement-window FT source before their own
   control-page writes are considered for FT capture
 
 If the dedicated FT capture FIFO fills:
