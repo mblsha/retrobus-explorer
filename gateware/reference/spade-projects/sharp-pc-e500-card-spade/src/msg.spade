@@ -22,6 +22,16 @@ pub(lib) struct MeasureReport {
     delta_ft_overflow: uint<32>,
 }
 
+pub(lib) struct FtStatus {
+    config: CardData,
+    mode: CardData,
+    uart_active: bool,
+    window_active: bool,
+    capture_active: bool,
+    session_overflow: uint<32>,
+    overflow: uint<32>,
+}
+
 pub(lib) enum RespMsg {
     None,
     Ok,
@@ -30,6 +40,7 @@ pub(lib) enum RespMsg {
     Read{addr: CardOffset, value: CardData},
     Timing{cycles: uint<7>},
     CtrlTiming{cycles: uint<7>},
+    FtStatus{status: FtStatus},
     MeasureStatus{status: MeasureStatus},
 }
 
@@ -107,6 +118,10 @@ fn byte_hex_char(value: CardData, low_nibble: bool) -> uint<8> {
 
 fn dec_char(value: uint<4>) -> uint<8> {
     b'0' +. zext(value)
+}
+
+fn bool_char(value: bool) -> uint<8> {
+    if value { b'1' } else { b'0' }
 }
 
 fn timing_byte(prefix: uint<8>, cycles: uint<7>, idx: RespIdx) -> TxReq8 {
@@ -198,6 +213,45 @@ impl RespMsg {
                 7 => tx_req_byte(b'\n'),
                 _ => tx_req_none(),
             },
+            Self::FtStatus$(status) => if idx < 7 {
+                indexed_bytes(b"FS,CFG=", idx)
+            } else if idx == 7 {
+                tx_req_byte(byte_hex_char(status.config, false))
+            } else if idx == 8 {
+                tx_req_byte(byte_hex_char(status.config, true))
+            } else if idx < 15 {
+                indexed_bytes(b",MODE=", idx -. 9)
+            } else if idx == 15 {
+                tx_req_byte(byte_hex_char(status.mode, false))
+            } else if idx == 16 {
+                tx_req_byte(byte_hex_char(status.mode, true))
+            } else if idx < 23 {
+                indexed_bytes(b",UART=", idx -. 17)
+            } else if idx == 23 {
+                tx_req_byte(bool_char(status.uart_active))
+            } else if idx < 29 {
+                indexed_bytes(b",WIN=", idx -. 24)
+            } else if idx == 29 {
+                tx_req_byte(bool_char(status.window_active))
+            } else if idx < 35 {
+                indexed_bytes(b",CAP=", idx -. 30)
+            } else if idx == 35 {
+                tx_req_byte(bool_char(status.capture_active))
+            } else if idx < 42 {
+                indexed_bytes(b",SOVF=0", idx -. 36)
+            } else if idx < 50 {
+                tx_req_byte(u32_hex_char(status.session_overflow, trunc(idx -. 42)))
+            } else if idx < 56 {
+                indexed_bytes(b",OVF=0", idx -. 50)
+            } else if idx < 64 {
+                tx_req_byte(u32_hex_char(status.overflow, trunc(idx -. 56)))
+            } else if idx == 64 {
+                tx_req_byte(b'\r')
+            } else if idx == 65 {
+                tx_req_byte(b'\n')
+            } else {
+                tx_req_none()
+            },
             Self::MeasureStatus$(status) => if idx < 7 {
                 indexed_bytes(b"MS,CNT=", idx)
             } else if idx == 7 {
@@ -211,7 +265,7 @@ impl RespMsg {
             } else if idx < 27 {
                 indexed_bytes(b",ARM=", idx -. 22)
             } else if idx == 27 {
-                tx_req_byte(if status.armed { b'1' } else { b'0' })
+                tx_req_byte(bool_char(status.armed))
             } else if idx == 28 {
                 tx_req_byte(b'\r')
             } else if idx == 29 {

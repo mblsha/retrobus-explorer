@@ -14,6 +14,7 @@ use shared_components::{
 };
 use msg::{
     EchoStreamState,
+    FtStatus,
     MeasureMsg,
     MeasureReport,
     MeasureStatus,
@@ -81,6 +82,7 @@ fn ce6_uart_port() -> Ce6Low16 { ce6_ctrl_port(1) }
 fn ce6_measure_stop_port() -> Ce6Low16 { ce6_ctrl_port(2) }
 fn ce6_measure_abort_port() -> Ce6Low16 { ce6_ctrl_port(3) }
 fn ce6_ft_stream_cfg_port() -> Ce6Low16 { ce6_ctrl_port(4) }
+fn ce6_ft_stream_mode_port() -> Ce6Low16 { ce6_ctrl_port(5) }
 
 enum Ce6CtrlAddr {
     None,
@@ -90,6 +92,7 @@ enum Ce6CtrlAddr {
     MeasureStop,
     MeasureAbort,
     FtStreamCfg,
+    FtStreamMode,
 }
 
 struct Ce6AddrDecode {
@@ -122,6 +125,10 @@ impl Ce6CtrlAddr {
     fn is_ft_stream_cfg(self) -> bool {
         if let Self::FtStreamCfg = self { true } else { false }
     }
+
+    fn is_ft_stream_mode(self) -> bool {
+        if let Self::FtStreamMode = self { true } else { false }
+    }
 }
 
 fn decode_ce6_addr(addr: BusAddr) -> Ce6AddrDecode {
@@ -139,6 +146,8 @@ fn decode_ce6_addr(addr: BusAddr) -> Ce6AddrDecode {
             Ce6CtrlAddr::MeasureAbort()
         } else if low16 == ce6_ft_stream_cfg_port() {
             Ce6CtrlAddr::FtStreamCfg()
+        } else if low16 == ce6_ft_stream_mode_port() {
+            Ce6CtrlAddr::FtStreamMode()
         } else if low16 >= ce6_ctrl_page_base() {
             Ce6CtrlAddr::Other()
         } else {
@@ -364,6 +373,12 @@ struct FtStreamRegs {
     cur_value: SampledBusWord,
 }
 
+struct FtUartSessionState {
+    active: bool,
+    base_overflow_count: MeasureCount,
+    last_overflow_delta: MeasureCount,
+}
+
 struct MeasureEngineOut {
     next_state: MeasureEngineState,
     fifo_rget: bool,
@@ -475,6 +490,14 @@ fn init_ft_stream_regs() -> FtStreamRegs {
     FtStreamRegs$(
         state: FtWordStreamState::GetFifo(),
         cur_value: 0,
+    )
+}
+
+fn init_ft_uart_session_state() -> FtUartSessionState {
+    FtUartSessionState$(
+        active: false,
+        base_overflow_count: 0,
+        last_overflow_delta: 0,
     )
 }
 
@@ -1043,6 +1066,9 @@ entity main_core(
         Some(cycles) => (true, cycles),
         None => (false, 0),
     };
+    let ft_uart_enable_request = parser_event.ft_uart_enable_request();
+    let ft_uart_disable_request = parser_event.ft_uart_disable_request();
+    let ft_status_request = parser_event.ft_status_request();
     let measure_dump_request = parser_event.measure_dump_request();
     let measure_status_request = parser_event.measure_status_request();
     let measure_clear_request = parser_event.measure_clear_request();
@@ -1259,25 +1285,57 @@ entity main_core(
     let ce6_measure_stop = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_stop();
     let ce6_measure_abort = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_measure_abort();
     let ce6_ft_stream_cfg_write = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_ft_stream_cfg();
-
-    reg(clk) ft_stream_enabled: bool reset(rst: false) =
+    let ce6_ft_stream_mode_write = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_ft_stream_mode();
+    let ft_stream_cfg_next = ce6_ctrl_step.data & 0x03;
+    reg(clk) ft_stream_cfg: CardData reset(rst: 0) =
         if ce6_ft_stream_cfg_write {
-            (ce6_ctrl_step.data & 0x01) != 0
+            ft_stream_cfg_next
         } else {
-            ft_stream_enabled
+            ft_stream_cfg
         };
-    reg(clk) ft_window_active: bool reset(rst: false) =
+    let ft_stream_mode_next = ce6_ctrl_step.data & 0x01;
+    reg(clk) ft_stream_mode: CardData reset(rst: 0) =
+        if ce6_ft_stream_mode_write {
+            ft_stream_mode_next
+        } else {
+            ft_stream_mode
+        };
+    let ft_measure_source_enabled = (ft_stream_cfg & 0x01) != 0;
+    let ft_uart_source_enabled = (ft_stream_cfg & 0x02) != 0;
+    let ft_hold_measure_source = (ft_stream_mode & 0x01) != 0;
+    let ft_uart_source_disable = ce6_ft_stream_cfg_write && (ft_stream_cfg_next & 0x02) == 0;
+    reg(clk) ft_uart_active: bool reset(rst: false) =
+        if ft_uart_source_disable || ft_uart_disable_request {
+            false
+        } else if ft_uart_enable_request {
+            true
+        } else {
+            ft_uart_active
+        };
+    reg(clk) ft_measure_window_armed: bool reset(rst: false) =
         if ce6_measure_stop || ce6_measure_abort {
             false
-        } else if ce6_ft_stream_cfg_write && ce6_ctrl_step.data == 0 {
+        } else if ce6_measure_start {
+            true
+        } else {
+            ft_measure_window_armed
+        };
+    reg(clk) ft_measure_window_source_enabled: bool reset(rst: false) =
+        if ce6_measure_stop || ce6_measure_abort {
             false
         } else if ce6_measure_start {
-            ft_stream_enabled
+            ft_measure_source_enabled
         } else {
-            ft_window_active
+            ft_measure_window_source_enabled
         };
-    let ft_capture_window = ft_window_active && !ce6_measure_stop && !ce6_measure_abort;
-    let ft_capture_sample = sampled_bus_valid && ft_capture_window;
+    let ft_measure_window_live = ft_measure_window_armed && !ce6_measure_stop && !ce6_measure_abort;
+    let ft_measure_capture_active = if ft_hold_measure_source {
+        ft_measure_window_live && ft_measure_window_source_enabled
+    } else {
+        ft_measure_window_live && ft_measure_source_enabled
+    };
+    let ft_capture_active = ft_measure_capture_active || (ft_uart_source_enabled && ft_uart_active);
+    let ft_capture_sample = sampled_bus_valid && ft_capture_active;
     reg(clk) ft_ingress: FtIngressState reset(rst: init_ft_ingress_state()) = {
         let dequeue = ft_ingress.pending_valid && !*ft_stream_fifo_full;
         let accept_new = ft_capture_sample && (!ft_ingress.pending_valid || dequeue);
@@ -1318,6 +1376,31 @@ entity main_core(
     let ft_stream_fifo_drop = ft_capture_sample && ft_ingress.pending_valid && *ft_stream_fifo_full;
     reg(clk) ft_overflow_total: MeasureCount reset(rst: 0) =
         if ft_stream_fifo_drop { ft_overflow_total +. 1 } else { ft_overflow_total };
+    reg(clk) ft_uart_session: FtUartSessionState reset(rst: init_ft_uart_session_state()) =
+        if ft_uart_source_disable || ft_uart_disable_request {
+            FtUartSessionState$(
+                active: false,
+                base_overflow_count: ft_uart_session.base_overflow_count,
+                last_overflow_delta: if ft_uart_session.active {
+                    ft_overflow_total -. ft_uart_session.base_overflow_count
+                } else {
+                    ft_uart_session.last_overflow_delta
+                },
+            )
+        } else if ft_uart_enable_request {
+            FtUartSessionState$(
+                active: true,
+                base_overflow_count: ft_overflow_total,
+                last_overflow_delta: 0,
+            )
+        } else {
+            ft_uart_session
+        };
+    let ft_uart_session_overflow = if ft_uart_session.active {
+        ft_overflow_total -. ft_uart_session.base_overflow_count
+    } else {
+        ft_uart_session.last_overflow_delta
+    };
     let ft_stream_fifo = inst sync_fifo::<32, 4096>(
         clk,
         rst,
@@ -1433,6 +1516,15 @@ entity main_core(
         overflow: measure_overflow_count,
         armed: measure_capture.armed,
     );
+    let ft_status_now = FtStatus$(
+        config: ft_stream_cfg,
+        mode: ft_stream_mode,
+        uart_active: ft_uart_active,
+        window_active: ft_measure_capture_active,
+        capture_active: ft_capture_active,
+        session_overflow: ft_uart_session_overflow,
+        overflow: ft_overflow_total,
+    );
 
     let next_resp_msg = if usb_ram_read_valid {
         if mem_clear.active || uart_ram_read_collision {
@@ -1450,9 +1542,11 @@ entity main_core(
         RespMsg::Timing(classify_delay_cycles)
     } else if ctrl_write_delay_update_valid {
         RespMsg::CtrlTiming(ctrl_write_delay_cycles)
+    } else if ft_status_request {
+        RespMsg::FtStatus(ft_status_now)
     } else if measure_status_request {
         RespMsg::MeasureStatus(measure_status_now)
-    } else if measure_clear_request {
+    } else if measure_clear_request || ft_uart_enable_request || ft_uart_disable_request {
         RespMsg::Ok()
     } else if parser_event.is_parse_err() {
         RespMsg::Err()

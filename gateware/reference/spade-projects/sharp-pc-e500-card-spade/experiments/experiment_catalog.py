@@ -368,7 +368,7 @@ def build_asm_mv_abs_a_ctrl_write_chain(count: int) -> str:
         "    MV A, 0xA5",
     ]
     for _ in range(count):
-        lines.append("    MV [0x1FFF5], A")
+        lines.append("    MV [0x1FFF6], A")
     lines.append("    RETF")
     lines.append("")
     return "\n".join(lines)
