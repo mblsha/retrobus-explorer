@@ -45,7 +45,7 @@ pub fn default_assembler_dir() -> PathBuf {
 pub fn project_root_from_manifest() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
-        .nth(3)
+        .nth(2)
         .expect("project root")
         .to_path_buf()
 }
