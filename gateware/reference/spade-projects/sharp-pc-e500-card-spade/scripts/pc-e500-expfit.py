@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from statistics import mean
 
-from pc_e500_supervisor_client import DEFAULT_SOCKET, send_request
+from pce500_host.supervisor_client import DEFAULT_SOCKET, send_request
 
 DEFAULT_COUNTS = [64, 128, 192, 224, 255, 256]
 DEFAULT_QUANTUM = 130.879

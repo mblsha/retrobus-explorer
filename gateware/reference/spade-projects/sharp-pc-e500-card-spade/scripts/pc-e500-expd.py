@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from pce500_host.contract import SUPERVISOR_RPC_ACTIONS
 from pc_e500_experiment_common import (
     BEGIN_PREFIX,
     DEFAULT_ASSEMBLER_DIR,
@@ -42,18 +43,6 @@ DEFAULT_DEBUG_ECHO_ASM = PROJECT_ROOT / "asm" / "card_rom_echo_short_retf.asm"
 DEFAULT_SAFE_TIMING = 5
 DEFAULT_SAFE_CONTROL_TIMING = 10
 DEFAULT_FT_MAX_RETAINED_WORDS = 262_144
-SUPPORTED_RPC_ACTIONS = (
-    "status",
-    "stream_on",
-    "stream_off",
-    "stream_status",
-    "stream_config",
-    "arm_safe",
-    "debug_echo_short",
-    "wait_ready",
-    "run",
-    "shutdown",
-)
 
 CMD_BASE = 0x107E0
 CMD_MAGIC0 = CMD_BASE + 0x00
