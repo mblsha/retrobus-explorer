@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import socket
 import sys
 import time
 from pathlib import Path
 from statistics import mean
 
+from pc_e500_supervisor_client import DEFAULT_SOCKET, send_request
 
-DEFAULT_SOCKET = Path.home() / ".cache" / "pc-e500-expd.sock"
 DEFAULT_COUNTS = [64, 128, 192, 224, 255, 256]
 DEFAULT_QUANTUM = 130.879
 
@@ -46,24 +45,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("script", type=Path, help="path to the experiment script")
     parser.add_argument("script_args", nargs=argparse.REMAINDER, help="extra args forwarded after the count; prefix with -- to separate")
     return parser
-
-
-def send_request(socket_path: Path, payload: dict[str, object]) -> dict[str, object]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(socket_path))
-        client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-        response = bytearray()
-        while True:
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            response.extend(chunk)
-            if b"\n" in chunk:
-                break
-    if not response:
-        raise RuntimeError("daemon returned no response")
-    return json.loads(response.decode("utf-8"))
-
 
 def build_run_request(script: Path, script_args: list[str]) -> dict[str, object]:
     return {

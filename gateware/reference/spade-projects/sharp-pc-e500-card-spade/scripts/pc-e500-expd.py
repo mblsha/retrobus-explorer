@@ -42,6 +42,18 @@ DEFAULT_DEBUG_ECHO_ASM = PROJECT_ROOT / "asm" / "card_rom_echo_short_retf.asm"
 DEFAULT_SAFE_TIMING = 5
 DEFAULT_SAFE_CONTROL_TIMING = 10
 DEFAULT_FT_MAX_RETAINED_WORDS = 262_144
+SUPPORTED_RPC_ACTIONS = (
+    "status",
+    "stream_on",
+    "stream_off",
+    "stream_status",
+    "stream_config",
+    "arm_safe",
+    "debug_echo_short",
+    "wait_ready",
+    "run",
+    "shutdown",
+)
 
 CMD_BASE = 0x107E0
 CMD_MAGIC0 = CMD_BASE + 0x00
@@ -559,6 +571,105 @@ class ExperimentDaemon:
             "recent_uart_lines": self.uart.last_lines(),
         }
 
+    def stream_command(self, command: str) -> dict[str, Any]:
+        reply = self.uart.send_command(command)
+        self._poll_unsolicited_lines()
+        return {
+            "status": "ok",
+            "action": command,
+            "reply_text": render_terminal_bytes(reply),
+            "reply_hex": reply.hex(),
+            "recent_uart_lines": self.uart.last_lines(),
+        }
+
+    def set_stream_config(self, cfg: int, mode: int | None = None) -> dict[str, Any]:
+        self._poll_unsolicited_lines()
+        if self.status != "idle" or self.needs_reset:
+            raise RuntimeError("device is not idle; wait for XR,READY or reset + CALL &10000")
+
+        asm_text = f""".ORG 0x10100
+
+start:
+    MV A, 0x{cfg:02X}
+    MV [0x1FFF4], A
+"""
+        if mode is not None:
+            asm_text += f"""    MV A, 0x{mode:02X}
+    MV [0x1FFF5], A
+"""
+        asm_text += "    RETF\n"
+
+        start_address, image = self._assemble_image_from_text(asm_text)
+        image_to_program = self._build_full_experiment_region(start_address, image)
+        plan = {
+            "name": "set_ft_stream_config",
+            "asm_text": asm_text,
+            "timing": DEFAULT_SAFE_TIMING,
+            "control_timing": DEFAULT_SAFE_CONTROL_TIMING,
+            "timeout_s": 2.0,
+            "start_tag": 0xF0,
+            "stop_tag": 0xF1,
+            "flags": 0,
+            "args": [],
+            "ft_capture": False,
+            "fill_experiment_region": True,
+            "ft_read_size": 64 * 1024,
+            "ft_read_timeout_ms": 20,
+            "ft_post_stop_idle_s": 0.1,
+            "ft_post_stop_hard_s": 1.0,
+            "ft_max_retained_words": DEFAULT_FT_MAX_RETAINED_WORDS,
+        }
+        run_id = self._make_run_id()
+        sequence = self._next_sequence()
+        command_block = self._compose_command_block(plan, sequence)
+
+        self.uart.set_timing(DEFAULT_SAFE_TIMING)
+        self.uart.set_control_timing(DEFAULT_SAFE_CONTROL_TIMING)
+        self.uart.write_rom_bytes(EXPERIMENT_MIN, image_to_program, fast=True)
+        self.uart.synchronize_rx_boundary()
+        line_index = self.uart.line_count()
+        self._commit_command_block(command_block)
+        self.status = "running"
+
+        begin_text = f"{BEGIN_PREFIX},{sequence:02X}"
+        end_prefix = f"{END_PREFIX},{sequence:02X},"
+
+        try:
+            begin_line = self.uart.wait_for_line(lambda text: text == begin_text, 2.0, start_index=line_index)
+            end_line = self.uart.wait_for_line(lambda text: text.startswith(end_prefix), 2.0, start_index=line_index)
+        except TimeoutError as exc:
+            xr_lines = [line.text for line in self.uart.lines_since(line_index) if line.text.startswith("XR,")]
+            payload = self._handle_timeout(
+                run_id=run_id,
+                reason=f"{exc} during stream_config",
+                plan=plan,
+                timing=DEFAULT_SAFE_TIMING,
+                control_timing=DEFAULT_SAFE_CONTROL_TIMING,
+                measurements=[],
+                uart_lines=xr_lines,
+                ft_capture_result=None,
+            )
+            self.last_result = payload
+            return payload
+
+        xr_lines = [line.text for line in self.uart.lines_since(line_index) if line.text.startswith("XR,")]
+        result = {
+            "status": "ok",
+            "run_id": run_id,
+            "action": "stream_config",
+            "cfg": cfg,
+            "mode": mode,
+            "begin_line": begin_line.text,
+            "end_line": end_line.text,
+            "uart_lines": xr_lines,
+            "recent_uart_lines": self.uart.last_lines(),
+        }
+        self.status = "idle"
+        self.needs_reset = False
+        self.last_error = None
+        self.last_result = result
+        return result
+
     def wait_ready(self, timeout_s: float) -> dict[str, Any]:
         self._poll_unsolicited_lines()
         if self.status == "idle":
@@ -578,6 +689,16 @@ def handle_request(daemon: ExperimentDaemon, request: dict[str, Any]) -> dict[st
     action = request.get("action")
     if action == "status":
         return daemon.status_payload()
+    if action == "stream_on":
+        return daemon.stream_command("F1")
+    if action == "stream_off":
+        return daemon.stream_command("F0")
+    if action == "stream_status":
+        return daemon.stream_command("F?")
+    if action == "stream_config":
+        cfg = int(request.get("cfg"))
+        mode = request.get("mode")
+        return daemon.set_stream_config(cfg, None if mode is None else int(mode))
     if action == "arm_safe":
         return daemon.program_safe_image()
     if action == "debug_echo_short":

@@ -7,13 +7,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import socket
 import sys
 from pathlib import Path
 
-
-DEFAULT_SOCKET = Path.home() / ".cache" / "pc-e500-expd.sock"
-
+from pc_e500_supervisor_client import DEFAULT_SOCKET, send_request
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PC-E500 experiment supervisor client")
@@ -23,6 +20,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("status", help="query daemon/device status")
+    subparsers.add_parser("stream-on", help="send F1 through the supervisor")
+    subparsers.add_parser("stream-off", help="send F0 through the supervisor")
+    subparsers.add_parser("stream-status", help="send F? through the supervisor")
+    stream_config = subparsers.add_parser("stream-config", help="program FT stream cfg/mode through the supervisor")
+    stream_config.add_argument("--cfg", required=True, type=lambda value: int(value, 0), help="FT_STREAM_CFG value")
+    stream_config.add_argument("--mode", type=lambda value: int(value, 0), help="optional FT_STREAM_MODE value")
     subparsers.add_parser("arm-safe", help="program the safe supervisor image")
 
     debug_echo_short = subparsers.add_parser(
@@ -46,27 +49,20 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("shutdown", help="stop the daemon")
     return parser
 
-
-def send_request(socket_path: Path, payload: dict[str, object]) -> dict[str, object]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(socket_path))
-        client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-        response = bytearray()
-        while True:
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            response.extend(chunk)
-            if b"\n" in chunk:
-                break
-    if not response:
-        raise RuntimeError("daemon returned no response")
-    return json.loads(response.decode("utf-8"))
-
-
 def build_request(args: argparse.Namespace) -> dict[str, object]:
     if args.command == "status":
         return {"action": "status"}
+    if args.command == "stream-on":
+        return {"action": "stream_on"}
+    if args.command == "stream-off":
+        return {"action": "stream_off"}
+    if args.command == "stream-status":
+        return {"action": "stream_status"}
+    if args.command == "stream-config":
+        payload: dict[str, object] = {"action": "stream_config", "cfg": args.cfg}
+        if args.mode is not None:
+            payload["mode"] = args.mode
+        return payload
     if args.command == "arm-safe":
         return {"action": "arm_safe"}
     if args.command == "debug-echo-short":

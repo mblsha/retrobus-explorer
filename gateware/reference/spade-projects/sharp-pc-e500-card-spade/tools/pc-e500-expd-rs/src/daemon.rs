@@ -246,9 +246,7 @@ impl ExperimentDaemon {
             anyhow::bail!("device is not idle; wait for XR,READY or reset + CALL &10000");
         }
 
-        let mut asm_text = String::from(
-            ".ORG 0x10100\n\nstart:\n    MV A, 0x",
-        );
+        let mut asm_text = String::from(".ORG 0x10100\n\nstart:\n    MV A, 0x");
         asm_text.push_str(&format!("{cfg:02X}\n"));
         asm_text.push_str("    MV [0x1FFF4], A\n");
         if let Some(mode) = mode {
@@ -280,11 +278,11 @@ impl ExperimentDaemon {
             extra: serde_json::Map::new(),
         };
         let sequence = self.next_sequence();
+        let run_id = self.make_run_id();
         let command_block = self.compose_command_block(&plan, sequence)?;
 
         self.uart.set_timing(DEFAULT_SAFE_TIMING)?;
         self.uart.set_control_timing(DEFAULT_SAFE_CONTROL_TIMING)?;
-        self.uart.clear_measurements()?;
         self.uart
             .write_rom_bytes(EXPERIMENT_MIN, &image_to_program, true)?;
         self.uart.synchronize_rx_boundary(0.2, 2.0)?;
@@ -294,36 +292,64 @@ impl ExperimentDaemon {
 
         let begin_text = format!("{BEGIN_PREFIX},{sequence:02X}");
         let end_prefix = format!("{END_PREFIX},{sequence:02X},");
-        let begin_line = self
-            .uart
-            .wait_for_line(|text| text == begin_text, plan.timeout_s, line_index)?;
-        let end_line = self
-            .uart
-            .wait_for_line(|text| text.starts_with(&end_prefix), plan.timeout_s, line_index)?;
-        let measurements = self.uart.dump_measurements()?;
-        let xr_lines: Vec<String> = self
-            .uart
-            .lines_since(line_index)
-            .into_iter()
-            .filter(|line| line.text.starts_with("XR,"))
-            .map(|line| line.text)
-            .collect();
-        self.status = "idle".into();
-        self.needs_reset = false;
-        self.last_error = None;
-        let result = json!({
-            "status": "ok",
-            "action": "stream_config",
-            "cfg": cfg,
-            "mode": mode,
-            "begin_line": begin_line.text,
-            "end_line": end_line.text,
-            "measurement": measurements,
-            "uart_lines": xr_lines,
-            "recent_uart_lines": self.uart.last_lines(20),
-        });
-        self.last_result = Some(result.clone());
-        Ok(result)
+        match (
+            self.uart
+                .wait_for_line(|text| text == begin_text, plan.timeout_s, line_index),
+            self.uart.wait_for_line(
+                |text| text.starts_with(&end_prefix),
+                plan.timeout_s,
+                line_index,
+            ),
+        ) {
+            (Ok(begin_line), Ok(end_line)) => {
+                let xr_lines: Vec<String> = self
+                    .uart
+                    .lines_since(line_index)
+                    .into_iter()
+                    .filter(|line| line.text.starts_with("XR,"))
+                    .map(|line| line.text)
+                    .collect();
+                self.status = "idle".into();
+                self.needs_reset = false;
+                self.last_error = None;
+                let result = json!({
+                    "status": "ok",
+                    "run_id": run_id,
+                    "action": "stream_config",
+                    "cfg": cfg,
+                    "mode": mode,
+                    "begin_line": begin_line.text,
+                    "end_line": end_line.text,
+                    "uart_lines": xr_lines,
+                    "recent_uart_lines": self.uart.last_lines(20),
+                });
+                self.last_result = Some(result.clone());
+                Ok(result)
+            }
+            _ => {
+                let xr_lines: Vec<String> = self
+                    .uart
+                    .lines_since(line_index)
+                    .into_iter()
+                    .filter(|line| line.text.starts_with("XR,"))
+                    .map(|line| line.text)
+                    .collect();
+                let payload = self.handle_timeout(
+                    &run_id,
+                    "timed out waiting for UART line during stream_config",
+                    Some(&plan),
+                    None,
+                    None,
+                    Some(DEFAULT_SAFE_TIMING),
+                    Some(DEFAULT_SAFE_CONTROL_TIMING),
+                    &[],
+                    &xr_lines,
+                    None,
+                )?;
+                self.last_result = Some(payload.clone());
+                Ok(payload)
+            }
+        }
     }
 
     pub fn run_experiment(
@@ -484,7 +510,10 @@ impl ExperimentDaemon {
                 let cfg = request["cfg"]
                     .as_u64()
                     .ok_or_else(|| anyhow!("missing cfg"))? as u8;
-                let mode = request.get("mode").and_then(|value| value.as_u64()).map(|v| v as u8);
+                let mode = request
+                    .get("mode")
+                    .and_then(|value| value.as_u64())
+                    .map(|v| v as u8);
                 self.set_stream_config(cfg, mode)
             }
             "arm_safe" => self.program_safe_image(),
