@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context, Result};
 use libloading::{Library, Symbol};
 
 const FT_OK: c_ulong = 0;
+const FT_TIMEOUT: c_ulong = 19;
 const FT_OPEN_BY_INDEX: c_ulong = 0x0000_0010;
 
 type FtHandle = *mut c_void;
@@ -94,7 +95,9 @@ impl Device {
                 timeout_ms as c_ulong,
             )
         };
-        ensure_status(status, "FT_ReadPipeEx")?;
+        if status != FT_OK && status != FT_TIMEOUT {
+            ensure_status(status, "FT_ReadPipeEx")?;
+        }
         buffer.truncate(transferred as usize);
         Ok(buffer)
     }

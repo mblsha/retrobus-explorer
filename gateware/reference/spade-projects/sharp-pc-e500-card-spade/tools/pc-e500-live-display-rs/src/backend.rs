@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
+use std::ffi::CString;
 use std::fs;
+use std::io::{Read, Write};
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use serialport::SerialPort;
-
 use crate::d3xx::Device;
 use crate::lcd::{LcdModel, DISPLAY_HEIGHT, DISPLAY_WIDTH};
 use crate::protocol::{
@@ -15,6 +16,9 @@ use crate::protocol::{
     DEFAULT_READ_SIZE, DEFAULT_READ_TIMEOUT_MS, DEFAULT_STREAM_SIZE, LCD_WRITE_ADDR_MAX,
     LCD_WRITE_ADDR_MIN,
 };
+
+#[cfg(target_os = "macos")]
+const IOSSIOSPEED: libc::c_ulong = 0x8004_5402;
 
 #[derive(Clone, Debug)]
 pub struct BackendConfig {
@@ -166,10 +170,10 @@ fn run_session(
         ..Default::default()
     };
 
-    send_uart_command(&mut *uart, "F1")?;
+    send_uart_command(&mut uart, "F1")?;
     snapshot.stream_enabled = true;
     let _ = updates.send(snapshot.clone());
-    send_uart_command(&mut *uart, "F?")?;
+    send_uart_command(&mut uart, "F?")?;
 
     let mut last_publish = Instant::now();
     let mut last_status_poll = Instant::now();
@@ -178,20 +182,20 @@ fn run_session(
         while let Ok(command) = commands.try_recv() {
             match command {
                 BackendCommand::EnableStream => {
-                    send_uart_command(&mut *uart, "F1")?;
+                    send_uart_command(&mut uart, "F1")?;
                     snapshot.stream_enabled = true;
                 }
                 BackendCommand::DisableStream => {
-                    send_uart_command(&mut *uart, "F0")?;
+                    send_uart_command(&mut uart, "F0")?;
                     snapshot.stream_enabled = false;
                 }
-                BackendCommand::PollStatus => send_uart_command(&mut *uart, "F?")?,
+                BackendCommand::PollStatus => send_uart_command(&mut uart, "F?")?,
                 BackendCommand::Stop => return Ok(()),
             }
         }
 
         if last_status_poll.elapsed() >= Duration::from_secs(1) {
-            let _ = send_uart_command(&mut *uart, "F?");
+            let _ = send_uart_command(&mut uart, "F?");
             last_status_poll = Instant::now();
         }
 
@@ -212,7 +216,7 @@ fn run_session(
             }
         }
 
-        drain_uart(&mut *uart, &mut uart_buf, &mut snapshot, &mut recent_lines)?;
+        drain_uart(&mut uart, &mut uart_buf, &mut snapshot, &mut recent_lines)?;
 
         if last_publish.elapsed() >= Duration::from_millis(33) {
             snapshot.frame = lcd.render_monochrome();
@@ -242,21 +246,23 @@ fn detect_second_usb_serial_port() -> Result<String> {
         .ok_or_else(|| anyhow!("expected at least two /dev/cu.usbserial-* devices"))
 }
 
-fn open_serial(path: &str, baud_rate: u32) -> Result<Box<dyn SerialPort>> {
-    serialport::new(path, baud_rate)
-        .timeout(Duration::from_millis(10))
-        .open()
-        .with_context(|| format!("failed to open serial port {path}"))
+fn open_serial(path: &str, baud_rate: u32) -> Result<PortHandle> {
+    let port = PortHandle::open(path, baud_rate)
+        .with_context(|| format!("failed to open serial port {path}"))?;
+    let _ = port.clear_input();
+    let _ = port.clear_output();
+    Ok(port)
 }
 
-fn send_uart_command(port: &mut dyn SerialPort, command: &str) -> Result<()> {
+fn send_uart_command(port: &mut PortHandle, command: &str) -> Result<()> {
     port.write_all(command.as_bytes())?;
     port.write_all(b"\r")?;
+    port.flush()?;
     Ok(())
 }
 
 fn drain_uart(
-    port: &mut dyn SerialPort,
+    port: &mut PortHandle,
     buffer: &mut Vec<u8>,
     snapshot: &mut BackendSnapshot,
     recent_lines: &mut VecDeque<String>,
@@ -288,4 +294,152 @@ fn drain_uart(
         }
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct PortHandle {
+    fd: RawFd,
+}
+
+#[cfg(target_os = "macos")]
+impl PortHandle {
+    fn open(path: &str, baud: u32) -> Result<Self> {
+        let c_path = CString::new(path)?;
+        let fd = unsafe {
+            libc::open(
+                c_path.as_ptr(),
+                libc::O_RDWR | libc::O_NOCTTY | libc::O_NONBLOCK,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+
+        let mut termios = unsafe {
+            let mut termios = std::mem::zeroed::<libc::termios>();
+            if libc::tcgetattr(fd, &mut termios) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+            termios
+        };
+
+        unsafe { libc::cfmakeraw(&mut termios) };
+        termios.c_cflag |= libc::CREAD | libc::CLOCAL;
+        termios.c_cflag &= !libc::CSIZE;
+        termios.c_cflag |= libc::CS8;
+        termios.c_cflag &= !libc::CSTOPB;
+        termios.c_cflag &= !(libc::PARENB | libc::PARODD);
+        termios.c_iflag &= !(libc::IXON | libc::IXOFF | libc::IXANY);
+        termios.c_cc[libc::VMIN] = 0;
+        termios.c_cc[libc::VTIME] = 0;
+
+        unsafe {
+            if libc::cfsetispeed(&mut termios, libc::B9600) != 0
+                || libc::cfsetospeed(&mut termios, libc::B9600) != 0
+            {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+            if libc::tcsetattr(fd, libc::TCSANOW, &termios) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+            let speed = baud as libc::speed_t;
+            if libc::ioctl(fd, IOSSIOSPEED, &speed) != 0 {
+                let err = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err.into());
+            }
+        }
+
+        Ok(Self { fd })
+    }
+
+    fn clear_input(&self) -> std::io::Result<()> {
+        let rc = unsafe { libc::tcflush(self.fd, libc::TCIFLUSH) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+
+    fn clear_output(&self) -> std::io::Result<()> {
+        let rc = unsafe { libc::tcflush(self.fd, libc::TCOFLUSH) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Read for PortHandle {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = unsafe { libc::read(self.fd, buffer.as_mut_ptr().cast(), buffer.len()) };
+        if read < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::WouldBlock {
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, err));
+            }
+            return Err(err);
+        }
+        Ok(read as usize)
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Write for PortHandle {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let wrote = unsafe { libc::write(self.fd, buffer.as_ptr().cast(), buffer.len()) };
+        if wrote < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(wrote as usize)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let rc = unsafe { libc::tcdrain(self.fd) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Drop for PortHandle {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+type PortHandle = serialport::TTYPort;
+
+#[cfg(not(target_os = "macos"))]
+impl PortHandle {
+    fn open(path: &str, baud: u32) -> Result<Self> {
+        serialport::new(path, baud)
+            .timeout(Duration::from_millis(10))
+            .open_native()
+            .map_err(Into::into)
+    }
+
+    fn clear_input(&self) -> std::io::Result<()> {
+        self.clear(serialport::ClearBuffer::Input)
+    }
+
+    fn clear_output(&self) -> std::io::Result<()> {
+        self.clear(serialport::ClearBuffer::Output)
+    }
 }
