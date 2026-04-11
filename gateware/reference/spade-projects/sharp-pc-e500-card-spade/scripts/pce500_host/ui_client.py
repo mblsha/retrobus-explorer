@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import socket
 import time
 from pathlib import Path
 
@@ -15,7 +14,7 @@ def read_ui_state(socket_path: Path) -> dict[str, object] | None:
         return None
     try:
         return send_request(socket_path, {"action": "get_text"})
-    except OSError:
+    except (OSError, RuntimeError, ValueError):
         return None
 
 
@@ -27,11 +26,15 @@ def ui_state_fresh_enough(
         return False
     if baseline is None:
         return True
-    current_words = current.get("total_words")
-    baseline_words = baseline.get("total_words")
+    current_generation = current.get("render_generation")
+    baseline_generation = baseline.get("render_generation")
     current_writes = current.get("lcd_writes")
     baseline_writes = baseline.get("lcd_writes")
-    if isinstance(current_words, int) and isinstance(baseline_words, int) and current_words > baseline_words:
+    if (
+        isinstance(current_generation, int)
+        and isinstance(baseline_generation, int)
+        and current_generation > baseline_generation
+    ):
         return True
     if isinstance(current_writes, int) and isinstance(baseline_writes, int) and current_writes > baseline_writes:
         return True
