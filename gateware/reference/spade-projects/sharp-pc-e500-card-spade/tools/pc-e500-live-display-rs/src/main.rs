@@ -12,8 +12,8 @@ fn main() -> Result<()> {
     let config = BackendConfig::from_env()?;
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1100.0, 620.0])
-            .with_min_inner_size([860.0, 480.0])
+            .with_inner_size([1280.0, 760.0])
+            .with_min_inner_size([980.0, 620.0])
             .with_title("PC-E500 Live Display"),
         ..Default::default()
     };
