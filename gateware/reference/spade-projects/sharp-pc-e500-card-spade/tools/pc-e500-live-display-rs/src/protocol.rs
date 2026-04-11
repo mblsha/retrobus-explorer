@@ -94,3 +94,46 @@ fn parse_bool_digit(value: &str) -> Option<bool> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_packed_words_preserves_pending_bytes() {
+        let mut pending = vec![0x11, 0x22];
+        let words = decode_packed_words(&[0x33, 0x44, 0x55, 0x66, 0x77], &mut pending);
+
+        assert_eq!(words, vec![0x4433_2211]);
+        assert_eq!(pending, vec![0x55, 0x66, 0x77]);
+    }
+
+    #[test]
+    fn parse_stream_status_line_decodes_core_fields() {
+        let status = parse_stream_status_line(
+            "FS,CFG=02,MODE=00,UART=1,WIN=0,CAP=1,SOVF=00000000,OVF=00000010",
+        )
+        .expect("status should parse");
+
+        assert_eq!(status.cfg, Some(0x02));
+        assert_eq!(status.mode, Some(0x00));
+        assert_eq!(status.uart, Some(true));
+        assert_eq!(status.win, Some(false));
+        assert_eq!(status.cap, Some(true));
+        assert_eq!(status.sovf, Some(0));
+        assert_eq!(status.ovf, Some(0x10));
+        assert!(status.desynced());
+        assert_eq!(status.fields.get("CFG").map(String::as_str), Some("02"));
+    }
+
+    #[test]
+    fn sampled_word_extracts_fields() {
+        let raw = 0x2a55_1234;
+        let word = SampledWord::from_raw(raw);
+
+        assert_eq!(word.addr, raw & 0x3ffff);
+        assert_eq!(word.data, ((raw >> 18) & 0xff) as u8);
+        assert_eq!(word.status, ((raw >> 26) & 0x3f) as u8);
+        assert_eq!(word.rw(), (word.status & 0x01) != 0);
+    }
+}
