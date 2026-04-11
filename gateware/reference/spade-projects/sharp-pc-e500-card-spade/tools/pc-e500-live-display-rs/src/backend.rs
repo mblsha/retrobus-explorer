@@ -199,6 +199,14 @@ fn run_session(
             &mut snapshot,
             &mut recent_lines,
         )?;
+        reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
+        discard_ft_backlog(
+            &mut ft,
+            config.pipe_id,
+            config.read_size,
+            config.read_timeout_ms,
+            &mut pending,
+        )?;
         let _ = updates.send(snapshot.clone());
     } else {
         snapshot.stream_enabled = false;
@@ -208,6 +216,7 @@ fn run_session(
 
     let mut last_publish = Instant::now();
     let mut last_status_poll = Instant::now();
+    let mut desired_stream_enabled = uart.is_some() || config.daemon_socket.is_some();
 
     loop {
         while let Ok(command) = commands.try_recv() {
@@ -219,6 +228,15 @@ fn run_session(
                         &mut snapshot,
                         &mut recent_lines,
                     )?;
+                    reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
+                    discard_ft_backlog(
+                        &mut ft,
+                        config.pipe_id,
+                        config.read_size,
+                        config.read_timeout_ms,
+                        &mut pending,
+                    )?;
+                    desired_stream_enabled = true;
                 }
                 BackendCommand::DisableStream => {
                     if let Some(uart) = uart.as_mut() {
@@ -231,6 +249,7 @@ fn run_session(
                         );
                     }
                     snapshot.stream_enabled = false;
+                    desired_stream_enabled = false;
                 }
                 BackendCommand::PollStatus => {
                     if let Some(uart) = uart.as_mut() {
@@ -256,6 +275,24 @@ fn run_session(
                 }
             }
             last_status_poll = Instant::now();
+        }
+
+        if desired_stream_enabled && snapshot.last_status.as_ref().and_then(|status| status.uart) == Some(false)
+        {
+            enable_stream_and_refresh(
+                uart.as_mut(),
+                config.daemon_socket.as_deref(),
+                &mut snapshot,
+                &mut recent_lines,
+            )?;
+            reset_local_display_state(&mut lcd, &mut pending, &mut snapshot);
+            discard_ft_backlog(
+                &mut ft,
+                config.pipe_id,
+                config.read_size,
+                config.read_timeout_ms,
+                &mut pending,
+            )?;
         }
 
         let chunk = ft.read_pipe(config.pipe_id, config.read_size, config.read_timeout_ms)?;
@@ -286,6 +323,35 @@ fn run_session(
             last_publish = Instant::now();
         }
     }
+}
+
+fn reset_local_display_state(
+    lcd: &mut LcdModel,
+    pending: &mut Vec<u8>,
+    snapshot: &mut BackendSnapshot,
+) {
+    *lcd = LcdModel::default();
+    pending.clear();
+    snapshot.frame = lcd.render_monochrome();
+    snapshot.lcd_writes = 0;
+}
+
+fn discard_ft_backlog(
+    ft: &mut Device,
+    pipe_id: u8,
+    read_size: usize,
+    read_timeout_ms: u32,
+    pending: &mut Vec<u8>,
+) -> Result<()> {
+    loop {
+        let chunk = ft.read_pipe(pipe_id, read_size, read_timeout_ms)?;
+        if chunk.is_empty() {
+            break;
+        }
+        let _ = decode_packed_words(&chunk, pending);
+    }
+    pending.clear();
+    Ok(())
 }
 
 fn detect_second_usb_serial_port() -> Result<String> {
