@@ -6,8 +6,11 @@ Source reference:
 - `https://cdn.alchitry.com/elements/Alchitry%20V2%20Elements%20KiCAD.zip`
 - `https://alchitry.com/tutorials/references/pinouts-and-custom-elements/`
 
-The original KiCad symbol and footprint files are vendored under [`vendor/`](vendor).
-`src/components.py` parses those sources and builds reusable JITX components for:
+The runtime model is generated from the published KiCad symbol data and rebuilt from shared Hirose DF40 connector models.
+The generated signal maps live in [`src/generated_data.py`](src/generated_data.py).
+The reusable connector footprints live in [`shared-components`](../shared-components/src/shared_components/hirose_df40.py).
+
+`src/components.py` builds reusable JITX components for:
 
 - `AlchitryV2TopElement`
 - `AlchitryV2BottomElement`
