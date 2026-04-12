@@ -497,14 +497,15 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/saleae-dslab-adapter/` now exists, builds, exports, and matches the archived KiCad reference
 - `jitx-py/espi-debug-breakout/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - `jitx-py/sharp-organizer-card/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
+- `jitx-py/sharp-organizer-host/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
 
 The next milestone should be:
 
-- build on the first organizer-family board by porting the matching host-side board and shared organizer connector surface
-- use `sharp-organizer-host` as that next board
+- build on the organizer-family connector work by porting the remaining Sharp memory/interposer boards that reuse adjacent connector surface and parity tooling
+- use `sharp-pc-e500-ram-card` as the next board
 
 ## Practical Notes
 
@@ -517,7 +518,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, and `sharp-organizer-card` as the reference harnesses, but move the implementation focus to `sharp-organizer-host` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, `sharp-organizer-card`, and `sharp-organizer-host` as the reference harnesses, but move the implementation focus to `sharp-pc-e500-ram-card` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
