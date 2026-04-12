@@ -14,8 +14,9 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Text
 from jitx.substrate import Substrate
+from retrobus_jitx_parts.saleae import SaleaeProbeHeader2x4
 
-from src.components import JushuoAfa01S10Fca00, PinHeader2x10, SaleaeProbeHeader2x4
+from src.components import JushuoAfa01S10Fca00, PinHeader2x10
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BOARD_DATE = subprocess.check_output(

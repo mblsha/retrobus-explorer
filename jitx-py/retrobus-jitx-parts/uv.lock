@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-04-05T11:42:44.64648639Z"
+exclude-newer = "2026-04-05T11:42:42.535537804Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -355,12 +355,18 @@ wheels = [
 [[package]]
 name = "retrobus-jitx-parts"
 version = "0.1.0"
-source = { editable = "../retrobus-jitx-parts" }
+source = { editable = "." }
 dependencies = [
     { name = "jitx" },
     { name = "jitxexamples-components" },
     { name = "jitxlib-parts" },
     { name = "jitxlib-standard" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "ruff" },
+    { name = "ty" },
 ]
 
 [package.metadata]
@@ -398,36 +404,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4c/56/5c7084299bd2cacaa07ae63a91c6f4ba66edc08bf28f356b24f6b717c799/ruff-0.15.9-py3-none-win_amd64.whl", hash = "sha256:45a70921b80e1c10cf0b734ef09421f71b5aa11d27404edc89d7e8a69505e43d", size = 11744969, upload-time = "2026-04-02T18:16:59.611Z" },
     { url = "https://files.pythonhosted.org/packages/03/36/76704c4f312257d6dbaae3c959add2a622f63fcca9d864659ce6d8d97d3d/ruff-0.15.9-py3-none-win_arm64.whl", hash = "sha256:0694e601c028fd97dc5c6ee244675bc241aeefced7ef80cd9c6935a871078f53", size = 11005870, upload-time = "2026-04-02T18:17:15.773Z" },
 ]
-
-[[package]]
-name = "saleae-dslab-adapter-py"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "jitx" },
-    { name = "jitxexamples-components" },
-    { name = "jitxlib-parts" },
-    { name = "jitxlib-standard" },
-    { name = "retrobus-jitx-parts" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "ruff" },
-    { name = "ty" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "jitx", specifier = ">=4.0.0,<5" },
-    { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
-    { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
-    { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
-    { name = "retrobus-jitx-parts", editable = "../retrobus-jitx-parts" },
-    { name = "ruff", marker = "extra == 'dev'" },
-    { name = "ty", marker = "extra == 'dev'" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "shapely"

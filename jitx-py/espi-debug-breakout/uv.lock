@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-04-05T04:26:18.584726697Z"
+exclude-newer = "2026-04-05T11:42:42.936732694Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -104,6 +104,7 @@ dependencies = [
     { name = "jitxexamples-components" },
     { name = "jitxlib-parts" },
     { name = "jitxlib-standard" },
+    { name = "retrobus-jitx-parts" },
 ]
 
 [package.optional-dependencies]
@@ -118,6 +119,7 @@ requires-dist = [
     { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
+    { name = "retrobus-jitx-parts", editable = "../retrobus-jitx-parts" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "ty", marker = "extra == 'dev'" },
 ]
@@ -379,6 +381,28 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4d/87/cb5e585192a22b8bd457df5a2c16a75ea0db9674c3a0a39fc9347d84e075/protobuf-7.34.1-cp310-abi3-win_amd64.whl", hash = "sha256:e97b55646e6ce5cbb0954a8c28cd39a5869b59090dfaa7df4598a7fba869468c", size = 437901, upload-time = "2026-03-20T17:34:44.112Z" },
     { url = "https://files.pythonhosted.org/packages/88/95/608f665226bca68b736b79e457fded9a2a38c4f4379a4a7614303d9db3bc/protobuf-7.34.1-py3-none-any.whl", hash = "sha256:bb3812cd53aefea2b028ef42bd780f5b96407247f20c6ef7c679807e9d188f11", size = 170715, upload-time = "2026-03-20T17:34:45.384Z" },
 ]
+
+[[package]]
+name = "retrobus-jitx-parts"
+version = "0.1.0"
+source = { editable = "../retrobus-jitx-parts" }
+dependencies = [
+    { name = "jitx" },
+    { name = "jitxexamples-components" },
+    { name = "jitxlib-parts" },
+    { name = "jitxlib-standard" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jitx", specifier = ">=4.0.0,<5" },
+    { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
+    { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
+    { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "ty", marker = "extra == 'dev'" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "ruff"

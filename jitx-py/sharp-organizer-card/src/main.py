@@ -14,10 +14,11 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import ShapelyGeometry, rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
+from retrobus_jitx_parts.ffc import HDGC60PinFfc
 from shapely.geometry import box
 from shapely.ops import unary_union
 
-from src.components import HDGC60PinFfc, SharpOrganizerBus
+from src.components import SharpOrganizerBus
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BOARD_DATE = subprocess.check_output(

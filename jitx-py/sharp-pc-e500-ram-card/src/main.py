@@ -14,8 +14,9 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
+from retrobus_jitx_parts.ffc import HDGC60PinFfc
 
-from src.components import HDGC60PinFfc, SharpPcE500RamCard
+from src.components import SharpPcE500RamCard
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BOARD_DATE = subprocess.check_output(

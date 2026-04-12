@@ -15,10 +15,10 @@ from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
+from retrobus_jitx_parts.ffc import HDGC60PinFfc
+from retrobus_jitx_parts.testpads import GndTestpads
 
 from src.components import (
-    GndTestpads,
-    HDGC60PinFfc,
     PinHeader2x4,
     PinHeader2x8,
     SignalTestPad,
