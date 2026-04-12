@@ -1,4 +1,4 @@
-# pin-tester-py
+# pin-tester
 
 First Python JITX port scaffold for the legacy `jitx/pin-tester.stanza` board.
 
@@ -19,7 +19,7 @@ locked in.
 ## Run
 
 ```bash
-cd /home/mblsha/src/jitx/retrobus-explorer/pin-tester-py
+cd /home/mblsha/src/jitx/retrobus-explorer/jitx-py/pin-tester
 uv sync
-uv run python -m jitx build --dry pin_tester.main.PinTesterDesign
+uv run python -m jitx build --dry src.main.PinTesterDesign
 ```

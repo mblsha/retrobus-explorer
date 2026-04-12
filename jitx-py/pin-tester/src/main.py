@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from jitx.board import Board
 from jitx.circuit import Circuit
@@ -16,7 +16,7 @@ from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
 
-from pin_tester.components import (
+from src.components import (
     GroundCornerTestPad,
     HDGC60PinFfc,
     PinHeader2x4,
@@ -24,8 +24,7 @@ from pin_tester.components import (
     SignalTestPad,
 )
 
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 BOARD_DATE = subprocess.check_output(
     ["git", "log", "-1", "--format=%cs"],
     text=True,
@@ -153,7 +152,7 @@ class PinTesterCircuit(Circuit):
         for index, header in enumerate(self.test_headers):
             x = DATA_HEADER_XS[index]
             y = HEADER_ROW_Y if index % 2 == 0 else -HEADER_ROW_Y
-            self.place(header, Placement((x, y), 90, on=Side.Top))
+            self.place(header, Placement((x, y), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
             self += Silkscreen(
                 Circle(diameter=DATA_HEADER_MARKER_DIAMETER).at(
                     x + DATA_HEADER_MARKER_OFFSET_X,
