@@ -16,14 +16,16 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 Merged progress as of `2026-04-12`:
 
 - the new Python JITX surface now lives under `jitx-py/`
-- three migrated boards now live there:
+- four migrated boards now live there:
   - `jitx-py/pin-tester/`
   - `jitx-py/sharp-pc-g850-bus/`
   - `jitx-py/rpi-pico-40-pin-adapter/`
+  - `jitx-py/saleae-dslab-adapter/`
 - the merged board entry points are now buildable as:
   - `src.main.PinTesterDesign`
   - `src.main.SharpPcG850BusDesign`
   - `src.main.RpiPico40PinAdapterDesign`
+  - `src.main.SaleaeDslabAdapterDesign`
 - the first required shared Python component set now exists in working form:
   - `FFCConnector`
   - `_0_5K-1_2X-60PWB`
@@ -70,6 +72,19 @@ Known remaining parity gaps for `rpi-pico-40-pin-adapter` if we want stricter th
 
 - exported KiCad copper still differs from the archived routed board because live ws routing is not being serialized back into the exported `.kicad_pcb`
 - the current gold compare reports copper-summary mismatches on the routed BCM nets for that reason even though placement and net membership are at parity
+
+Current status of `saleae-dslab-adapter`:
+
+- the board now exists in `jitx-py/saleae-dslab-adapter/` and builds as `src.main.SaleaeDslabAdapterDesign`
+- connector placement parity against the archived KiCad board is clean by realized copper geometry
+- net membership parity against the archived KiCad board is clean; there are no current-only or gold-only net signatures
+- live JITX routing on the eight Saleae signal nets works cleanly on bottom copper
+- after live routing and export, `tools/compare_kicad_gold.py` now reports a full `PASS` against the archived KiCad reference
+- JITX-side ground pours are intentionally omitted here too; planes should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `saleae-dslab-adapter` if we want stricter than functional equivalence:
+
+- the current version is at practical KiCad parity with the archived reference; only date-string drift should be expected over time
 
 ## Golden Output Reference
 
@@ -383,7 +398,6 @@ This sequence keeps the high-risk board until after all major dependencies exist
 
 Once the platform parts are stable, port the remaining boards:
 
-- `saleae-dslab-adapter`
 - `sharp-organizer-card`
 - `sharp-organizer-host`
 - `sharp-pc-e500-ram-card`
@@ -429,6 +443,7 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/pin-tester/` exists, builds, and exports
 - `jitx-py/sharp-pc-g850-bus/` exists, builds, and exports
 - `jitx-py/rpi-pico-40-pin-adapter/` now exists, builds, and exports
+- `jitx-py/saleae-dslab-adapter/` now exists, builds, exports, and matches the archived KiCad reference
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
@@ -436,7 +451,7 @@ The first three grounding milestones have effectively been reached:
 The next milestone should be:
 
 - port the next low-risk adapter that reuses existing patterns rather than introducing a new custom platform dependency
-- use `saleae-dslab-adapter` as that next board
+- use `espi-debug-breakout` as that next board
 
 ## Practical Notes
 
@@ -449,7 +464,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester`, `sharp-pc-g850-bus`, and `rpi-pico-40-pin-adapter` as the reference harnesses, but move the implementation focus to `saleae-dslab-adapter` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, and `saleae-dslab-adapter` as the reference harnesses, but move the implementation focus to `espi-debug-breakout` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
@@ -476,11 +491,12 @@ Given the existence of `/tmp/kicad.zip`, the practical starting order should be:
 2. `sharp-pc-g850-bus`
 3. `rpi-pico-40-pin-adapter`
 4. `saleae-dslab-adapter`
-5. `sharp-organizer-card`
-6. `sharp-organizer-host`
-7. `sharp-pc-e500-ram-card`
-8. `sharp-sc61860-interposer`
-9. `sharp-sc62015-interposer`
-10. `alchitry-au1-level-shifter`
+5. `espi-debug-breakout`
+6. `sharp-organizer-card`
+7. `sharp-organizer-host`
+8. `sharp-pc-e500-ram-card`
+9. `sharp-sc61860-interposer`
+10. `sharp-sc62015-interposer`
+11. `alchitry-au1-level-shifter`
 
 This order is now preferred not just because of technical risk, but because these boards have concrete archived outputs that can be used as migration acceptance tests.
