@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-04-05T04:52:52.02304513Z"
+exclude-newer = "2026-04-05T11:42:45.991160821Z"
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -353,6 +353,28 @@ wheels = [
 ]
 
 [[package]]
+name = "retrobus-jitx-parts"
+version = "0.1.0"
+source = { editable = "../retrobus-jitx-parts" }
+dependencies = [
+    { name = "jitx" },
+    { name = "jitxexamples-components" },
+    { name = "jitxlib-parts" },
+    { name = "jitxlib-standard" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jitx", specifier = ">=4.0.0,<5" },
+    { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
+    { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
+    { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "ty", marker = "extra == 'dev'" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "ruff"
 version = "0.15.9"
 source = { registry = "https://pypi.org/simple" }
@@ -437,6 +459,7 @@ dependencies = [
     { name = "jitxexamples-components" },
     { name = "jitxlib-parts" },
     { name = "jitxlib-standard" },
+    { name = "retrobus-jitx-parts" },
 ]
 
 [package.optional-dependencies]
@@ -451,6 +474,7 @@ requires-dist = [
     { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
+    { name = "retrobus-jitx-parts", editable = "../retrobus-jitx-parts" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "ty", marker = "extra == 'dev'" },
 ]

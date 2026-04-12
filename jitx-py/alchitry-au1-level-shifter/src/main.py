@@ -17,6 +17,9 @@ from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
+from retrobus_jitx_parts.ffc import HDGC60PinFfc
+from retrobus_jitx_parts.saleae import SaleaeProbeHeader2x4
+from retrobus_jitx_parts.testpads import GndTestpads
 
 from src.components import (
     AlchitryA,
@@ -24,10 +27,7 @@ from src.components import (
     AlchitryC,
     AlchitryD,
     Cap0402,
-    GndTestpads,
-    HDGC60PinFfc,
     PinHeader2x3,
-    SaleaeProbeHeader2x4,
     Txb0108Pwr,
 )
 

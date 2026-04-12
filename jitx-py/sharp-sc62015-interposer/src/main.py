@@ -14,8 +14,10 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
+from retrobus_jitx_parts.ffc import HDGC60PinFfc
+from retrobus_jitx_parts.testpads import SignalTestPad
 
-from src.components import HDGC60PinFfc, Sc62015Interposer, SignalTestPad
+from src.components import Sc62015Interposer
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BOARD_DATE = subprocess.check_output(

@@ -15,8 +15,10 @@ from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
+from retrobus_jitx_parts.ffc import HDGC60PinFfc
+from retrobus_jitx_parts.testpads import GndTestpads
 
-from src.components import GndTestpads, HDGC60PinFfc, PCG850Bus
+from src.components import PCG850Bus
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BOARD_DATE = subprocess.check_output(
