@@ -17,7 +17,7 @@ from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
 
 from src.components import (
-    GroundCornerTestPad,
+    GndTestpads,
     HDGC60PinFfc,
     PinHeader2x4,
     PinHeader2x8,
@@ -44,6 +44,8 @@ DATA_HEADER_MARKER_OFFSET_Y = 5.08
 
 
 class PinTesterSubstrate(Substrate):
+    # Python replacement for the shared design/default stackup setup that the
+    # Stanza project gets via `setup-design(...)` and `helpers.stanza`.
     stackup = SampleStackup(4)
     constraints = SampleFabConstraints()
 
@@ -56,6 +58,7 @@ class PinTesterSubstrate(Substrate):
 
 
 class PowerPins(Circuit):
+    # Direct port of `pcb-module power-pins` in `jitx/pin-tester.stanza`.
     vcc = Port()
     gnd = Port()
 
@@ -74,6 +77,8 @@ class PowerPins(Circuit):
 
 
 class TestPins(Circuit):
+    # Direct port of `pcb-module test-pins(start-index:Int)` in
+    # `jitx/pin-tester.stanza`.
     data = [Port() for _ in range(8)]
 
     def __init__(self, start_index: int):
@@ -85,6 +90,7 @@ class TestPins(Circuit):
 
 
 class FFCConnector(Circuit):
+    # Direct port of `components/FFCConnector.stanza` as used by the board.
     VCC5V = Port()
     GND = Port()
     data = [Port() for _ in range(48)]
@@ -115,6 +121,8 @@ class FFCConnector(Circuit):
 
 
 class PinTesterCircuit(Circuit):
+    # Direct port of the main `pcb-module pin-tester` in
+    # `jitx/pin-tester.stanza`.
     gnd = Port()
     vcc = Port()
 
@@ -125,7 +133,7 @@ class PinTesterCircuit(Circuit):
         self.power_headers = [PowerPins() for _ in range(2)]
         self.test_headers = [TestPins(8 * idx) for idx in range(6)]
         self.signal_testpad = SignalTestPad()
-        self.gnd_testpads = [GroundCornerTestPad() for _ in range(8)]
+        self.gnd_testpads = GndTestpads(diameter=3.0, width=50.0, height=40.0)
 
         gnd_net = Net(name="GND") + self.gnd + self.ffc.GND
         vcc_net = Net(name="VCC") + self.vcc + self.ffc.VCC5V
@@ -142,8 +150,7 @@ class PinTesterCircuit(Circuit):
 
         self.nets.append(self.ffc.data[0] + self.signal_testpad.tp)
 
-        for pad in self.gnd_testpads:
-            gnd_net += pad.gnd
+        gnd_net += self.gnd_testpads.GND
 
         self.nets.extend([gnd_net, vcc_net])
 
@@ -171,27 +178,20 @@ class PinTesterCircuit(Circuit):
         self.place(self.power_headers[1], Placement(POWER_HEADER_POSITIONS[1], on=Side.Top))
         self.place(self.signal_testpad, Placement((13.27, 16.35), on=Side.Top))
 
-        gnd_pad_placements = [
-            ((22.0, 17.0), Side.Top),
-            ((22.0, 17.0), Side.Bottom),
-            ((22.0, -17.0), Side.Top),
-            ((22.0, -17.0), Side.Bottom),
-            ((-22.0, 17.0), Side.Top),
-            ((-22.0, 17.0), Side.Bottom),
-            ((-22.0, -17.0), Side.Top),
-            ((-22.0, -17.0), Side.Bottom),
-        ]
-        for pad, (position, side) in zip(self.gnd_testpads, gnd_pad_placements, strict=True):
-            self.place(pad, Placement(position, on=side))
+        self.place(self.gnd_testpads, Placement((0.0, 0.0), on=Side.Top))
 
 
 class PinTesterBoard(Board):
+    # Collects the Stanza board-shape and version-label behavior into the
+    # Python board definition.
     shape = BOARD_SHAPE
     signal_area = SIGNAL_AREA
     label = Silkscreen(Text(f"pin-tester v1 (c) mblsha {BOARD_DATE}", 1.5).at(0.0, 18.0), side=FeatureSide.Top)
 
 
 class PinTesterDesign(Design):
+    # Structural equivalent of `setup-design(...)` + `set-main-module(pin-tester)`
+    # in `jitx/pin-tester.stanza`.
     substrate = PinTesterSubstrate()
     board = PinTesterBoard()
     circuit = PinTesterCircuit()

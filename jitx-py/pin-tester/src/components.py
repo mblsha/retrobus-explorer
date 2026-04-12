@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from jitx.component import Component
-from jitx.feature import Courtyard, Paste, Silkscreen, Soldermask
+from jitx.feature import Courtyard, Cutout, Paste, Silkscreen, Soldermask
 from jitx.landpattern import Landpattern, Pad, PadMapping
 from jitx.net import Port
 from jitx.shapes.composites import rectangle
@@ -35,14 +35,17 @@ class SmdRoundPad1mm(Pad):
         self.soldermask = Soldermask(Circle(diameter=1.1))
 
 
-class SmdRoundPad3mm(Pad):
+class ProbePthPad3mm(Pad):
     shape = Circle(diameter=3.0)
 
     def __init__(self):
-        self.soldermask = Soldermask(Circle(diameter=3.1))
+        self.cutout = Cutout(Circle(diameter=1.5))
+        self.soldermask = Soldermask(Circle(diameter=2.9))
 
 
 class PinHeader2x4(Component):
+    # Python analogue of the generic `pin-header(4, 2)` used by
+    # `pcb-module power-pins` in `jitx/pin-tester.stanza`.
     p = [Port() for _ in range(4)]
     reference_designator_prefix = "J"
     manufacturer = "Generic"
@@ -73,6 +76,8 @@ class PinHeader2x4(Component):
 
 
 class PinHeader2x8(Component):
+    # Python analogue of the generic `pin-header(8, 2)` used by
+    # `pcb-module test-pins(start-index:Int)` in `jitx/pin-tester.stanza`.
     p = [Port() for _ in range(8)]
     reference_designator_prefix = "J"
     manufacturer = "Generic"
@@ -107,6 +112,8 @@ class PinHeader2x8(Component):
 
 
 class SignalTestPad(Component):
+    # Closest Stanza equivalent: `gen-testpad(1.0)` as used for `tp0` in
+    # `jitx/pin-tester.stanza`.
     tp = Port()
     reference_designator_prefix = "TP"
     value = "~"
@@ -119,20 +126,34 @@ class SignalTestPad(Component):
         self.symbol = BoxSymbol(rows=[Row(left=PinGroup([self.tp]))], config=BoxConfig())
 
 
-class GroundCornerTestPad(Component):
-    gnd = Port()
+class GndTestpads(Component):
+    # Direct port of `components/GndTestpads.stanza`: one centered component
+    # that exposes four large corner probe holes tied to a shared GND port.
+    GND = Port()
     reference_designator_prefix = "TP"
     value = "~"
 
-    def __init__(self):
+    def __init__(self, *, diameter: float, width: float, height: float):
         class _Landpattern(Landpattern):
-            pad = SmdRoundPad3mm().at(0.0, 0.0)
+            p1 = ProbePthPad3mm().at(width / 2.0 - diameter, height / 2.0 - diameter)
+            p2 = ProbePthPad3mm().at(width / 2.0 - diameter, -height / 2.0 + diameter)
+            p3 = ProbePthPad3mm().at(-width / 2.0 + diameter, height / 2.0 - diameter)
+            p4 = ProbePthPad3mm().at(-width / 2.0 + diameter, -height / 2.0 + diameter)
 
         self.landpattern = _Landpattern()
-        self.symbol = BoxSymbol(rows=[Row(left=PinGroup([self.gnd]))], config=BoxConfig())
+        self.symbol = BoxSymbol(rows=[Row(left=PinGroup([self.GND]))], config=BoxConfig())
+        self.pad_mapping = PadMapping({
+            self.GND: [
+                self.landpattern.p1,
+                self.landpattern.p2,
+                self.landpattern.p3,
+                self.landpattern.p4,
+            ]
+        })
 
 
 class HDGC60PinFfcLandpattern(Landpattern):
+    # Footprint-level port of `components/_0_5K-1_2X-60PWB.stanza`.
     def __init__(self):
         self.signal_pads = [SmallRectSmdPad().at(14.75 - 0.5 * index, -2.096, rotate=180) for index in range(60)]
         self.mount_pad_left = LargeRectSmdPad().at(-16.43, 0.527, rotate=180)
@@ -148,6 +169,7 @@ class HDGC60PinFfcLandpattern(Landpattern):
 
 
 class HDGC60PinFfc(Component):
+    # Raw connector component port of `components/_0_5K-1_2X-60PWB.stanza`.
     p = [Port() for _ in range(62)]
 
     manufacturer = "HDGC"
