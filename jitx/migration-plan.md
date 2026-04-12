@@ -16,17 +16,19 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 Merged progress as of `2026-04-12`:
 
 - the new Python JITX surface now lives under `jitx-py/`
-- four migrated boards now live there:
+- five migrated boards now live there:
   - `jitx-py/pin-tester/`
   - `jitx-py/sharp-pc-g850-bus/`
   - `jitx-py/rpi-pico-40-pin-adapter/`
   - `jitx-py/saleae-dslab-adapter/`
+  - `jitx-py/espi-debug-breakout/`
 - the obsolete top-level `saleae-dslab-adapter-py/` tree has now been removed, so the Python migration surface is consolidated under `jitx-py/`
 - the merged board entry points are now buildable as:
   - `src.main.PinTesterDesign`
   - `src.main.SharpPcG850BusDesign`
   - `src.main.RpiPico40PinAdapterDesign`
   - `src.main.SaleaeDslabAdapterDesign`
+  - `src.main.EspiDebugBreakoutDesign`
 - the first required shared Python component set now exists in working form:
   - `FFCConnector`
   - `_0_5K-1_2X-60PWB`
@@ -88,6 +90,20 @@ Current status of `saleae-dslab-adapter`:
 Known remaining parity gaps for `saleae-dslab-adapter` if we want stricter than functional equivalence:
 
 - the current version is at practical KiCad parity with the archived reference; only date-string drift should be expected over time
+
+
+Current status of `espi-debug-breakout`:
+
+- the board now exists in `jitx-py/espi-debug-breakout/` and builds as `src.main.EspiDebugBreakoutDesign`
+- connector placement parity against the archived KiCad board is clean by realized copper geometry
+- net membership parity against the archived KiCad board is clean; there are no remaining current-only or gold-only net signatures
+- live top-layer routing now works for the VCC net and the eight eSPI signal nets
+- JITX-side ground pours are intentionally omitted here too; planes and stitching should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `espi-debug-breakout` if we want stricter than functional equivalence:
+
+- exported KiCad copper still differs from the archived routed board on `GND` and six routed eSPI nets
+- the remaining mismatch is route-shape/topology parity, not connector placement or net membership
 
 ## Golden Output Reference
 
@@ -447,14 +463,15 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/sharp-pc-g850-bus/` exists, builds, and exports
 - `jitx-py/rpi-pico-40-pin-adapter/` now exists, builds, and exports
 - `jitx-py/saleae-dslab-adapter/` now exists, builds, exports, and matches the archived KiCad reference
+- `jitx-py/espi-debug-breakout/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
 
 The next milestone should be:
 
-- port the next low-risk adapter that reuses existing patterns rather than introducing a new custom platform dependency
-- use `espi-debug-breakout` as that next board
+- move from the small adapter class into the first organizer-family board that introduces the next connector family
+- use `sharp-organizer-card` as that next board
 
 ## Practical Notes
 
@@ -467,7 +484,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, and `saleae-dslab-adapter` as the reference harnesses, but move the implementation focus to `espi-debug-breakout` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, and `espi-debug-breakout` as the reference harnesses, but move the implementation focus to `sharp-organizer-card` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
