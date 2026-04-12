@@ -14,9 +14,9 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import ShapelyGeometry, rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
-from retrobus_jitx_parts.ffc import HDGC60PinFfc
 from shapely.geometry import box
 from shapely.ops import unary_union
+from shared_components.ffc import HDGC60PinFfc
 
 from src.components import SharpOrganizerBus
 

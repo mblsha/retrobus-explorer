@@ -3,7 +3,7 @@ from __future__ import annotations
 from jitx.feature import Cutout, Silkscreen, Soldermask
 from jitx.landpattern import Landpattern, Pad
 from jitx.shapes.primitive import Circle, Polyline
-from retrobus_jitx_parts.saleae import SignalGroundHeader2x4
+from shared_components.saleae import SignalGroundHeader2x4
 
 
 class DSLabPthPad(Pad):

@@ -13,7 +13,7 @@ dependencies = [
   "jitxlib-parts>=1.0.0,<2",
   "jitxlib-standard>=4.0.0,<5",
   "jitxexamples-components>=1.0.0,<2",
-  "retrobus-jitx-parts",
+  "shared-components",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-retrobus-jitx-parts = { path = "../retrobus-jitx-parts", editable = true }
+shared-components = { path = "../shared-components", editable = true }
 
 [tool.ruff]
 target-version = "py312"
