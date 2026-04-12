@@ -11,6 +11,34 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 - avoids a direct 1:1 transliteration where Stanza depends on `ocdb/...` helpers that do not map cleanly to the Python style we are already using
 - gives us a staged path with early end-to-end wins before touching the highest-risk boards
 
+## Current Progress
+
+Merged progress as of `2026-04-12`:
+
+- the new Python JITX surface now lives under `jitx-py/`
+- the first migrated board lives at `jitx-py/pin-tester/`
+- the `pin-tester` port is now merged and buildable as `src.main.PinTesterDesign`
+- the port includes direct Python equivalents for the first required board pieces:
+  - `FFCConnector`
+  - `_0_5K-1_2X-60PWB`
+  - generic `2x2` / `4x2` headers used by the board
+  - shared `GndTestpads`
+- Python CI now treats `py/` and `jitx-py/` as the two repo-level Python roots
+- `jitx-tooling` now includes `tools/compare_kicad_gold.py` for KiCad-vs-KiCad parity checks
+
+Current status of `pin-tester`:
+
+- board outline, connector placement, power-net naming, pin labeling, and corner GND probe holes are in good shape
+- the board now uses the shared corner PTH GND testpad component rather than one-sided circular SMD pads
+- JITX-side ground pours were intentionally removed; planes should be added later in KiCad/post-process tooling
+- connector-placement parity is now checked by realized copper geometry rather than KiCad footprint instance angle
+
+Known remaining parity gaps for `pin-tester` if we want stricter than functional equivalence:
+
+- net-signature comparison still reports many current-only/gold-only data-net signatures and needs further analysis
+- `VCC` copper topology still differs from the archived Stanza route summary
+- some KiCad artifact structure still differs even where the physical geometry is acceptable
+
 ## Golden Output Reference
 
 We now have a concrete reference archive at `/tmp/kicad.zip`. This should be treated as the primary migration target for exported outputs.
@@ -230,19 +258,15 @@ The Python style already proven in `ld2450-radar-adapter` is much more explicit 
 
 ## Recommended Python Project Shape
 
-Inside `retrobus-explorer`, create a dedicated Python JITX package for hardware, modeled after `ld2450-radar-adapter`:
+Inside `retrobus-explorer`, use `jitx-py/` as the Python JITX root. Each migrated board should live in its own child project:
 
-- `retrobus_explorer_hw/__init__.py`
-- `retrobus_explorer_hw/helpers.py`
-- `retrobus_explorer_hw/components/`
-- `retrobus_explorer_hw/designs/`
-- root `main.py`
-- `.vscode/tasks.json`
-- `.vscode/launch.json`
-- `.vscode/settings.json`
-- `pyproject.toml` for the hardware package if needed
+- `jitx-py/<board>/pyproject.toml`
+- `jitx-py/<board>/main.py`
+- `jitx-py/<board>/src/`
+- `jitx-py/<board>/.vscode/` as needed
+- shared repo-level CI rooted at `jitx-py/`
 
-This should be treated as the new source of truth for JITX Python designs. The existing Stanza tree stays as reference during the migration.
+This is now the direction already in use for `jitx-py/pin-tester/`. The existing Stanza tree stays as reference during the migration.
 
 ## Phased Migration Plan
 
@@ -289,7 +313,6 @@ Why:
 - repeated headers
 - one FFC-based mapping path
 - board text
-- GND pours
 - good validation of the overall Python design pattern
 
 Success criteria:
@@ -299,6 +322,7 @@ Success criteria:
 - Gerber export works
 - board can be inspected with current `jitx-tooling`
 - output is compared against the Stanza reference in `/tmp/kicad.zip`
+- any remaining differences are understood and recorded as either acceptable or still open
 
 ### Phase 4: First connector-driven adapter
 
@@ -368,18 +392,17 @@ Recommended order of actual implementation:
 
 ## Immediate Grounding Milestone
 
-The best first checkpoint is:
+The first grounding milestone has effectively been reached:
 
-- create the Python hardware package in `retrobus-explorer`
-- port the minimal helper/bootstrap layer
-- port `FFCConnector`
-- port `GndTestpads`
-- port `pin-tester`
-- verify KiCad export with `jitx-tooling`
-- verify Gerber export with `jitx-tooling`
-- compare the generated outputs against `kicad/pin-tester/` and the archived pin-tester Gerber bundle in `/tmp/kicad.zip`
+- `jitx-py/pin-tester/` exists and builds
+- the required first-wave connector/component ports exist
+- KiCad export works through `jitx-tooling`
+- the board can be compared against the archived Stanza KiCad output with `tools/compare_kicad_gold.py`
 
-This gives an end-to-end proof that the Python migration direction is sound before touching the more coupled boards.
+The next milestone should be:
+
+- finish understanding the remaining `pin-tester` parity gaps if we care about stricter-than-functional equivalence
+- then move to `sharp-pc-g850-bus` as the next real board port
 
 ## Practical Notes
 
@@ -388,10 +411,11 @@ This gives an end-to-end proof that the Python migration direction is sound befo
 - Keep Stanza files as reference until the equivalent Python design builds and exports successfully.
 - Use one board as a porting harness at a time; avoid partially porting many boards in parallel.
 - Reuse the current `jitx-tooling` scripts for build/export/render/status checks as soon as each Python board is alive.
+- Do not model ground planes in JITX unless there is a strong reason; prefer adding pours and stitching later at the KiCad/post-process stage for faster JITX iteration.
 
 ## Recommended Next Step
 
-Start Phase 0 and Phase 1 immediately, then port `pin-tester` as the first real board.
+Use `pin-tester` as the reference harness, but move the implementation focus to `sharp-pc-g850-bus` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
