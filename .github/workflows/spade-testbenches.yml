@@ -7,12 +7,16 @@ on:
       - "gateware/reference/spade-projects/**"
       - "gateware/reference/binary-counter/**"
       - ".github/workflows/spade-testbenches.yml"
+      - "!jitx/**"
+      - "!jitx-py/**"
   pull_request:
     branches: [ master, main ]
     paths:
       - "gateware/reference/spade-projects/**"
       - "gateware/reference/binary-counter/**"
       - ".github/workflows/spade-testbenches.yml"
+      - "!jitx/**"
+      - "!jitx-py/**"
 
 jobs:
   spade-testbenches:
