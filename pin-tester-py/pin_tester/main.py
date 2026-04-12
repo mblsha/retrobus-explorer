@@ -5,7 +5,6 @@ import subprocess
 
 from jitx.board import Board
 from jitx.circuit import Circuit
-from jitx.copper import Pour
 from jitx.design import Design
 from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
@@ -146,9 +145,6 @@ class PinTesterCircuit(Circuit):
 
         for pad in self.gnd_testpads:
             gnd_net += pad.gnd
-
-        for layer in range(4):
-            gnd_net += Pour(BOARD_SHAPE, layer=layer, isolate=0.15, rank=1)
 
         self.nets.extend([gnd_net, vcc_net])
 
