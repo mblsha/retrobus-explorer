@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        workdir: [py, jitx-py]
+        workdir: [py, jitx-py/pin-tester]
     defaults:
       run:
         working-directory: ${{ matrix.workdir }}
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        workdir: [py, jitx-py]
+        workdir: [py, jitx-py/pin-tester]
     defaults:
       run:
         working-directory: ${{ matrix.workdir }}
