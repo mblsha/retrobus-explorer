@@ -106,8 +106,10 @@ class Event:
         if self.type == Type.WRITE:
             return f"write(0x{self.val:02X}, 0x{self.addr:04X})"
         if self.type == Type.IN_PORT:
+            assert self.port is not None
             return f"in_port(0x{self.val:02X}, IOPort.{self.port.name})"
         if self.type == Type.OUT_PORT:
+            assert self.port is not None
             return f"out_port(0x{self.val:02X}, IOPort.{self.port.name})"
         if self.type == Type.READ_STACK:
             return f"read_stack(0x{self.val:02X}, 0x{self.addr:04X})"
