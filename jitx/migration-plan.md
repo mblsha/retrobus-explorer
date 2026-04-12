@@ -16,7 +16,7 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 Merged progress as of `2026-04-12`:
 
 - the new Python JITX surface now lives under `jitx-py/`
-- seven migrated boards now live there:
+- eight migrated boards now live there:
   - `jitx-py/pin-tester/`
   - `jitx-py/sharp-pc-g850-bus/`
   - `jitx-py/rpi-pico-40-pin-adapter/`
@@ -24,6 +24,7 @@ Merged progress as of `2026-04-12`:
   - `jitx-py/espi-debug-breakout/`
   - `jitx-py/sharp-organizer-card/`
   - `jitx-py/sharp-organizer-host/`
+  - `jitx-py/sharp-pc-e500-ram-card/`
 - the obsolete top-level `saleae-dslab-adapter-py/` tree has now been removed, so the Python migration surface is consolidated under `jitx-py/`
 - the merged board entry points are now buildable as:
   - `src.main.PinTesterDesign`
@@ -33,11 +34,13 @@ Merged progress as of `2026-04-12`:
   - `src.main.EspiDebugBreakoutDesign`
   - `src.main.SharpOrganizerCardDesign`
   - `src.main.SharpOrganizerHostDesign`
+  - `src.main.SharpPcE500RamCardDesign`
 - the first required shared Python component set now exists in working form:
   - `FFCConnector`
   - `_0_5K-1_2X-60PWB`
   - `PCG850Bus`
   - shared `GndTestpads`
+  - `SharpPcE500RamCard`
   - the generic headers needed by `pin-tester`
 - Python CI now treats `py/` and `jitx-py/` as the two repo-level Python roots
 - `jitx-tooling` now includes `tools/compare_kicad_gold.py` for KiCad-vs-KiCad parity checks, including copper-geometry placement matching and blank-reference KiCad footprint handling
@@ -135,6 +138,21 @@ Current status of `sharp-organizer-host`:
 Known remaining parity gaps for `sharp-organizer-host` if we want stricter than functional equivalence:
 
 - exported KiCad copper still differs from the archived routed board because the live ws routing is not being serialized back into the exported `.kicad_pcb`
+- the remaining mismatch is route-shape/topology parity, not connector placement or net membership
+
+Current status of `sharp-pc-e500-ram-card`:
+
+- the board now exists in `jitx-py/sharp-pc-e500-ram-card/` and builds as `src.main.SharpPcE500RamCardDesign`
+- connector placement parity against the archived KiCad board is clean by realized copper geometry
+- net membership parity against the archived KiCad board is clean; there are no current-only or gold-only net signatures
+- the custom PC-E500 RAM-card edge connector geometry is now ported in working form alongside the reused FFC path
+- live JITX routing is at least partially proven: the board accepts live routing commands and remains design-check clean, though the current routing helpers do not yet finish the whole board automatically
+- JITX-side ground pours are intentionally omitted here too; planes and stitching should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `sharp-pc-e500-ram-card` if we want stricter than functional equivalence:
+
+- exported KiCad copper still differs from the archived routed board because the live ws routing is not being serialized back into the exported `.kicad_pcb`
+- current live routing automation does not yet complete all RAM-card signal routes automatically
 - the remaining mismatch is route-shape/topology parity, not connector placement or net membership
 
 ## Golden Output Reference
@@ -498,14 +516,15 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/espi-debug-breakout/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - `jitx-py/sharp-organizer-card/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - `jitx-py/sharp-organizer-host/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
+- `jitx-py/sharp-pc-e500-ram-card/` now exists, builds, exports, and matches the archived KiCad reference structurally and by net membership; only copper-topology parity remains
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
 
 The next milestone should be:
 
-- build on the organizer-family connector work by porting the remaining Sharp memory/interposer boards that reuse adjacent connector surface and parity tooling
-- use `sharp-pc-e500-ram-card` as the next board
+- build on the Sharp memory/interposer connector work by porting the remaining interposer boards that reuse adjacent connector surface and parity tooling
+- use `sharp-sc61860-interposer` as the next board
 
 ## Practical Notes
 
@@ -518,7 +537,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, `sharp-organizer-card`, and `sharp-organizer-host` as the reference harnesses, but move the implementation focus to `sharp-pc-e500-ram-card` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, `sharp-organizer-card`, `sharp-organizer-host`, and `sharp-pc-e500-ram-card` as the reference harnesses, but move the implementation focus to `sharp-sc61860-interposer` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
