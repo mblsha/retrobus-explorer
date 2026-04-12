@@ -16,15 +16,22 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 Merged progress as of `2026-04-12`:
 
 - the new Python JITX surface now lives under `jitx-py/`
-- the first migrated board lives at `jitx-py/pin-tester/`
-- the `pin-tester` port is now merged and buildable as `src.main.PinTesterDesign`
-- the port includes direct Python equivalents for the first required board pieces:
+- three migrated boards now live there:
+  - `jitx-py/pin-tester/`
+  - `jitx-py/sharp-pc-g850-bus/`
+  - `jitx-py/rpi-pico-40-pin-adapter/`
+- the merged board entry points are now buildable as:
+  - `src.main.PinTesterDesign`
+  - `src.main.SharpPcG850BusDesign`
+  - `src.main.RpiPico40PinAdapterDesign`
+- the first required shared Python component set now exists in working form:
   - `FFCConnector`
   - `_0_5K-1_2X-60PWB`
-  - generic `2x2` / `4x2` headers used by the board
+  - `PCG850Bus`
   - shared `GndTestpads`
+  - the generic headers needed by `pin-tester`
 - Python CI now treats `py/` and `jitx-py/` as the two repo-level Python roots
-- `jitx-tooling` now includes `tools/compare_kicad_gold.py` for KiCad-vs-KiCad parity checks
+- `jitx-tooling` now includes `tools/compare_kicad_gold.py` for KiCad-vs-KiCad parity checks, including copper-geometry placement matching and blank-reference KiCad footprint handling
 
 Current status of `pin-tester`:
 
@@ -35,9 +42,34 @@ Current status of `pin-tester`:
 
 Known remaining parity gaps for `pin-tester` if we want stricter than functional equivalence:
 
-- net-signature comparison still reports many current-only/gold-only data-net signatures and needs further analysis
 - `VCC` copper topology still differs from the archived Stanza route summary
 - some KiCad artifact structure still differs even where the physical geometry is acceptable
+
+Current status of `sharp-pc-g850-bus`:
+
+- the board is now merged and buildable as `src.main.SharpPcG850BusDesign`
+- the custom `PCG850Bus` connector geometry now matches the archived KiCad placement by realized copper geometry
+- the board uses the shared PTH `GndTestpads` component from current Stanza source rather than the older dual-side SMD corner testpads found in the archived gold KiCad
+- live JITX routing on the signal set works cleanly on top copper
+- JITX-side ground pours are intentionally omitted here too; planes should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `sharp-pc-g850-bus` if we want stricter than functional equivalence:
+
+- `GND-DATA0` still differs from the archived KiCad because the archived board uses the older SMD corner probe pads while current source uses the newer shared PTH corner component
+- exported KiCad copper still differs from the archived routed board because live ws routing is not being serialized back into the exported `.kicad_pcb`
+
+Current status of `rpi-pico-40-pin-adapter`:
+
+- the board now exists in `jitx-py/rpi-pico-40-pin-adapter/` and builds as `src.main.RpiPico40PinAdapterDesign`
+- connector placement parity against the archived KiCad board is clean by realized copper geometry
+- net membership parity against the archived KiCad board is clean; there are no remaining current-only or gold-only net signatures
+- the root `jitx-py/run-ruff.sh` and `jitx-py/run-ty.sh` flows both pass with the new child project included
+- JITX-side ground pours are intentionally omitted here too; planes should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `rpi-pico-40-pin-adapter` if we want stricter than functional equivalence:
+
+- exported KiCad copper still differs from the archived routed board because live ws routing is not being serialized back into the exported `.kicad_pcb`
+- the current gold compare reports copper-summary mismatches on the routed BCM nets for that reason even though placement and net membership are at parity
 
 ## Golden Output Reference
 
@@ -392,17 +424,19 @@ Recommended order of actual implementation:
 
 ## Immediate Grounding Milestone
 
-The first grounding milestone has effectively been reached:
+The first three grounding milestones have effectively been reached:
 
-- `jitx-py/pin-tester/` exists and builds
-- the required first-wave connector/component ports exist
+- `jitx-py/pin-tester/` exists, builds, and exports
+- `jitx-py/sharp-pc-g850-bus/` exists, builds, and exports
+- `jitx-py/rpi-pico-40-pin-adapter/` now exists, builds, and exports
+- the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
-- the board can be compared against the archived Stanza KiCad output with `tools/compare_kicad_gold.py`
+- the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
 
 The next milestone should be:
 
-- finish understanding the remaining `pin-tester` parity gaps if we care about stricter-than-functional equivalence
-- then move to `sharp-pc-g850-bus` as the next real board port
+- port the next low-risk adapter that reuses existing patterns rather than introducing a new custom platform dependency
+- use `saleae-dslab-adapter` as that next board
 
 ## Practical Notes
 
@@ -415,7 +449,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester` as the reference harness, but move the implementation focus to `sharp-pc-g850-bus` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, and `rpi-pico-40-pin-adapter` as the reference harnesses, but move the implementation focus to `saleae-dslab-adapter` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
