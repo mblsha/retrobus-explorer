@@ -16,12 +16,13 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 Merged progress as of `2026-04-12`:
 
 - the new Python JITX surface now lives under `jitx-py/`
-- five migrated boards now live there:
+- six migrated boards now live there:
   - `jitx-py/pin-tester/`
   - `jitx-py/sharp-pc-g850-bus/`
   - `jitx-py/rpi-pico-40-pin-adapter/`
   - `jitx-py/saleae-dslab-adapter/`
   - `jitx-py/espi-debug-breakout/`
+  - `jitx-py/sharp-organizer-card/`
 - the obsolete top-level `saleae-dslab-adapter-py/` tree has now been removed, so the Python migration surface is consolidated under `jitx-py/`
 - the merged board entry points are now buildable as:
   - `src.main.PinTesterDesign`
@@ -29,6 +30,7 @@ Merged progress as of `2026-04-12`:
   - `src.main.RpiPico40PinAdapterDesign`
   - `src.main.SaleaeDslabAdapterDesign`
   - `src.main.EspiDebugBreakoutDesign`
+  - `src.main.SharpOrganizerCardDesign`
 - the first required shared Python component set now exists in working form:
   - `FFCConnector`
   - `_0_5K-1_2X-60PWB`
@@ -103,6 +105,20 @@ Current status of `espi-debug-breakout`:
 Known remaining parity gaps for `espi-debug-breakout` if we want stricter than functional equivalence:
 
 - exported KiCad copper still differs from the archived routed board on `GND` and six routed eSPI nets
+- the remaining mismatch is route-shape/topology parity, not connector placement or net membership
+
+Current status of `sharp-organizer-card`:
+
+- the board now exists in `jitx-py/sharp-organizer-card/` and builds as `src.main.SharpOrganizerCardDesign`
+- connector placement parity against the archived KiCad board is clean by realized copper geometry
+- net membership parity against the archived KiCad board is clean; there are no current-only or gold-only net signatures
+- the custom organizer connector family is now ported in working form via `JC20-C45S-F1-A1` / `sharp-organizer-component` semantics
+- live JITX routing now works cleanly for the 44 non-GND organizer signal nets on top copper
+- JITX-side ground pours are intentionally omitted here too; planes and stitching should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `sharp-organizer-card` if we want stricter than functional equivalence:
+
+- exported KiCad copper still differs from the archived routed board because the live ws routing is not being serialized back into the exported `.kicad_pcb`
 - the remaining mismatch is route-shape/topology parity, not connector placement or net membership
 
 ## Golden Output Reference
@@ -464,14 +480,15 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/rpi-pico-40-pin-adapter/` now exists, builds, and exports
 - `jitx-py/saleae-dslab-adapter/` now exists, builds, exports, and matches the archived KiCad reference
 - `jitx-py/espi-debug-breakout/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
+- `jitx-py/sharp-organizer-card/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
 
 The next milestone should be:
 
-- move from the small adapter class into the first organizer-family board that introduces the next connector family
-- use `sharp-organizer-card` as that next board
+- build on the first organizer-family board by porting the matching host-side board and shared organizer connector surface
+- use `sharp-organizer-host` as that next board
 
 ## Practical Notes
 
@@ -484,7 +501,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, and `espi-debug-breakout` as the reference harnesses, but move the implementation focus to `sharp-organizer-card` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, and `sharp-organizer-card` as the reference harnesses, but move the implementation focus to `sharp-organizer-host` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
