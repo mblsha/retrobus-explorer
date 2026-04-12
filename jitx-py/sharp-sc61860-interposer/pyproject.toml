@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27.0,<2.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sharp-sc61860-interposer-py"
+version = "0.1.0"
+description = "Python JITX port scaffold for the retrobus sharp-sc61860-interposer board"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "jitx>=4.0.0,<5",
+  "jitxlib-parts>=1.0.0,<2",
+  "jitxlib-standard>=4.0.0,<5",
+  "jitxexamples-components>=1.0.0,<2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[project.optional-dependencies]
+dev = [
+  "ruff",
+  "ty",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = ["E501"]
