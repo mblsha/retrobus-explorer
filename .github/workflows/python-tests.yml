@@ -7,8 +7,11 @@ on:
     branches: [ main, master ]
 
 jobs:
-  ruff:
+  ruff-py:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: py
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v1
@@ -16,17 +19,16 @@ jobs:
         python-version: '3.12'
 
     - name: Sync dependencies
-      run: |
-        (cd py && uv sync --extra dev)
-        (cd jitx-py/pin-tester && uv sync --extra dev)
+      run: uv sync --extra dev
 
     - name: Run Ruff
-      run: |
-        (cd py && uv run ruff check .)
-        (cd jitx-py/pin-tester && uv run ruff check .)
+      run: uv run ruff check .
 
-  ty:
+  ruff-jitx-py:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jitx-py/pin-tester
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v1
@@ -34,14 +36,44 @@ jobs:
         python-version: '3.12'
 
     - name: Sync dependencies
-      run: |
-        (cd py && uv sync --extra dev)
-        (cd jitx-py/pin-tester && uv sync --extra dev)
+      run: uv sync --extra dev
+
+    - name: Run Ruff
+      run: uv run ruff check .
+
+  ty-py:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: py
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v1
+      with:
+        python-version: '3.12'
+
+    - name: Sync dependencies
+      run: uv sync --extra dev
 
     - name: Run Ty
-      run: |
-        (cd py && uv run -- ../.github/scripts/run-ty.sh)
-        (cd jitx-py/pin-tester && uv run ty check .)
+      run: uv run -- ../.github/scripts/run-ty.sh
+
+  ty-jitx-py:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jitx-py/pin-tester
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v1
+      with:
+        python-version: '3.12'
+
+    - name: Sync dependencies
+      run: uv sync --extra dev
+
+    - name: Run Ty
+      run: uv run ty check .
 
   test:
     runs-on: ubuntu-latest
@@ -64,12 +96,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     name: Test Summary
-    needs: [ruff, ty, test]
+    needs: [ruff-py, ruff-jitx-py, ty-py, ty-jitx-py, test]
     steps:
       - name: Check test results
         run: |
-          if [[ "${{ needs.ruff.result }}" == "failure" || \
-                "${{ needs.ty.result }}" == "failure" || \
+          if [[ "${{ needs.ruff-py.result }}" == "failure" || \
+                "${{ needs.ruff-jitx-py.result }}" == "failure" || \
+                "${{ needs.ty-py.result }}" == "failure" || \
+                "${{ needs.ty-jitx-py.result }}" == "failure" || \
                 "${{ needs.test.result }}" == "failure" ]]; then
             echo "One or more tests failed"
             exit 1
