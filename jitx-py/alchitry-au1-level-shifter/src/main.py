@@ -14,10 +14,10 @@ from jitx.net import Net, Port
 from jitx.placement import Placement, Side
 from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
-from jitx.shapes.primitive import Circle, Text
+from jitx.shapes.primitive import Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
-from shared_components.ffc import HDGC60PinFfc
+from shared_components.ffc import RetroBus60FfcConnector
 from shared_components.saleae import SaleaeProbeHeader2x4
 from shared_components.testpads import GndTestpads
 
@@ -91,35 +91,7 @@ class AlchitryAu1LevelShifterSubstrate(Substrate):
         type = ViaType.MechanicalDrill
 
 
-class FFCConnector(Circuit):
-    # Direct port of `components/FFCConnector.stanza`.
-    VCC5V = Port()
-    GND = Port()
-    data = [Port() for _ in range(48)]
-
-    def __init__(self, *, flip_pins: bool = False):
-        super().__init__()
-        self.connector = HDGC60PinFfc()
-        self.place(self.connector, Placement((0.0, 2.8), on=Side.Top))
-
-        vcc_pin = 60 if flip_pins else 1
-        gnd_pins = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
-
-        self.nets = [chain_net(None, self.VCC5V, self.connector.p[vcc_pin - 1])]
-        for pin in gnd_pins:
-            mapped_pin = 60 - pin + 1 if flip_pins else pin
-            self.nets.append(chain_net(None, self.GND, self.connector.p[mapped_pin - 1]))
-
-        data_index = 0
-        for pin in range(2, 61):
-            if pin in gnd_pins:
-                continue
-            mapped_pin = 60 - pin + 1 if flip_pins else pin
-            self.nets.append(chain_net(None, self.data[data_index], self.connector.p[mapped_pin - 1]))
-            data_index += 1
-
-        marker_x = (-18.0 + 1.5) if flip_pins else (18.0 - 1.5)
-        self += Silkscreen(Circle(diameter=1.0).at(marker_x, 0.0), side=FeatureSide.Top)
+FFCConnector = RetroBus60FfcConnector
 
 
 class Saleae8(Circuit):

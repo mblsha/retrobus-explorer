@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from jitx.circuit import Circuit
 from jitx.component import Component
 from jitx.feature import Courtyard, Paste, Silkscreen, Soldermask
 from jitx.landpattern import Landpattern, Pad, PadMapping
-from jitx.net import Port
+from jitx.layerindex import Side as FeatureSide
+from jitx.net import Net, Port
+from jitx.placement import Placement, Side
 from jitx.shapes.composites import rectangle
-from jitx.shapes.primitive import Polyline, Text
+from jitx.shapes.primitive import Circle, Polyline, Text
 from jitxlib.symbols.box import BoxConfig, BoxSymbol, PinGroup, Row
+
+DEFAULT_RETROBUS_GND_PINS = (5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+
+
+def connect_ports(name: str | None, *ports: Port) -> Net:
+    net = Net(name=name) if name is not None else Net()
+    for port in ports:
+        net = net + port
+    return net
 
 
 class SmallRectSmdPad(Pad):
@@ -60,3 +74,31 @@ class HDGC60PinFfc(Component):
         mapping[self.p[60]] = self.landpattern.mount_pad_left
         mapping[self.p[61]] = self.landpattern.mount_pad_right
         self.pad_mapping = PadMapping(mapping)
+
+
+class RetroBus60FfcConnector(Circuit):
+    VCC5V = Port()
+    GND = Port()
+    data = [Port() for _ in range(48)]
+
+    def __init__(self, *, flip_pins: bool = False, gnd_pins: Sequence[int] = DEFAULT_RETROBUS_GND_PINS):
+        super().__init__()
+        self.connector = HDGC60PinFfc()
+        self.place(self.connector, Placement((0.0, 2.8), on=Side.Top))
+
+        vcc_pin = 60 if flip_pins else 1
+        self.nets = [connect_ports(None, self.VCC5V, self.connector.p[vcc_pin - 1])]
+        for pin in gnd_pins:
+            mapped_pin = 60 - pin + 1 if flip_pins else pin
+            self.nets.append(connect_ports(None, self.GND, self.connector.p[mapped_pin - 1]))
+
+        data_index = 0
+        for pin in range(2, 61):
+            if pin in gnd_pins:
+                continue
+            mapped_pin = 60 - pin + 1 if flip_pins else pin
+            self.nets.append(connect_ports(None, self.data[data_index], self.connector.p[mapped_pin - 1]))
+            data_index += 1
+
+        marker_x = (-18.0 + 1.5) if flip_pins else (18.0 - 1.5)
+        self += Silkscreen(Circle(diameter=1.0).at(marker_x, 0.0), side=FeatureSide.Top)
