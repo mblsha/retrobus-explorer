@@ -1,6 +1,6 @@
-/.socket.jitx
-/.venv/
-/.venv_sync_last
+.socket.jitx
+.venv/
+.venv_sync_last
 __pycache__/
 *.pyc
 designs/
