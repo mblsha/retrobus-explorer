@@ -21,6 +21,7 @@ Merged progress as of `2026-04-12`:
   - `jitx-py/sharp-pc-g850-bus/`
   - `jitx-py/rpi-pico-40-pin-adapter/`
   - `jitx-py/saleae-dslab-adapter/`
+- the obsolete top-level `saleae-dslab-adapter-py/` tree has now been removed, so the Python migration surface is consolidated under `jitx-py/`
 - the merged board entry points are now buildable as:
   - `src.main.PinTesterDesign`
   - `src.main.SharpPcG850BusDesign`
@@ -81,6 +82,7 @@ Current status of `saleae-dslab-adapter`:
 - live JITX routing on the eight Saleae signal nets works cleanly on bottom copper
 - after live routing and export, `tools/compare_kicad_gold.py` now reports a full `PASS` against the archived KiCad reference
 - that full KiCad-vs-gold `PASS` has now been re-verified from the committed `jitx-py/saleae-dslab-adapter/` project state
+- the old standalone `saleae-dslab-adapter-py/` project has been deleted now that the `jitx-py/` port is the canonical version
 - JITX-side ground pours are intentionally omitted here too; planes should be added later in KiCad/post-process tooling
 
 Known remaining parity gaps for `saleae-dslab-adapter` if we want stricter than functional equivalence:
