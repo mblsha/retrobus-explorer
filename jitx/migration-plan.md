@@ -554,14 +554,15 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/sharp-pc-e500-ram-card/` now exists, builds, exports, and matches the archived KiCad reference structurally and by net membership; only copper-topology parity remains
 - `jitx-py/sharp-sc61860-interposer/` now exists, builds, and matches the archived KiCad reference structurally and by net membership; only copper-topology parity remains
 - `jitx-py/sharp-sc62015-interposer/` now exists, builds, and compares cleanly for placement/net membership; the remaining live parity gap is down to `GND`, `VCC`, `RXD`, and `TXD` connectivity plus topology-only route differences
+- `jitx-py/alchitry-au1-level-shifter/` now exists, builds, exports, and matches the archived KiCad reference structurally; the remaining live parity gap is connector-side routing for the three-end `DATA0..47` nets plus power-net/topology differences
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
 
 The next milestone should be:
 
-- build on the Sharp memory/interposer connector work by porting the remaining interposer boards that reuse adjacent connector surface and parity tooling
-- use `alchitry-au1-level-shifter` as the next board
+- finish routing-parity work for `alchitry-au1-level-shifter`, especially the three-end connector-side `DATA0..47` nets
+- after the rigid-board migration is grounded, move the remaining migration effort to the flex stackup/material/rule files
 
 ## Practical Notes
 
@@ -574,7 +575,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, `sharp-organizer-card`, `sharp-organizer-host`, `sharp-pc-e500-ram-card`, `sharp-sc61860-interposer`, and `sharp-sc62015-interposer` as the reference harnesses, but move the implementation focus to `alchitry-au1-level-shifter` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, `sharp-organizer-card`, `sharp-organizer-host`, `sharp-pc-e500-ram-card`, `sharp-sc61860-interposer`, `sharp-sc62015-interposer`, and `alchitry-au1-level-shifter` as the reference harnesses. There is no remaining rigid-board PCB port after `alchitry-au1-level-shifter`; the next implementation focus is routing-parity cleanup on that board and then the flex stackup/rules migration.
 
 ## Board-by-Board Acceptance Workflow
 
