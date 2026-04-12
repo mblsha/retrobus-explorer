@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        workdir: [py, jitx-py/pin-tester]
+        workdir: [py, jitx-py]
     defaults:
       run:
         working-directory: ${{ matrix.workdir }}
@@ -22,16 +22,22 @@ jobs:
         python-version: '3.12'
 
     - name: Sync dependencies
+      if: matrix.workdir == 'py'
       run: uv sync --extra dev
 
     - name: Run Ruff
-      run: uv run ruff check .
+      run: |
+        if [[ "${{ matrix.workdir }}" == "py" ]]; then
+          uv run ruff check .
+        else
+          ./run-ruff.sh
+        fi
 
   ty:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        workdir: [py, jitx-py/pin-tester]
+        workdir: [py, jitx-py]
     defaults:
       run:
         working-directory: ${{ matrix.workdir }}
@@ -42,6 +48,7 @@ jobs:
         python-version: '3.12'
 
     - name: Sync dependencies
+      if: matrix.workdir == 'py'
       run: uv sync --extra dev
 
     - name: Run Ty
@@ -49,7 +56,7 @@ jobs:
         if [[ "${{ matrix.workdir }}" == "py" ]]; then
           uv run -- ../.github/scripts/run-ty.sh
         else
-          uv run ty check .
+          ./run-ty.sh
         fi
 
   test:
