@@ -47,7 +47,7 @@ Merged progress as of `2026-04-12`:
   - `SharpPcE500RamCard`
   - the generic headers needed by `pin-tester`
 - Python CI now treats `py/` and `jitx-py/` as the two repo-level Python roots
-- `jitx-tooling` now includes `tools/compare_kicad_gold.py` for KiCad-vs-KiCad parity checks, including copper-geometry placement matching and blank-reference KiCad footprint handling
+- `jitx-tooling` now includes `tools/compare_kicad_gold.py` for KiCad-vs-KiCad parity checks, including copper-geometry placement matching, blank-reference KiCad footprint handling, and live-board connectivity checks that separate real routed-vs-unrouted mismatches from topology-only differences
 
 Current status of `pin-tester`:
 
@@ -178,12 +178,17 @@ Current status of `sharp-sc62015-interposer`:
 - the board now exists in `jitx-py/sharp-sc62015-interposer/` and builds as `src.main.SharpSc62015InterposerDesign`
 - the generic 48-lane FFC path is reused here, and the custom `SC62015B02` interposer footprint is now ported in Python JITX
 - repo-level `jitx-py` lint/type discovery now picks the board up automatically; `jitx-py/run-ruff.sh` and `jitx-py/run-ty.sh` both pass with the new child project present
+- the live VS Code bridge/export path is now working for this workspace on this machine, so archived KiCad compare runs again
+- connector placement parity against the archived KiCad board is clean by realized copper geometry
+- net membership parity against the archived KiCad board is clean; there are no current-only or gold-only net signatures
+- the current live board state is clean with `46` live routes, `0` unrouted pairs, and `0` design checks
 - JITX-side ground pours are intentionally omitted here too; planes and stitching should be added later in KiCad/post-process tooling
 
 Known remaining parity gaps for `sharp-sc62015-interposer` if we want stricter than functional equivalence:
 
-- dry build and source-level validation are clean, but archived KiCad placement/net/copper parity is not yet re-verified because the live VS Code bridge did not come up for this workspace on this machine
-- live routing and exported copper-topology parity are therefore still unproven for this board
+- the current live-vs-gold compare now reports `4` real connectivity mismatches: `GND`, `VCC`, `RXD-DATA40`, and `TXD-DATA41`
+- the compare still reports `49` topology-only copper differences, which reflect route-shape/export differences rather than pad membership
+- `RXD` and `TXD` are still the two missing signal routes on the current board
 
 ## Golden Output Reference
 
@@ -548,7 +553,7 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/sharp-organizer-host/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - `jitx-py/sharp-pc-e500-ram-card/` now exists, builds, exports, and matches the archived KiCad reference structurally and by net membership; only copper-topology parity remains
 - `jitx-py/sharp-sc61860-interposer/` now exists, builds, and matches the archived KiCad reference structurally and by net membership; only copper-topology parity remains
-- `jitx-py/sharp-sc62015-interposer/` now exists and passes source-level build/lint/type validation; archived KiCad parity re-verification is still pending because live export for that workspace is currently blocked by the VS Code bridge
+- `jitx-py/sharp-sc62015-interposer/` now exists, builds, and compares cleanly for placement/net membership; the remaining live parity gap is down to `GND`, `VCC`, `RXD`, and `TXD` connectivity plus topology-only route differences
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
