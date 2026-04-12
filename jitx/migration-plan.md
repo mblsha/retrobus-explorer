@@ -16,13 +16,14 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 Merged progress as of `2026-04-12`:
 
 - the new Python JITX surface now lives under `jitx-py/`
-- six migrated boards now live there:
+- seven migrated boards now live there:
   - `jitx-py/pin-tester/`
   - `jitx-py/sharp-pc-g850-bus/`
   - `jitx-py/rpi-pico-40-pin-adapter/`
   - `jitx-py/saleae-dslab-adapter/`
   - `jitx-py/espi-debug-breakout/`
   - `jitx-py/sharp-organizer-card/`
+  - `jitx-py/sharp-organizer-host/`
 - the obsolete top-level `saleae-dslab-adapter-py/` tree has now been removed, so the Python migration surface is consolidated under `jitx-py/`
 - the merged board entry points are now buildable as:
   - `src.main.PinTesterDesign`
@@ -31,6 +32,7 @@ Merged progress as of `2026-04-12`:
   - `src.main.SaleaeDslabAdapterDesign`
   - `src.main.EspiDebugBreakoutDesign`
   - `src.main.SharpOrganizerCardDesign`
+  - `src.main.SharpOrganizerHostDesign`
 - the first required shared Python component set now exists in working form:
   - `FFCConnector`
   - `_0_5K-1_2X-60PWB`
@@ -117,6 +119,20 @@ Current status of `sharp-organizer-card`:
 - JITX-side ground pours are intentionally omitted here too; planes and stitching should be added later in KiCad/post-process tooling
 
 Known remaining parity gaps for `sharp-organizer-card` if we want stricter than functional equivalence:
+
+- exported KiCad copper still differs from the archived routed board because the live ws routing is not being serialized back into the exported `.kicad_pcb`
+- the remaining mismatch is route-shape/topology parity, not connector placement or net membership
+
+Current status of `sharp-organizer-host`:
+
+- the board now exists in `jitx-py/sharp-organizer-host/` and builds as `src.main.SharpOrganizerHostDesign`
+- connector placement parity against the archived KiCad board is clean by realized copper geometry
+- net membership parity against the archived KiCad board is clean; there are no current-only or gold-only net signatures
+- live JITX routing now works cleanly for the 44 non-GND organizer-host signal nets on top copper with `0` design checks
+- the organizer host DB-Z connector geometry is now ported in working form, including the mount pads and locating holes
+- JITX-side ground pours are intentionally omitted here too; planes and stitching should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `sharp-organizer-host` if we want stricter than functional equivalence:
 
 - exported KiCad copper still differs from the archived routed board because the live ws routing is not being serialized back into the exported `.kicad_pcb`
 - the remaining mismatch is route-shape/topology parity, not connector placement or net membership
