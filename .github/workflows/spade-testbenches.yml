@@ -3,23 +3,33 @@ name: Spade Testbenches
 on:
   push:
     branches: [ master, main ]
-    paths:
-      - "gateware/reference/spade-projects/**"
-      - "gateware/reference/binary-counter/**"
-      - ".github/workflows/spade-testbenches.yml"
-      - "!jitx/**"
-      - "!jitx-py/**"
   pull_request:
     branches: [ master, main ]
-    paths:
-      - "gateware/reference/spade-projects/**"
-      - "gateware/reference/binary-counter/**"
-      - ".github/workflows/spade-testbenches.yml"
-      - "!jitx/**"
-      - "!jitx-py/**"
 
 jobs:
-  spade-testbenches:
+  detect-spade-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      spade: ${{ steps.filter.outputs.spade }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Spade-related changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            spade:
+              - 'gateware/reference/spade-projects/**'
+              - 'gateware/reference/binary-counter/**'
+              - '.github/workflows/spade-testbenches.yml'
+
+  run-spade-testbenches:
+    needs: detect-spade-changes
+    if: needs.detect-spade-changes.outputs.spade == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -208,3 +218,23 @@ jobs:
             gateware/reference/spade-projects/shared-components/test/waveforms/*.results.xml
           if-no-files-found: warn
           retention-days: 14
+
+  spade-testbenches:
+    runs-on: ubuntu-latest
+    needs: [detect-spade-changes, run-spade-testbenches]
+    if: always()
+    steps:
+      - name: Report required-check status
+        run: |
+          if [[ "${{ needs.detect-spade-changes.outputs.spade }}" != "true" ]]; then
+            echo "Spade testbenches not required for this change."
+            exit 0
+          fi
+
+          if [[ "${{ needs.run-spade-testbenches.result }}" == "success" ]]; then
+            echo "Spade testbenches required and passed."
+            exit 0
+          fi
+
+          echo "Spade testbenches were required and did not pass."
+          exit 1
