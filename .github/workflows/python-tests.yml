@@ -7,11 +7,14 @@ on:
     branches: [ main, master ]
 
 jobs:
-  ruff-py:
+  ruff:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        workdir: [py, jitx-py/pin-tester]
     defaults:
       run:
-        working-directory: py
+        working-directory: ${{ matrix.workdir }}
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v1
@@ -24,28 +27,14 @@ jobs:
     - name: Run Ruff
       run: uv run ruff check .
 
-  ruff-jitx-py:
+  ty:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        workdir: [py, jitx-py/pin-tester]
     defaults:
       run:
-        working-directory: jitx-py/pin-tester
-    steps:
-    - uses: actions/checkout@v4
-    - uses: astral-sh/setup-uv@v1
-      with:
-        python-version: '3.12'
-
-    - name: Sync dependencies
-      run: uv sync --extra dev
-
-    - name: Run Ruff
-      run: uv run ruff check .
-
-  ty-py:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: py
+        working-directory: ${{ matrix.workdir }}
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/setup-uv@v1
@@ -56,24 +45,12 @@ jobs:
       run: uv sync --extra dev
 
     - name: Run Ty
-      run: uv run -- ../.github/scripts/run-ty.sh
-
-  ty-jitx-py:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: jitx-py/pin-tester
-    steps:
-    - uses: actions/checkout@v4
-    - uses: astral-sh/setup-uv@v1
-      with:
-        python-version: '3.12'
-
-    - name: Sync dependencies
-      run: uv sync --extra dev
-
-    - name: Run Ty
-      run: uv run ty check .
+      run: |
+        if [[ "${{ matrix.workdir }}" == "py" ]]; then
+          uv run -- ../.github/scripts/run-ty.sh
+        else
+          uv run ty check .
+        fi
 
   test:
     runs-on: ubuntu-latest
@@ -96,15 +73,11 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     name: Test Summary
-    needs: [ruff-py, ruff-jitx-py, ty-py, ty-jitx-py, test]
+    needs: [ruff, ty, test]
     steps:
       - name: Check test results
         run: |
-          if [[ "${{ needs.ruff-py.result }}" == "failure" || \
-                "${{ needs.ruff-jitx-py.result }}" == "failure" || \
-                "${{ needs.ty-py.result }}" == "failure" || \
-                "${{ needs.ty-jitx-py.result }}" == "failure" || \
-                "${{ needs.test.result }}" == "failure" ]]; then
+          if [[ "${{ needs.ruff.result }}" == "failure" || "${{ needs.ty.result }}" == "failure" || "${{ needs.test.result }}" == "failure" ]]; then
             echo "One or more tests failed"
             exit 1
           else
