@@ -16,7 +16,7 @@ Port the PCB/component definitions in `~/src/jitx/retrobus-explorer/jitx` from S
 Merged progress as of `2026-04-12`:
 
 - the new Python JITX surface now lives under `jitx-py/`
-- nine migrated boards now live there:
+- ten migrated boards now live there:
   - `jitx-py/pin-tester/`
   - `jitx-py/sharp-pc-g850-bus/`
   - `jitx-py/rpi-pico-40-pin-adapter/`
@@ -25,7 +25,8 @@ Merged progress as of `2026-04-12`:
   - `jitx-py/sharp-organizer-card/`
   - `jitx-py/sharp-organizer-host/`
   - `jitx-py/sharp-pc-e500-ram-card/`
-- `jitx-py/sharp-sc61860-interposer/`
+  - `jitx-py/sharp-sc61860-interposer/`
+  - `jitx-py/sharp-sc62015-interposer/`
 - the obsolete top-level `saleae-dslab-adapter-py/` tree has now been removed, so the Python migration surface is consolidated under `jitx-py/`
 - the merged board entry points are now buildable as:
   - `src.main.PinTesterDesign`
@@ -36,7 +37,8 @@ Merged progress as of `2026-04-12`:
   - `src.main.SharpOrganizerCardDesign`
   - `src.main.SharpOrganizerHostDesign`
   - `src.main.SharpPcE500RamCardDesign`
-- `src.main.SharpSc61860InterposerDesign`
+  - `src.main.SharpSc61860InterposerDesign`
+  - `src.main.SharpSc62015InterposerDesign`
 - the first required shared Python component set now exists in working form:
   - `FFCConnector`
   - `_0_5K-1_2X-60PWB`
@@ -170,6 +172,18 @@ Known remaining parity gaps for `sharp-sc61860-interposer` if we want stricter t
 
 - exported KiCad copper still differs from the archived routed board; current compare reports `47` copper-topology mismatches
 - the remaining mismatch is route-shape/topology parity, not connector placement or net membership
+
+Current status of `sharp-sc62015-interposer`:
+
+- the board now exists in `jitx-py/sharp-sc62015-interposer/` and builds as `src.main.SharpSc62015InterposerDesign`
+- the generic 48-lane FFC path is reused here, and the custom `SC62015B02` interposer footprint is now ported in Python JITX
+- repo-level `jitx-py` lint/type discovery now picks the board up automatically; `jitx-py/run-ruff.sh` and `jitx-py/run-ty.sh` both pass with the new child project present
+- JITX-side ground pours are intentionally omitted here too; planes and stitching should be added later in KiCad/post-process tooling
+
+Known remaining parity gaps for `sharp-sc62015-interposer` if we want stricter than functional equivalence:
+
+- dry build and source-level validation are clean, but archived KiCad placement/net/copper parity is not yet re-verified because the live VS Code bridge did not come up for this workspace on this machine
+- live routing and exported copper-topology parity are therefore still unproven for this board
 
 ## Golden Output Reference
 
@@ -533,6 +547,8 @@ The first three grounding milestones have effectively been reached:
 - `jitx-py/sharp-organizer-card/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - `jitx-py/sharp-organizer-host/` now exists, builds, exports, and matches the archived KiCad reference structurally; only copper-topology parity remains
 - `jitx-py/sharp-pc-e500-ram-card/` now exists, builds, exports, and matches the archived KiCad reference structurally and by net membership; only copper-topology parity remains
+- `jitx-py/sharp-sc61860-interposer/` now exists, builds, and matches the archived KiCad reference structurally and by net membership; only copper-topology parity remains
+- `jitx-py/sharp-sc62015-interposer/` now exists and passes source-level build/lint/type validation; archived KiCad parity re-verification is still pending because live export for that workspace is currently blocked by the VS Code bridge
 - the required first-wave connector/component ports now exist in working form
 - KiCad export works through `jitx-tooling`
 - the boards can be compared against archived Stanza KiCad output with `tools/compare_kicad_gold.py`
@@ -540,7 +556,7 @@ The first three grounding milestones have effectively been reached:
 The next milestone should be:
 
 - build on the Sharp memory/interposer connector work by porting the remaining interposer boards that reuse adjacent connector surface and parity tooling
-- use `sharp-sc62015-interposer` as the next board
+- use `alchitry-au1-level-shifter` as the next board
 
 ## Practical Notes
 
@@ -553,7 +569,7 @@ The next milestone should be:
 
 ## Recommended Next Step
 
-Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, `sharp-organizer-card`, `sharp-organizer-host`, `sharp-pc-e500-ram-card`, and `sharp-sc61860-interposer` as the reference harnesses, but move the implementation focus to `sharp-sc62015-interposer` as the next full board port.
+Use `pin-tester`, `sharp-pc-g850-bus`, `rpi-pico-40-pin-adapter`, `saleae-dslab-adapter`, `espi-debug-breakout`, `sharp-organizer-card`, `sharp-organizer-host`, `sharp-pc-e500-ram-card`, `sharp-sc61860-interposer`, and `sharp-sc62015-interposer` as the reference harnesses, but move the implementation focus to `alchitry-au1-level-shifter` as the next full board port.
 
 ## Board-by-Board Acceptance Workflow
 
