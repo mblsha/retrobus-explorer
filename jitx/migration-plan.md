@@ -80,6 +80,7 @@ Current status of `saleae-dslab-adapter`:
 - net membership parity against the archived KiCad board is clean; there are no current-only or gold-only net signatures
 - live JITX routing on the eight Saleae signal nets works cleanly on bottom copper
 - after live routing and export, `tools/compare_kicad_gold.py` now reports a full `PASS` against the archived KiCad reference
+- that full KiCad-vs-gold `PASS` has now been re-verified from the committed `jitx-py/saleae-dslab-adapter/` project state
 - JITX-side ground pours are intentionally omitted here too; planes should be added later in KiCad/post-process tooling
 
 Known remaining parity gaps for `saleae-dslab-adapter` if we want stricter than functional equivalence:
