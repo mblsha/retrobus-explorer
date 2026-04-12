@@ -8,7 +8,7 @@ from jitx.circuit import Circuit
 from jitx.design import Design
 from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
-from jitx.net import Port
+from jitx.net import Net, Port
 from jitx.placement import Placement, Side
 from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
@@ -128,8 +128,8 @@ class PinTesterCircuit(Circuit):
         self.signal_testpad = SignalTestPad()
         self.gnd_testpads = [GroundCornerTestPad() for _ in range(8)]
 
-        gnd_net = self.gnd + self.ffc.GND
-        vcc_net = self.vcc + self.ffc.VCC5V
+        gnd_net = Net(name="GND") + self.gnd + self.ffc.GND
+        vcc_net = Net(name="VCC") + self.vcc + self.ffc.VCC5V
 
         self.nets = []
 
