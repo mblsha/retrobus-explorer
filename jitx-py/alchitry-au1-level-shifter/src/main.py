@@ -16,6 +16,7 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
+from jitx.via import Via, ViaType
 
 from src.components import (
     AlchitryA,
@@ -81,6 +82,13 @@ class AlchitryAu1LevelShifterSubstrate(Substrate):
     # Python replacement for the Stanza `setup-design(...)` board defaults.
     stackup = SampleStackup(4)
     constraints = SampleFabConstraints()
+
+    class StandardVia(Via):
+        start_layer = 0
+        stop_layer = 3
+        diameter = 0.45
+        hole_diameter = 0.3
+        type = ViaType.MechanicalDrill
 
 
 class FFCConnector(Circuit):
