@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27.0,<2.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "retrobus-jitx-parts"
+name = "shared-components"
 version = "0.1.0"
 description = "Shared reusable JITX Python parts for retrobus jitx-py projects"
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/retrobus_jitx_parts"]
+packages = ["src/shared_components"]
 
 [project.optional-dependencies]
 dev = [

@@ -14,8 +14,8 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
-from retrobus_jitx_parts.ffc import HDGC60PinFfc
-from retrobus_jitx_parts.testpads import GndTestpads
+from shared_components.ffc import HDGC60PinFfc
+from shared_components.testpads import GndTestpads
 
 from src.components import SharpOrganizerHost
 

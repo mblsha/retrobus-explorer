@@ -14,7 +14,7 @@ from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
-from retrobus_jitx_parts.ffc import HDGC60PinFfc
+from shared_components.ffc import HDGC60PinFfc
 
 from src.components import SharpPcE500RamCard
 
