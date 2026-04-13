@@ -1,3 +1,18 @@
+from shared_components.alchitry_v2 import (
+    FT_PLUS_PROFILE,
+    FT_PROFILE,
+    PINOUTS_URL,
+    PROFILES_BY_NAME,
+    AlchitryV2UsageProfile,
+    ConnectorUsageProfile,
+    PinClaim,
+    make_alchitry_v2_bank,
+    make_alchitry_v2_bank_bottom,
+    make_alchitry_v2_bank_top,
+    profile_claims,
+    reserved_signal_pins,
+    resolve_profile,
+)
 from shared_components.ffc import HDGC60PinFfc, RetroBus60FfcConnector
 from shared_components.hirose_df40 import (
     DF40_50_BOTTOM_SPECS,
@@ -15,7 +30,14 @@ from shared_components.sharp_organizer import SharpOrganizerBus, SharpOrganizerH
 from shared_components.testpads import GndTestpads, SignalTestPad
 
 __all__ = [
+    "AlchitryV2UsageProfile",
+    "ConnectorUsageProfile",
     "DF40_50_BOTTOM_SPECS",
+    "FT_PLUS_PROFILE",
+    "FT_PROFILE",
+    "PINOUTS_URL",
+    "PROFILES_BY_NAME",
+    "PinClaim",
     "DF40_50_TOP_SPECS",
     "DF40_80_BOTTOM_SPECS",
     "DF40_80_TOP_SPECS",
@@ -25,7 +47,13 @@ __all__ = [
     "HiroseDf40BankTop",
     "HiroseDf40ControlBottom",
     "HiroseDf40ControlTop",
+    "make_alchitry_v2_bank",
+    "make_alchitry_v2_bank_bottom",
+    "make_alchitry_v2_bank_top",
     "place_df40_pad_specs",
+    "profile_claims",
+    "reserved_signal_pins",
+    "resolve_profile",
     "RetroBus60FfcConnector",
     "SaleaeProbeHeader2x4",
     "SharpOrganizerBus",
