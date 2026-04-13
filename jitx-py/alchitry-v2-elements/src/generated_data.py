@@ -2,7 +2,14 @@ from __future__ import annotations
 
 SignalMap = tuple[tuple[str, tuple[str, ...]], ...]
 
-# Generated from the published Alchitry V2 KiCad symbol library.
+# Generated from the published Alchitry V2 KiCad symbol library linked from:
+# https://alchitry.com/tutorials/references/pinouts-and-custom-elements/
+# Source archive:
+# https://cdn.alchitry.com/elements/Alchitry%20V2%20Elements%20KiCAD.zip
+#
+# This file is the checked-in replacement for the old vendored symbol library.
+# It preserves the upstream signal naming exactly, including the V2_BOTTOM C30 ->
+# GND quirk present in the published Alchitry symbol data.
 SOURCE_REFERENCES = (
     "https://cdn.alchitry.com/elements/Alchitry%20V2%20Elements%20KiCAD.zip",
     "https://alchitry.com/tutorials/references/pinouts-and-custom-elements/",

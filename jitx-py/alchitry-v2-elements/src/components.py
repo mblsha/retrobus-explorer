@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+# Alchitry V2 composite element footprints built from shared DF40 connectors.
+#
+# Provenance:
+# - Connector naming, role, and orientation come from Alchitry's primary
+#   reference: https://alchitry.com/tutorials/references/pinouts-and-custom-elements/
+# - Exact signal names come from the published KiCad element library converted
+#   into src.generated_data.
+# - The reusable DF40 pad geometry comes from shared_components.hirose_df40,
+#   which is fitted against the published Alchitry KiCad footprints rather than
+#   relying on a checked-in vendor snapshot at runtime.
 import keyword
 import re
 from collections import OrderedDict
@@ -65,6 +75,8 @@ ELEMENT_OUTLINE = [
     (0.0, -1.5),
     (0.0, -43.5),
 ]
+# The composite placements below match the published V2 element library: control
+# connector on the left, Bank A above, and Bank B below.
 ELEMENT_LAYOUTS = {
     "V2_TOP": (
         (DF40_50_TOP_SPECS, 16.5, -41.0, "C", None),

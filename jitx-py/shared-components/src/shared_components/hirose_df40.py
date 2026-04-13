@@ -1,5 +1,24 @@
 from __future__ import annotations
 
+# Reusable Hirose DF40 connector geometry used by the Alchitry V2 element import.
+#
+# Primary sources:
+# - Alchitry reference: https://alchitry.com/tutorials/references/pinouts-and-custom-elements/
+#   This page states that each V2 side uses one 50-pin Control header and two
+#   80-pin bank headers, with pin 1 at the bottom-left in the published diagram.
+#   It also names the exact connector variants used by Alchitry:
+#   - Top control: DF40HC(4.0)-50DS-0.4V(51)
+#   - Top banks:   DF40HC(4.0)-80DS-0.4V(51)
+#   - Bottom mate: DF40C-50DP-0.4V(51) and DF40C-80DP-0.4V(51)
+# - Published KiCad library: https://cdn.alchitry.com/elements/Alchitry%20V2%20Elements%20KiCAD.zip
+#   The numeric pad geometry below was fit to the published Alchitry KiCad
+#   footprints so the shared model reproduces the shipped V2 element library.
+# - Hirose DF40 family page: https://www.hirose.com/en/product/series/DF40/
+#
+# These helpers model the connector land patterns used by the Alchitry V2
+# element libraries. They are intentionally parameterized in terms of pin count
+# and side, rather than hard-coding only the composite Alchitry footprints.
+
 from dataclasses import dataclass
 
 from jitx.component import Component
