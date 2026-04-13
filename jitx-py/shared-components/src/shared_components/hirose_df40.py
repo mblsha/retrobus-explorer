@@ -18,7 +18,6 @@ from __future__ import annotations
 # These helpers model the connector land patterns used by the Alchitry V2
 # element libraries. They are intentionally parameterized in terms of pin count
 # and side, rather than hard-coding only the composite Alchitry footprints.
-
 from dataclasses import dataclass
 
 from jitx.component import Component
