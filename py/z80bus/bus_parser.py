@@ -304,28 +304,25 @@ class BaseBusParser:
 
 # like BusParser, but only parses type, val, addr
 class SimpleBusParser:
-    def parse(self, data):
-        r = []
+    def parse(self, data: bytes) -> list[Event]:
+        events: list[Event] = []
         offset = 0
         view = memoryview(data)
         while offset + 4 <= len(view):
             chunk = view[offset : offset + 4]
             try:
-                type, val, addr = _decode_event_fields(chunk)
+                event_type, val, addr = _decode_event_fields(chunk)
             except ValueError:
                 offset += 1
                 continue
 
             offset += 4
 
-            r.append(Event(type=type, val=val, addr=addr))
-        return r
+            events.append(Event(type=event_type, val=val, addr=addr))
+        return events
 
 
 class BusParser(BaseBusParser):
-    def __init__(self) -> None:
-        super().__init__()
-
     def parse(self, data):
         errors = []
         events = []
