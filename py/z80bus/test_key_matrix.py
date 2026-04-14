@@ -83,3 +83,16 @@ def test_key_matrix_equality_handles_other_types():
     interpreter = KeyMatrixInterpreter()
     assert interpreter == KeyMatrixInterpreter()
     assert interpreter != object()
+
+
+def test_pressed_keys_returns_a_copy():
+    interpreter = eval(
+        out_port(0x01, IOPort.SET_KEY_STROBE_LO)
+        + in_port(0x01, IOPort.KEY_INPUT)
+        + in_port(0x01, IOPort.SHIFT_KEY_INPUT)
+    )
+
+    pressed = interpreter.pressed_keys()
+    pressed.pop()
+
+    assert interpreter.pressed_keys() == [PressedKey(row=0, col=0), PressedKey.shift()]
