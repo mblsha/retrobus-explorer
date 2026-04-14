@@ -425,13 +425,14 @@ class PipelineBusParser(BaseBusParser):
                 continue
             data = data[4:]
 
-            event = self.event(event_type, value, addr)
-
-            if event.type == Type.FETCH:
+            # A fetch starts a new instruction, so flush buffered events before
+            # creating the new event. This keeps instruction state updates
+            # single-sourced in _create_event.
+            if event_type == Type.FETCH:
                 self.flush()
 
+            event = self.event(event_type, value, addr)
             self.buf.append(event)
-            self._record_instruction_event(event)
 
         # return unprocessed data, it should be concatenated with the next batch
         return bytes(data)

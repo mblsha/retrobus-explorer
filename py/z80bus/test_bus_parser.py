@@ -71,6 +71,24 @@ def test_invalid_parse() -> None:
     not_parse(b"R")
 
 
+def test_pipeline_records_instruction_state_once_per_event() -> None:
+    class RecordingPipelineBusParser(PipelineBusParser):
+        def __init__(self, errors_queue, out_ports_queue):
+            super().__init__(errors_queue, out_ports_queue)
+            self.record_calls = 0
+
+        def _record_instruction_event(self, event: Event) -> None:
+            self.record_calls += 1
+            super()._record_instruction_event(event)
+
+    errors_queue: queue.Queue = queue.Queue()
+    out_ports_queue: queue.Queue = queue.Queue()
+    parser = RecordingPipelineBusParser(errors_queue, out_ports_queue)
+    parser.parse(fetch(0xCD, 0x1234) + read(0x12, 0x1235))
+
+    assert parser.record_calls == 2
+
+
 # helper functions to construct fake transmitted bytes
 def read(val: int, addr: int) -> bytes:
     return b"R" + struct.pack("B", val) + struct.pack("<H", addr)
