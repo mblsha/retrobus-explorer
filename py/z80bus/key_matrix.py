@@ -67,9 +67,10 @@ class KeyMatrixInterpreter:
         )
 
     def pressed_keys(self) -> list[PressedKey]:
+        keys = self.last_full_state.copy()
         if self.last_shift_state:
-            return self.last_full_state + [PressedKey.shift()]
-        return self.last_full_state
+            keys.append(PressedKey.shift())
+        return keys
 
     def __str__(self):
         r = []
