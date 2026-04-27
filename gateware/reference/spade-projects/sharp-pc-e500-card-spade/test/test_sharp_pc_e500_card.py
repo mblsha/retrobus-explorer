@@ -23,6 +23,13 @@ def saleae_bit(value, idx):
     return (value >> idx) & 1
 
 
+def _saleae(dut, idx: int):
+    scalar = getattr(dut, f"saleae_{idx}", None)
+    if scalar is not None:
+        return scalar
+    return dut.saleae[idx]
+
+
 def sampled_write_addr(word: int) -> int:
     return word & 0x3FFFF
 
@@ -798,9 +805,9 @@ async def saleae_control_outputs_and_write_bus_activity(dut):
     dut.ce6.value = 1
     await tick(dut.clk, 1)
 
-    event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
-    data_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[6], dut.clk, 8))
-    addr_uart = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[7], dut.clk, 18))
+    event_write = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
+    data_uart = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 6), dut.clk, 8))
+    addr_uart = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 7), dut.clk, 18))
 
     await _bus_write(dut, 0x0012, 0x5A)
 
@@ -817,7 +824,7 @@ async def saleae_read_reports_bus_activity(dut):
 
     await _bus_write(dut, 0x0012, 0x5A)
 
-    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_read = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
 
     assert await _bus_read(dut, 0x0012) == 0x5A
     assert await event_read == 0x525A
@@ -828,7 +835,7 @@ async def saleae_read_reports_bus_activity(dut):
 async def saleae4_streams_sampled_ce1_write_after_cycle_start(dut):
     await _init(dut)
 
-    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    sampled_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 4), dut.clk, 32, 400))
     await _emit_sampled_ce1_write(dut, 0x0012, 0x5A)
 
     word = await sampled_word
@@ -854,7 +861,7 @@ async def ft_stream_tracks_saleae4_only_while_measurement_window_is_active(dut):
     assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
     assert await _ce6_write(dut, 0x1FFF0, 0x12) == 0
 
-    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 4), dut.clk, 32, 400))
     ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
     await _emit_sampled_ce1_write(dut, 0x0034, 0xA5)
     assert await ft_word == await saleae_word
@@ -888,7 +895,7 @@ async def ft_stream_measure_source_is_live_by_default_within_measurement_window(
 
     assert await _ce6_write(dut, 0x1FFF4, 0x01) == 0
 
-    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 4), dut.clk, 32, 400))
     ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
     await _emit_sampled_ce1_write(dut, 0x0034, 0xA5)
     assert await ft_word == await saleae_word
@@ -913,7 +920,7 @@ async def ft_stream_mode_can_hold_measure_source_policy_for_one_window(dut):
     assert await _ce6_write(dut, 0x1FFF2, 0x32) == 0
     assert await _ce6_write(dut, 0x1FFF0, 0x33) == 0
 
-    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 4), dut.clk, 32, 400))
     ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
     await _emit_sampled_ce1_write(dut, 0x0055, 0x7E)
     assert await ft_word == await saleae_word
@@ -957,7 +964,7 @@ async def ft_stream_uart_latch_can_enable_capture_outside_measurement_window(dut
     await _uart_send_text(dut, "F1\r")
     assert await rx == b"F1\r\nOK\r\n"
 
-    saleae_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    saleae_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 4), dut.clk, 32, 400))
     ft_word = cocotb.start_soon(_ft_recv_stream_word(dut, 4000))
     await _emit_sampled_ce1_write(dut, 0x0034, 0xA5)
     assert await ft_word == await saleae_word
@@ -1079,7 +1086,7 @@ async def ft_status_tracks_uart_session_overflow_separately_from_total(dut):
 async def saleae4_streams_sampled_write_without_cycle_start_as_fallback(dut):
     await _init(dut)
 
-    sampled_words = cocotb.start_soon(_fast_uart_recv_words(dut.saleae[4], dut.clk, 32, 2, 400))
+    sampled_words = cocotb.start_soon(_fast_uart_recv_words(_saleae(dut, 4), dut.clk, 32, 2, 400))
 
     dut.addr.value = 0x0034
     dut.ce1.value = 0
@@ -1117,7 +1124,7 @@ async def saleae4_streams_sampled_write_without_cycle_start_as_fallback(dut):
 async def saleae4_streams_sampled_ce6_control_write_with_ctrl_flag(dut):
     await _init(dut)
 
-    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    sampled_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 4), dut.clk, 32, 400))
 
     dut.addr.value = 0x1FFF1
     dut.ce1.value = 0
@@ -1150,7 +1157,7 @@ async def saleae4_streams_sampled_ce6_control_write_with_ctrl_flag(dut):
 async def saleae4_streams_addr_change_even_when_no_ce_is_active(dut):
     await _init(dut)
 
-    sampled_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[4], dut.clk, 32, 400))
+    sampled_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 4), dut.clk, 32, 400))
 
     dut.addr.value = 0x15555
     dut.ce1.value = 0
@@ -1180,7 +1187,7 @@ async def saleae4_streams_addr_seeded_followups_until_phase_timeout(dut):
 
     sampled_words = cocotb.start_soon(
         _fast_uart_recv_words(
-            dut.saleae[4],
+            _saleae(dut, 4),
             dut.clk,
             32,
             SAMPLED_BUS_PHASE_TIMEOUT_CYCLES,
@@ -1215,7 +1222,7 @@ async def saleae4_streams_addr_seeded_followups_until_phase_timeout(dut):
         assert sampled_write_status_bit(word, 3) == 1
         assert sampled_write_status_bit(word, 4) == 0
         assert sampled_write_status_bit(word, 5) == 0
-    await _assert_no_fast_uart_start_fall(dut.saleae[4], dut.clk, SAMPLED_BUS_CYCLE_CYCLES * 2)
+    await _assert_no_fast_uart_start_fall(_saleae(dut, 4), dut.clk, SAMPLED_BUS_CYCLE_CYCLES * 2)
 
 
 @cocotb.test()
@@ -1223,7 +1230,7 @@ async def saleae_s5_pulses_on_internal_addr_change(dut):
     await _init(dut)
 
     dut.addr.value = 0x00001
-    await _wait_signal_high(dut.saleae[5], dut.clk, 6)
+    await _wait_signal_high(_saleae(dut, 5), dut.clk, 6)
     await tick(dut.clk, 1)
     assert saleae_bit(int(dut.saleae.value), 5) == 0
 
@@ -1278,7 +1285,7 @@ async def ce6_low_range_rom_reads_drive_backed_bytes_and_are_logged(dut):
     await _uart_send_text(dut, "W021=A7\r")
     assert await rx == b"W021=A7\r\nOK\r\n"
 
-    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_read = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     observed, drive = await _ce6_read(dut, 0x0021, 0x11)
     assert observed == 0xA7
     assert drive == 1
@@ -1293,7 +1300,7 @@ async def ce6_reads_alias_on_low16_bits(dut):
     await _uart_send_text(dut, "W021=A7\r")
     assert await rx == b"W021=A7\r\nOK\r\n"
 
-    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_read = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     observed, drive = await _ce6_read(dut, 0x10021, 0x11)
     assert observed == 0xA7
     assert drive == 1
@@ -1304,7 +1311,7 @@ async def ce6_reads_alias_on_low16_bits(dut):
 async def ce6_high_range_reads_remain_passive_and_are_logged(dut):
     await _init(dut)
 
-    event_read = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_read = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     observed, drive = await _ce6_read(dut, 0x0821, 0xA7)
     assert observed == 0xA7
     assert drive == 0
@@ -1319,7 +1326,7 @@ async def ce6_write_attempts_are_logged_but_never_drive_bus(dut):
     await _uart_send_text(dut, "W021=A7\r")
     assert await rx == b"W021=A7\r\nOK\r\n"
 
-    event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_write = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     drive = await _ce6_write(dut, 0x0021, 0x3C)
     assert drive == 0
     assert await event_write == 0x773C
@@ -1348,7 +1355,7 @@ async def ce6_control_page_reads_remain_passive_and_are_logged(dut):
     observed, drive = await _ce6_read(dut, 0x1FFF1, 0x5E)
     assert observed == 0x5E
     assert drive == 0
-    await _assert_no_fast_uart_start_fall(dut.saleae[3], dut.clk, 128)
+    await _assert_no_fast_uart_start_fall(_saleae(dut, 3), dut.clk, 128)
 
 
 @cocotb.test()
@@ -1364,7 +1371,7 @@ async def ce6_control_page_writes_use_separate_control_delay(dut):
     assert await rx == b"c20\r\nC=200ns\r\n"
 
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
-    event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_write = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
 
     dut.addr.value = 0x1FFF1
     dut.ce6.value = 0
@@ -1375,7 +1382,7 @@ async def ce6_control_page_writes_use_separate_control_delay(dut):
     dut.data_host_drive.value = 1
     await tick(dut.clk, 1)
     dut.rw.value = 0
-    await _assert_no_fast_uart_start_fall(dut.saleae[3], dut.clk, 10)
+    await _assert_no_fast_uart_start_fall(_saleae(dut, 3), dut.clk, 10)
     await _assert_no_usb_tx_start_bit(dut, 10)
     await tick(dut.clk, 1)
     drive = int(dut.data_oe.value)
@@ -1403,7 +1410,7 @@ async def ce6_control_page_phase_sweep_detects_async_echo_writes(dut):
 
     for ce6_phase_ns, rw_phase_ns, value in cases:
         usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
-        event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+        event_write = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
         drive = await _ce6_ctrl_async_write_phase(
             dut,
             0x1FFF1,
@@ -1421,7 +1428,7 @@ async def ce6_control_page_write_can_start_after_addr_enters_range(dut):
     await _init(dut)
 
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
-    event_write = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_write = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
 
     dut.addr.value = 0x1F000
     dut.ce6.value = 1
@@ -1478,7 +1485,7 @@ async def ce6_control_page_aborted_write_does_not_fire_late(dut):
     dut.ce6.value = 1
     _set_data_bus_z(dut)
 
-    await _assert_no_fast_uart_start_fall(dut.saleae[3], dut.clk, 40)
+    await _assert_no_fast_uart_start_fall(_saleae(dut, 3), dut.clk, 40)
     await _assert_no_usb_tx_start_bit(dut, 40)
 
 
@@ -1491,13 +1498,13 @@ async def ce6_control_page_c00_and_c01_use_current_cycle_data(dut):
     assert await rx == b"c00\r\nC=000ns\r\n"
 
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
-    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("A"), ce6_phase_ns=1, rw_phase_ns=3) == 0
     assert await usb_char == b"A"
     assert await event_word == 0x7741
 
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
-    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("B"), ce6_phase_ns=2, rw_phase_ns=5) == 0
     assert await usb_char == b"B"
     assert await event_word == 0x7742
@@ -1507,13 +1514,13 @@ async def ce6_control_page_c00_and_c01_use_current_cycle_data(dut):
     assert await rx == b"c01\r\nC=010ns\r\n"
 
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
-    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("C"), ce6_phase_ns=0, rw_phase_ns=2) == 0
     assert await usb_char == b"C"
     assert await event_word == 0x7743
 
     usb_char = cocotb.start_soon(_uart_recv_exact(dut, 1))
-    event_word = cocotb.start_soon(_fast_uart_recv_word(dut.saleae[3], dut.clk, 16))
+    event_word = cocotb.start_soon(_fast_uart_recv_word(_saleae(dut, 3), dut.clk, 16))
     assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF1, ord("D"), ce6_phase_ns=3, rw_phase_ns=6) == 0
     assert await usb_char == b"D"
     assert await event_word == 0x7744
@@ -1523,7 +1530,7 @@ async def ce6_control_page_c00_and_c01_use_current_cycle_data(dut):
 async def ce6_control_page_back_to_back_event_words_are_queued(dut):
     await _init(dut)
 
-    event_words = cocotb.start_soon(_fast_uart_recv_words(dut.saleae[3], dut.clk, 16, 2))
+    event_words = cocotb.start_soon(_fast_uart_recv_words(_saleae(dut, 3), dut.clk, 16, 2))
     assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF0, 0x11, ce6_phase_ns=1, rw_phase_ns=3, hold_low_ns=60) == 0
     assert await _ce6_ctrl_async_write_phase(dut, 0x1FFF2, 0x22, ce6_phase_ns=2, rw_phase_ns=4, hold_low_ns=60) == 0
     assert await event_words == [0x7711, 0x7722]
