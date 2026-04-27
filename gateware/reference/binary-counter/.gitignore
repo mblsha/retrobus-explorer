@@ -1,4 +1,5 @@
 build/
+src/build_info.spade
 .venv-host/
 test/dump.vcd
 test/results.xml

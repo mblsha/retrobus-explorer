@@ -1,4 +1,5 @@
 name = "binary_counter"
+preprocessing = ["python3 ../spade-projects/tools/gen_build_info.py --project ."]
 
 [libraries]
 shared_components = { path = "../spade-projects/shared-components" }

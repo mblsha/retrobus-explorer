@@ -83,15 +83,48 @@ async def send_uart_byte(dut, value):
     await tick(dut.clk, BIT_CYCLES)
 
 
-async def recv_uart_byte(dut, timeout_cycles=BIT_CYCLES * 50):
-    model = AlchitryUartRxModel(bit_time=BIT_CYCLES)
+async def wait_uart_start_fall(dut, timeout_cycles=BIT_CYCLES * 120):
+    if int(dut.usb_tx.value) == 0:
+        return
+    prev = int(dut.usb_tx.value)
     for _ in range(timeout_cycles):
         await tick(dut.clk, 1)
-        valid, value = model.step(int(dut.usb_tx.value))
-        if valid:
-            return value
+        cur = int(dut.usb_tx.value)
+        if prev == 1 and cur == 0:
+            return
+        prev = cur
 
-    assert False, "timed out waiting for uart echo"
+    assert False, "timed out waiting for UART start bit"
+
+
+async def recv_uart_byte(dut, timeout_cycles=BIT_CYCLES * 120):
+    await wait_uart_start_fall(dut, timeout_cycles)
+    await tick(dut.clk, BIT_CYCLES + (BIT_CYCLES // 2))
+
+    value = 0
+    for bit_idx in range(8):
+        value |= int(dut.usb_tx.value) << bit_idx
+        await tick(dut.clk, BIT_CYCLES)
+
+    stop = int(dut.usb_tx.value)
+    assert stop == 1, f"invalid UART stop bit: {stop}"
+    await tick(dut.clk, BIT_CYCLES // 2)
+    return value
+
+
+async def recv_uart_line(dut, timeout_cycles=BIT_CYCLES * 120, max_len=160):
+    data = bytearray()
+    for _ in range(max_len):
+        data.append(await recv_uart_byte(dut, timeout_cycles))
+        if data[-1] == 0x0A:
+            return data.decode("ascii", errors="replace")
+    assert False, f"line too long without LF: {data!r}"
+
+
+async def expect_boot_banner(dut):
+    line = await recv_uart_line(dut, timeout_cycles=BIT_CYCLES * 220)
+    assert line.startswith("RBXBOOT project=binary-counter git="), f"unexpected boot banner: {line!r}"
+    assert " dirty=" in line and " built=" in line and line.endswith("\r\n"), f"malformed boot banner: {line!r}"
 
 
 async def assert_no_uart_echo(dut, cycles):
@@ -154,6 +187,7 @@ async def uart_digit_controls_led_saleae_slow_factor(dut):
     assert read_u8(dut.saleae) == 0
 
     dut.rst_n.value = 1
+    await expect_boot_banner(dut)
     await wait_for_tx_idle_high(dut)
 
     fast_intervals = await measure_led_change_intervals(dut, count=8, max_cycles=40)
@@ -185,6 +219,7 @@ async def non_digit_is_ignored_and_not_echoed(dut):
     dut.usb_rx.value = 1
     await tick(dut.clk, 8)
     dut.rst_n.value = 1
+    await expect_boot_banner(dut)
     await wait_for_tx_idle_high(dut)
 
     baseline = await measure_led_change_intervals(dut, count=6, max_cycles=30)

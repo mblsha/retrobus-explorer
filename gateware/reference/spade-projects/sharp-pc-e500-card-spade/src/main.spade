@@ -3,7 +3,7 @@ mod msg;
 mod protocol;
 
 use shared_components::{
-    boot_banner::{BootBannerOut, BootBannerState, boot_banner_step, init_boot_banner},
+    boot_banner::{BootBannerOut, boot_banner_core},
     clocking::sampled_bool_clock,
     config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
     ft_stream::{FtWordStreamState, ft_word_stream_step},
@@ -795,19 +795,6 @@ fn measure_engine_step(
     )
 }
 
-entity boot_banner_core<#uint IDX_W, #uint N>(
-    clk: clock,
-    rst: bool,
-    banner: [uint<8>; N],
-    block_tx: bool,
-) -> BootBannerOut<IDX_W> {
-    reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = {
-        boot_banner_step(state, banner, block_tx).state
-    };
-
-    boot_banner_step(state, banner, block_tx)
-}
-
 entity parser_core(
     clk: clock,
     rst: bool,
@@ -1022,7 +1009,7 @@ entity main_core(
 
     let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
 
-    let boot_banner_out = inst boot_banner_core::<8, 56>(
+    let boot_banner_out = inst boot_banner_core::<8, 94>(
         clk,
         rst,
         build_info::boot_banner_text(),
