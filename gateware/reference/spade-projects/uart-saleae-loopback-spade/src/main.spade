@@ -1,5 +1,6 @@
 mod build_info;
 use shared_components::{
+    boot_banner::boot_banner_core,
     bridges::BridgePolicy,
     clocking::{clk_wiz_200_400, sampled_bool_clock},
     config::{au_dual_bridge_u8x8_100_200, au_usb_uart_rx, au_usb_uart_tx8_tap},
@@ -26,6 +27,12 @@ entity main(
 
     let (enqueue, enqueue_w): (&bool, inv &bool) = port;
     let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
+    let boot_banner_out = inst boot_banner_core::<8, 96>(
+        clk,
+        rst,
+        build_info::boot_banner_text(),
+        *usb_uart.busy,
+    );
 
     let cmd_core = inst simple_cmd_uart_core(
         clk,
@@ -33,7 +40,7 @@ entity main(
         rx.valid,
         rx.parity_error,
         rx.byte,
-        *usb_uart.busy,
+        *usb_uart.busy || boot_banner_out.tx_req.valid,
     );
 
     let mode_is_echo = cmd_core.mode.is_echo();
@@ -55,12 +62,14 @@ entity main(
     let rx_is_payload = cmd_core.payload_rx;
 
     let all_fifo_ready = !tx6_bridge.fifo_full && !tx7_bridge.fifo_full;
-    let can_accept = rx_is_payload && cmd_core.tx_msg_none && !*usb_uart.busy && all_fifo_ready;
+    let can_accept = rx_is_payload && cmd_core.tx_msg_none && !*usb_uart.busy && !boot_banner_out.tx_req.valid && all_fifo_ready;
     let dropped = rx_is_payload && !can_accept;
     set enqueue_w = &can_accept;
 
-    let tx_new_data = cmd_core.tx_req.valid || can_accept;
-    let tx_data = if cmd_core.tx_req.valid {
+    let tx_new_data = boot_banner_out.tx_req.valid || cmd_core.tx_req.valid || can_accept;
+    let tx_data = if boot_banner_out.tx_req.valid {
+        boot_banner_out.tx_req.byte
+    } else if cmd_core.tx_req.valid {
         cmd_core.tx_req.byte
     } else if can_accept {
         rx.byte

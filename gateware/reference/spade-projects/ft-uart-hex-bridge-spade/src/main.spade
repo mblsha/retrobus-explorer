@@ -3,6 +3,7 @@ mod msg;
 mod protocol;
 
 use shared_components::{
+    boot_banner::boot_banner_core,
     clocking::sampled_bool_clock,
     config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
     primitives::reset_conditioner,
@@ -297,19 +298,30 @@ entity main_core(
         rx_empty,
         rx_dout,
     );
+    let boot_banner_out = inst boot_banner_core::<8, 94>(
+        clk,
+        rst,
+        build_info::boot_banner_text(),
+        *usb_busy,
+    );
     let msg_stream = bridge_msg_stream_step(
         state.msg_stream,
-        *usb_busy,
+        *usb_busy || boot_banner_out.tx_req.valid,
         msg_decision.next_msg_valid,
         msg_decision.next_msg,
     );
+    let usb_tx_req = if boot_banner_out.tx_req.valid {
+        boot_banner_out.tx_req
+    } else {
+        msg_stream.tx_req
+    };
 
     let _usb_tx = inst au_usb_uart_tx8_tap(
         clk,
         rst,
         false,
-        msg_stream.tx_req.byte,
-        msg_stream.tx_req.valid,
+        usb_tx_req.byte,
+        usb_tx_req.valid,
         usb_tx_line_w,
         usb_busy_w,
     );

@@ -64,6 +64,7 @@ async def _init(dut):
     await tick(dut.clk, 6)
     dut.rst_n.value = 1
     await tick(dut.clk, 10)
+    await _expect_boot_banner(dut, "sharp-pc-g850-bus-spade")
 
 
 async def _ft_host_send_word(dut, word: int, timeout_cycles: int = 2000):
@@ -115,6 +116,8 @@ async def _uart_send_text(dut, text: str):
 
 
 async def _uart_wait_start_fall(dut, timeout_cycles: int) -> None:
+    if int(dut.usb_tx.value) == 0:
+        return
     prev = int(dut.usb_tx.value)
     for _ in range(timeout_cycles):
         cur = int(dut.usb_tx.value)
@@ -138,6 +141,7 @@ async def _uart_recv_byte(dut, timeout_cycles: int = 12000) -> int:
 
     stop = int(dut.usb_tx.value)
     assert stop == 1, f"invalid UART stop bit: {stop}"
+    await tick(dut.clk, CLK_PER_UART_BIT // 2)
     return value
 
 
@@ -155,6 +159,12 @@ async def _uart_recv_lines(dut, count: int) -> list[bytes]:
     for _ in range(count):
         lines.append(await _uart_recv_line(dut))
     return lines
+
+
+async def _expect_boot_banner(dut, project_name: str) -> None:
+    line = (await _uart_recv_line(dut, max_bytes=160)).decode("ascii", errors="replace")
+    assert line.startswith(f"RBXBOOT project={project_name} git="), f"unexpected boot banner: {line!r}"
+    assert " dirty=" in line and " built=" in line and line.endswith("\r\n"), f"malformed boot banner: {line!r}"
 
 
 @cocotb.test()

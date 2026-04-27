@@ -1,8 +1,9 @@
 mod build_info;
 use shared_components::{
+    boot_banner::au_usb_uart_banner_then_loopback,
     clocking::clk_wiz_400,
     sharp::{banked_rom_byte, count_on_event, gate_byte8},
-    serial::{ft_aux_activity, usb_loopback},
+    serial::ft_aux_activity,
 };
 
 #[no_mangle(all)]
@@ -52,7 +53,13 @@ entity main(
     let aux = ft_aux || z80_wait || z80_m1 || z80_ioreset || z80_int1;
 
     set data = &out_byte;
-    let _ = inst usb_loopback(usb_rx, usb_tx);
+    inst au_usb_uart_banner_then_loopback::<8, 103>(
+        clk,
+        rst,
+        usb_rx,
+        build_info::boot_banner_text(),
+        usb_tx,
+    );
     set ft_rd = &!ft_rxf;
     set ft_wr = &false;
     set ft_oe = &false;

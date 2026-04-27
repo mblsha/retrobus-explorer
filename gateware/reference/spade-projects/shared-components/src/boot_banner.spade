@@ -1,4 +1,7 @@
-use super::message_stream::{TxReq8, tx_req_none};
+use super::{
+    config::{au_usb_uart_rx, au_usb_uart_tx8_tap},
+    message_stream::{TxReq8, tx_req_none},
+};
 
 pub struct BootBannerState<#uint IDX_W> {
     active: bool,
@@ -38,4 +41,56 @@ pub fn boot_banner_step<#uint IDX_W, #uint N>(
             tx_req: TxReq8$(valid: true, byte: banner[trunc(state.idx)]),
         )
     }
+}
+
+#[inline]
+pub entity boot_banner_core<#uint IDX_W, #uint N>(
+    clk: clock,
+    rst: bool,
+    banner: [uint<8>; N],
+    block_tx: bool,
+) -> BootBannerOut<IDX_W> {
+    reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = {
+        boot_banner_step(state, banner, block_tx).state
+    };
+
+    boot_banner_step(state, banner, block_tx)
+}
+
+#[inline]
+pub entity au_usb_uart_banner_then_loopback<#uint IDX_W, #uint N>(
+    clk: clock,
+    rst: bool,
+    usb_rx: bool,
+    banner: [uint<8>; N],
+    usb_tx: inv &bool,
+) {
+    let (tx_line, tx_line_w): (&bool, inv &bool) = port;
+    let (tx_busy, tx_busy_w): (&bool, inv &bool) = port;
+    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
+    let banner_out = inst boot_banner_core::<IDX_W, N>(
+        clk,
+        rst,
+        banner,
+        *tx_busy,
+    );
+    let banner_active = banner_out.tx_req.valid;
+    let tx_data = if banner_active {
+        banner_out.tx_req.byte
+    } else {
+        rx.byte
+    };
+    let tx_valid = banner_active || rx.valid;
+
+    inst au_usb_uart_tx8_tap(
+        clk,
+        rst,
+        false,
+        tx_data,
+        tx_valid,
+        tx_line_w,
+        tx_busy_w,
+    );
+
+    set usb_tx = &*tx_line;
 }

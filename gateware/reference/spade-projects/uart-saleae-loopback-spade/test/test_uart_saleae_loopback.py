@@ -47,6 +47,9 @@ async def reset_and_capture_ready(dut):
     await tick(dut.clk, 8)
 
     dut.rst_n.value = 1
+    boot = await recv_uart_line(dut)
+    assert boot.startswith("RBXBOOT project=uart-saleae-loopback-spade git="), f"unexpected boot banner: {boot!r}"
+    assert " dirty=" in boot and " built=" in boot and boot.endswith("\r\n"), f"malformed boot banner: {boot!r}"
     ready = await recv_rbx_line_matching(dut, "READY", attempts=24)
     assert ready == "RBX READY M=C F=0\r\n", f"unexpected boot banner: {ready!r}"
 
