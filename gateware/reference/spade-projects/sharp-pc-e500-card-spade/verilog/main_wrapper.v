@@ -31,16 +31,36 @@ module main (
 `ifdef COCOTB_SIM
     ,
     input wire [7:0] data_host,
-    input wire data_host_drive
+    input wire data_host_drive,
+    output wire data_bus_conflict,
+    output wire ft_bus_conflict,
+    output wire saleae_3,
+    output wire saleae_4,
+    output wire saleae_5,
+    output wire saleae_6,
+    output wire saleae_7
 `endif
 );
-    wire [15:0] ft_data_in = ft_data;
-    wire [1:0] ft_be_in = ft_be;
     wire [15:0] ft_data_drive;
     wire [1:0] ft_be_drive;
-    wire [7:0] data_in = data;
     wire [7:0] data_drive;
     wire data_oe;
+`ifdef COCOTB_SIM
+    wire [15:0] ft_data_in = ft_host_drive ? ft_data_host : 16'h0000;
+    wire [1:0] ft_be_in = ft_host_drive ? ft_be_host : 2'b00;
+    wire [7:0] data_in = data_host_drive ? data_host : 8'h00;
+    assign data_bus_conflict = data_host_drive && data_oe;
+    assign ft_bus_conflict = ft_host_drive && ft_oe;
+    assign saleae_3 = saleae[3];
+    assign saleae_4 = saleae[4];
+    assign saleae_5 = saleae[5];
+    assign saleae_6 = saleae[6];
+    assign saleae_7 = saleae[7];
+`else
+    wire [15:0] ft_data_in = ft_data;
+    wire [1:0] ft_be_in = ft_be;
+    wire [7:0] data_in = data;
+`endif
 
 `ifdef COCOTB_SIM
     assign ft_data = ft_oe ? ft_data_drive : (ft_host_drive ? ft_data_host : 16'hzzzz);
