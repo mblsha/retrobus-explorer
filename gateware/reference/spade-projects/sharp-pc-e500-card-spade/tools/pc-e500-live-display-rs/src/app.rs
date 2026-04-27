@@ -55,6 +55,7 @@ pub struct LiveDisplayApp {
     snapshot: BackendSnapshot,
     texture: Option<TextureHandle>,
     export_state: Arc<Mutex<UiExportState>>,
+    lcd_scale: f32,
 }
 
 impl LiveDisplayApp {
@@ -68,6 +69,7 @@ impl LiveDisplayApp {
             snapshot: BackendSnapshot::default(),
             texture: None,
             export_state,
+            lcd_scale: 2.0,
         }
     }
 
@@ -232,7 +234,11 @@ impl eframe::App for LiveDisplayApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.columns(2, |columns| {
-                    draw_lcd_panel(&mut columns[0], self.texture.as_ref());
+                    draw_lcd_panel(
+                        &mut columns[0],
+                        self.texture.as_ref(),
+                        self.lcd_scale,
+                    );
                     draw_transport_panel(&mut columns[1], &self.snapshot);
                 });
 
@@ -245,13 +251,19 @@ impl eframe::App for LiveDisplayApp {
     }
 }
 
-fn draw_lcd_panel(ui: &mut egui::Ui, texture: Option<&TextureHandle>) {
+fn draw_lcd_panel(
+    ui: &mut egui::Ui,
+    texture: Option<&TextureHandle>,
+    lcd_scale: f32,
+) {
     framed_panel(ui, "LCD View", |ui| {
         ui.label("Local decoded 240x32 framebuffer");
         ui.add_space(8.0);
 
-        let scale = 2.0;
-        let size = egui::vec2(DISPLAY_WIDTH as f32 * scale, DISPLAY_HEIGHT as f32 * scale);
+        let size = egui::vec2(
+            DISPLAY_WIDTH as f32 * lcd_scale * 0.5,
+            DISPLAY_HEIGHT as f32 * lcd_scale,
+        );
         let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
         ui.painter()
             .rect_filled(rect, CornerRadius::same(8), Color32::from_gray(12));
@@ -268,6 +280,7 @@ fn draw_lcd_panel(ui: &mut egui::Ui, texture: Option<&TextureHandle>) {
         }
 
         ui.add_space(8.0);
+        ui.label("Pixel aspect ratio: 0.50x horizontal, 2x vertical nearest-neighbor doubling");
         ui.label(
             "Requires calculator-side FT stream source selection for UART-mirrored sampled words.",
         );
