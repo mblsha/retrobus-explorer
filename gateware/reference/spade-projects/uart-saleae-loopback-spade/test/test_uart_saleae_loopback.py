@@ -266,8 +266,8 @@ async def boot_banner_and_command_parser_paths(dut):
     await send_cmd_expect_line(dut, "!F9", "ERR FREQ", "RBX ERR FREQ\r\n")
     await send_cmd_expect_line(dut, "!e", "OK", "RBX OK M=E F=0\r\n")
     await send_cmd_expect_line(dut, "!S", "STATUS", "RBX STATUS M=E F=0\r\n")
-    await send_cmd_expect_line(dut, "!f2", "OK", "RBX OK M=C F=2\r\n")
-    await send_cmd_expect_line(dut, "!S", "STATUS", "RBX STATUS M=C F=2\r\n")
+    await send_cmd_expect_line(dut, "!f2", "OK", "RBX OK M=E F=2\r\n")
+    await send_cmd_expect_line(dut, "!S", "STATUS", "RBX STATUS M=E F=2\r\n")
     await send_cmd_expect_line(dut, "!C", "OK", "RBX OK M=C F=2\r\n")
 
 
