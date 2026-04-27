@@ -82,7 +82,7 @@ pub(lib) struct OrganizerMonitorLines {
     misc: bool,
 }
 
-pub(lib) fn stable_threshold() -> SampleCount {
+pub(lib) fn default_stable_threshold() -> SampleCount {
     5
 }
 
@@ -205,11 +205,13 @@ impl OrganizerMonitorState {
         addr_sync: OrganizerAddr,
         data_sync: OrganizerData,
         misc_sync: MiscWord,
+        addr_stable_threshold: SampleCount,
+        data_stable_threshold: SampleCount,
         stream_capture_enable: bool,
     ) -> OrganizerMonitorOut {
-        let addr_step = stable_sample_step(self.addr, addr_sync, stable_threshold());
-        let data_step = stable_sample_step(self.data, data_sync, stable_threshold());
-        let misc_step = stable_sample_step(self.misc, misc_sync, stable_threshold());
+        let addr_step = stable_sample_step(self.addr, addr_sync, addr_stable_threshold);
+        let data_step = stable_sample_step(self.data, data_sync, data_stable_threshold);
+        let misc_step = stable_sample_step(self.misc, misc_sync, default_stable_threshold());
         let samples = live_samples(
             addr_sync,
             data_sync,

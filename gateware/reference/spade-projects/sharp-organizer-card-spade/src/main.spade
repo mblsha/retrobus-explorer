@@ -18,8 +18,19 @@ use shared_components::{
     trace_events::pack_trace_event_word,
 };
 use self::board::organizer_board_outputs;
-use self::cmd::{OrganizerUiEffect, OrganizerUiInputs, eval_organizer_ui};
-use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, OrganizerMonitorTransportOut, reset_monitor_state};
+use self::cmd::{
+    OrganizerCmdState,
+    OrganizerUiEffect,
+    OrganizerUiInputs,
+    eval_organizer_ui,
+    init_organizer_cmd_state,
+    pin_source_mskrom,
+    pin_source_oe,
+    pin_source_rw,
+    pin_source_sram1,
+    saleae_mode_standard,
+};
+use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, OrganizerMonitorTransportOut, default_stable_threshold, reset_monitor_state};
 use self::msg::{
     OrganizerMsgStreamOut,
     OrganizerMsgStreamState,
@@ -31,6 +42,9 @@ use self::protocol::{
     OrganizerAddr,
     OrganizerData,
     OrganizerTraceWord,
+    SaleaeModeCode,
+    SaleaePinSource,
+    SampleCount,
     SaleaeState,
     SyncSubMode,
     misc_word,
@@ -48,11 +62,19 @@ struct SaleaeRegs {
     state: SaleaeState,
     counter: uint<8>,
     sync_sub_mode: SyncSubMode,
+    mode: SaleaeModeCode,
+    pin0: SaleaePinSource,
+    pin1: SaleaePinSource,
+    pin2: SaleaePinSource,
+    pin3: SaleaePinSource,
 }
 
 struct MainState {
     ft: FtRegs,
     saleae: SaleaeRegs,
+    cmd_state: OrganizerCmdState,
+    addr_stable_delay: SampleCount,
+    data_stable_delay: SampleCount,
     monitor: OrganizerMonitorState,
     msg_stream: OrganizerMsgStreamState,
 }
@@ -94,7 +116,15 @@ fn reset_main_state() -> MainState {
             state: SaleaeState::SyncSignals(),
             counter: 0,
             sync_sub_mode: SyncSubMode::StandardSignals(),
+            mode: saleae_mode_standard(),
+            pin0: pin_source_rw(),
+            pin1: pin_source_oe(),
+            pin2: pin_source_mskrom(),
+            pin3: pin_source_sram1(),
         ),
+        cmd_state: init_organizer_cmd_state(),
+        addr_stable_delay: default_stable_threshold(),
+        data_stable_delay: default_stable_threshold(),
         monitor: reset_monitor_state(),
         msg_stream: init_organizer_msg_stream(),
     )
@@ -106,6 +136,11 @@ fn current_board_state(state: MainState) -> BoardRenderState {
         saleae_state: state.saleae.state,
         saleae_counter: state.saleae.counter,
         sync_sub_mode: state.saleae.sync_sub_mode,
+        saleae_mode: state.saleae.mode,
+        pin0: state.saleae.pin0,
+        pin1: state.saleae.pin1,
+        pin2: state.saleae.pin2,
+        pin3: state.saleae.pin3,
     )
 }
 
@@ -120,6 +155,14 @@ impl MainState {
                 ft_ui_dout_be: inputs.ft_ui_dout_be,
                 saleae_state: self.saleae.state,
                 sync_sub_mode: self.saleae.sync_sub_mode,
+                saleae_mode: self.saleae.mode,
+                cmd_state: self.cmd_state,
+                addr_stable_delay: self.addr_stable_delay,
+                data_stable_delay: self.data_stable_delay,
+                pin0: self.saleae.pin0,
+                pin1: self.saleae.pin1,
+                pin2: self.saleae.pin2,
+                pin3: self.saleae.pin3,
                 ft_enabled: self.ft.enabled,
             ),
         );
@@ -127,6 +170,8 @@ impl MainState {
             inputs.addr_sync,
             inputs.data_sync,
             inputs.misc_sync,
+            self.addr_stable_delay,
+            self.data_stable_delay,
             self.ft.enabled,
         );
         let monitor_transport: OrganizerMonitorTransportOut = monitor.next_state.drain_stream(!inputs.stream_fifo_full);
@@ -166,7 +211,15 @@ impl MainState {
                         self.saleae.counter
                     },
                     sync_sub_mode: ui.next_sync_sub_mode,
+                    mode: ui.next_saleae_mode,
+                    pin0: ui.next_pin0,
+                    pin1: ui.next_pin1,
+                    pin2: ui.next_pin2,
+                    pin3: ui.next_pin3,
                 ),
+                cmd_state: ui.next_cmd_state,
+                addr_stable_delay: ui.next_addr_stable_delay,
+                data_stable_delay: ui.next_data_stable_delay,
                 monitor: monitor_transport.next_state,
                 msg_stream: msg_stream.state,
             ),
@@ -241,6 +294,10 @@ entity main_core(
 
     let addr_sync: OrganizerAddr = addr_sync_bits.to_uint();
     let data_sync: OrganizerData = data_sync_bits.to_uint();
+    reg(clk) addr_sync_last: OrganizerAddr reset(rst: 0) = addr_sync;
+    reg(clk) data_sync_last: OrganizerData reset(rst: 0) = data_sync;
+    let addr_changed = addr_sync != addr_sync_last;
+    let data_changed = data_sync != data_sync_last;
     let misc_sync = misc_word(
         conn_rw_sync,
         conn_oe_sync,
@@ -345,6 +402,11 @@ entity main_core(
         conn_sram1_sync,
         conn_sram2_sync,
         conn_eprom_sync,
+        conn_stnby_sync,
+        conn_vbatt_sync,
+        conn_vpp_sync,
+        addr_changed,
+        data_changed,
         led,
         saleae,
     );

@@ -20,6 +20,9 @@ pub(lib) enum SyncSubMode {
     MemoryBanks,
 }
 
+pub(lib) type SaleaePinSource = uint<4>;
+pub(lib) type SaleaeModeCode = uint<2>;
+
 pub(lib) enum OrganizerTraceKind {
     Addr,
     Data,

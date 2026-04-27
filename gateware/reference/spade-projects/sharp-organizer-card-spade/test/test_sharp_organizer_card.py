@@ -288,6 +288,91 @@ async def counter_mode_increments_every_cycle(dut):
 
 
 @cocotb.test()
+async def settling_mode_marks_bus_changes_and_stable_samples(dut):
+    await _init(dut)
+
+    dut.conn_rw.value = 1
+    dut.conn_oe.value = 0
+    dut.conn_mskrom.value = 1
+    dut.conn_sram1.value = 0
+    await tick(dut.clk, 4)
+
+    await _uart_send_byte(dut, ord("t"))
+    await tick(dut.clk, 4)
+
+    assert int(dut.saleae.value) & 0x0F == 0x05
+
+    dut.addr.value = 0x12345
+    dut.data.value = 0xA5
+
+    seen_addr_change = False
+    seen_data_change = False
+    seen_addr_sample = False
+    seen_data_sample = False
+    for _ in range(48):
+        value = int(dut.saleae.value)
+        seen_addr_sample |= bool(_saleae_bit(value, 4))
+        seen_data_sample |= bool(_saleae_bit(value, 5))
+        seen_addr_change |= bool(_saleae_bit(value, 6))
+        seen_data_change |= bool(_saleae_bit(value, 7))
+        await tick(dut.clk, 1)
+
+    assert seen_addr_change
+    assert seen_data_change
+    assert seen_addr_sample
+    assert seen_data_sample
+    assert _saleae_bit(int(dut.saleae.value), 6) == 0
+    assert _saleae_bit(int(dut.saleae.value), 7) == 0
+
+
+@cocotb.test()
+async def settling_delay_command_controls_addr_sample_pulse(dut):
+    await _init(dut)
+
+    await _uart_send_byte(dut, ord("t"))
+    await _uart_send_byte(dut, ord("A"))
+    await _uart_send_byte(dut, ord("F"))
+    await tick(dut.clk, 4)
+
+    dut.addr.value = 0x22222
+
+    seen_addr_change = False
+    seen_early_addr_sample = False
+    for _ in range(12):
+        value = int(dut.saleae.value)
+        seen_addr_change |= bool(_saleae_bit(value, 6))
+        seen_early_addr_sample |= bool(_saleae_bit(value, 4))
+        await tick(dut.clk, 1)
+
+    assert seen_addr_change
+    assert not seen_early_addr_sample
+
+    seen_late_addr_sample = False
+    for _ in range(32):
+        seen_late_addr_sample |= bool(_saleae_bit(int(dut.saleae.value), 4))
+        await tick(dut.clk, 1)
+
+    assert seen_late_addr_sample
+
+
+@cocotb.test()
+async def settling_pin_select_command_routes_unknown_pins(dut):
+    await _init(dut)
+
+    await _uart_send_byte(dut, ord("t"))
+    await _uart_send_byte(dut, ord("0"))
+    await _uart_send_byte(dut, ord("V"))
+
+    dut.conn_vpp.value = 1
+    await tick(dut.clk, 4)
+    assert _saleae_bit(int(dut.saleae.value), 0) == 1
+
+    dut.conn_vpp.value = 0
+    await tick(dut.clk, 4)
+    assert _saleae_bit(int(dut.saleae.value), 0) == 0
+
+
+@cocotb.test()
 async def stable_bus_changes_emit_debounced_uart_monitor_streams(dut):
     await _init(dut)
 

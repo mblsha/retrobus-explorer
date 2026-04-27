@@ -1,10 +1,15 @@
-use super::protocol::{SaleaeState, SyncSubMode};
+use super::protocol::{SaleaeModeCode, SaleaePinSource, SaleaeState, SyncSubMode};
 
 pub(lib) struct BoardRenderState {
     ft_enabled: bool,
     saleae_state: SaleaeState,
     saleae_counter: uint<8>,
     sync_sub_mode: SyncSubMode,
+    saleae_mode: SaleaeModeCode,
+    pin0: SaleaePinSource,
+    pin1: SaleaePinSource,
+    pin2: SaleaePinSource,
+    pin3: SaleaePinSource,
 }
 
 pub(lib) struct BoardRenderInputs {
@@ -23,6 +28,13 @@ pub(lib) struct BoardRenderInputs {
     conn_sram1_sync: bool,
     conn_sram2_sync: bool,
     conn_eprom_sync: bool,
+    conn_stnby_sync: bool,
+    conn_vbatt_sync: bool,
+    conn_vpp_sync: bool,
+    addr_changed: bool,
+    data_changed: bool,
+    addr_sample: bool,
+    data_sample: bool,
     misc_line: bool,
     data_line: bool,
     addr_line: bool,
@@ -59,6 +71,53 @@ fn saleae_memory_banks(inputs: BoardRenderInputs) -> [bool; 8] {
     ]
 }
 
+fn selected_pin(source: SaleaePinSource, inputs: BoardRenderInputs) -> bool {
+    if source == 1 {
+        true
+    } else if source == 2 {
+        inputs.conn_rw_sync
+    } else if source == 3 {
+        inputs.conn_oe_sync
+    } else if source == 4 {
+        inputs.conn_ci_sync
+    } else if source == 5 {
+        inputs.conn_e2_sync
+    } else if source == 6 {
+        inputs.conn_mskrom_sync
+    } else if source == 7 {
+        inputs.conn_sram1_sync
+    } else if source == 8 {
+        inputs.conn_sram2_sync
+    } else if source == 9 {
+        inputs.conn_eprom_sync
+    } else if source == 10 {
+        inputs.conn_stnby_sync
+    } else if source == 11 {
+        inputs.conn_vbatt_sync
+    } else if source == 12 {
+        inputs.conn_vpp_sync
+    } else if source == 14 {
+        inputs.addr_changed
+    } else if source == 15 {
+        inputs.data_changed
+    } else {
+        false
+    }
+}
+
+fn saleae_settling(inputs: BoardRenderInputs) -> [bool; 8] {
+    [
+        selected_pin(inputs.state.pin0, inputs),
+        selected_pin(inputs.state.pin1, inputs),
+        selected_pin(inputs.state.pin2, inputs),
+        selected_pin(inputs.state.pin3, inputs),
+        inputs.addr_sample,
+        inputs.data_sample,
+        inputs.addr_changed,
+        inputs.data_changed,
+    ]
+}
+
 pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
     BoardOutputs$(
         led: [
@@ -71,12 +130,14 @@ pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
             !inputs.ft_ui_dout_empty,
             inputs.ft_ui_din_full,
         ],
-        saleae: match inputs.state.saleae_state {
-            SaleaeState::Counter => inputs.state.saleae_counter.to_bits(),
-            SaleaeState::SyncSignals => match inputs.state.sync_sub_mode {
-                SyncSubMode::StandardSignals => saleae_standard_signals(inputs),
-                SyncSubMode::MemoryBanks => saleae_memory_banks(inputs),
-            },
+        saleae: if let SaleaeState::Counter = inputs.state.saleae_state {
+            inputs.state.saleae_counter.to_bits()
+        } else if inputs.state.saleae_mode == 2 {
+            saleae_settling(inputs)
+        } else if inputs.state.saleae_mode == 1 {
+            saleae_memory_banks(inputs)
+        } else {
+            saleae_standard_signals(inputs)
         },
     )
 }
