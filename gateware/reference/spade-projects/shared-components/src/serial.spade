@@ -156,7 +156,7 @@ pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     let ctr_last = clk_per_bit - 1;
 
     reg(clk) regs: UartTxRegs<DATA_WIDTH>
-        reset(rst: UartTxRegs$(state: UartTxState::Idle(), ctr: 0, bit_ctr: 0, saved_data: 0, tx_reg: false, block_flag: false))
+        reset(rst: UartTxRegs$(state: UartTxState::Idle(), ctr: 0, bit_ctr: 0, saved_data: 0, tx_reg: true, block_flag: false))
         = {
             let state = regs.state;
             let ctr = regs.ctr;

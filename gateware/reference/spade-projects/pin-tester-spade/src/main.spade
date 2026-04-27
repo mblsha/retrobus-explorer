@@ -1,5 +1,5 @@
 mod build_info;
-use shared_components::{primitives::counter, serial::usb_loopback};
+use shared_components::{boot_banner::au_usb_uart_banner_then_loopback, primitives::counter};
 
 #[no_mangle(all)]
 entity main(
@@ -21,5 +21,11 @@ entity main(
     set led = &led_bits;
     set saleae = &led_bits;
     set ffc_data = &ffc_bits;
-    let _ = inst usb_loopback(usb_rx, usb_tx);
+    inst au_usb_uart_banner_then_loopback::<8, 86>(
+        clk,
+        rst,
+        usb_rx,
+        build_info::boot_banner_text(),
+        usb_tx,
+    );
 }

@@ -1,4 +1,11 @@
-use shared_components::{ascii::DigitDecode, primitives::reset_conditioner, serial::{uart_rx, uart_tx}};
+mod build_info;
+
+use shared_components::{
+    ascii::DigitDecode,
+    boot_banner::boot_banner_core,
+    primitives::reset_conditioner,
+    serial::{uart_rx, uart_tx},
+};
 
 fn default_digit_decode() -> DigitDecode {
     DigitDecode$(valid: false, value: 0)
@@ -52,8 +59,30 @@ entity main(
     let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
     let rx_digit = inst decode_rx_digit(clk, rx_out.valid, rx_out.parity_error, rx_out.byte)
         .unwrap_or(default_digit_decode());
-    let tx_out = inst uart_tx::<100_000_000, 1_000_000, 8>(clk, rst, false, rx_out.byte, rx_digit.valid);
-    let accepted_digit = rx_digit.valid && !tx_out.busy;
+    let (tx_line, tx_line_w): (&bool, inv &bool) = port;
+    let (tx_busy, tx_busy_w): (&bool, inv &bool) = port;
+    let boot_banner_out = inst boot_banner_core::<8, 84>(
+        clk,
+        rst,
+        build_info::boot_banner_text(),
+        *tx_busy,
+    );
+    let tx_data = if boot_banner_out.tx_req.valid {
+        boot_banner_out.tx_req.byte
+    } else {
+        rx_out.byte
+    };
+    let tx_valid = boot_banner_out.tx_req.valid || rx_digit.valid;
+    let tx_out = inst uart_tx::<100_000_000, 1_000_000, 8>(
+        clk,
+        rst,
+        false,
+        tx_data,
+        tx_valid,
+    );
+    set tx_line_w = &tx_out.tx;
+    set tx_busy_w = &tx_out.busy;
+    let accepted_digit = rx_digit.valid && !*tx_busy && !boot_banner_out.tx_req.valid;
 
     reg(clk) slow_factor: uint<4> reset(rst: 0) = {
         if accepted_digit {
@@ -84,5 +113,5 @@ entity main(
     let bits = counter.to_bits();
     set led = &bits;
     set saleae = &bits;
-    set usb_tx = &tx_out.tx;
+    set usb_tx = &*tx_line;
 }
