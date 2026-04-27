@@ -70,7 +70,7 @@ class HDGC60PinFfc(Component):
         rows.append(Row(left=PinGroup([self.p[60]]), right=PinGroup([self.p[61]])))
         self.symbol = BoxSymbol(rows=rows, config=BoxConfig(group_spacing=1))
 
-        mapping = {self.p[i]: self.landpattern.signal_pads[i] for i in range(60)}
+        mapping: dict[Port, Pad] = {self.p[i]: self.landpattern.signal_pads[i] for i in range(60)}
         mapping[self.p[60]] = self.landpattern.mount_pad_left
         mapping[self.p[61]] = self.landpattern.mount_pad_right
         self.pad_mapping = PadMapping(mapping)
