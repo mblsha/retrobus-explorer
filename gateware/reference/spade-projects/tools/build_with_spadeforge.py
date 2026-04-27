@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
         description="Build a Spade project through spadeforge-cli"
     )
     parser.add_argument("--project", required=True, type=Path, help="Spade project directory")
-    parser.add_argument("--token", help="API token (or use SPADEFORGE_TOKEN env var)")
+    parser.add_argument("--token", help="Optional API token (or use SPADEFORGE_TOKEN env var)")
     parser.add_argument("--cli", help="spadeforge-cli path/command")
     parser.add_argument("--server", help="Optional server URL; omit for zeroconf discovery")
     parser.add_argument("--discover-timeout", default="45s", help="mDNS discovery timeout")
@@ -117,9 +117,6 @@ def main() -> int:
     top = tooling_top(project, args.top)
     part = resolve_target_part(args.part, args.board)
     token = args.token or os.environ.get("SPADEFORGE_TOKEN")
-    if not token:
-        print("error: missing token; pass --token or set SPADEFORGE_TOKEN", file=sys.stderr)
-        return 2
 
     output_dir = (
         Path(args.output_dir).resolve()
@@ -149,8 +146,6 @@ def main() -> int:
         resolve_cli(args.cli),
         "--project",
         project_name(project),
-        "--token",
-        token,
         "--top",
         top,
         "--part",
@@ -162,6 +157,8 @@ def main() -> int:
         "--out-zip",
         str(out_zip),
     ]
+    if token:
+        cmd.extend(["--token", token])
     for src in sources:
         cmd.extend(["--source", str(src)])
     if not args.no_stream_events:

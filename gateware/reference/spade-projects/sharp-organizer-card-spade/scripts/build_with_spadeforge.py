@@ -14,7 +14,15 @@ def main() -> int:
     here = Path(__file__).resolve().parent.parent
     tool = here.parent / "tools" / "project.py"
     subprocess.run(
-        [sys.executable, str(tool), "build-with-spadeforge", "--project", str(here), *sys.argv[1:]],
+        [
+            sys.executable,
+            str(tool),
+            "build-with-spadeforge",
+            "--project",
+            str(here),
+            "--no-regenerate-xdc",
+            *sys.argv[1:],
+        ],
         check=True,
     )
     return 0

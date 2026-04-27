@@ -1,16 +1,11 @@
-use shared_components::serial::{FtBe, FtData};
+use shared_components::{ascii, serial::{FtBe, FtData}};
 
 use super::{
     msg::{OrganizerMsg, organizer_msg_combine},
-    protocol::{SaleaeState, SyncSubMode},
+    protocol::{SaleaeModeCode, SaleaePinSource, SampleCount, SaleaeState, SyncSubMode},
 };
 
-pub(lib) enum OrganizerCmd {
-    None,
-    Counter,
-    SyncStandard,
-    SyncMemory,
-}
+pub(lib) type OrganizerCmdState = uint<3>;
 
 enum OrganizerFtCmd {
     None,
@@ -26,13 +21,15 @@ pub(lib) struct OrganizerUiInputs {
     ft_ui_dout_be: FtBe,
     saleae_state: SaleaeState,
     sync_sub_mode: SyncSubMode,
+    saleae_mode: SaleaeModeCode,
+    cmd_state: OrganizerCmdState,
+    addr_stable_delay: SampleCount,
+    data_stable_delay: SampleCount,
+    pin0: SaleaePinSource,
+    pin1: SaleaePinSource,
+    pin2: SaleaePinSource,
+    pin3: SaleaePinSource,
     ft_enabled: bool,
-}
-
-pub(lib) struct OrganizerCmdEffect {
-    next_saleae_state: SaleaeState,
-    next_sync_sub_mode: SyncSubMode,
-    msg: OrganizerMsg,
 }
 
 pub(lib) struct OrganizerFtCmdEffect {
@@ -43,23 +40,34 @@ pub(lib) struct OrganizerFtCmdEffect {
 pub(lib) struct OrganizerUiEffect {
     next_saleae_state: SaleaeState,
     next_sync_sub_mode: SyncSubMode,
+    next_saleae_mode: SaleaeModeCode,
+    next_cmd_state: OrganizerCmdState,
+    next_addr_stable_delay: SampleCount,
+    next_data_stable_delay: SampleCount,
+    next_pin0: SaleaePinSource,
+    next_pin1: SaleaePinSource,
+    next_pin2: SaleaePinSource,
+    next_pin3: SaleaePinSource,
     next_ft_enabled: bool,
     msg: OrganizerMsg,
 }
 
-fn organizer_cmd_from_byte(rx_valid: bool, byte: uint<8>) -> OrganizerCmd {
-    if !rx_valid {
-        OrganizerCmd::None()
-    } else if byte == b'c' {
-        OrganizerCmd::Counter()
-    } else if byte == b's' {
-        OrganizerCmd::SyncStandard()
-    } else if byte == b'S' {
-        OrganizerCmd::SyncMemory()
-    } else {
-        OrganizerCmd::None()
-    }
-}
+pub(lib) fn init_organizer_cmd_state() -> OrganizerCmdState { 0 }
+fn cmd_wait_addr_delay() -> OrganizerCmdState { 1 }
+fn cmd_wait_data_delay() -> OrganizerCmdState { 2 }
+fn cmd_wait_pin0() -> OrganizerCmdState { 3 }
+fn cmd_wait_pin1() -> OrganizerCmdState { 4 }
+fn cmd_wait_pin2() -> OrganizerCmdState { 5 }
+fn cmd_wait_pin3() -> OrganizerCmdState { 6 }
+
+pub(lib) fn saleae_mode_standard() -> SaleaeModeCode { 0 }
+pub(lib) fn saleae_mode_memory() -> SaleaeModeCode { 1 }
+pub(lib) fn saleae_mode_settling() -> SaleaeModeCode { 2 }
+
+pub(lib) fn pin_source_rw() -> SaleaePinSource { 2 }
+pub(lib) fn pin_source_oe() -> SaleaePinSource { 3 }
+pub(lib) fn pin_source_mskrom() -> SaleaePinSource { 6 }
+pub(lib) fn pin_source_sram1() -> SaleaePinSource { 7 }
 
 fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData, be: FtBe) -> OrganizerFtCmd {
     let b0: uint<8> = trunc(word);
@@ -72,33 +80,6 @@ fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData, be: FtBe) ->
         OrganizerFtCmd::Disable()
     } else {
         OrganizerFtCmd::None()
-    }
-}
-
-impl OrganizerCmd {
-    fn effect(self, saleae_state: SaleaeState, sync_sub_mode: SyncSubMode) -> OrganizerCmdEffect {
-        match self {
-            Self::None => OrganizerCmdEffect$(
-                next_saleae_state: saleae_state,
-                next_sync_sub_mode: sync_sub_mode,
-                msg: OrganizerMsg::None(),
-            ),
-            Self::Counter => OrganizerCmdEffect$(
-                next_saleae_state: SaleaeState::Counter(),
-                next_sync_sub_mode: sync_sub_mode,
-                msg: OrganizerMsg::CounterSelected(),
-            ),
-            Self::SyncStandard => OrganizerCmdEffect$(
-                next_saleae_state: SaleaeState::SyncSignals(),
-                next_sync_sub_mode: SyncSubMode::StandardSignals(),
-                msg: OrganizerMsg::SyncStandardSelected(),
-            ),
-            Self::SyncMemory => OrganizerCmdEffect$(
-                next_saleae_state: SaleaeState::SyncSignals(),
-                next_sync_sub_mode: SyncSubMode::MemoryBanks(),
-                msg: OrganizerMsg::SyncMemorySelected(),
-            ),
-        }
     }
 }
 
@@ -121,20 +102,133 @@ impl OrganizerFtCmd {
     }
 }
 
-fn merge_ui_effects(cmd: OrganizerCmdEffect, ft: OrganizerFtCmdEffect) -> OrganizerUiEffect {
-    OrganizerUiEffect$(
-        next_saleae_state: cmd.next_saleae_state,
-        next_sync_sub_mode: cmd.next_sync_sub_mode,
-        next_ft_enabled: ft.next_ft_enabled,
-        msg: organizer_msg_combine(cmd.msg, ft.msg),
-    )
+fn pin_source_valid(byte: uint<8>) -> bool {
+    let upper = byte.to_upper();
+    upper == b'L' || upper == b'H' || upper == b'R' || upper == b'O' ||
+        upper == b'C' || upper == b'E' || upper == b'M' || byte == b'1' ||
+        byte == b'2' || upper == b'P' || upper == b'Y' || upper == b'B' ||
+        upper == b'V' || upper == b'A' || upper == b'D'
+}
+
+fn pin_source_from_byte(byte: uint<8>) -> SaleaePinSource {
+    let upper = byte.to_upper();
+    if upper == b'H' {
+        1
+    } else if upper == b'R' {
+        2
+    } else if upper == b'O' {
+        3
+    } else if upper == b'C' {
+        4
+    } else if upper == b'E' {
+        5
+    } else if upper == b'M' {
+        6
+    } else if byte == b'1' {
+        7
+    } else if byte == b'2' {
+        8
+    } else if upper == b'P' {
+        9
+    } else if upper == b'Y' {
+        10
+    } else if upper == b'B' {
+        11
+    } else if upper == b'V' {
+        12
+    } else if upper == b'A' {
+        14
+    } else if upper == b'D' {
+        15
+    } else {
+        0
+    }
 }
 
 pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
-    let usb_effect = organizer_cmd_from_byte(inputs.rx_valid, inputs.rx_byte)
-        .effect(inputs.saleae_state, inputs.sync_sub_mode);
     let ft_effect = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout, inputs.ft_ui_dout_be)
         .effect(inputs.ft_enabled);
+    let decoded = inputs.rx_byte.decode_hex();
+    let source = pin_source_from_byte(inputs.rx_byte);
+    let source_valid = pin_source_valid(inputs.rx_byte);
+    let waiting_pin = inputs.cmd_state == cmd_wait_pin0() ||
+        inputs.cmd_state == cmd_wait_pin1() ||
+        inputs.cmd_state == cmd_wait_pin2() ||
+        inputs.cmd_state == cmd_wait_pin3();
 
-    merge_ui_effects(usb_effect, ft_effect)
+    let next_cmd_state = if !inputs.rx_valid {
+        inputs.cmd_state
+    } else if inputs.cmd_state == cmd_wait_addr_delay() ||
+        inputs.cmd_state == cmd_wait_data_delay() ||
+        waiting_pin {
+        init_organizer_cmd_state()
+    } else if inputs.rx_byte == b'a' || inputs.rx_byte == b'A' {
+        cmd_wait_addr_delay()
+    } else if inputs.rx_byte == b'd' || inputs.rx_byte == b'D' {
+        cmd_wait_data_delay()
+    } else if inputs.rx_byte == b'0' {
+        cmd_wait_pin0()
+    } else if inputs.rx_byte == b'1' {
+        cmd_wait_pin1()
+    } else if inputs.rx_byte == b'2' {
+        cmd_wait_pin2()
+    } else if inputs.rx_byte == b'3' {
+        cmd_wait_pin3()
+    } else {
+        init_organizer_cmd_state()
+    };
+
+    let next_saleae_state = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'c' {
+        SaleaeState::Counter()
+    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() &&
+        (inputs.rx_byte == b's' || inputs.rx_byte == b'S' || inputs.rx_byte == b't' || inputs.rx_byte == b'T') {
+        SaleaeState::SyncSignals()
+    } else {
+        inputs.saleae_state
+    };
+    let next_sync_sub_mode = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b's' {
+        SyncSubMode::StandardSignals()
+    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'S' {
+        SyncSubMode::MemoryBanks()
+    } else {
+        inputs.sync_sub_mode
+    };
+    let next_saleae_mode = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b's' {
+        saleae_mode_standard()
+    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'S' {
+        saleae_mode_memory()
+    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && (inputs.rx_byte == b't' || inputs.rx_byte == b'T') {
+        saleae_mode_settling()
+    } else {
+        inputs.saleae_mode
+    };
+
+    let set_addr_delay = inputs.rx_valid && inputs.cmd_state == cmd_wait_addr_delay() && decoded.valid;
+    let set_data_delay = inputs.rx_valid && inputs.cmd_state == cmd_wait_data_delay() && decoded.valid;
+    let set_pin = inputs.rx_valid && waiting_pin && source_valid;
+
+    let usb_msg = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'c' {
+        OrganizerMsg::CounterSelected()
+    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b's' {
+        OrganizerMsg::SyncStandardSelected()
+    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'S' {
+        OrganizerMsg::SyncMemorySelected()
+    } else {
+        OrganizerMsg::None()
+    };
+
+    OrganizerUiEffect$(
+        next_saleae_state: next_saleae_state,
+        next_sync_sub_mode: next_sync_sub_mode,
+        next_saleae_mode: next_saleae_mode,
+        next_cmd_state: next_cmd_state,
+        next_addr_stable_delay: if set_addr_delay { zext(decoded.value) } else { inputs.addr_stable_delay },
+        next_data_stable_delay: if set_data_delay { zext(decoded.value) } else { inputs.data_stable_delay },
+        next_pin0: if set_pin && inputs.cmd_state == cmd_wait_pin0() { source } else { inputs.pin0 },
+        next_pin1: if set_pin && inputs.cmd_state == cmd_wait_pin1() { source } else { inputs.pin1 },
+        next_pin2: if set_pin && inputs.cmd_state == cmd_wait_pin2() { source } else { inputs.pin2 },
+        next_pin3: if set_pin && inputs.cmd_state == cmd_wait_pin3() { source } else { inputs.pin3 },
+        next_ft_enabled: ft_effect.next_ft_enabled,
+        msg: organizer_msg_combine(usb_msg, ft_effect.msg),
+    )
 }
