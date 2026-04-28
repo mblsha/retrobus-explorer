@@ -4,6 +4,7 @@ import cocotb
 from cocotb.triggers import Edge
 from cocotb.triggers import with_timeout
 from cocotb.utils import get_sim_time
+from boot_banner_test import assert_boot_banner
 from cocotb_helpers import start_clock
 from cocotb_helpers import tick
 
@@ -48,8 +49,7 @@ async def reset_and_capture_ready(dut):
 
     dut.rst_n.value = 1
     boot = await recv_uart_line(dut)
-    assert boot.startswith("RBXBOOT project=uart-saleae-loopback-spade git="), f"unexpected boot banner: {boot!r}"
-    assert " dirty=" in boot and " built=" in boot and boot.endswith("\r\n"), f"malformed boot banner: {boot!r}"
+    assert_boot_banner(boot, "uart-saleae-loopback-spade")
     ready = await recv_rbx_line_matching(dut, "READY", attempts=24)
     assert ready == "RBX READY M=C F=0\r\n", f"unexpected boot banner: {ready!r}"
 

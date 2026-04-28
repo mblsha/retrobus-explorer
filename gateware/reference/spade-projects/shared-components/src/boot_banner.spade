@@ -13,6 +13,11 @@ pub struct BootBannerOut<#uint IDX_W> {
     tx_req: TxReq8,
 }
 
+pub struct BootBannerTxGateOut {
+    tx_req: TxReq8,
+    app_tx_busy: bool,
+}
+
 pub fn init_boot_banner<#uint IDX_W>() -> BootBannerState<IDX_W> {
     BootBannerState$(
         active: true,
@@ -55,6 +60,34 @@ pub entity boot_banner_core<#uint IDX_W, #uint N>(
     };
 
     boot_banner_step(state, banner, block_tx)
+}
+
+#[inline]
+pub entity boot_banner_tx_gate<#uint IDX_W, #uint N>(
+    clk: clock,
+    rst: bool,
+    banner: [uint<8>; N],
+    tx_busy: bool,
+) -> BootBannerTxGateOut {
+    let banner_out = inst boot_banner_core::<IDX_W, N>(
+        clk,
+        rst,
+        banner,
+        tx_busy,
+    );
+
+    BootBannerTxGateOut$(
+        tx_req: banner_out.tx_req,
+        app_tx_busy: tx_busy || banner_out.tx_req.valid,
+    )
+}
+
+pub fn boot_banner_then_tx_req(banner_tx_req: TxReq8, app_tx_req: TxReq8) -> TxReq8 {
+    if banner_tx_req.valid {
+        banner_tx_req
+    } else {
+        app_tx_req
+    }
 }
 
 #[inline]

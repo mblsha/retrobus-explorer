@@ -8,7 +8,7 @@ mod render;
 mod transport;
 
 use shared_components::{
-    boot_banner::boot_banner_core,
+    boot_banner::boot_banner_tx_gate,
     clocking::{clk_wiz_400, sampled_bool_clock},
     config::au_usb_uart_rx,
     ft_stream::{FtWordStreamOut, FtWordStreamState, ft_word_stream_step},
@@ -330,7 +330,7 @@ entity main_core(
     let (stream_fifo_dout, stream_fifo_dout_w): (&OrganizerTraceWord, inv &OrganizerTraceWord) = port;
 
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
-    let boot_banner_out = inst boot_banner_core::<8, 96>(
+    let boot_tx = inst boot_banner_tx_gate::<8, 96>(
         clk,
         rst,
         build_info::boot_banner_text(),
@@ -343,7 +343,7 @@ entity main_core(
         misc_sync: misc_sync,
         rx_valid: rx.valid,
         rx_byte: rx.byte,
-        tx_busy: *usb_tx_busy || boot_banner_out.tx_req.valid,
+        tx_busy: boot_tx.app_tx_busy,
         ft_ui_din_full: *ft_ui_din_full,
         ft_ui_dout_empty: *ft_ui_dout_empty,
         ft_ui_dout: *ft_ui_dout,
@@ -361,7 +361,7 @@ entity main_core(
         };
 
     let eval = state.eval(inputs);
-    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, eval.tx_req, tx_req_none());
+    let usb_tx_req = tx_req_arbiter(boot_tx.tx_req, eval.tx_req, tx_req_none());
     inst organizer_transport(
         clk,
         rst,

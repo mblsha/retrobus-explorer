@@ -3,7 +3,7 @@ mod msg;
 mod protocol;
 
 use shared_components::{
-    boot_banner::{BootBannerOut, boot_banner_core},
+    boot_banner::boot_banner_tx_gate,
     clocking::sampled_bool_clock,
     config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
     ft_stream::{FtWordStreamState, ft_word_stream_step},
@@ -1009,7 +1009,7 @@ entity main_core(
 
     let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
 
-    let boot_banner_out = inst boot_banner_core::<8, 94>(
+    let boot_tx = inst boot_banner_tx_gate::<8, 94>(
         clk,
         rst,
         build_info::boot_banner_text(),
@@ -1225,11 +1225,10 @@ entity main_core(
     set sampled_bus_fifo_empty_w = &sampled_bus_fifo.empty;
     set sampled_bus_fifo_dout_w = &sampled_bus_fifo.dout;
 
-    let boot_tx_busy = *usb_tx_busy || boot_banner_out.tx_req.valid;
     let echo_out = inst echo_stream_core(
         clk,
         rst,
-        boot_tx_busy,
+        boot_tx.app_tx_busy,
         parser_front.echo.as_option(),
     );
     let ce6_port_write_valid = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_uart_port();
@@ -1452,7 +1451,7 @@ entity main_core(
     };
     let measure_report_wput = measure_pending.pending_valid && !*measure_fifo_full;
     let measure_report_drop = measure_report_capture && measure_pending.pending_valid && *measure_fifo_full;
-    let measure_block_tx = boot_tx_busy || echo_out.tx_req.valid;
+    let measure_block_tx = boot_tx.app_tx_busy || echo_out.tx_req.valid;
     let measure_eval = inst measure_engine_core(
         clk,
         rst,
@@ -1566,7 +1565,7 @@ entity main_core(
     );
     let usb_tx_low_req = tx_req_arbiter(resp_out.tx_req, port_char_tx_req, port_out.tx_req);
     let usb_tx_mid_req = tx_req_arbiter(measure_eval.tx_req, usb_tx_low_req, tx_req_none());
-    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, echo_out.tx_req, usb_tx_mid_req);
+    let usb_tx_req = tx_req_arbiter(boot_tx.tx_req, echo_out.tx_req, usb_tx_mid_req);
 
     let _addr_uart = inst uart_tx_tap::<100_000_000, 100_000_000, 18>(
         clk,
