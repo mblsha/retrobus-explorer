@@ -1,6 +1,7 @@
 # top = main
 
 import cocotb
+from boot_banner_test import assert_boot_banner
 from cocotb_helpers import start_clock
 from cocotb_helpers import tick
 from cocotb.triggers import FallingEdge
@@ -162,9 +163,7 @@ async def _uart_recv_lines(dut, count: int) -> list[bytes]:
 
 
 async def _expect_boot_banner(dut, project_name: str) -> None:
-    line = (await _uart_recv_line(dut, max_bytes=160)).decode("ascii", errors="replace")
-    assert line.startswith(f"RBXBOOT project={project_name} git="), f"unexpected boot banner: {line!r}"
-    assert " dirty=" in line and " built=" in line and line.endswith("\r\n"), f"malformed boot banner: {line!r}"
+    assert_boot_banner(await _uart_recv_line(dut, max_bytes=160), project_name)
 
 
 @cocotb.test()

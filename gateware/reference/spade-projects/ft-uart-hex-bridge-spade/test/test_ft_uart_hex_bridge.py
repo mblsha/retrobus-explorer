@@ -5,6 +5,7 @@ from cocotb.triggers import FallingEdge
 from cocotb.triggers import RisingEdge
 from cocotb.triggers import Timer
 
+from boot_banner_test import assert_boot_banner
 from cocotb_helpers import start_clock
 from cocotb_helpers import tick
 
@@ -92,8 +93,7 @@ async def _uart_recv_line(dut, timeout_cycles: int = USB_UART_BIT_CYCLES * 150, 
 
 async def _expect_boot_banner(dut, project_name: str) -> None:
     line = await _uart_recv_line(dut, timeout_cycles=USB_UART_BIT_CYCLES * 220)
-    assert line.startswith(f"RBXBOOT project={project_name} git="), f"unexpected boot banner: {line!r}"
-    assert " dirty=" in line and " built=" in line and line.endswith("\r\n"), f"malformed boot banner: {line!r}"
+    assert_boot_banner(line, project_name)
 
 
 async def _ft_host_send_word_be(dut, word: int, be: int, timeout_cycles: int = 2000):

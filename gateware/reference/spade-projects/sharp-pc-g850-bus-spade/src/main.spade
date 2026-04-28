@@ -2,7 +2,7 @@ mod build_info;
 mod console;
 
 use shared_components::{
-    boot_banner::boot_banner_core,
+    boot_banner::boot_banner_tx_gate,
     bridges::{BridgePolicy, UartBridgeOut},
     bus_debug::{
         BusAddr,
@@ -607,7 +607,7 @@ entity main_core(
         *ft_ui_dout,
     );
 
-    let boot_banner_out = inst boot_banner_core::<8, 93>(
+    let boot_tx = inst boot_banner_tx_gate::<8, 93>(
         clk,
         rst,
         build_info::boot_banner_text(),
@@ -618,7 +618,7 @@ entity main_core(
         cycle_decode: cycle_decode,
         rx_valid: rx.valid,
         rx_byte: rx.byte,
-        tx_busy: *tx_busy || boot_banner_out.tx_req.valid,
+        tx_busy: boot_tx.app_tx_busy,
         mreq_fall: mreq_fall,
         iorq_fall: iorq_fall,
         rd_rise: rd_rise,
@@ -644,7 +644,7 @@ entity main_core(
     let bus_sample = eval.bus_sample;
     let ft_mux = eval.ft_mux;
     let usb_cmd = eval.usb_cmd;
-    let usb_tx_req = tx_req_arbiter(boot_banner_out.tx_req, usb_cmd.tx_req, tx_req_none());
+    let usb_tx_req = tx_req_arbiter(boot_tx.tx_req, usb_cmd.tx_req, tx_req_none());
 
     let _tx = inst au_usb_uart_tx8_rv_tap(
         clk,
