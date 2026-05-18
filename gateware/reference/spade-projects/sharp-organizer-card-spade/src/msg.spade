@@ -1,6 +1,25 @@
-use shared_components::message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_none};
+use shared_components::{
+    ascii,
+    message_stream::{TxReq8, tx_req_none},
+};
 
-type OrganizerMsgIdx = uint<2>;
+use super::protocol::{SaleaeModeCode, SaleaePinSource, SampleCount, SaleaeState};
+
+type ByteIdx = uint<4>;
+type NameKind = uint<5>;
+type StatusPhase = uint<5>;
+
+pub(lib) struct OrganizerStatus {
+    saleae_state: SaleaeState,
+    saleae_mode: SaleaeModeCode,
+    addr_delay: SampleCount,
+    data_delay: SampleCount,
+    pin0: SaleaePinSource,
+    pin1: SaleaePinSource,
+    pin2: SaleaePinSource,
+    pin3: SaleaePinSource,
+    ft_enabled: bool,
+}
 
 pub(lib) enum OrganizerMsg {
     None,
@@ -9,6 +28,7 @@ pub(lib) enum OrganizerMsg {
     SyncMemorySelected,
     FtEnabled,
     FtDisabled,
+    Status{status: OrganizerStatus},
     CounterThenFtEnabled,
     CounterThenFtDisabled,
     SyncStandardThenFtEnabled,
@@ -17,14 +37,61 @@ pub(lib) enum OrganizerMsg {
     SyncMemoryThenFtDisabled,
 }
 
-pub type OrganizerMsgStreamState = ByteMsgStreamState<OrganizerMsg, 2>;
-pub type OrganizerMsgStreamOut = ByteMsgStreamOut<OrganizerMsg, 2>;
+pub struct OrganizerMsgStreamState {
+    cur_msg: OrganizerMsg,
+    pending_msg: OrganizerMsg,
+    status_phase: StatusPhase,
+    status_idx: ByteIdx,
+    status_ch: uint<3>,
+    simple_idx: uint<1>,
+}
+
+pub struct OrganizerMsgStreamOut {
+    state: OrganizerMsgStreamState,
+    tx_req: TxReq8,
+    msg_none: bool,
+}
+
+struct ProgressedState {
+    cur_msg: OrganizerMsg,
+    status_phase: StatusPhase,
+    status_idx: ByteIdx,
+    status_ch: uint<3>,
+    simple_idx: uint<1>,
+}
 
 pub fn init_organizer_msg_stream() -> OrganizerMsgStreamState {
-    ByteMsgStreamState$(
+    OrganizerMsgStreamState$(
         cur_msg: OrganizerMsg::None(),
-        cur_idx: 0,
         pending_msg: OrganizerMsg::None(),
+        status_phase: 0,
+        status_idx: 0,
+        status_ch: 0,
+        simple_idx: 0,
+    )
+}
+
+pub fn organizer_status(
+    saleae_state: SaleaeState,
+    saleae_mode: SaleaeModeCode,
+    addr_delay: SampleCount,
+    data_delay: SampleCount,
+    pin0: SaleaePinSource,
+    pin1: SaleaePinSource,
+    pin2: SaleaePinSource,
+    pin3: SaleaePinSource,
+    ft_enabled: bool,
+) -> OrganizerStatus {
+    OrganizerStatus$(
+        saleae_state: saleae_state,
+        saleae_mode: saleae_mode,
+        addr_delay: addr_delay,
+        data_delay: data_delay,
+        pin0: pin0,
+        pin1: pin1,
+        pin2: pin2,
+        pin3: pin3,
+        ft_enabled: ft_enabled,
     )
 }
 
@@ -44,6 +111,345 @@ pub fn organizer_msg_combine(primary: OrganizerMsg, secondary: OrganizerMsg) -> 
             (_, _) => primary,
         }
     }
+}
+
+fn tx_req_byte(byte: uint<8>) -> TxReq8 {
+    TxReq8$(valid: true, byte: byte)
+}
+
+fn indexed_bytes<#uint N>(bytes: [uint<8>; N], idx: ByteIdx) -> TxReq8 {
+    if idx < N {
+        tx_req_byte(bytes[trunc(idx)])
+    } else {
+        tx_req_none()
+    }
+}
+
+fn bool_char(value: bool) -> uint<8> {
+    if value { b'1' } else { b'0' }
+}
+
+fn byte_hex_char(value: uint<8>, high: bool) -> uint<8> {
+    if high {
+        ascii::hex_char(trunc(value >> 4))
+    } else {
+        ascii::hex_char(trunc(value))
+    }
+}
+
+fn status_delay_hex_char(delay: SampleCount, high: bool) -> uint<8> {
+    byte_hex_char(trunc(delay), high)
+}
+
+fn name_kind_addr_sample() -> NameKind { 19 }
+fn name_kind_data_sample() -> NameKind { 20 }
+fn name_kind_counter0() -> NameKind { 21 }
+
+fn phase_channel() -> StatusPhase { 17 }
+fn phase_crlf() -> StatusPhase { 18 }
+
+fn source_name_kind(source: SaleaePinSource) -> NameKind {
+    if source <= 18 {
+        source
+    } else {
+        0
+    }
+}
+
+fn name_len(kind: NameKind) -> ByteIdx {
+    if kind == 0 {
+        3
+    } else if kind == 1 {
+        4
+    } else if kind == 2 {
+        2
+    } else if kind == 3 {
+        2
+    } else if kind == 4 {
+        2
+    } else if kind == 5 {
+        2
+    } else if kind == 6 {
+        6
+    } else if kind == 7 {
+        5
+    } else if kind == 8 {
+        5
+    } else if kind == 9 {
+        5
+    } else if kind == 10 {
+        5
+    } else if kind == 11 {
+        5
+    } else if kind == 12 {
+        3
+    } else if kind == 14 {
+        8
+    } else if kind == 15 {
+        8
+    } else if kind == 16 {
+        6
+    } else if kind == 17 {
+        6
+    } else if kind == 18 {
+        6
+    } else if kind == name_kind_addr_sample() {
+        6
+    } else if kind == name_kind_data_sample() {
+        6
+    } else {
+        8
+    }
+}
+
+fn name_byte(kind: NameKind, idx: ByteIdx) -> TxReq8 {
+    if kind == 0 {
+        indexed_bytes(b"LOW", idx)
+    } else if kind == 1 {
+        indexed_bytes(b"HIGH", idx)
+    } else if kind == 2 {
+        indexed_bytes(b"RW", idx)
+    } else if kind == 3 {
+        indexed_bytes(b"OE", idx)
+    } else if kind == 4 {
+        indexed_bytes(b"CI", idx)
+    } else if kind == 5 {
+        indexed_bytes(b"E2", idx)
+    } else if kind == 6 {
+        indexed_bytes(b"MSKROM", idx)
+    } else if kind == 7 {
+        indexed_bytes(b"SRAM1", idx)
+    } else if kind == 8 {
+        indexed_bytes(b"SRAM2", idx)
+    } else if kind == 9 {
+        indexed_bytes(b"EPROM", idx)
+    } else if kind == 10 {
+        indexed_bytes(b"STNBY", idx)
+    } else if kind == 11 {
+        indexed_bytes(b"VBATT", idx)
+    } else if kind == 12 {
+        indexed_bytes(b"VPP", idx)
+    } else if kind == 14 {
+        indexed_bytes(b"ADDR_CHG", idx)
+    } else if kind == 15 {
+        indexed_bytes(b"DATA_CHG", idx)
+    } else if kind == 16 {
+        indexed_bytes(b"ADDR_U", idx)
+    } else if kind == 17 {
+        indexed_bytes(b"DATA_U", idx)
+    } else if kind == 18 {
+        indexed_bytes(b"MISC_U", idx)
+    } else if kind == name_kind_addr_sample() {
+        indexed_bytes(b"ADDR_S", idx)
+    } else if kind == name_kind_data_sample() {
+        indexed_bytes(b"DATA_S", idx)
+    } else if kind == name_kind_counter0() {
+        indexed_bytes(b"COUNTER0", idx)
+    } else if kind == name_kind_counter0() +. 1 {
+        indexed_bytes(b"COUNTER1", idx)
+    } else if kind == name_kind_counter0() +. 2 {
+        indexed_bytes(b"COUNTER2", idx)
+    } else if kind == name_kind_counter0() +. 3 {
+        indexed_bytes(b"COUNTER3", idx)
+    } else if kind == name_kind_counter0() +. 4 {
+        indexed_bytes(b"COUNTER4", idx)
+    } else if kind == name_kind_counter0() +. 5 {
+        indexed_bytes(b"COUNTER5", idx)
+    } else if kind == name_kind_counter0() +. 6 {
+        indexed_bytes(b"COUNTER6", idx)
+    } else if kind == name_kind_counter0() +. 7 {
+        indexed_bytes(b"COUNTER7", idx)
+    } else {
+        tx_req_none()
+    }
+}
+
+fn is_counter(status: OrganizerStatus) -> bool {
+    if let SaleaeState::Counter = status.saleae_state { true } else { false }
+}
+
+fn is_settling(status: OrganizerStatus) -> bool {
+    !is_counter(status) && status.saleae_mode == 2
+}
+
+fn mode_byte(status: OrganizerStatus, idx: ByteIdx) -> TxReq8 {
+    if is_counter(status) {
+        indexed_bytes(b"CTR", idx)
+    } else if status.saleae_mode == 1 {
+        indexed_bytes(b"MEM", idx)
+    } else if status.saleae_mode == 2 {
+        indexed_bytes(b"SET", idx)
+    } else {
+        indexed_bytes(b"STD", idx)
+    }
+}
+
+fn set_channel_kind(status: OrganizerStatus, ch: uint<3>) -> NameKind {
+    if ch == 0 {
+        source_name_kind(status.pin0)
+    } else if ch == 1 {
+        source_name_kind(status.pin1)
+    } else if ch == 2 {
+        source_name_kind(status.pin2)
+    } else if ch == 3 {
+        source_name_kind(status.pin3)
+    } else if ch == 4 {
+        name_kind_addr_sample()
+    } else if ch == 5 {
+        name_kind_data_sample()
+    } else if ch == 6 {
+        14
+    } else {
+        15
+    }
+}
+
+fn std_channel_kind(ch: uint<3>) -> NameKind {
+    if ch == 0 {
+        2
+    } else if ch == 1 {
+        3
+    } else if ch == 2 {
+        4
+    } else if ch == 3 {
+        5
+    } else if ch == 4 {
+        6
+    } else if ch == 5 {
+        18
+    } else if ch == 6 {
+        17
+    } else {
+        16
+    }
+}
+
+fn mem_channel_kind(ch: uint<3>) -> NameKind {
+    if ch == 0 {
+        2
+    } else if ch == 1 {
+        6
+    } else if ch == 2 {
+        7
+    } else if ch == 3 {
+        8
+    } else if ch == 4 {
+        9
+    } else if ch == 5 {
+        18
+    } else if ch == 6 {
+        17
+    } else {
+        16
+    }
+}
+
+fn channel_kind(status: OrganizerStatus, ch: uint<3>) -> NameKind {
+    if is_counter(status) {
+        name_kind_counter0() +. zext(ch)
+    } else if is_settling(status) {
+        set_channel_kind(status, ch)
+    } else if status.saleae_mode == 1 {
+        mem_channel_kind(ch)
+    } else {
+        std_channel_kind(ch)
+    }
+}
+
+fn status_pin_kind(status: OrganizerStatus, phase: StatusPhase) -> NameKind {
+    if phase == 7 {
+        source_name_kind(status.pin0)
+    } else if phase == 9 {
+        source_name_kind(status.pin1)
+    } else if phase == 11 {
+        source_name_kind(status.pin2)
+    } else {
+        source_name_kind(status.pin3)
+    }
+}
+
+fn status_phase_len(status: OrganizerStatus, phase: StatusPhase, ch: uint<3>) -> ByteIdx {
+    if phase == 0 {
+        5
+    } else if phase == 1 {
+        3
+    } else if phase == 2 {
+        3
+    } else if phase == 3 {
+        2
+    } else if phase == 4 {
+        3
+    } else if phase == 5 {
+        2
+    } else if phase == 6 || phase == 8 || phase == 10 || phase == 12 {
+        4
+    } else if phase == 7 || phase == 9 || phase == 11 || phase == 13 {
+        name_len(status_pin_kind(status, phase))
+    } else if phase == 14 {
+        4
+    } else if phase == 15 {
+        1
+    } else if phase == 16 {
+        5
+    } else if phase == phase_channel() {
+        name_len(channel_kind(status, ch)) +. if ch == 0 { 0 } else { 1 }
+    } else {
+        2
+    }
+}
+
+fn status_byte(status: OrganizerStatus, phase: StatusPhase, idx: ByteIdx, ch: uint<3>) -> TxReq8 {
+    if phase == 0 {
+        indexed_bytes(b"OS,M=", idx)
+    } else if phase == 1 {
+        mode_byte(status, idx)
+    } else if phase == 2 {
+        indexed_bytes(b",A=", idx)
+    } else if phase == 3 {
+        tx_req_byte(status_delay_hex_char(status.addr_delay, idx == 0))
+    } else if phase == 4 {
+        indexed_bytes(b",D=", idx)
+    } else if phase == 5 {
+        tx_req_byte(status_delay_hex_char(status.data_delay, idx == 0))
+    } else if phase == 6 {
+        indexed_bytes(b",P0=", idx)
+    } else if phase == 7 {
+        name_byte(source_name_kind(status.pin0), idx)
+    } else if phase == 8 {
+        indexed_bytes(b",P1=", idx)
+    } else if phase == 9 {
+        name_byte(source_name_kind(status.pin1), idx)
+    } else if phase == 10 {
+        indexed_bytes(b",P2=", idx)
+    } else if phase == 11 {
+        name_byte(source_name_kind(status.pin2), idx)
+    } else if phase == 12 {
+        indexed_bytes(b",P3=", idx)
+    } else if phase == 13 {
+        name_byte(source_name_kind(status.pin3), idx)
+    } else if phase == 14 {
+        indexed_bytes(b",FT=", idx)
+    } else if phase == 15 {
+        tx_req_byte(bool_char(status.ft_enabled))
+    } else if phase == 16 {
+        indexed_bytes(b"\r\nCH=", idx)
+    } else if phase == phase_channel() {
+        if ch != 0 && idx == 0 {
+            tx_req_byte(b',')
+        } else {
+            name_byte(channel_kind(status, ch), if ch == 0 { idx } else { idx -. 1 })
+        }
+    } else {
+        indexed_bytes(b"\r\n", idx)
+    }
+}
+
+fn status_last_byte(status: OrganizerStatus, phase: StatusPhase, idx: ByteIdx, ch: uint<3>) -> bool {
+    phase == phase_crlf() && idx == status_phase_len(status, phase, ch) -. 1
+}
+
+fn status_phase_done(status: OrganizerStatus, phase: StatusPhase, idx: ByteIdx, ch: uint<3>) -> bool {
+    idx == status_phase_len(status, phase, ch) -. 1
 }
 
 impl OrganizerMsg {
@@ -75,7 +481,7 @@ impl OrganizerMsg {
         }
     }
 
-    fn len(self) -> OrganizerMsgIdx {
+    fn simple_len(self) -> uint<2> {
         if self.first_part().is_none() {
             0
         } else if self.second_part().is_none() {
@@ -85,8 +491,13 @@ impl OrganizerMsg {
         }
     }
 
-    fn atom_byte(self) -> uint<8> {
-        match self {
+    fn simple_byte(self, idx: uint<1>) -> uint<8> {
+        let part = if idx == 0 {
+            self.first_part()
+        } else {
+            self.second_part()
+        };
+        match part {
             Self::CounterSelected => b'c',
             Self::SyncStandardSelected => b's',
             Self::SyncMemorySelected => b'S',
@@ -96,16 +507,80 @@ impl OrganizerMsg {
         }
     }
 
-    pub fn byte(self, idx: OrganizerMsgIdx) -> TxReq8 {
-        if idx >= self.len() {
-            tx_req_none()
-        } else {
-            let part = if idx == 0 {
-                self.first_part()
+    fn tx_req(self, status_phase: StatusPhase, status_idx: ByteIdx, status_ch: uint<3>, simple_idx: uint<1>) -> TxReq8 {
+        match self {
+            Self::Status$(status) => status_byte(status, status_phase, status_idx, status_ch),
+            _ => if zext(simple_idx) < self.simple_len() {
+                tx_req_byte(self.simple_byte(simple_idx))
             } else {
-                self.second_part()
-            };
-            TxReq8$(valid: true, byte: part.atom_byte())
+                tx_req_none()
+            },
+        }
+    }
+
+    fn last_byte(self, status_phase: StatusPhase, status_idx: ByteIdx, status_ch: uint<3>, simple_idx: uint<1>) -> bool {
+        match self {
+            Self::Status$(status) => status_last_byte(status, status_phase, status_idx, status_ch),
+            _ => zext(simple_idx) == self.simple_len() -. 1,
+        }
+    }
+}
+
+fn reset_progress() -> ProgressedState {
+    ProgressedState$(
+        cur_msg: OrganizerMsg::None(),
+        status_phase: 0,
+        status_idx: 0,
+        status_ch: 0,
+        simple_idx: 0,
+    )
+}
+
+fn progress_state(state: OrganizerMsgStreamState, sent: bool) -> ProgressedState {
+    if !sent {
+        ProgressedState$(
+            cur_msg: state.cur_msg,
+            status_phase: state.status_phase,
+            status_idx: state.status_idx,
+            status_ch: state.status_ch,
+            simple_idx: state.simple_idx,
+        )
+    } else if state.cur_msg.last_byte(state.status_phase, state.status_idx, state.status_ch, state.simple_idx) {
+        reset_progress()
+    } else {
+        match state.cur_msg {
+            OrganizerMsg::Status$(status) => if status_phase_done(status, state.status_phase, state.status_idx, state.status_ch) {
+                ProgressedState$(
+                    cur_msg: state.cur_msg,
+                    status_phase: if state.status_phase == phase_channel() && state.status_ch != 7 {
+                        state.status_phase
+                    } else {
+                        state.status_phase +. 1
+                    },
+                    status_idx: 0,
+                    status_ch: if state.status_phase == phase_channel() && state.status_ch != 7 {
+                        state.status_ch +. 1
+                    } else {
+                        state.status_ch
+                    },
+                    simple_idx: state.simple_idx,
+                )
+            } else {
+                ProgressedState$(
+                    cur_msg: state.cur_msg,
+                    status_phase: state.status_phase,
+                    status_idx: state.status_idx +. 1,
+                    status_ch: state.status_ch,
+                    simple_idx: state.simple_idx,
+                )
+            },
+            _ => ProgressedState$(
+                cur_msg: state.cur_msg,
+                status_phase: state.status_phase,
+                status_idx: state.status_idx,
+                status_ch: state.status_ch,
+                simple_idx: state.simple_idx +. 1,
+            ),
         }
     }
 }
@@ -116,12 +591,75 @@ pub fn organizer_msg_stream_step(
     msg_valid: bool,
     msg: OrganizerMsg,
 ) -> OrganizerMsgStreamOut {
-    state.step_with(
-        OrganizerMsg::None(),
-        fn |msg| { msg.is_none() },
-        fn |msg, idx| { msg.byte(idx) },
-        block_tx,
-        msg_valid,
-        msg,
+    let cur_none = state.cur_msg.is_none();
+    let pending_none = state.pending_msg.is_none();
+    let tx_req = if !cur_none && !block_tx {
+        state.cur_msg.tx_req(state.status_phase, state.status_idx, state.status_ch, state.simple_idx)
+    } else {
+        tx_req_none()
+    };
+    let progressed = progress_state(state, tx_req.valid);
+    let progressed_none = progressed.cur_msg.is_none();
+    let load_pending = progressed_none && !pending_none;
+    let loaded_cur_msg = if load_pending {
+        state.pending_msg
+    } else {
+        progressed.cur_msg
+    };
+    let loaded_pending_msg = if load_pending {
+        OrganizerMsg::None()
+    } else {
+        state.pending_msg
+    };
+    let loaded_none = if load_pending {
+        false
+    } else {
+        progressed_none
+    };
+    let enqueue = msg_valid && !msg.is_none();
+    let replace_current = enqueue && loaded_none;
+    let queue_pending = enqueue && !loaded_none;
+    let final_cur_msg = if replace_current {
+        msg
+    } else {
+        loaded_cur_msg
+    };
+    let final_pending_msg = if queue_pending {
+        msg
+    } else {
+        loaded_pending_msg
+    };
+    let final_none = if replace_current {
+        false
+    } else {
+        loaded_none
+    };
+    OrganizerMsgStreamOut$(
+        state: OrganizerMsgStreamState$(
+            cur_msg: final_cur_msg,
+            pending_msg: final_pending_msg,
+            status_phase: if replace_current || load_pending || progressed.cur_msg.is_none() {
+                0
+            } else {
+                progressed.status_phase
+            },
+            status_idx: if replace_current || load_pending || progressed.cur_msg.is_none() {
+                0
+            } else {
+                progressed.status_idx
+            },
+            status_ch: if replace_current || load_pending || progressed.cur_msg.is_none() {
+                0
+            } else {
+                progressed.status_ch
+            },
+            simple_idx: if replace_current || load_pending || progressed.cur_msg.is_none() {
+                0
+            } else {
+                progressed.simple_idx
+            },
+        ),
+        tx_req: tx_req,
+        msg_none: final_none,
     )
 }

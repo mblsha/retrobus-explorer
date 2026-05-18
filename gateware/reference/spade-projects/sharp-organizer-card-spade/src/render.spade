@@ -100,6 +100,12 @@ fn selected_pin(source: SaleaePinSource, inputs: BoardRenderInputs) -> bool {
         inputs.addr_changed
     } else if source == 15 {
         inputs.data_changed
+    } else if source == 16 {
+        inputs.addr_line
+    } else if source == 17 {
+        inputs.data_line
+    } else if source == 18 {
+        inputs.misc_line
     } else {
         false
     }

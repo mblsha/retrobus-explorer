@@ -6,7 +6,7 @@ use shared_components::{
 pub type OrganizerAddr = uint<20>;
 pub type OrganizerData = uint<8>;
 pub type MiscWord = uint<11>;
-pub type SampleCount = uint<32>;
+pub type SampleCount = uint<8>;
 pub type OrganizerTraceWord = TraceEventWord;
 pub type OrganizerOverflowCount = uint<24>;
 
@@ -20,7 +20,7 @@ pub(lib) enum SyncSubMode {
     MemoryBanks,
 }
 
-pub(lib) type SaleaePinSource = uint<4>;
+pub(lib) type SaleaePinSource = uint<5>;
 pub(lib) type SaleaeModeCode = uint<2>;
 
 pub(lib) enum OrganizerTraceKind {

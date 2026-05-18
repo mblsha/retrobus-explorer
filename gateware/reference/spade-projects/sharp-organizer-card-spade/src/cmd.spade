@@ -1,11 +1,11 @@
 use shared_components::{ascii, serial::{FtBe, FtData}};
 
 use super::{
-    msg::{OrganizerMsg, organizer_msg_combine},
+    msg::{OrganizerMsg, organizer_msg_combine, organizer_status},
     protocol::{SaleaeModeCode, SaleaePinSource, SampleCount, SaleaeState, SyncSubMode},
 };
 
-pub(lib) type OrganizerCmdState = uint<3>;
+pub(lib) type OrganizerCmdState = uint<4>;
 
 enum OrganizerFtCmd {
     None,
@@ -23,6 +23,7 @@ pub(lib) struct OrganizerUiInputs {
     sync_sub_mode: SyncSubMode,
     saleae_mode: SaleaeModeCode,
     cmd_state: OrganizerCmdState,
+    cmd_hex_high: uint<4>,
     addr_stable_delay: SampleCount,
     data_stable_delay: SampleCount,
     pin0: SaleaePinSource,
@@ -42,6 +43,7 @@ pub(lib) struct OrganizerUiEffect {
     next_sync_sub_mode: SyncSubMode,
     next_saleae_mode: SaleaeModeCode,
     next_cmd_state: OrganizerCmdState,
+    next_cmd_hex_high: uint<4>,
     next_addr_stable_delay: SampleCount,
     next_data_stable_delay: SampleCount,
     next_pin0: SaleaePinSource,
@@ -59,6 +61,12 @@ fn cmd_wait_pin0() -> OrganizerCmdState { 3 }
 fn cmd_wait_pin1() -> OrganizerCmdState { 4 }
 fn cmd_wait_pin2() -> OrganizerCmdState { 5 }
 fn cmd_wait_pin3() -> OrganizerCmdState { 6 }
+fn cmd_wait_addr_ext_hi() -> OrganizerCmdState { 7 }
+fn cmd_wait_addr_ext_lo() -> OrganizerCmdState { 8 }
+fn cmd_wait_data_ext_hi() -> OrganizerCmdState { 9 }
+fn cmd_wait_data_ext_lo() -> OrganizerCmdState { 10 }
+fn cmd_wait_addr_ext_drop() -> OrganizerCmdState { 11 }
+fn cmd_wait_data_ext_drop() -> OrganizerCmdState { 12 }
 
 pub(lib) fn saleae_mode_standard() -> SaleaeModeCode { 0 }
 pub(lib) fn saleae_mode_memory() -> SaleaeModeCode { 1 }
@@ -68,6 +76,9 @@ pub(lib) fn pin_source_rw() -> SaleaePinSource { 2 }
 pub(lib) fn pin_source_oe() -> SaleaePinSource { 3 }
 pub(lib) fn pin_source_mskrom() -> SaleaePinSource { 6 }
 pub(lib) fn pin_source_sram1() -> SaleaePinSource { 7 }
+pub(lib) fn pin_source_addr_uart() -> SaleaePinSource { 16 }
+pub(lib) fn pin_source_data_uart() -> SaleaePinSource { 17 }
+pub(lib) fn pin_source_misc_uart() -> SaleaePinSource { 18 }
 
 fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData, be: FtBe) -> OrganizerFtCmd {
     let b0: uint<8> = trunc(word);
@@ -107,7 +118,8 @@ fn pin_source_valid(byte: uint<8>) -> bool {
     upper == b'L' || upper == b'H' || upper == b'R' || upper == b'O' ||
         upper == b'C' || upper == b'E' || upper == b'M' || byte == b'1' ||
         byte == b'2' || upper == b'P' || upper == b'Y' || upper == b'B' ||
-        upper == b'V' || upper == b'A' || upper == b'D'
+        upper == b'V' || upper == b'A' || upper == b'D' ||
+        upper == b'X' || upper == b'Z' || upper == b'J'
 }
 
 fn pin_source_from_byte(byte: uint<8>) -> SaleaePinSource {
@@ -140,6 +152,12 @@ fn pin_source_from_byte(byte: uint<8>) -> SaleaePinSource {
         14
     } else if upper == b'D' {
         15
+    } else if upper == b'X' {
+        pin_source_addr_uart()
+    } else if upper == b'Z' {
+        pin_source_data_uart()
+    } else if upper == b'J' {
+        pin_source_misc_uart()
     } else {
         0
     }
@@ -155,12 +173,46 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
         inputs.cmd_state == cmd_wait_pin1() ||
         inputs.cmd_state == cmd_wait_pin2() ||
         inputs.cmd_state == cmd_wait_pin3();
+    let waiting_addr_ext_hi = inputs.cmd_state == cmd_wait_addr_ext_hi();
+    let waiting_addr_ext_lo = inputs.cmd_state == cmd_wait_addr_ext_lo();
+    let waiting_data_ext_hi = inputs.cmd_state == cmd_wait_data_ext_hi();
+    let waiting_data_ext_lo = inputs.cmd_state == cmd_wait_data_ext_lo();
+    let waiting_addr_ext_drop = inputs.cmd_state == cmd_wait_addr_ext_drop();
+    let waiting_data_ext_drop = inputs.cmd_state == cmd_wait_data_ext_drop();
+    let waiting_ext_hi = waiting_addr_ext_hi || waiting_data_ext_hi;
+    let waiting_ext_lo = waiting_addr_ext_lo || waiting_data_ext_lo;
+    let waiting_ext_drop = waiting_addr_ext_drop || waiting_data_ext_drop;
+    let ext_delay: uint<8> = (zext(inputs.cmd_hex_high) << 4) | zext(decoded.value);
 
     let next_cmd_state = if !inputs.rx_valid {
         inputs.cmd_state
-    } else if inputs.cmd_state == cmd_wait_addr_delay() ||
-        inputs.cmd_state == cmd_wait_data_delay() ||
-        waiting_pin {
+    } else if inputs.cmd_state == cmd_wait_addr_delay() {
+        if inputs.rx_byte == b'=' {
+            cmd_wait_addr_ext_hi()
+        } else {
+            init_organizer_cmd_state()
+        }
+    } else if inputs.cmd_state == cmd_wait_data_delay() {
+        if inputs.rx_byte == b'=' {
+            cmd_wait_data_ext_hi()
+        } else {
+            init_organizer_cmd_state()
+        }
+    } else if waiting_addr_ext_hi {
+        if decoded.valid {
+            cmd_wait_addr_ext_lo()
+        } else {
+            cmd_wait_addr_ext_drop()
+        }
+    } else if waiting_data_ext_hi {
+        if decoded.valid {
+            cmd_wait_data_ext_lo()
+        } else {
+            cmd_wait_data_ext_drop()
+        }
+    } else if waiting_ext_drop {
+            init_organizer_cmd_state()
+    } else if waiting_ext_lo || waiting_pin {
         init_organizer_cmd_state()
     } else if inputs.rx_byte == b'a' || inputs.rx_byte == b'A' {
         cmd_wait_addr_delay()
@@ -205,7 +257,16 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
 
     let set_addr_delay = inputs.rx_valid && inputs.cmd_state == cmd_wait_addr_delay() && decoded.valid;
     let set_data_delay = inputs.rx_valid && inputs.cmd_state == cmd_wait_data_delay() && decoded.valid;
+    let set_addr_ext_delay = inputs.rx_valid && waiting_addr_ext_lo && decoded.valid;
+    let set_data_ext_delay = inputs.rx_valid && waiting_data_ext_lo && decoded.valid;
     let set_pin = inputs.rx_valid && waiting_pin && source_valid;
+    let next_cmd_hex_high = if inputs.rx_valid && waiting_ext_hi && decoded.valid {
+        decoded.value
+    } else if inputs.rx_valid && (waiting_ext_lo || waiting_ext_drop || inputs.cmd_state == cmd_wait_addr_delay() || inputs.cmd_state == cmd_wait_data_delay()) {
+        0
+    } else {
+        inputs.cmd_hex_high
+    };
 
     let usb_msg = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'c' {
         OrganizerMsg::CounterSelected()
@@ -213,6 +274,18 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
         OrganizerMsg::SyncStandardSelected()
     } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'S' {
         OrganizerMsg::SyncMemorySelected()
+    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'?' {
+        OrganizerMsg::Status(organizer_status(
+            inputs.saleae_state,
+            inputs.saleae_mode,
+            inputs.addr_stable_delay,
+            inputs.data_stable_delay,
+            inputs.pin0,
+            inputs.pin1,
+            inputs.pin2,
+            inputs.pin3,
+            inputs.ft_enabled,
+        ))
     } else {
         OrganizerMsg::None()
     };
@@ -222,8 +295,9 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
         next_sync_sub_mode: next_sync_sub_mode,
         next_saleae_mode: next_saleae_mode,
         next_cmd_state: next_cmd_state,
-        next_addr_stable_delay: if set_addr_delay { zext(decoded.value) } else { inputs.addr_stable_delay },
-        next_data_stable_delay: if set_data_delay { zext(decoded.value) } else { inputs.data_stable_delay },
+        next_cmd_hex_high: next_cmd_hex_high,
+        next_addr_stable_delay: if set_addr_ext_delay { zext(ext_delay) } else if set_addr_delay { zext(decoded.value) } else { inputs.addr_stable_delay },
+        next_data_stable_delay: if set_data_ext_delay { zext(ext_delay) } else if set_data_delay { zext(decoded.value) } else { inputs.data_stable_delay },
         next_pin0: if set_pin && inputs.cmd_state == cmd_wait_pin0() { source } else { inputs.pin0 },
         next_pin1: if set_pin && inputs.cmd_state == cmd_wait_pin1() { source } else { inputs.pin1 },
         next_pin2: if set_pin && inputs.cmd_state == cmd_wait_pin2() { source } else { inputs.pin2 },
