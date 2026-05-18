@@ -9,7 +9,7 @@ mod transport;
 
 use shared_components::{
     boot_banner::boot_banner_tx_gate,
-    clocking::{clk_wiz_400, sampled_bool_clock},
+    clocking::sampled_bool_clock,
     config::au_usb_uart_rx,
     ft_stream::{FtWordStreamOut, FtWordStreamState, ft_word_stream_step},
     message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
@@ -55,6 +55,7 @@ use self::transport::organizer_transport;
 
 struct FtRegs {
     enabled: bool,
+    stream_fifo_full: bool,
     cur_value: OrganizerTraceWord,
     stream_state: FtWordStreamState,
 }
@@ -74,6 +75,7 @@ struct MainState {
     ft: FtRegs,
     saleae: SaleaeRegs,
     cmd_state: OrganizerCmdState,
+    cmd_hex_high: uint<4>,
     addr_stable_delay: SampleCount,
     data_stable_delay: SampleCount,
     monitor: OrganizerMonitorState,
@@ -110,6 +112,7 @@ fn reset_main_state() -> MainState {
     MainState$(
         ft: FtRegs$(
             enabled: false,
+            stream_fifo_full: false,
             cur_value: 0,
             stream_state: FtWordStreamState::GetFifo(),
         ),
@@ -124,6 +127,7 @@ fn reset_main_state() -> MainState {
             pin3: pin_source_sram1(),
         ),
         cmd_state: init_organizer_cmd_state(),
+        cmd_hex_high: 0,
         addr_stable_delay: default_stable_threshold(),
         data_stable_delay: default_stable_threshold(),
         monitor: reset_monitor_state(),
@@ -158,6 +162,7 @@ impl MainState {
                 sync_sub_mode: self.saleae.sync_sub_mode,
                 saleae_mode: self.saleae.mode,
                 cmd_state: self.cmd_state,
+                cmd_hex_high: self.cmd_hex_high,
                 addr_stable_delay: self.addr_stable_delay,
                 data_stable_delay: self.data_stable_delay,
                 pin0: self.saleae.pin0,
@@ -167,7 +172,10 @@ impl MainState {
                 ft_enabled: self.ft.enabled,
             ),
         );
-        let monitor: OrganizerMonitorOut = self.monitor.eval(
+        let monitor_transport: OrganizerMonitorTransportOut = self.monitor.drain_stream(
+            self.ft.enabled && !self.ft.stream_fifo_full,
+        );
+        let monitor: OrganizerMonitorOut = monitor_transport.next_state.eval(
             inputs.addr_sync,
             inputs.data_sync,
             inputs.misc_sync,
@@ -175,7 +183,6 @@ impl MainState {
             self.data_stable_delay,
             self.ft.enabled,
         );
-        let monitor_transport: OrganizerMonitorTransportOut = monitor.next_state.drain_stream(!inputs.stream_fifo_full);
         let ft_stream = ft_word_stream_step(
             self.ft.stream_state,
             self.ft.cur_value,
@@ -201,6 +208,7 @@ impl MainState {
             next_state: MainState$(
                 ft: FtRegs$(
                     enabled: ui.next_ft_enabled,
+                    stream_fifo_full: inputs.stream_fifo_full,
                     cur_value: ft_stream.next_cur_value,
                     stream_state: ft_stream.next_state,
                 ),
@@ -219,9 +227,10 @@ impl MainState {
                     pin3: ui.next_pin3,
                 ),
                 cmd_state: ui.next_cmd_state,
+                cmd_hex_high: ui.next_cmd_hex_high,
                 addr_stable_delay: ui.next_addr_stable_delay,
                 data_stable_delay: ui.next_data_stable_delay,
-                monitor: monitor_transport.next_state,
+                monitor: monitor.next_state,
                 msg_stream: msg_stream.state,
             ),
             tx_req: msg_stream.tx_req,
@@ -272,7 +281,7 @@ entity main_core(
     data: OrganizerData,
 ) {
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
-    let clk_uart = unsafe { inst clk_wiz_400(clk) };
+    let clk_uart = clk;
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
 
     let conn_core_sync = inst sync_bundle::<2, 4>(clk, [conn_rw, conn_oe, conn_ci, conn_e2]);

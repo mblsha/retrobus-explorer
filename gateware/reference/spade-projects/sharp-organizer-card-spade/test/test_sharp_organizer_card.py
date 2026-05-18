@@ -11,7 +11,7 @@ from cocotb_helpers import tick
 
 
 USB_UART_BIT_CYCLES = 100
-SALEAE_UART_BIT_CYCLES = 4
+SALEAE_UART_BIT_CYCLES = 1
 
 
 def _saleae_bit(value: int, idx: int) -> int:
@@ -96,6 +96,11 @@ async def _uart_send_byte(dut, byte: int):
 
     dut.usb_rx.value = 1
     await tick(dut.clk, USB_UART_BIT_CYCLES)
+
+
+async def _uart_send_text(dut, text: str):
+    for byte in text.encode("ascii"):
+        await _uart_send_byte(dut, byte)
 
 
 async def _uart_wait_start_fall(dut, timeout_cycles: int) -> None:
@@ -209,6 +214,14 @@ async def _uart_recv_saleae_word(dut, bit_idx: int, width: int, timeout_cycles: 
     stop = _saleae_bit(int(dut.saleae.value), bit_idx)
     assert stop == 1, f"invalid stop bit on saleae[{bit_idx}]"
     return value
+
+
+async def _wait_saleae_high(dut, bit_idx: int, timeout_cycles: int) -> None:
+    for _ in range(timeout_cycles):
+        if _saleae_bit(int(dut.saleae.value), bit_idx):
+            return
+        await tick(dut.clk, 1)
+    raise AssertionError(f"timeout waiting for saleae[{bit_idx}] to go high")
 
 
 @cocotb.test()
@@ -372,6 +385,52 @@ async def settling_delay_command_controls_addr_sample_pulse(dut):
 
 
 @cocotb.test()
+async def extended_addr_delay_command_controls_addr_sample_pulse(dut):
+    await _init(dut)
+
+    await _uart_send_text(dut, "tA=1F")
+    await tick(dut.clk, 4)
+
+    dut.addr.value = 0x22222
+
+    seen_addr_change = False
+    seen_early_addr_sample = False
+    for _ in range(24):
+        value = int(dut.saleae.value)
+        seen_addr_change |= bool(_saleae_bit(value, 6))
+        seen_early_addr_sample |= bool(_saleae_bit(value, 4))
+        await tick(dut.clk, 1)
+
+    assert seen_addr_change
+    assert not seen_early_addr_sample
+
+    await _wait_saleae_high(dut, 4, 64)
+
+
+@cocotb.test()
+async def extended_data_delay_command_controls_data_sample_pulse(dut):
+    await _init(dut)
+
+    await _uart_send_text(dut, "tD=20")
+    await tick(dut.clk, 4)
+
+    dut.data.value = 0x5A
+
+    seen_data_change = False
+    seen_early_data_sample = False
+    for _ in range(24):
+        value = int(dut.saleae.value)
+        seen_data_change |= bool(_saleae_bit(value, 7))
+        seen_early_data_sample |= bool(_saleae_bit(value, 5))
+        await tick(dut.clk, 1)
+
+    assert seen_data_change
+    assert not seen_early_data_sample
+
+    await _wait_saleae_high(dut, 5, 72)
+
+
+@cocotb.test()
 async def settling_pin_select_command_routes_unknown_pins(dut):
     await _init(dut)
 
@@ -386,6 +445,136 @@ async def settling_pin_select_command_routes_unknown_pins(dut):
     dut.conn_vpp.value = 0
     await tick(dut.clk, 4)
     assert _saleae_bit(int(dut.saleae.value), 0) == 0
+
+
+@cocotb.test()
+async def compact_commands_remain_backward_compatible(dut):
+    await _init(dut)
+
+    recv_standard = cocotb.start_soon(_uart_recv_byte(dut))
+    await _uart_send_byte(dut, ord("s"))
+    assert await recv_standard == ord("s")
+
+    recv_memory = cocotb.start_soon(_uart_recv_byte(dut))
+    await _uart_send_byte(dut, ord("S"))
+    assert await recv_memory == ord("S")
+
+    await _uart_send_text(dut, "tA5D50V1R2O3M")
+    dut.conn_vpp.value = 1
+    dut.conn_rw.value = 1
+    dut.conn_oe.value = 1
+    dut.conn_mskrom.value = 1
+    await tick(dut.clk, 4)
+    assert int(dut.saleae.value) & 0x0F == 0x0F
+
+    recv_counter = cocotb.start_soon(_uart_recv_byte(dut))
+    await _uart_send_byte(dut, ord("c"))
+    assert await recv_counter == ord("c")
+
+
+@cocotb.test()
+async def settling_mode_can_route_uart_monitor_lines(dut):
+    await _init(dut)
+
+    await _uart_send_text(dut, "t0X1Z2R3O")
+    await tick(dut.clk, 4)
+
+    dut.conn_rw.value = 1
+    dut.conn_oe.value = 0
+    dut.addr.value = 0x3A5C7
+    dut.data.value = 0xC6
+
+    seen_addr_sample = False
+    seen_data_sample = False
+    seen_addr_change = False
+    seen_data_change = False
+    addr_task = cocotb.start_soon(_uart_recv_saleae_word(dut, 0, 20))
+    data_task = cocotb.start_soon(_uart_recv_saleae_word(dut, 1, 8))
+
+    for _ in range(48):
+        value = int(dut.saleae.value)
+        seen_addr_sample |= bool(_saleae_bit(value, 4))
+        seen_data_sample |= bool(_saleae_bit(value, 5))
+        seen_addr_change |= bool(_saleae_bit(value, 6))
+        seen_data_change |= bool(_saleae_bit(value, 7))
+        await tick(dut.clk, 1)
+
+    assert seen_addr_sample
+    assert seen_data_sample
+    assert seen_addr_change
+    assert seen_data_change
+    assert await addr_task == 0x3A5C7
+    assert await data_task == 0xC6
+    assert _saleae_bit(int(dut.saleae.value), 2) == 1
+    assert _saleae_bit(int(dut.saleae.value), 3) == 0
+
+
+@cocotb.test()
+async def settling_mode_can_route_misc_uart_monitor_line(dut):
+    await _init(dut)
+
+    await _uart_send_text(dut, "t0J")
+    await tick(dut.clk, 4)
+
+    expected_misc = _misc_word(1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1)
+    misc_task = cocotb.start_soon(_uart_recv_saleae_word(dut, 0, 11))
+    dut.conn_rw.value = 1
+    dut.conn_oe.value = 0
+    dut.conn_ci.value = 1
+    dut.conn_e2.value = 0
+    dut.conn_mskrom.value = 1
+    dut.conn_sram1.value = 0
+    dut.conn_sram2.value = 1
+    dut.conn_eprom.value = 0
+    dut.conn_stnby.value = 1
+    dut.conn_vbatt.value = 0
+    dut.conn_vpp.value = 1
+
+    assert await misc_task == expected_misc
+
+
+@cocotb.test()
+async def status_command_reports_current_debug_state(dut):
+    await _init(dut)
+
+    await _uart_send_text(dut, "tA=1FD=200X1Z2R3O")
+    line1_task = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_byte(dut, ord("?"))
+    line1 = await line1_task
+    line2 = await _uart_recv_line(dut)
+
+    assert "M=SET" in line1
+    assert "A=1F" in line1
+    assert "D=20" in line1
+    assert "P0=ADDR_U" in line1
+    assert "P1=DATA_U" in line1
+    assert "P2=RW" in line1
+    assert "P3=OE" in line1
+    assert "FT=0" in line1
+    assert line2 == "CH=ADDR_U,DATA_U,RW,OE,ADDR_S,DATA_S,ADDR_CHG,DATA_CHG\r\n"
+
+
+@cocotb.test()
+async def invalid_extended_delay_commands_leave_delay_unchanged(dut):
+    await _init(dut)
+
+    await _uart_send_text(dut, "tA=1FA=G0D=20")
+    line1_task = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_byte(dut, ord("?"))
+    line1 = await line1_task
+    line2 = await _uart_recv_line(dut)
+    assert "A=1F" in line1
+    assert "D=20" in line1
+    assert "M=SET" in line1
+    assert line2.startswith("CH=")
+
+    await _uart_send_text(dut, "A=2G")
+    line1_task = cocotb.start_soon(_uart_recv_line(dut))
+    await _uart_send_byte(dut, ord("?"))
+    line1 = await line1_task
+    line2 = await _uart_recv_line(dut)
+    assert "A=1F" in line1
+    assert line2.startswith("CH=")
 
 
 @cocotb.test()

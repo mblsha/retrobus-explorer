@@ -27,9 +27,9 @@ use super::protocol::{
     sample_misc_value,
 };
 
-type AddrSampleState = StableSampleState<20, 32>;
-type DataSampleState = StableSampleState<8, 32>;
-type MiscSampleState = StableSampleState<11, 32>;
+type AddrSampleState = StableSampleState<20, 8>;
+type DataSampleState = StableSampleState<8, 8>;
+type MiscSampleState = StableSampleState<11, 8>;
 
 struct QueuedSample {
     valid: bool,
@@ -93,7 +93,7 @@ entity organizer_monitor_uart<#uint WIDTH>(
     sample_valid: bool,
     clk_uart: clock,
 ) -> bool {
-    let uart = inst async_uart_monitor::<WIDTH, 4, 3, 400_000_000, 100_000_000>(
+    let uart = inst async_uart_monitor::<WIDTH, 4, 3, 100_000_000, 100_000_000>(
         clk,
         rst,
         sample,
@@ -118,9 +118,9 @@ fn empty_queued_samples() -> OrganizerQueuedSamples {
 
 pub(lib) fn reset_monitor_state() -> OrganizerMonitorState {
     OrganizerMonitorState$(
-        addr: stable_sample_reset::<20, 32>(0),
-        data: stable_sample_reset::<8, 32>(0),
-        misc: stable_sample_reset::<11, 32>(0),
+        addr: stable_sample_reset::<20, 8>(0),
+        data: stable_sample_reset::<8, 8>(0),
+        misc: stable_sample_reset::<11, 8>(0),
         queued: empty_queued_samples(),
         overflow_count: 0,
     )
