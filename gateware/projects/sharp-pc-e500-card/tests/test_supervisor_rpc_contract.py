@@ -19,6 +19,10 @@ if str(SCRIPT_PATH.parent) not in sys.path:
 
 def load_python_supervisor_module():
     sys.modules.setdefault("serial", types.SimpleNamespace())
+    ft600_stub = types.ModuleType("pc_e500_ft600")
+    ft600_stub.Ft600Capture = object
+    ft600_stub.preview_event_stream = lambda *_args, **_kwargs: []
+    sys.modules[ft600_stub.__name__] = ft600_stub
     spec = importlib.util.spec_from_file_location("pc_e500_expd_script", SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
