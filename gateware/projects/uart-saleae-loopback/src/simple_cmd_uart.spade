@@ -1,0 +1,364 @@
+use std::conv::concat_arrays;
+
+use shared_components::{
+    ascii::{DigitDecode, digit_char},
+    message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_byte, tx_req_none},
+};
+
+pub enum Mode {
+    ClockTester,
+    Echo,
+}
+
+impl Mode {
+    pub fn is_echo(self) -> bool {
+        if let Self::Echo = self { true } else { false }
+    }
+
+    fn char(self) -> uint<8> {
+        match self {
+            Self::ClockTester => b'C',
+            Self::Echo => b'E',
+        }
+    }
+}
+
+struct MsgTemplate<#uint CAPACITY> {
+    len: uint<8>,
+    bytes: [uint<8>; CAPACITY],
+}
+
+struct RxByteDecode {
+    byte: uint<8>,
+    upper: uint<8>,
+    digit: DigitDecode,
+}
+
+fn max_supported_freq_code() -> uint<4> {
+    5
+}
+
+fn default_rx_byte_decode() -> RxByteDecode {
+    RxByteDecode$(
+        byte: 0,
+        upper: 0,
+        digit: DigitDecode$(valid: false, value: 0),
+    )
+}
+
+entity decode_rx_byte(
+    clk: clock,
+    rx_valid: bool,
+    rx_parity_error: bool,
+    rx_byte: uint<8>,
+) -> Option<RxByteDecode> {
+    let max_freq_code = max_supported_freq_code();
+    let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
+
+    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
+        let _ = clk;
+        RxByteDecode$(
+            byte: byte,
+            upper: byte.to_upper(),
+            digit: byte.decode_digit_max(max_freq_code),
+        )
+    })
+}
+
+fn pad_message<#uint N, #uint CAPACITY>(message: [uint<8>; N]) -> [uint<8>; CAPACITY] {
+    concat_arrays(message, [0; CAPACITY - N])
+}
+
+fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate<64> {
+    let len: uint<8> = N;
+    MsgTemplate$(len: len, bytes: pad_message::<N, 64>(message))
+}
+
+fn mode_freq_suffix(mode: uint<8>, freq: uint<8>) -> [uint<8>; 10] {
+    let mode_field = concat_arrays(b" M=", [mode]);
+    let freq_field = concat_arrays(b" F=", [freq]);
+    concat_arrays(concat_arrays(mode_field, freq_field), b"\r\n")
+}
+
+pub enum CmdParseState {
+    Idle,
+    Bang,
+    Freq,
+}
+
+impl CmdParseState {
+    pub fn is_idle(self) -> bool {
+        if let Self::Idle = self { true } else { false }
+    }
+}
+
+enum MsgKind {
+    None,
+    Ready,
+    Help,
+    Status,
+    Ok,
+    ErrCmd,
+    ErrFreq,
+}
+
+impl MsgKind {
+    fn is_none(self) -> bool {
+        if let Self::None = self { true } else { false }
+    }
+
+    fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate<64> {
+        let m = mode.char();
+        let f = digit_char(freq_code);
+
+        match self {
+            Self::None => MsgTemplate$(len: 0, bytes: [0; 64]),
+            Self::Ready => msg_template_bytes(concat_arrays(b"RBX READY", mode_freq_suffix(m, f))),
+            Self::Help => msg_template_bytes(b"RBX HELP !H !S !C !E !F0-5 M:CLOCK E:ECHO\r\n"),
+            Self::Status => msg_template_bytes(concat_arrays(b"RBX STATUS", mode_freq_suffix(m, f))),
+            Self::Ok => msg_template_bytes(concat_arrays(b"RBX OK", mode_freq_suffix(m, f))),
+            Self::ErrCmd => msg_template_bytes(b"RBX ERR CMD\r\n"),
+            Self::ErrFreq => msg_template_bytes(b"RBX ERR FREQ\r\n"),
+        }
+    }
+
+    fn byte(self, idx: uint<8>, mode: Mode, freq_code: uint<4>) -> TxReq8 {
+        let msg_tpl = self.template(mode, freq_code);
+        if idx < msg_tpl.len {
+            tx_req_byte(msg_tpl.bytes[trunc(idx)])
+        } else {
+            tx_req_none()
+        }
+    }
+}
+
+pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk400: bool) -> bool {
+    let bits = clk_div.to_bits();
+    let sources: [bool; 6] = [
+        bits[4],
+        bits[3],
+        bits[2],
+        bits[1],
+        clk200,
+        clk400,
+    ];
+    let idx_u4: uint<4> = if freq_code > max_supported_freq_code() { 0 } else { freq_code };
+    let idx: uint<3> = trunc(idx_u4);
+    sources[idx]
+}
+
+fn next_cmd_state(
+    state: CmdParseState,
+    rx_ok: bool,
+    rx_byte: uint<8>,
+    rx_upper: uint<8>,
+) -> CmdParseState {
+    if !rx_ok {
+        state
+    } else {
+        match state {
+            CmdParseState::Idle if rx_byte == b'!' => CmdParseState::Bang(),
+            CmdParseState::Bang if rx_upper == b'F' => CmdParseState::Freq(),
+            _ => CmdParseState::Idle(),
+        }
+    }
+}
+
+struct CmdDecode {
+    msg: MsgKind,
+    msg_valid: bool,
+    mode_write: bool,
+    mode_value: Mode,
+    freq_write: bool,
+    freq_value: uint<4>,
+}
+
+fn cmd_decode_none() -> CmdDecode {
+    CmdDecode$(
+        msg: MsgKind::None(),
+        msg_valid: false,
+        mode_write: false,
+        mode_value: Mode::ClockTester(),
+        freq_write: false,
+        freq_value: 0,
+    )
+}
+
+fn cmd_decode_msg(msg: MsgKind) -> CmdDecode {
+    CmdDecode$(
+        msg: msg,
+        msg_valid: true,
+        mode_write: false,
+        mode_value: Mode::ClockTester(),
+        freq_write: false,
+        freq_value: 0,
+    )
+}
+
+fn cmd_decode_set_mode(mode: Mode) -> CmdDecode {
+    CmdDecode$(
+        msg: MsgKind::Ok(),
+        msg_valid: true,
+        mode_write: true,
+        mode_value: mode,
+        freq_write: false,
+        freq_value: 0,
+    )
+}
+
+fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
+    CmdDecode$(
+        msg: MsgKind::Ok(),
+        msg_valid: true,
+        mode_write: false,
+        mode_value: Mode::ClockTester(),
+        freq_write: true,
+        freq_value: freq,
+    )
+}
+
+fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
+    if rx_upper == b'H' {
+        cmd_decode_msg(MsgKind::Help())
+    } else if rx_upper == b'S' {
+        cmd_decode_msg(MsgKind::Status())
+    } else if rx_upper == b'C' {
+        cmd_decode_set_mode(Mode::ClockTester())
+    } else if rx_upper == b'E' {
+        cmd_decode_set_mode(Mode::Echo())
+    } else if rx_upper == b'F' {
+        cmd_decode_none()
+    } else {
+        cmd_decode_msg(MsgKind::ErrCmd())
+    }
+}
+
+fn decode_cmd(
+    state: CmdParseState,
+    rx_ok: bool,
+    rx_upper: uint<8>,
+    rx_digit: DigitDecode,
+) -> CmdDecode {
+    if !rx_ok {
+        cmd_decode_none()
+    } else {
+        match state {
+            CmdParseState::Bang => decode_bang_cmd(rx_upper),
+            CmdParseState::Freq if rx_digit.valid => cmd_decode_set_freq(rx_digit.value),
+            CmdParseState::Freq => cmd_decode_msg(MsgKind::ErrFreq()),
+            _ => cmd_decode_none(),
+        }
+    }
+}
+
+pub struct SimpleCmdUartOut {
+    mode: Mode,
+    freq_code: uint<4>,
+    cmd_state: CmdParseState,
+    tx_msg_none: bool,
+    tx_req: TxReq8,
+    payload_rx: bool,
+}
+
+fn tx_stream_step(
+    tx_state: ByteMsgStreamState<MsgKind, 8>,
+    mode: Mode,
+    freq_code: uint<4>,
+    tx_busy: bool,
+    next_msg_valid: bool,
+    next_msg: MsgKind,
+) -> ByteMsgStreamOut<MsgKind, 8> {
+    tx_state.step_with(
+        MsgKind::None(),
+        fn |msg| { msg.is_none() },
+        fn |msg, idx| { msg.byte(idx, mode, freq_code) },
+        tx_busy,
+        next_msg_valid,
+        next_msg,
+    )
+}
+
+pub entity simple_cmd_uart_core(
+    clk: clock,
+    rst: bool,
+    rx_valid: bool,
+    rx_parity_error: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+) -> SimpleCmdUartOut {
+    let rx_decoded = inst decode_rx_byte(clk, rx_valid, rx_parity_error, rx_byte);
+    let (rx_ok, rx_decode) = match rx_decoded {
+        Some(decoded) => (true, decoded),
+        None => (false, default_rx_byte_decode()),
+    };
+
+    reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {
+        next_cmd_state(cmd_state, rx_ok, rx_decode.byte, rx_decode.upper)
+    };
+    let cmd_decode = decode_cmd(cmd_state, rx_ok, rx_decode.upper, rx_decode.digit);
+
+    reg(clk) mode: Mode reset(rst: Mode::ClockTester()) = {
+        if cmd_decode.mode_write {
+            cmd_decode.mode_value
+        } else {
+            mode
+        }
+    };
+
+    reg(clk) freq_code: uint<4> reset(rst: 0) = {
+        if cmd_decode.freq_write {
+            cmd_decode.freq_value
+        } else {
+            freq_code
+        }
+    };
+
+    reg(clk) tx_state: ByteMsgStreamState<MsgKind, 8>
+        reset(rst: ByteMsgStreamState$(cur_msg: MsgKind::Ready(), cur_idx: 0, pending_msg: MsgKind::None()))
+        = {
+        tx_stream_step(tx_state, mode, freq_code, tx_busy, cmd_decode.msg_valid, cmd_decode.msg).state
+    };
+
+    let tx_stream = tx_stream_step(tx_state, mode, freq_code, tx_busy, false, MsgKind::None());
+    let tx_msg_none = tx_stream.msg_none;
+
+    let rx_is_bang = rx_ok && rx_decode.byte == b'!';
+    let payload_rx = mode.is_echo() && cmd_state.is_idle() && rx_ok && !rx_is_bang;
+
+    SimpleCmdUartOut$(
+        mode: mode,
+        freq_code: freq_code,
+        cmd_state: cmd_state,
+        tx_msg_none: tx_msg_none,
+        tx_req: tx_stream.tx_req,
+        payload_rx: payload_rx,
+    )
+}
+
+pub fn saleae_outputs(
+    mode_is_echo: bool,
+    selected_clk: bool,
+    clk_100_div: bool,
+    clk200_probe: bool,
+    clk400_probe: bool,
+    clk_50_div: bool,
+    usb_rx: bool,
+    usb_tx_line: bool,
+    tx6_line: bool,
+    tx7_line: bool,
+) -> [bool; 8] {
+    if mode_is_echo {
+        [
+            clk_100_div,
+            clk200_probe,
+            clk400_probe,
+            clk_50_div,
+            usb_rx,
+            usb_tx_line,
+            tx6_line,
+            tx7_line,
+        ]
+    } else {
+        [selected_clk, false, false, false, false, false, false, false]
+    }
+}

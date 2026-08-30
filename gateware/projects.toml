@@ -1,0 +1,51 @@
+version = 1
+
+[[projects]]
+path = "projects/ft-uart-hex-bridge"
+kind = "diagnostic"
+ci = true
+
+[[projects]]
+path = "projects/pin-tester"
+kind = "diagnostic"
+ci = true
+
+[[projects]]
+path = "projects/sharp-organizer-card"
+kind = "application"
+ci = true
+
+[[projects]]
+path = "projects/sharp-pc-e500-card"
+kind = "application"
+ci = true
+
+[[projects]]
+path = "projects/sharp-pc-g850-bus"
+kind = "application"
+ci = true
+
+[[projects]]
+path = "projects/sharp-pc-g850-streaming-rom"
+kind = "application"
+ci = true
+
+[[projects]]
+path = "projects/test-minimal"
+kind = "example"
+ci = true
+
+[[projects]]
+path = "projects/uart-saleae-loopback"
+kind = "diagnostic"
+ci = true
+
+[[projects]]
+path = "projects/binary-counter"
+kind = "example"
+ci = true
+
+[[projects]]
+path = "projects/ws2812b"
+kind = "example"
+ci = true

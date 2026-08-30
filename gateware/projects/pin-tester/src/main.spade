@@ -1,0 +1,158 @@
+mod build_info;
+
+use shared_components::{
+    config::{au_usb_uart_rx, au_usb_uart_tx8_req_tap},
+    message_stream::{TxReq8, tx_req_byte, tx_req_none},
+    primitives::reset_conditioner,
+    serial::UartLineBusyPort,
+};
+
+enum PinTesterMode {
+    Receive,
+    Send,
+}
+
+impl PinTesterMode {
+    fn is_send(self) -> bool {
+        if let Self::Send = self { true } else { false }
+    }
+}
+
+struct PinTesterState {
+    mode: PinTesterMode,
+    bank: uint<3>,
+    counter: uint<128>,
+}
+
+struct PinTesterStep {
+    next_state: PinTesterState,
+    echo: TxReq8,
+}
+
+fn reset_pin_tester_state() -> PinTesterState {
+    PinTesterState$(
+        mode: PinTesterMode::Receive(),
+        bank: 0,
+        counter: 0,
+    )
+}
+
+fn is_bank_command(byte: uint<8>) -> bool {
+    byte >= b'0' && byte <= b'5'
+}
+
+fn is_send_command(byte: uint<8>) -> bool {
+    byte == b's' || byte == b'S'
+}
+
+fn is_receive_command(byte: uint<8>) -> bool {
+    byte == b'r' || byte == b'R'
+}
+
+fn command_bank(byte: uint<8>) -> uint<3> {
+    trunc(byte -. b'0')
+}
+
+fn pin_tester_step(
+    state: PinTesterState,
+    rx_valid: bool,
+    rx_byte: uint<8>,
+) -> PinTesterStep {
+    let send_mode = state.mode.is_send();
+    let bank_command = rx_valid && is_bank_command(rx_byte);
+    let switch_to_send = rx_valid && !send_mode && is_send_command(rx_byte);
+    let switch_to_receive = rx_valid && send_mode && is_receive_command(rx_byte);
+
+    let counter = if send_mode {
+        state.counter +. 1
+    } else {
+        state.counter
+    };
+    let mode = if switch_to_send {
+        PinTesterMode::Send()
+    } else if switch_to_receive {
+        PinTesterMode::Receive()
+    } else {
+        state.mode
+    };
+    let bank = if bank_command {
+        command_bank(rx_byte)
+    } else if switch_to_send || switch_to_receive {
+        0
+    } else {
+        state.bank
+    };
+    let accepted = bank_command || switch_to_send || switch_to_receive;
+
+    PinTesterStep$(
+        next_state: PinTesterState$(
+            mode: mode,
+            bank: bank,
+            counter: counter,
+        ),
+        echo: if accepted { tx_req_byte(rx_byte) } else { tx_req_none() },
+    )
+}
+
+fn receive_bank_byte(ffc_data: uint<48>, bank: uint<3>) -> uint<8> {
+    let bank_wide: uint<48> = zext(bank);
+    let shift = bank_wide << 3;
+    trunc(ffc_data >> shift)
+}
+
+fn send_counter_byte(counter: uint<128>, bank: uint<3>) -> uint<8> {
+    let bank_wide: uint<128> = zext(bank);
+    let shift = bank_wide << 1;
+    trunc(counter >> shift)
+}
+
+#[no_mangle(all)]
+entity main_core(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+    ffc_data_in: uint<48>,
+    ffc_data_drive: inv &uint<48>,
+    ffc_data_oe: inv &uint<48>,
+    saleae: inv &[bool; 8],
+    send_mode_debug: inv &bool,
+    bank_debug: inv &uint<3>,
+    counter_debug: inv &uint<128>,
+) {
+    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
+    let rx_valid = rx.valid && !rx.parity_error;
+
+    reg(clk) state: PinTesterState
+        reset(rst: reset_pin_tester_state())
+        = pin_tester_step(state, rx_valid, rx.byte).next_state;
+    let step = pin_tester_step(state, rx_valid, rx.byte);
+
+    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
+    let _tx = inst au_usb_uart_tx8_req_tap(
+        clk,
+        rst,
+        false,
+        step.echo,
+        uart_w.line,
+        uart_w.busy,
+    );
+
+    let send_mode = state.mode.is_send();
+    let receive_byte = receive_bank_byte(ffc_data_in, state.bank);
+    let send_byte = send_counter_byte(state.counter, state.bank);
+    let display_byte = if send_mode { send_byte } else { receive_byte };
+    let ffc_drive: uint<48> = zext(send_byte);
+    let ffc_oe: uint<48> = if send_mode { 255 } else { 0 };
+
+    set led = &display_byte.to_bits();
+    set usb_tx = &*uart.line;
+    set ffc_data_drive = &ffc_drive;
+    set ffc_data_oe = &ffc_oe;
+    set saleae = &display_byte.to_bits();
+    set send_mode_debug = &send_mode;
+    set bank_debug = &state.bank;
+    set counter_debug = &state.counter;
+}

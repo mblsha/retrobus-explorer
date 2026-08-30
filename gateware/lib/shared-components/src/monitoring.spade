@@ -1,0 +1,75 @@
+use super::bridges::{BridgePolicy, uart_fifo_bridge};
+
+pub struct StableSampleState<#uint WIDTH, #uint COUNT_W> {
+    last: uint<WIDTH>,
+    sent: bool,
+    counter: uint<COUNT_W>,
+}
+
+pub struct StableSampleOut<#uint WIDTH, #uint COUNT_W> {
+    next_state: StableSampleState<WIDTH, COUNT_W>,
+    wput: bool,
+}
+
+pub fn stable_sample_reset<#uint WIDTH, #uint COUNT_W>(value: uint<WIDTH>) -> StableSampleState<WIDTH, COUNT_W> {
+    StableSampleState$(
+        last: value,
+        sent: false,
+        counter: 0,
+    )
+}
+
+pub fn stable_sample_step<#uint WIDTH, #uint COUNT_W>(
+    state: StableSampleState<WIDTH, COUNT_W>,
+    current: uint<WIDTH>,
+    threshold: uint<COUNT_W>,
+) -> StableSampleOut<WIDTH, COUNT_W> {
+    let changed = state.last != current;
+    let stable = !changed;
+    let has_waited_long_enough = state.counter > threshold;
+    let should_send = stable && !state.sent && has_waited_long_enough;
+    StableSampleOut$(
+        next_state: StableSampleState$(
+            last: if changed { current } else { state.last },
+            sent: if changed { false } else { state.sent || should_send },
+            counter: if changed { 0 } else { state.counter +. 1 },
+        ),
+        wput: should_send,
+    )
+}
+
+pub struct AsyncUartMonitorOut<#uint WIDTH> {
+    line: bool,
+    busy: bool,
+    fifo_full: bool,
+    fifo_empty: bool,
+    fifo_dout: uint<WIDTH>,
+}
+
+pub entity async_uart_monitor<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint TX_CLK_FREQ, #uint BAUD>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<WIDTH>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+) -> AsyncUartMonitorOut<WIDTH> {
+    let bridge = inst uart_fifo_bridge::<WIDTH, ENTRIES, SYNC_STAGES, TX_CLK_FREQ, BAUD, 1>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        true,
+        BridgePolicy::QueueOnly(),
+    );
+
+    AsyncUartMonitorOut$(
+        line: bridge.line,
+        busy: bridge.busy,
+        fifo_full: bridge.fifo_full,
+        fifo_empty: bridge.fifo_empty,
+        fifo_dout: bridge.fifo_dout,
+    )
+}

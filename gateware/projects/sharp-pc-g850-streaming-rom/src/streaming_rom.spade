@@ -1,0 +1,395 @@
+pub type RomData = uint<8>;
+pub type RomAddr = uint<16>;
+pub type RomBank = uint<2>;
+pub type RamAddr = uint<15>;
+pub type FtWord = uint<16>;
+
+#[no_mangle(all)]
+extern entity simple_dual_port_ram<#uint WIDTH, #uint ENTRIES>(
+    wclk: clock,
+    waddr: uint<{uint_bits_to_fit(ENTRIES - 1)}>,
+    write_data: uint<WIDTH>,
+    write_enable: bool,
+    rclk: clock,
+    raddr: uint<{uint_bits_to_fit(ENTRIES - 1)}>,
+    read_data: inv &uint<WIDTH>,
+);
+
+pub enum ReadState {
+    Init,
+    FillBank0,
+    FillBank1,
+    Ready,
+    HoldData,
+}
+
+pub enum StreamingState {
+    Ready,
+    RequestData,
+    GetSize,
+    FillBank,
+    FillBank2,
+    Done,
+}
+
+pub struct StreamingRomState {
+    read_state: ReadState,
+    streaming_state: StreamingState,
+    num_data_request: FtWord,
+    num_streaming_bank: RomBank,
+    streaming_data_size: FtWord,
+    streaming_index: FtWord,
+    write_byte2: RomData,
+    last_bank: RomBank,
+    last_addr: RomAddr,
+}
+
+pub struct StreamingRomInputs {
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    ft_ui_dout: FtWord,
+    mreq_fall: bool,
+    mreq_rise: bool,
+    addr_sync: RomAddr,
+    addr_bnk_sync: RomBank,
+    addr_cerom2_sync: bool,
+}
+
+pub struct StreamingRomStep {
+    next_state: StreamingRomState,
+    ft_ui_din: FtWord,
+    ft_ui_din_be: uint<2>,
+    ft_ui_din_valid: bool,
+    ft_ui_dout_get: bool,
+    ram_waddr: RamAddr,
+    ram_write_data: RomData,
+    ram_write_enable: bool,
+    ram_raddr: RamAddr,
+    data_oe: bool,
+}
+
+pub struct StreamingRomOut {
+    ft_ui_din: FtWord,
+    ft_ui_din_be: uint<2>,
+    ft_ui_din_valid: bool,
+    ft_ui_dout_get: bool,
+    data_drive: RomData,
+    data_oe: bool,
+    read_state_code: uint<3>,
+    streaming_state_code: uint<3>,
+    num_streaming_bank: RomBank,
+    num_data_request: FtWord,
+    streaming_data_size: FtWord,
+    streaming_index: FtWord,
+}
+
+pub fn reset_streaming_rom_state() -> StreamingRomState {
+    StreamingRomState$(
+        read_state: ReadState::Init(),
+        streaming_state: StreamingState::Ready(),
+        num_data_request: 0,
+        num_streaming_bank: 0,
+        streaming_data_size: 0,
+        streaming_index: 0,
+        write_byte2: 0,
+        last_bank: 0,
+        last_addr: 0,
+    )
+}
+
+pub fn read_state_code(state: ReadState) -> uint<3> {
+    match state {
+        ReadState::Init => 0,
+        ReadState::FillBank0 => 1,
+        ReadState::FillBank1 => 2,
+        ReadState::Ready => 3,
+        ReadState::HoldData => 4,
+    }
+}
+
+pub fn streaming_state_code(state: StreamingState) -> uint<3> {
+    match state {
+        StreamingState::Ready => 0,
+        StreamingState::RequestData => 1,
+        StreamingState::GetSize => 2,
+        StreamingState::FillBank => 3,
+        StreamingState::FillBank2 => 4,
+        StreamingState::Done => 5,
+    }
+}
+
+fn bank_ram_addr(bank: RomBank, offset: RomAddr) -> RamAddr {
+    let bank_base: uint<17> = zext(bank) << 14;
+    let offset_wide: uint<17> = zext(offset);
+    trunc(bank_base + offset_wide)
+}
+
+impl StreamingState {
+    fn is_ready(self) -> bool {
+        match self {
+            Self::Ready => true,
+            _ => false,
+        }
+    }
+
+    fn is_done(self) -> bool {
+        match self {
+            Self::Done => true,
+            _ => false,
+        }
+    }
+}
+
+fn with_read_state(state: StreamingRomState, read_state: ReadState) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: read_state,
+        streaming_state: state.streaming_state,
+        num_data_request: state.num_data_request,
+        num_streaming_bank: state.num_streaming_bank,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index,
+        write_byte2: state.write_byte2,
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+fn with_streaming_state(
+    state: StreamingRomState,
+    streaming_state: StreamingState,
+) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: state.read_state,
+        streaming_state: streaming_state,
+        num_data_request: state.num_data_request,
+        num_streaming_bank: state.num_streaming_bank,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index,
+        write_byte2: state.write_byte2,
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+fn begin_bank_fill(state: StreamingRomState, bank: RomBank) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: state.read_state,
+        streaming_state: StreamingState::RequestData(),
+        num_data_request: state.num_data_request,
+        num_streaming_bank: bank,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index,
+        write_byte2: state.write_byte2,
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+fn finish_initial_bank(
+    state: StreamingRomState,
+    next_read_state: ReadState,
+) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: next_read_state,
+        streaming_state: StreamingState::Ready(),
+        num_data_request: state.num_data_request,
+        num_streaming_bank: state.num_streaming_bank,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index,
+        write_byte2: state.write_byte2,
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+fn capture_read(state: StreamingRomState, inputs: StreamingRomInputs) -> StreamingRomState {
+    let selected_streaming_bank = inputs.addr_bnk_sync == state.num_streaming_bank;
+    StreamingRomState$(
+        read_state: ReadState::HoldData(),
+        streaming_state: if selected_streaming_bank {
+            StreamingState::RequestData()
+        } else {
+            state.streaming_state
+        },
+        num_data_request: state.num_data_request,
+        num_streaming_bank: if selected_streaming_bank {
+            if state.num_streaming_bank == 0 { 1 } else { 0 }
+        } else {
+            state.num_streaming_bank
+        },
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index,
+        write_byte2: state.write_byte2,
+        last_bank: inputs.addr_bnk_sync,
+        last_addr: inputs.addr_sync -. 0x8000,
+    )
+}
+
+fn accept_request(state: StreamingRomState) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: state.read_state,
+        streaming_state: StreamingState::GetSize(),
+        num_data_request: state.num_data_request +. 1,
+        num_streaming_bank: state.num_streaming_bank,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index,
+        write_byte2: state.write_byte2,
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+fn accept_size(state: StreamingRomState, size: FtWord) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: state.read_state,
+        streaming_state: StreamingState::FillBank(),
+        num_data_request: state.num_data_request,
+        num_streaming_bank: state.num_streaming_bank,
+        streaming_data_size: size,
+        streaming_index: 0,
+        write_byte2: state.write_byte2,
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+fn accept_low_byte(state: StreamingRomState, word: FtWord) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: state.read_state,
+        streaming_state: StreamingState::FillBank2(),
+        num_data_request: state.num_data_request,
+        num_streaming_bank: state.num_streaming_bank,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index +. 1,
+        write_byte2: trunc(word >> 8),
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+fn write_high_byte(state: StreamingRomState) -> StreamingRomState {
+    StreamingRomState$(
+        read_state: state.read_state,
+        streaming_state: StreamingState::FillBank(),
+        num_data_request: state.num_data_request,
+        num_streaming_bank: state.num_streaming_bank,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index +. 1,
+        write_byte2: state.write_byte2,
+        last_bank: state.last_bank,
+        last_addr: state.last_addr,
+    )
+}
+
+struct ReadStep {
+    next_state: StreamingRomState,
+}
+
+fn step_read(state: StreamingRomState, inputs: StreamingRomInputs) -> ReadStep {
+    let next_state = match state.read_state {
+        ReadState::Init => with_read_state(state, ReadState::FillBank0()),
+        ReadState::FillBank0 if state.streaming_state.is_ready() => begin_bank_fill(state, 0),
+        ReadState::FillBank0 if state.streaming_state.is_done() => finish_initial_bank(state, ReadState::FillBank1()),
+        ReadState::FillBank1 if state.streaming_state.is_ready() => begin_bank_fill(state, 1),
+        ReadState::FillBank1 if state.streaming_state.is_done() => finish_initial_bank(state, ReadState::Ready()),
+        ReadState::Ready if inputs.mreq_fall && !inputs.addr_cerom2_sync => capture_read(state, inputs),
+        ReadState::HoldData if inputs.mreq_rise => with_read_state(state, ReadState::Ready()),
+        _ => state,
+    };
+    ReadStep$(next_state: next_state)
+}
+
+impl StreamingRomState {
+    pub fn step(self, inputs: StreamingRomInputs) -> StreamingRomStep {
+        // Lucid's read-state case runs before its streaming-state case. Both
+        // can update streaming_state, so preserve that ordering explicitly.
+        let read_step = step_read(self, inputs);
+        let read_next = read_step.next_state;
+
+        let request_fire = if let StreamingState::RequestData = self.streaming_state {
+            !inputs.ft_ui_din_full
+        } else {
+            false
+        };
+        let size_fire = if let StreamingState::GetSize = self.streaming_state {
+            !inputs.ft_ui_dout_empty
+        } else {
+            false
+        };
+        let low_byte_fire = if let StreamingState::FillBank = self.streaming_state {
+            self.streaming_index < self.streaming_data_size && !inputs.ft_ui_dout_empty
+        } else {
+            false
+        };
+        let high_byte_fire = if let StreamingState::FillBank2 = self.streaming_state {
+            true
+        } else {
+            false
+        };
+
+        let stream_next = match self.streaming_state {
+            StreamingState::RequestData if request_fire => accept_request(read_next),
+            StreamingState::GetSize if size_fire => accept_size(read_next, inputs.ft_ui_dout),
+            StreamingState::FillBank if self.streaming_index >= self.streaming_data_size => with_streaming_state(read_next, StreamingState::Done()),
+            StreamingState::FillBank if low_byte_fire => accept_low_byte(read_next, inputs.ft_ui_dout),
+            StreamingState::FillBank2 => write_high_byte(read_next),
+            _ => read_next,
+        };
+
+        let ram_raddr = if let ReadState::HoldData = self.read_state {
+            bank_ram_addr(self.last_bank, self.last_addr)
+        } else {
+            0
+        };
+        let ram_waddr = bank_ram_addr(self.num_streaming_bank, self.streaming_index);
+
+        StreamingRomStep$(
+            next_state: stream_next,
+            ft_ui_din: self.num_data_request,
+            ft_ui_din_be: if request_fire { 0b11 } else { 0 },
+            ft_ui_din_valid: request_fire,
+            ft_ui_dout_get: size_fire || low_byte_fire,
+            ram_waddr: ram_waddr,
+            ram_write_data: if high_byte_fire { self.write_byte2 } else { trunc(inputs.ft_ui_dout) },
+            ram_write_enable: low_byte_fire || high_byte_fire,
+            ram_raddr: ram_raddr,
+            data_oe: if let ReadState::HoldData = self.read_state { true } else { false },
+        )
+    }
+}
+
+pub entity streaming_rom_core(
+    clk: clock,
+    rst: bool,
+    inputs: StreamingRomInputs,
+) -> StreamingRomOut {
+    reg(clk) state: StreamingRomState reset(rst: reset_streaming_rom_state()) =
+        state.step(inputs).next_state;
+    let step = state.step(inputs);
+
+    let (ram_read_data, ram_read_data_w): (&RomData, inv &RomData) = port;
+    inst simple_dual_port_ram::<8, 32768>(
+        clk,
+        step.ram_waddr,
+        step.ram_write_data,
+        step.ram_write_enable,
+        clk,
+        step.ram_raddr,
+        ram_read_data_w,
+    );
+
+    StreamingRomOut$(
+        ft_ui_din: step.ft_ui_din,
+        ft_ui_din_be: step.ft_ui_din_be,
+        ft_ui_din_valid: step.ft_ui_din_valid,
+        ft_ui_dout_get: step.ft_ui_dout_get,
+        data_drive: *ram_read_data,
+        data_oe: step.data_oe,
+        read_state_code: read_state_code(state.read_state),
+        streaming_state_code: streaming_state_code(state.streaming_state),
+        num_streaming_bank: state.num_streaming_bank,
+        num_data_request: state.num_data_request,
+        streaming_data_size: state.streaming_data_size,
+        streaming_index: state.streaming_index,
+    )
+}

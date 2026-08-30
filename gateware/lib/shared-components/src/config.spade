@@ -1,0 +1,210 @@
+use super::{
+    bridges::{BridgePolicy, UartBridgeOut, UartFifoBridgeOut, uart_fifo_bridge},
+    memory::{FifoOut, sync_fifo},
+    message_stream::TxReq8,
+    serial::{BitTime, FtBe, FtData, StopBits, UartRxOut, ft_tap, uart_rx, uart_tx_tap},
+};
+
+fn au_usb_uart_bit_time() -> BitTime { 100 }
+fn au_usb_uart_stop_bits() -> StopBits { 1 }
+
+#[inline]
+pub entity au_usb_uart_rx(
+    clk: clock,
+    rst: bool,
+    rx: bool,
+) -> UartRxOut<uint<8>> {
+    inst uart_rx::<8>(clk, rst, rx, au_usb_uart_bit_time(), false, au_usb_uart_stop_bits())
+}
+
+#[inline]
+pub entity au_usb_uart_tx8_tap(
+    clk: clock,
+    rst: bool,
+    block: bool,
+    data: uint<8>,
+    new_data: bool,
+    tx_line: inv &bool,
+    busy: inv &bool,
+) {
+    inst uart_tx_tap::<100_000_000, 1_000_000, 8>(
+        clk,
+        rst,
+        block,
+        data,
+        new_data,
+        tx_line,
+        busy,
+    );
+}
+
+#[inline]
+pub entity au_usb_uart_tx8_req_tap(
+    clk: clock,
+    rst: bool,
+    block: bool,
+    tx_req: TxReq8,
+    tx_line: inv &bool,
+    busy: inv &bool,
+) {
+    let (busy_sig, busy_sig_w): (&bool, inv &bool) = port;
+    let tx_fire = tx_req.valid && !block && !*busy_sig;
+
+    inst au_usb_uart_tx8_tap(
+        clk,
+        rst,
+        block,
+        tx_req.byte,
+        tx_fire,
+        tx_line,
+        busy_sig_w,
+    );
+    set busy = &*busy_sig;
+}
+
+#[inline]
+pub entity au_stream_fifo_u32(
+    clk: clock,
+    rst: bool,
+    din: uint<32>,
+    wput: bool,
+    rget: bool,
+) -> FifoOut<uint<32>> {
+    inst sync_fifo::<32, 32768>(clk, rst, din, wput, rget)
+}
+
+#[inline]
+pub entity au_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD, #uint DROP_COUNT_W>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<WIDTH>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+    policy: BridgePolicy,
+) -> UartBridgeOut<WIDTH, DROP_COUNT_W> {
+    // Alchitry Au preset bridge wrapper: fixed 400 MHz TX-domain clock.
+    inst uart_fifo_bridge::<WIDTH, ENTRIES, 3, 400_000_000, BAUD, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    )
+}
+
+pub struct AuDualBridgeOut<TData, #uint DROP_COUNT_W> {
+    tx_a: UartFifoBridgeOut<TData, DROP_COUNT_W>,
+    tx_b: UartFifoBridgeOut<TData, DROP_COUNT_W>,
+}
+
+entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B, #uint DROP_COUNT_W>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<WIDTH>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+    policy: BridgePolicy,
+) -> AuDualBridgeOut<uint<WIDTH>, DROP_COUNT_W> {
+    let tx_a = inst au_bridge::<WIDTH, ENTRIES, BAUD_A, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    );
+    let tx_b = inst au_bridge::<WIDTH, ENTRIES, BAUD_B, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    );
+    AuDualBridgeOut$(
+        tx_a: tx_a,
+        tx_b: tx_b,
+    )
+}
+
+#[inline]
+pub entity au_dual_bridge_u8x8_100_200<#uint DROP_COUNT_W>(
+    wclk: clock,
+    wrst: bool,
+    din: uint<8>,
+    wput: bool,
+    rclk: clock,
+    rrst: bool,
+    send_enable: bool,
+    policy: BridgePolicy,
+) -> AuDualBridgeOut<uint<8>, DROP_COUNT_W> {
+    inst au_dual_bridge::<8, 8, 100_000_000, 200_000_000, DROP_COUNT_W>(
+        wclk,
+        wrst,
+        din,
+        wput,
+        rclk,
+        rrst,
+        send_enable,
+        policy,
+    )
+}
+
+#[inline]
+pub entity au_ft_tap_u16(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: FtData,
+    ft_be_in: FtBe,
+    ui_din: FtData,
+    ui_din_be: FtBe,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+    ft_data_out: inv &FtData,
+    ft_be_out: inv &FtBe,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &FtData,
+    ui_dout_be: inv &FtBe,
+    ui_dout_empty: inv &bool,
+) {
+    #[verilog_attrs(keep_hierarchy = "yes")]
+    inst ft_tap::<16, 2, 8192, 64, 1, 0>(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_dout_get,
+        ft_data_out,
+        ft_be_out,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ui_din_full,
+        ui_dout,
+        ui_dout_be,
+        ui_dout_empty,
+    );
+}

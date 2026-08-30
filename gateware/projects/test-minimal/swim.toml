@@ -1,0 +1,15 @@
+name = "test_minimal_spade"
+preprocessing = ["python3 ../../tools/gen_build_info.py --project ."]
+
+[libraries]
+shared_components = { path = "../../lib/shared-components" }
+
+[constraints]
+auto = true
+
+[tooling]
+top = "main"
+test_module = "test_minimal"
+
+[simulation]
+testbench_dir = "test"

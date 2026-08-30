@@ -1,0 +1,5 @@
+[libraries.nstd]
+commit = "3c294a83e2414b6f70dce9d6b98f84b824f199d0"
+
+[spade]
+commit = "357c613054b239c3cf6ad535669ccd6170fc5938"

@@ -1,0 +1,47 @@
+pub struct ElasticSlotState<T> {
+    valid: bool,
+    data: T,
+}
+
+pub struct ElasticSlotOut<T> {
+    next_state: ElasticSlotState<T>,
+    pending_valid: bool,
+    pending_data: T,
+    sink_wput: bool,
+    sink_data: T,
+    accepted: bool,
+    dropped: bool,
+}
+
+pub fn elastic_slot_reset<T>(data: T) -> ElasticSlotState<T> {
+    ElasticSlotState$(valid: false, data: data)
+}
+
+pub fn elastic_slot_step<T>(
+    state: ElasticSlotState<T>,
+    capture_valid: bool,
+    capture_data: T,
+    sink_full: bool,
+) -> ElasticSlotOut<T> {
+    let dequeue = state.valid && !sink_full;
+    let accept_new = capture_valid && (!state.valid || dequeue);
+    let drop_new = capture_valid && state.valid && sink_full;
+    ElasticSlotOut$(
+        next_state: ElasticSlotState$(
+            valid: if accept_new {
+                true
+            } else if dequeue {
+                false
+            } else {
+                state.valid
+            },
+            data: if accept_new { capture_data } else { state.data },
+        ),
+        pending_valid: state.valid,
+        pending_data: state.data,
+        sink_wput: dequeue,
+        sink_data: state.data,
+        accepted: accept_new,
+        dropped: drop_new,
+    )
+}

@@ -66,21 +66,25 @@ communication on the system bus and the external bus card.
 
 # Building FPGA Projects
 
-The FPGA gateware uses a FuseSoC-based build system with Chisel HDL.
+The active FPGA gateware is written in Spade and lives in the `gateware/` uv
+workspace. Swim compiles each project to SystemVerilog; Cocotb and Verilator
+provide the local behavioral test path.
 
 ## Quick Start
 
 ```bash
-# First time setup
-cp .env.example .env
-nano .env  # Configure your Vivado paths
+cd gateware
 
-# Build a project
-./gateware/build-scripts/build_fusesoc.sh pin-tester
-./gateware/build-scripts/build_fusesoc.sh sharp-organizer-card
+# First-time Python/testbench setup
+uv sync --locked --all-packages
+
+# Validate the registered workspace and run a project testbench
+uv run python tools/project_inventory.py --check
+uv run python tools/run_tb.py --project projects/pin-tester
 ```
 
-See [gateware/build-scripts/](gateware/build-scripts/) for detailed build documentation.
+See the [gateware guide](gateware/README.md) for the project layout, shared
+components, waveform generation, constraint handling, synthesis, and flashing.
 
 # License
 

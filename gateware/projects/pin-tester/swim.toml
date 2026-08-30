@@ -1,0 +1,20 @@
+name = "pin_tester_spade"
+preprocessing = ["python3 ../../tools/gen_build_info.py --project ."]
+
+[libraries]
+shared_components = { path = "../../lib/shared-components" }
+
+[constraints]
+auto = true
+top_entity = "main_core"
+extra_signals = ["ffc_data"]
+
+[verilog]
+sources = ["verilog/main_wrapper.v"]
+
+[tooling]
+top = "main"
+test_module = "test_pin_tester"
+
+[simulation]
+testbench_dir = "test"

@@ -1,0 +1,23 @@
+name = "sharp_pc_g850_bus_spade"
+preprocessing = ["python3 ../../tools/gen_build_info.py --project ."]
+
+[libraries]
+shared_components = { path = "../../lib/shared-components" }
+
+[constraints]
+auto = true
+top_entity = "main_core"
+
+[verilog]
+sources = [
+    "verilog/main_wrapper.v",
+    "../../rtl/vendor/clk_wiz_0.v",
+    "../../lib/shared-components/verilog/**/*.v",
+]
+
+[tooling]
+top = "main"
+test_module = "test_sharp_pc_g850_bus"
+
+[simulation]
+testbench_dir = "test"

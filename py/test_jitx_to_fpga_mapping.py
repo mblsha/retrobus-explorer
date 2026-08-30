@@ -39,32 +39,32 @@ BOARD_CONFIGS = [
     BoardConfig(
         name="saleae",
         generator=jfm.generate_saleae_acf,
-        expected_file="gateware/shared-constraints/saleae.acf"
+        expected_file="gateware/constraints/interfaces/saleae.acf"
     ),
     BoardConfig(
         name="pin-tester",
         generator=jfm.generate_pin_tester_acf,
-        expected_file="gateware/shared-constraints/pin-tester.acf"
+        expected_file="gateware/constraints/interfaces/pin-tester.acf"
     ),
     BoardConfig(
         name="sharp-pc-g850-bus",
         generator=jfm.generate_sharp_pc_g850_bus_acf,
-        expected_file="gateware/shared-constraints/sharp-pc-g850-bus.acf"
+        expected_file="gateware/constraints/interfaces/sharp-pc-g850-bus.acf"
     ),
     BoardConfig(
         name="sharp-pc-e500-bus",
         generator=jfm.generate_sharp_pc_e500_bus_acf,
-        expected_file="gateware/shared-constraints/sharp-pc-e500-bus.acf"
+        expected_file="gateware/constraints/interfaces/sharp-pc-e500-bus.acf"
     ),
     BoardConfig(
         name="sharp-organizer-card",
         generator=jfm.generate_sharp_organizer_card_acf,
-        expected_file="gateware/shared-constraints/sharp-organizer-card.acf"
+        expected_file="gateware/constraints/interfaces/sharp-organizer-card.acf"
     ),
     BoardConfig(
         name="sharp-sc62015",
         generator=jfm.generate_sharp_sc62015_acf,
-        expected_file="gateware/shared-constraints/sharp-sc62015.acf"
+        expected_file="gateware/constraints/interfaces/sharp-sc62015.acf"
     ),
 ]
 
@@ -119,7 +119,7 @@ class TestPinMappings:
 
 
 def generate_all_acf_files():
-    """Generate all ACF files in the shared-constraints directory"""
+    """Generate all ACF files in the shared interface constraints directory."""
     project_root = Path(__file__).parent.parent
 
     for config in BOARD_CONFIGS:

@@ -1,0 +1,38 @@
+{
+  "binary-counter": {
+    "command_count": 60,
+    "sha256": "3a74a986dfc98a292215386e07abac07ecc316dc22482b90d677f1bdac2786a0"
+  },
+  "ft-uart-hex-bridge": {
+    "command_count": 74,
+    "sha256": "f0bf58e26274e67a7b3f0797c32426d5a460b0b0a72afbe32f260443b78f2697"
+  },
+  "pin-tester": {
+    "command_count": 156,
+    "sha256": "7bafebdc4334f8e3a5e6269f289c0d79464f28dc4f5df22210a0769c26723100"
+  },
+  "sharp-organizer-card": {
+    "command_count": 187,
+    "sha256": "b94ba734ccf4a35d46b4feb0677ad805044544b50349635843e284c49394ef7c"
+  },
+  "sharp-pc-e500-card": {
+    "command_count": 174,
+    "sha256": "109a510d656606111226d00693eaf000219a5f7881275ca55ddca3a91b2f6094"
+  },
+  "sharp-pc-g850-bus": {
+    "command_count": 181,
+    "sha256": "1573ce863c26f83310fc39ae11d2ea8cae49ec023785c3dabe638fb7ab78686c"
+  },
+  "sharp-pc-g850-streaming-rom": {
+    "command_count": 181,
+    "sha256": "1573ce863c26f83310fc39ae11d2ea8cae49ec023785c3dabe638fb7ab78686c"
+  },
+  "test-minimal": {
+    "command_count": 24,
+    "sha256": "6d6861cdef08b73b81f61a24c48c8c9a015c26e724dbd080e3a01f77accf19f2"
+  },
+  "uart-saleae-loopback": {
+    "command_count": 60,
+    "sha256": "3a74a986dfc98a292215386e07abac07ecc316dc22482b90d677f1bdac2786a0"
+  }
+}

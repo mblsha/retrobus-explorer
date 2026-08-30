@@ -1,0 +1,42 @@
+use super::{
+    trace_events::{overflow_trace_event, pack_trace_event_word, trace_event, trace_event_none},
+    trace_words::{TaggedTraceKind, TaggedTracePayload},
+};
+
+#[no_mangle(all)]
+entity tb_trace_events(
+    payload: TaggedTracePayload,
+    none_valid: inv &bool,
+    addr_valid: inv &bool,
+    data_valid: inv &bool,
+    misc_valid: inv &bool,
+    overflow_valid: inv &bool,
+    none_word: inv &uint<32>,
+    addr_word: inv &uint<32>,
+    data_word: inv &uint<32>,
+    misc_word: inv &uint<32>,
+    overflow_word: inv &uint<32>,
+) {
+    let none_req = trace_event_none();
+    let addr_req = trace_event(TaggedTraceKind::Addr(), payload);
+    let data_req = trace_event(TaggedTraceKind::Data(), payload);
+    let misc_req = trace_event(TaggedTraceKind::Misc(), payload);
+    let overflow_req = overflow_trace_event(payload);
+
+    let packed_none = pack_trace_event_word(none_req.event);
+    let packed_addr = pack_trace_event_word(addr_req.event);
+    let packed_data = pack_trace_event_word(data_req.event);
+    let packed_misc = pack_trace_event_word(misc_req.event);
+    let packed_overflow = pack_trace_event_word(overflow_req.event);
+
+    set none_valid = &none_req.valid;
+    set addr_valid = &addr_req.valid;
+    set data_valid = &data_req.valid;
+    set misc_valid = &misc_req.valid;
+    set overflow_valid = &overflow_req.valid;
+    set none_word = &packed_none;
+    set addr_word = &packed_addr;
+    set data_word = &packed_data;
+    set misc_word = &packed_misc;
+    set overflow_word = &packed_overflow;
+}
