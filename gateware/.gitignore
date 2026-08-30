@@ -42,3 +42,20 @@ wt/
 *_clk_wiz.v
 mmcm_pll_drp_func_*.vh
 
+# Generated Spade build and simulation outputs
+**/build/
+**/src/build_info.spade
+**/.venv-host/
+**/.venv/
+**/.pytest_cache/
+**/.surfer/
+**/test/__pycache__/
+**/test/dump.vcd
+**/test/dump.surfer.vcd
+**/test/results.xml
+**/test/*.results.xml
+**/test/waveforms/*.vcd
+**/test/waveforms/*.xml
+
+# Remote build artifacts
+**/forge-output-*/

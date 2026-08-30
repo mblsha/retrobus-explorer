@@ -1,0 +1,514 @@
+use shared_components::{ascii::DigitDecode, message_stream::{TxReq8, tx_req_none}};
+
+pub type BusAddr = uint<16>;
+pub type TraceWord = uint<32>;
+pub type OverflowCount = uint<24>;
+pub type WaitCounter = uint<128>;
+
+pub fn pack_event_word(addr: BusAddr, data: uint<8>, event: uint<8>) -> TraceWord {
+    let addr_wide: TraceWord = zext(addr);
+    let data_wide: TraceWord = zext(data);
+    let event_wide: TraceWord = zext(event);
+    (addr_wide << 16) | (data_wide << 8) | event_wide
+}
+
+pub fn pack_overflow_word(count: OverflowCount, event: uint<8>) -> TraceWord {
+    let count_wide: TraceWord = zext(count);
+    let event_wide: TraceWord = zext(event);
+    (count_wide << 8) | event_wide
+}
+
+impl uint<8> {
+    pub fn wait_shift(self) -> uint<5> {
+        let clamped = if self > 9 { 9 } else { self };
+        trunc(clamped << 1)
+    }
+}
+
+impl uint<128> {
+    pub fn wait_window(self, level: uint<8>) -> uint<8> {
+        let shift: uint<5> = level.wait_shift();
+        let shift_wide: uint<128> = zext(shift);
+        let shifted: uint<128> = self >> shift_wide;
+        trunc(shifted)
+    }
+}
+
+pub enum SampleState {
+    SampleBus,
+    InsertWait,
+}
+
+pub enum FtState {
+    GetFifo,
+    Stream,
+}
+
+pub enum SaleaeState {
+    DataSignals,
+    SyncSignals,
+    RawSignals,
+    EdgeSignals,
+    Counter,
+}
+
+struct SampleFlags {
+    is_bus: bool,
+    is_wait: bool,
+}
+
+impl SampleState {
+    fn flags(self) -> SampleFlags {
+        match self {
+            Self::SampleBus => SampleFlags$(is_bus: true, is_wait: false),
+            Self::InsertWait => SampleFlags$(is_bus: false, is_wait: true),
+        }
+    }
+}
+
+fn bus_event_char_from_flags(
+    rd_event_valid: bool,
+    wr_event_valid: bool,
+    z80_m1_sync: bool,
+    z80_mreq_sync: bool,
+) -> uint<8> {
+    if rd_event_valid {
+        if !z80_m1_sync {
+            b'M'
+        } else if !z80_mreq_sync {
+            b'R'
+        } else {
+            b'r'
+        }
+    } else if wr_event_valid {
+        if !z80_mreq_sync {
+            b'W'
+        } else {
+            b'w'
+        }
+    } else {
+        0
+    }
+}
+
+pub struct BusEventDecode {
+    invalid_bus_state: bool,
+    rd_event_valid: bool,
+    wr_event_valid: bool,
+    bus_event_valid: bool,
+    bus_event_char: uint<8>,
+}
+
+fn decode_bus_events(
+    z80_m1_sync: bool,
+    z80_mreq_sync: bool,
+    z80_iorq_sync: bool,
+    rd_rise: bool,
+    wr_rise: bool,
+) -> BusEventDecode {
+    let invalid_bus_state = (z80_mreq_sync && z80_iorq_sync) || (!z80_mreq_sync && !z80_iorq_sync);
+    let rd_event_valid = rd_rise && !invalid_bus_state;
+    let wr_event_valid = wr_rise && !invalid_bus_state;
+    let bus_event_valid = rd_event_valid || wr_event_valid;
+    let bus_event_char = bus_event_char_from_flags(rd_event_valid, wr_event_valid, z80_m1_sync, z80_mreq_sync);
+    BusEventDecode$(
+        invalid_bus_state: invalid_bus_state,
+        rd_event_valid: rd_event_valid,
+        wr_event_valid: wr_event_valid,
+        bus_event_valid: bus_event_valid,
+        bus_event_char: bus_event_char,
+    )
+}
+
+pub struct BusError {
+    valid: bool,
+    ch: uint<8>,
+}
+
+fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> BusError {
+    if rd_rise {
+        BusError$(valid: invalid_bus_state, ch: b'E')
+    } else if wr_rise {
+        BusError$(valid: invalid_bus_state, ch: b'e')
+    } else {
+        BusError$(valid: false, ch: b'e')
+    }
+}
+
+pub struct FtStreamCmdDecode {
+    enable: bool,
+    disable: bool,
+}
+
+impl uint<16> {
+    fn decode_ft_stream(self, ft_ui_dout_empty: bool) -> FtStreamCmdDecode {
+        let cmd_b0: uint<8> = trunc(self);
+        let cmd_b1: uint<8> = trunc(self >> 8);
+        let has_prefix = !ft_ui_dout_empty && cmd_b0.to_upper() == b'S';
+        FtStreamCmdDecode$(
+            enable: has_prefix && cmd_b1 == b'+',
+            disable: has_prefix && cmd_b1 == b'-',
+        )
+    }
+}
+
+pub struct SaleaeCmdDecode {
+    valid: bool,
+    state: SaleaeState,
+}
+
+impl uint<8> {
+    fn decode_saleae_state(self) -> SaleaeCmdDecode {
+        match self.to_upper() {
+            b'S' => SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals()),
+            b'E' => SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals()),
+            b'D' => SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals()),
+            b'R' => SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals()),
+            b'C' => SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter()),
+            _ => SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals()),
+        }
+    }
+}
+
+pub struct CycleDecode {
+    bus: BusEventDecode,
+    bus_error: BusError,
+    rx_digit: DigitDecode,
+    saleae_cmd: SaleaeCmdDecode,
+    ft_cmd: FtStreamCmdDecode,
+}
+
+pub fn decode_cycle(
+    z80_m1_sync: bool,
+    z80_mreq_sync: bool,
+    z80_iorq_sync: bool,
+    rd_rise: bool,
+    wr_rise: bool,
+    rx_byte: uint<8>,
+    ft_ui_dout_empty: bool,
+    ft_cmd_word: uint<16>,
+) -> CycleDecode {
+    let bus = decode_bus_events(z80_m1_sync, z80_mreq_sync, z80_iorq_sync, rd_rise, wr_rise);
+    CycleDecode$(
+        bus: bus,
+        bus_error: bus_error_status(rd_rise, wr_rise, bus.invalid_bus_state),
+        rx_digit: rx_byte.decode_digit(),
+        saleae_cmd: rx_byte.decode_saleae_state(),
+        ft_cmd: ft_cmd_word.decode_ft_stream(ft_ui_dout_empty),
+    )
+}
+
+pub struct BusSamplerOut {
+    sample_is_bus: bool,
+    sample_is_wait: bool,
+    wait_done: bool,
+    bus_start: bool,
+    bus_event_valid: bool,
+    bus_event_char: uint<8>,
+    bus_error: BusError,
+    addr_fifo_wput: bool,
+    event_fifo_wput: bool,
+    sample_tx_req: TxReq8,
+}
+
+fn sample_bus_cycle(
+    sample_state: SampleState,
+    wait_counter: WaitCounter,
+    wait_enabled: uint<8>,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    bus_decode: BusEventDecode,
+    bus_error: BusError,
+    tx_busy: bool,
+) -> BusSamplerOut {
+    let sample = sample_state.flags();
+    let sample_is_bus = sample.is_bus;
+    let sample_is_wait = sample.is_wait;
+    let wait_window_bits: uint<8> = wait_counter.wait_window(wait_enabled);
+    let wait_done = wait_window_bits > 1;
+    let bus_start = mreq_fall || iorq_fall;
+    BusSamplerOut$(
+        sample_is_bus: sample_is_bus,
+        sample_is_wait: sample_is_wait,
+        wait_done: wait_done,
+        bus_start: bus_start,
+        bus_event_valid: bus_decode.bus_event_valid,
+        bus_event_char: bus_decode.bus_event_char,
+        bus_error: bus_error,
+        addr_fifo_wput: bus_start && sample_is_bus,
+        event_fifo_wput: bus_decode.bus_event_valid,
+        sample_tx_req: if sample_is_wait && wait_done && !tx_busy {
+            TxReq8$(valid: true, byte: b'.')
+        } else {
+            tx_req_none()
+        },
+    )
+}
+
+pub struct UsbCmdOut {
+    next_wait_enabled: uint<8>,
+    next_saleae_state: SaleaeState,
+    rx_is_digit: bool,
+    rx_is_saleae_cmd: bool,
+    tx_req: TxReq8,
+}
+
+pub struct UsbCmdInputs {
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_busy: bool,
+    wait_enabled: uint<8>,
+    saleae_state: SaleaeState,
+    cycle_decode: CycleDecode,
+    upstream_req: TxReq8,
+}
+
+impl UsbCmdInputs {
+    pub fn parse(self) -> UsbCmdOut {
+        let next_wait_enabled = if self.rx_valid && self.cycle_decode.rx_digit.valid {
+            zext(self.cycle_decode.rx_digit.value)
+        } else {
+            self.wait_enabled
+        };
+
+        let next_saleae_state = if self.rx_valid && self.cycle_decode.saleae_cmd.valid {
+            self.cycle_decode.saleae_cmd.state
+        } else {
+            self.saleae_state
+        };
+
+        let rx_is_digit = self.rx_valid && self.cycle_decode.rx_digit.valid;
+        let rx_is_saleae_cmd = self.rx_valid && self.cycle_decode.saleae_cmd.valid;
+        let rx_tx_req = if (rx_is_digit || rx_is_saleae_cmd) && !self.tx_busy {
+            TxReq8$(valid: true, byte: self.rx_byte)
+        } else {
+            self.upstream_req
+        };
+
+        UsbCmdOut$(
+            next_wait_enabled: next_wait_enabled,
+            next_saleae_state: next_saleae_state,
+            rx_is_digit: rx_is_digit,
+            rx_is_saleae_cmd: rx_is_saleae_cmd,
+            tx_req: rx_tx_req,
+        )
+    }
+}
+
+pub struct FtStreamMuxOut {
+    next_ft_enabled: bool,
+    next_ft_state: FtState,
+    next_ft_cur_value: TraceWord,
+    ft_ui_din_valid: bool,
+    ft_ui_din: uint<16>,
+    ft_ui_din_be: uint<2>,
+    ft_ui_dout_get: bool,
+    stream_fifo_rget: bool,
+    ft_tx_req: TxReq8,
+}
+
+fn run_ft_stream_mux(
+    ft_state: FtState,
+    ft_enabled: bool,
+    ft_cur_value: TraceWord,
+    ft_cmd: FtStreamCmdDecode,
+    tx_busy: bool,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: TraceWord,
+) -> FtStreamMuxOut {
+    let ft_get_fifo = if let FtState::GetFifo = ft_state { true } else { false };
+    let ft_stream = if let FtState::Stream = ft_state { true } else { false };
+    let ft_can_push = !ft_ui_din_full;
+    let should_fetch_word = ft_get_fifo && ft_can_push && !stream_fifo_empty;
+    let should_stream_word = ft_stream && ft_can_push;
+    let next_ft_enabled = if ft_cmd.enable {
+        true
+    } else if ft_cmd.disable {
+        false
+    } else {
+        ft_enabled
+    };
+    let next_ft_state = match ft_state {
+        FtState::GetFifo if ft_can_push && !stream_fifo_empty => FtState::Stream(),
+        FtState::Stream if ft_can_push => FtState::GetFifo(),
+        _ => ft_state,
+    };
+    let next_ft_cur_value = if should_fetch_word {
+        stream_fifo_dout
+    } else {
+        ft_cur_value
+    };
+    let ft_ui_din_valid = should_fetch_word || should_stream_word;
+    let ft_ui_din: uint<16> = if should_fetch_word {
+        trunc(stream_fifo_dout)
+    } else if should_stream_word {
+        trunc(ft_cur_value >> 16)
+    } else {
+        0
+    };
+    let stream_fifo_rget = if ft_get_fifo {
+        should_fetch_word
+    } else if ft_stream {
+        ft_can_push
+    } else {
+        false
+    };
+    let ft_tx_req = if ft_cmd.enable && !tx_busy {
+        TxReq8$(valid: true, byte: b'+')
+    } else if ft_cmd.disable && !tx_busy {
+        TxReq8$(valid: true, byte: b'-')
+    } else {
+        tx_req_none()
+    };
+
+    FtStreamMuxOut$(
+        next_ft_enabled: next_ft_enabled,
+        next_ft_state: next_ft_state,
+        next_ft_cur_value: next_ft_cur_value,
+        ft_ui_din_valid: ft_ui_din_valid,
+        ft_ui_din: ft_ui_din,
+        ft_ui_din_be: if ft_ui_din_valid { 0x3 } else { 0x0 },
+        ft_ui_dout_get: !ft_ui_dout_empty,
+        stream_fifo_rget: stream_fifo_rget,
+        ft_tx_req: ft_tx_req,
+    )
+}
+
+pub struct CoreStepOut {
+    sample: BusSamplerOut,
+    ft_mux: FtStreamMuxOut,
+    should_emit_overflow: bool,
+}
+
+pub struct CoreStepInputs {
+    sample_state: SampleState,
+    wait_counter: WaitCounter,
+    wait_enabled: uint<8>,
+    mreq_fall: bool,
+    iorq_fall: bool,
+    cycle_decode: CycleDecode,
+    tx_busy: bool,
+    ft_state: FtState,
+    ft_enabled: bool,
+    ft_cur_value: TraceWord,
+    ft_ui_din_full: bool,
+    ft_ui_dout_empty: bool,
+    stream_fifo_empty: bool,
+    stream_fifo_dout: TraceWord,
+    rd_rise: bool,
+    wr_rise: bool,
+    stream_fifo_full: bool,
+    fifo_full_counter: OverflowCount,
+}
+
+impl CoreStepInputs {
+    pub fn run(self) -> CoreStepOut {
+        let sample = sample_bus_cycle(
+            self.sample_state,
+            self.wait_counter,
+            self.wait_enabled,
+            self.mreq_fall,
+            self.iorq_fall,
+            self.cycle_decode.bus,
+            self.cycle_decode.bus_error,
+            self.tx_busy,
+        );
+        let ft_mux = run_ft_stream_mux(
+            self.ft_state,
+            self.ft_enabled,
+            self.ft_cur_value,
+            self.cycle_decode.ft_cmd,
+            self.tx_busy,
+            self.ft_ui_din_full,
+            self.ft_ui_dout_empty,
+            self.stream_fifo_empty,
+            self.stream_fifo_dout,
+        );
+        let should_emit_overflow =
+            !self.rd_rise &&
+            !self.wr_rise &&
+            self.ft_enabled &&
+            !self.stream_fifo_full &&
+            self.fifo_full_counter > 0;
+        CoreStepOut$(
+            sample: sample,
+            ft_mux: ft_mux,
+            should_emit_overflow: should_emit_overflow,
+        )
+    }
+}
+
+pub fn saleae_mux(
+    saleae_state: SaleaeState,
+    z80_wr_sync: bool,
+    z80_rd_sync: bool,
+    z80_iorq_sync: bool,
+    z80_mreq_sync: bool,
+    z80_m1_sync: bool,
+    wr_rise: bool,
+    rd_rise: bool,
+    iorq_fall: bool,
+    mreq_fall: bool,
+    z80_wr_raw: bool,
+    z80_rd_raw: bool,
+    z80_iorq_raw: bool,
+    z80_mreq_raw: bool,
+    data_line: bool,
+    event_line: bool,
+    addr_line: bool,
+    saleae_counter: uint<8>,
+) -> [bool; 8] {
+    match saleae_state {
+        SaleaeState::DataSignals => {
+            [
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+                z80_m1_sync,
+                data_line,
+                event_line,
+                addr_line,
+            ]
+        },
+        SaleaeState::SyncSignals => {
+            [
+                wr_rise,
+                rd_rise,
+                mreq_fall,
+                z80_m1_sync,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::EdgeSignals => {
+            [
+                wr_rise,
+                rd_rise,
+                iorq_fall,
+                mreq_fall,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::RawSignals => {
+            [
+                z80_wr_raw,
+                z80_rd_raw,
+                z80_iorq_raw,
+                z80_mreq_raw,
+                z80_wr_sync,
+                z80_rd_sync,
+                z80_iorq_sync,
+                z80_mreq_sync,
+            ]
+        },
+        SaleaeState::Counter => saleae_counter.to_bits(),
+    }
+}

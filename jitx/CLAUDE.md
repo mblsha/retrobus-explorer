@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 RetroBus Explorer is a hardware/software co-design project for interfacing with legacy 5V computer systems, particularly SHARP calculators and organizers. It combines:
 - JITX/Stanza for PCB design of level-shifting adapters
-- FPGA gateware (Lucid/Verilog) for bus capture and analysis
+- FPGA gateware (Spade/SystemVerilog) for bus capture and analysis
 - Python tools for visualization and protocol decoding
 
 ## Build Commands
@@ -28,8 +28,16 @@ pytest z80bus/test_bus_parser.py
 ```
 
 ### FPGA Development
-- Use Alchitry Labs IDE for .alp project files
-- Or use Xilinx Vivado for direct synthesis
+
+The canonical FPGA workspace is `../gateware`. Use Swim for Spade builds and
+Cocotb with Verilator for behavioral testing:
+
+```bash
+cd ../gateware
+uv sync --locked --all-packages
+uv run python tools/project_inventory.py --check
+uv run python tools/run_tb.py --project projects/pin-tester
+```
 
 ## Architecture
 
@@ -39,9 +47,11 @@ pytest z80bus/test_bus_parser.py
   - `stackups/` - PCB stackup configurations for flexible PCBs
   - `designs/` - Generated PCB design outputs
 - `gateware/` - FPGA source code
-  - `pin-tester/` - Test functionality for pin connections
-  - `sharp-organizer-card/` - SHARP organizer card interface
-  - `sharp-pc-g850-bus/` - SHARP PC-G850 bus interface
+  - `projects/` - Buildable Spade applications, diagnostics, and examples
+  - `lib/shared-components/` - Reusable Spade modules and unit tests
+  - `constraints/` - Shared board, interface, and target pin mappings
+  - `rtl/vendor/` - Shared compatibility SystemVerilog
+  - `tools/` - Test, inventory, constraint, build, and flash helpers
 - `py/` - Python analysis tools
   - `z80bus/` - Z80 bus parsing and analysis
   - `shared/pyz80/` - Z80 CPU emulation library
@@ -111,9 +121,12 @@ inst r : resistor(10.0e3)
    - Check generated files in `designs/` directories
 
 2. **FPGA Development**:
-   - Pin constraints are in `.xdc` files
-   - IP cores are pre-generated in `ip_user_files/`
-   - Test with minimal designs in `test-minimal/`
+   - Project Spade sources and Cocotb tests live together under
+     `gateware/projects/<name>/`
+   - Reusable ACF inputs live under `gateware/constraints/`; checked-in project
+     `constraints/pins.xdc` snapshots are regenerated and golden-tested
+   - Test shared logic in `gateware/lib/shared-components/` and integration in
+     the affected project
 
 3. **Python Analysis**:
    - Bus captures are processed through `z80bus/BusParser`
@@ -128,9 +141,12 @@ inst r : resistor(10.0e3)
 3. Instantiate and connect in circuit
 
 ### Modifying FPGA Gateware
-1. Edit Lucid source files in appropriate `gateware/` subdirectory
-2. Update constraints if pin assignments change
-3. Rebuild using Alchitry Labs or Vivado
+1. Add or update Cocotb characterization tests before changing behavior.
+2. Edit the Spade source under `gateware/projects/<name>/src/`, or extract
+   reusable logic to `gateware/lib/shared-components/src/`.
+3. Update shared or project ACF inputs if pin assignments change.
+4. Run the affected shared-component and project tests through
+   `gateware/tools/run_tb.py` with Verilator.
 
 ### Analyzing Bus Captures
 1. Use Python scripts in `py/` directory

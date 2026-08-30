@@ -1,0 +1,26 @@
+#[no_mangle]
+entity led_counter(
+    clk: clock,
+    rst: bool,
+    max: uint<28>,
+) -> uint<8> {
+    reg(clk) counter: uint<28> reset(rst: 0) = if counter == max {0} else {counter +. 1};
+    reg(clk) led: uint<8> reset(rst: 0) = if counter == 0 {led +. 1} else {led};
+
+    led
+}
+
+#[no_mangle]
+entity main(
+    #[no_mangle] clk: clock,
+    #[no_mangle] rst_n: bool,
+    #[no_mangle] LED: inv &[bool; 8],
+) {
+    // The button is active when released, but we want the reset to be active high, so
+    // we'll invert it
+    let rst = !rst_n;
+    let max: uint<28> = 10_000_000;
+    let led = inst led_counter(clk, rst, max);
+
+    set LED = &led.to_bits();
+}

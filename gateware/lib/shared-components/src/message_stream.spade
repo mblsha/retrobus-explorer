@@ -1,0 +1,208 @@
+pub struct TxReq8 {
+    valid: bool,
+    byte: uint<8>,
+}
+
+pub fn tx_req_none() -> TxReq8 {
+    TxReq8$(valid: false, byte: 0)
+}
+
+pub fn tx_req_byte(byte: uint<8>) -> TxReq8 {
+    TxReq8$(valid: true, byte: byte)
+}
+
+pub fn tx_req_from_option(byte: Option<uint<8>>) -> TxReq8 {
+    if let Some(byte) = byte {
+        tx_req_byte(byte)
+    } else {
+        tx_req_none()
+    }
+}
+
+pub fn tx_req_indexed<#uint N, #uint IDX_W>(bytes: [uint<8>; N], idx: uint<IDX_W>) -> TxReq8 {
+    tx_req_from_option(if idx < N {
+        Some(bytes[trunc(idx)])
+    } else {
+        None
+    })
+}
+
+pub fn tx_req_or_else(primary: TxReq8, fallback: TxReq8) -> TxReq8 {
+    if primary.valid { primary } else { fallback }
+}
+
+pub fn tx_req_arbiter(highest: TxReq8, high: TxReq8, low: TxReq8) -> TxReq8 {
+    tx_req_or_else(highest, tx_req_or_else(high, low))
+}
+
+pub struct ByteMsgStreamState<TMsg, #uint IDX_W> {
+    cur_msg: TMsg,
+    cur_idx: uint<IDX_W>,
+    pending_msg: TMsg,
+}
+
+pub struct ByteMsgStreamOut<TMsg, #uint IDX_W> {
+    state: ByteMsgStreamState<TMsg, IDX_W>,
+    tx_req: TxReq8,
+    msg_none: bool,
+}
+
+pub struct ByteMsgStepArgs<TMsg> {
+    cur_msg_is_none: bool,
+    pending_msg_is_none: bool,
+    cur_byte: TxReq8,
+    next_byte: TxReq8,
+    block_tx: bool,
+    next_msg_valid: bool,
+    next_msg: TMsg,
+    next_msg_is_none: bool,
+}
+
+pub struct OneCurrentLatestPendingOut<T> {
+    current: T,
+    current_is_none: bool,
+    pending: T,
+    pending_is_none: bool,
+    current_loaded: bool,
+}
+
+pub fn schedule_one_current_latest_pending<T>(
+    none_value: T,
+    current: T,
+    current_is_none: bool,
+    pending: T,
+    pending_is_none: bool,
+    incoming_valid: bool,
+    incoming: T,
+    incoming_is_none: bool,
+) -> OneCurrentLatestPendingOut<T> {
+    let promote_pending = current_is_none && !pending_is_none;
+    let loaded_current = if promote_pending { pending } else { current };
+    let loaded_current_is_none = if promote_pending { false } else { current_is_none };
+    let loaded_pending = if promote_pending { none_value } else { pending };
+    let loaded_pending_is_none = if promote_pending { true } else { pending_is_none };
+
+    let enqueue = incoming_valid && !incoming_is_none;
+    let replace_empty_current = enqueue && loaded_current_is_none;
+    let queue_latest_pending = enqueue && !loaded_current_is_none;
+
+    OneCurrentLatestPendingOut$(
+        current: if replace_empty_current { incoming } else { loaded_current },
+        current_is_none: if replace_empty_current { false } else { loaded_current_is_none },
+        pending: if queue_latest_pending { incoming } else { loaded_pending },
+        pending_is_none: if queue_latest_pending { false } else { loaded_pending_is_none },
+        current_loaded: promote_pending || replace_empty_current,
+    )
+}
+
+pub fn init_byte_msg_stream<TMsg, #uint IDX_W>(none_msg: TMsg) -> ByteMsgStreamState<TMsg, IDX_W> {
+    ByteMsgStreamState$(
+        cur_msg: none_msg,
+        cur_idx: 0,
+        pending_msg: none_msg,
+    )
+}
+
+impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
+    pub fn step(
+        self,
+        none_msg: TMsg,
+        args: ByteMsgStepArgs<TMsg>,
+    ) -> ByteMsgStreamOut<TMsg, IDX_W> {
+        let tx_req = if !args.cur_msg_is_none && args.cur_byte.valid && !args.block_tx {
+            args.cur_byte
+        } else {
+            tx_req_none()
+        };
+        let sent = tx_req.valid;
+        let next_idx: uint<IDX_W> = self.cur_idx +. 1;
+        let drained = sent && !args.next_byte.valid;
+        let post_cur_msg = if drained {
+            none_msg
+        } else {
+            self.cur_msg
+        };
+        let post_cur_idx: uint<IDX_W> = if sent {
+            if args.next_byte.valid {
+                next_idx
+            } else {
+                0
+            }
+        } else {
+            self.cur_idx
+        };
+        let post_msg_none = args.cur_msg_is_none || drained;
+        let scheduled = schedule_one_current_latest_pending(
+            none_msg,
+            post_cur_msg,
+            post_msg_none,
+            self.pending_msg,
+            args.pending_msg_is_none,
+            args.next_msg_valid,
+            args.next_msg,
+            args.next_msg_is_none,
+        );
+        ByteMsgStreamOut$(
+            state: ByteMsgStreamState$(
+                cur_msg: scheduled.current,
+                cur_idx: if scheduled.current_loaded { 0 } else { post_cur_idx },
+                pending_msg: scheduled.pending,
+            ),
+            tx_req: tx_req,
+            msg_none: scheduled.current_is_none,
+        )
+    }
+
+    pub fn step_with(
+        self,
+        none_msg: TMsg,
+        is_none: impl Fn(TMsg) -> bool,
+        render_byte: impl Fn(TMsg, uint<IDX_W>) -> TxReq8,
+        block_tx: bool,
+        next_msg_valid: bool,
+        next_msg: TMsg,
+    ) -> ByteMsgStreamOut<TMsg, IDX_W> {
+        self.step_with_option(
+            none_msg,
+            is_none,
+            render_byte,
+            block_tx,
+            if next_msg_valid {
+                Some(next_msg)
+            } else {
+                None
+            },
+        )
+    }
+
+    pub fn step_with_option(
+        self,
+        none_msg: TMsg,
+        is_none: impl Fn(TMsg) -> bool,
+        render_byte: impl Fn(TMsg, uint<IDX_W>) -> TxReq8,
+        block_tx: bool,
+        next_msg: Option<TMsg>,
+    ) -> ByteMsgStreamOut<TMsg, IDX_W> {
+        let cur_msg_is_none = is_none.call((self.cur_msg,));
+        let pending_msg_is_none = is_none.call((self.pending_msg,));
+        let cur_byte = render_byte.call((self.cur_msg, self.cur_idx));
+        let next_idx: uint<IDX_W> = self.cur_idx +. 1;
+        let next_byte = render_byte.call((self.cur_msg, next_idx));
+        let (next_msg_valid, next_msg_value, next_msg_is_none): (bool, TMsg, bool) = if let Some(msg) = next_msg {
+            (true, msg, is_none.call((msg,)))
+        } else {
+            (false, none_msg, true)
+        };
+
+        self.step(none_msg, ByteMsgStepArgs$(
+            cur_msg_is_none: cur_msg_is_none,
+            pending_msg_is_none: pending_msg_is_none,
+            cur_byte: cur_byte,
+            next_byte: next_byte,
+            block_tx: block_tx,
+            next_msg_valid: next_msg_valid,
+            next_msg: next_msg_value,
+            next_msg_is_none: next_msg_is_none,
+        ))
+    }
+}

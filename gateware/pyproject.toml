@@ -1,0 +1,21 @@
+[project]
+name = "retrobus-gateware"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "cocotb<2",
+]
+
+[tool.uv.workspace]
+members = [
+    "projects/ft-uart-hex-bridge",
+    "projects/pin-tester",
+    "projects/sharp-organizer-card",
+    "projects/sharp-pc-e500-card",
+    "projects/sharp-pc-g850-bus",
+    "projects/sharp-pc-g850-streaming-rom",
+    "projects/test-minimal",
+    "projects/uart-saleae-loopback",
+    "projects/binary-counter",
+    "projects/ws2812b",
+]

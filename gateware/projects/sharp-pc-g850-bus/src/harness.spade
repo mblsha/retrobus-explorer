@@ -1,0 +1,93 @@
+use super::bus_debug::{
+    CoreStepInputs,
+    FtState,
+    SaleaeState,
+    SampleState,
+    decode_cycle,
+    pack_event_word,
+    pack_overflow_word,
+    saleae_mux,
+};
+
+#[no_mangle(all)]
+entity tb_bus_debug(
+    addr: uint<16>,
+    data: uint<8>,
+    event_code: uint<8>,
+    overflow_count: uint<24>,
+    saleae_mode: uint<3>,
+    saleae_inputs: uint<16>,
+    saleae_counter: uint<8>,
+    overflow_ft_enabled: bool,
+    overflow_fifo_full: bool,
+    overflow_rd_rise: bool,
+    overflow_wr_rise: bool,
+    event_word: inv &uint<32>,
+    overflow_word: inv &uint<32>,
+    saleae_out: inv &[bool; 8],
+    should_emit_overflow: inv &bool,
+) {
+    let signals = saleae_inputs.to_bits();
+    let state = match saleae_mode {
+        0 => SaleaeState::DataSignals(),
+        1 => SaleaeState::SyncSignals(),
+        2 => SaleaeState::EdgeSignals(),
+        3 => SaleaeState::RawSignals(),
+        _ => SaleaeState::Counter(),
+    };
+    let saleae = saleae_mux(
+        state,
+        signals[0],
+        signals[1],
+        signals[2],
+        signals[3],
+        signals[4],
+        signals[5],
+        signals[6],
+        signals[7],
+        signals[8],
+        signals[9],
+        signals[10],
+        signals[11],
+        signals[12],
+        signals[13],
+        signals[14],
+        signals[15],
+        saleae_counter,
+    );
+    let cycle_decode = decode_cycle(
+        true,
+        true,
+        false,
+        overflow_rd_rise,
+        overflow_wr_rise,
+        0,
+        true,
+        0,
+    );
+    let step = CoreStepInputs$(
+        sample_state: SampleState::SampleBus(),
+        wait_counter: 0,
+        wait_enabled: 0,
+        mreq_fall: false,
+        iorq_fall: false,
+        cycle_decode: cycle_decode,
+        tx_busy: false,
+        ft_state: FtState::GetFifo(),
+        ft_enabled: overflow_ft_enabled,
+        ft_cur_value: 0,
+        ft_ui_din_full: true,
+        ft_ui_dout_empty: true,
+        stream_fifo_empty: true,
+        stream_fifo_dout: 0,
+        rd_rise: overflow_rd_rise,
+        wr_rise: overflow_wr_rise,
+        stream_fifo_full: overflow_fifo_full,
+        fifo_full_counter: overflow_count,
+    ).run();
+
+    set event_word = &pack_event_word(addr, data, event_code);
+    set overflow_word = &pack_overflow_word(overflow_count, event_code);
+    set saleae_out = &saleae;
+    set should_emit_overflow = &step.should_emit_overflow;
+}

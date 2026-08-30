@@ -1,0 +1,21 @@
+name = "uart_saleae_loopback_spade"
+preprocessing = ["python3 ../../tools/gen_build_info.py --project ."]
+
+[libraries]
+shared_components = { path = "../../lib/shared-components" }
+
+[constraints]
+auto = true
+
+[verilog]
+sources = [
+    "../../rtl/vendor/clk_wiz_0.v",
+    "../../lib/shared-components/verilog/fifo_v.v",
+]
+
+[tooling]
+top = "main"
+test_module = "test_uart_saleae_loopback"
+
+[simulation]
+testbench_dir = "test"

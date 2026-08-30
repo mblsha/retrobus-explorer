@@ -1,0 +1,570 @@
+use super::{
+    guards::{require_at_least_two, require_positive, require_power_of_two},
+    primitives::sync_delay,
+};
+
+pub type BitTime = uint<15>;
+pub type StopBits = uint<3>;
+pub type FtData = uint<16>;
+pub type FtBe = uint<2>;
+
+pub struct UartTxOut {
+    tx: bool,
+    busy: bool,
+}
+
+pub struct UartRxOut<TData> {
+    valid: bool,
+    parity_error: bool,
+    byte: TData,
+}
+
+struct UartRxCapture<#uint DATA_WIDTH> {
+    valid: bool,
+    byte: uint<DATA_WIDTH>,
+    parity_error: bool,
+}
+
+pub struct port UartLineBusyPort {
+    line: &bool,
+    busy: &bool,
+}
+
+pub entity usb_loopback(
+    usb_rx: bool,
+    usb_tx: inv &bool,
+) {
+    set usb_tx = &usb_rx;
+}
+
+pub fn ft_aux_activity(
+    ft_clk: bool,
+    ft_txe: bool,
+    ft_data: [bool; 16],
+    ft_be: [bool; 2],
+) -> bool {
+    ft_clk || ft_txe || ft_data[0] || ft_data[1] || ft_be[0] || ft_be[1]
+}
+
+#[no_mangle(all)]
+extern entity ft_v<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<DATA_WIDTH>,
+    ft_be_in: uint<BE_WIDTH>,
+    ft_data_out: inv &uint<DATA_WIDTH>,
+    ft_be_out: inv &uint<BE_WIDTH>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din: uint<DATA_WIDTH>,
+    ui_din_be: uint<BE_WIDTH>,
+    ui_din_valid: bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<DATA_WIDTH>,
+    ui_dout_be: inv &uint<BE_WIDTH>,
+    ui_dout_empty: inv &bool,
+    ui_dout_get: bool,
+);
+
+pub struct FtOut<TData, TBe> {
+    ft_data_out: TData,
+    ft_be_out: TBe,
+    ft_rd: bool,
+    ft_wr: bool,
+    ft_oe: bool,
+    ui_din_full: bool,
+    ui_dout: TData,
+    ui_dout_be: TBe,
+    ui_dout_empty: bool,
+}
+
+pub struct port FtWirePort<TData, TBe> {
+    ft_data_out: &TData,
+    ft_be_out: &TBe,
+    ft_rd: &bool,
+    ft_wr: &bool,
+    ft_oe: &bool,
+    ui_din_full: &bool,
+    ui_dout: &TData,
+    ui_dout_be: &TBe,
+    ui_dout_empty: &bool,
+}
+
+impl uint<15> {
+    fn bit_time_last(self) -> uint<15> {
+        if self == 0 {
+            0
+        } else {
+            self -. 1
+        }
+    }
+}
+
+impl uint<3> {
+    fn normalized_stop_bits(self) -> uint<3> {
+        if self == 0 {
+            1
+        } else {
+            self
+        }
+    }
+
+    fn extra_stop_bits(self) -> uint<3> {
+        let normalized = self.normalized_stop_bits();
+        if normalized > 1 {
+            normalized -. 1
+        } else {
+            0
+        }
+    }
+}
+
+enum UartTxState {
+    Idle,
+    StartBit,
+    Data,
+    StopBit,
+}
+
+struct UartTxRegs<#uint DATA_WIDTH> {
+    state: UartTxState,
+    ctr: uint<32>,
+    bit_ctr: uint<32>,
+    saved_data: uint<DATA_WIDTH>,
+    tx_reg: bool,
+    block_flag: bool,
+}
+
+pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
+    clk: clock,
+    rst: bool,
+    block: bool,
+    data: uint<DATA_WIDTH>,
+    new_data: bool,
+) -> UartTxOut {
+    let _ = require_positive::<BAUD>();
+    let _ = require_positive::<DATA_WIDTH>();
+
+    // Match Lucid:
+    // CLK_PER_BIT = (CLK_FREQ + BAUD) / BAUD - 1
+    // and transitions when ctr == CLK_PER_BIT - 1.
+    let clk_per_bit = ((CLK_FREQ + BAUD) `std::ops::comb_div` BAUD) - 1;
+    let ctr_last = clk_per_bit - 1;
+
+    reg(clk) regs: UartTxRegs<DATA_WIDTH>
+        reset(rst: UartTxRegs$(state: UartTxState::Idle(), ctr: 0, bit_ctr: 0, saved_data: 0, tx_reg: true, block_flag: false))
+        = {
+            let state = regs.state;
+            let ctr = regs.ctr;
+            let bit_ctr = regs.bit_ctr;
+            let saved_data = regs.saved_data;
+            let block_flag = regs.block_flag;
+
+            let ctr_inc: uint<32> = ctr +. 1;
+            let block_flag_next = block;
+
+            match state {
+                UartTxState::Idle => {
+                    let start_send = !block_flag && new_data;
+                    // Keep blocked idle state as-is; otherwise clear counters while idle.
+                    let idle_ctr = if block_flag { ctr } else { 0 };
+                    let idle_bit_ctr = if block_flag { bit_ctr } else { 0 };
+                    UartTxRegs$(
+                        state: if start_send { UartTxState::StartBit() } else { UartTxState::Idle() },
+                        ctr: idle_ctr,
+                        bit_ctr: idle_bit_ctr,
+                        saved_data: if start_send { data } else { saved_data },
+                        tx_reg: true,
+                        block_flag: block_flag_next,
+                    )
+                },
+                UartTxState::StartBit => {
+                    if ctr == ctr_last {
+                        UartTxRegs$(
+                            state: UartTxState::Data(),
+                            ctr: 0,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: false,
+                            block_flag: block_flag_next,
+                        )
+                    } else {
+                        UartTxRegs$(
+                            state: UartTxState::StartBit(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: false,
+                            block_flag: block_flag_next,
+                        )
+                    }
+                },
+                UartTxState::Data => {
+                    let tx_bit = saved_data.to_bits()[trunc(bit_ctr)];
+                    if ctr == ctr_last {
+                        let bit_ctr_inc: uint<32> = bit_ctr +. 1;
+                        if bit_ctr == DATA_WIDTH - 1 {
+                            UartTxRegs$(
+                                state: UartTxState::StopBit(),
+                                ctr: 0,
+                                bit_ctr: bit_ctr_inc,
+                                saved_data: saved_data,
+                                tx_reg: tx_bit,
+                                block_flag: block_flag_next,
+                            )
+                        } else {
+                            UartTxRegs$(
+                                state: UartTxState::Data(),
+                                ctr: 0,
+                                bit_ctr: bit_ctr_inc,
+                                saved_data: saved_data,
+                                tx_reg: tx_bit,
+                                block_flag: block_flag_next,
+                            )
+                        }
+                    } else {
+                        UartTxRegs$(
+                            state: UartTxState::Data(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: tx_bit,
+                            block_flag: block_flag_next,
+                        )
+                    }
+                },
+                UartTxState::StopBit => {
+                    if ctr == ctr_last {
+                        UartTxRegs$(
+                            state: UartTxState::Idle(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: true,
+                            block_flag: block_flag_next,
+                        )
+                    } else {
+                        UartTxRegs$(
+                            state: UartTxState::StopBit(),
+                            ctr: ctr_inc,
+                            bit_ctr: bit_ctr,
+                            saved_data: saved_data,
+                            tx_reg: true,
+                            block_flag: block_flag_next,
+                        )
+                    }
+                },
+            }
+        };
+
+    let state = regs.state;
+    let tx_reg = regs.tx_reg;
+    let block_flag = regs.block_flag;
+    let busy = if let UartTxState::Idle = state { block_flag } else { true };
+
+    UartTxOut$(
+        tx: tx_reg,
+        busy: busy,
+    )
+}
+
+pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
+    clk: clock,
+    rst: bool,
+    block: bool,
+    data: uint<DATA_WIDTH>,
+    new_data: bool,
+    tx_line: inv &bool,
+    busy: inv &bool,
+) {
+    let out = inst uart_tx::<CLK_FREQ, BAUD, DATA_WIDTH>(clk, rst, block, data, new_data);
+    set tx_line = &out.tx;
+    set busy = &out.busy;
+}
+
+enum RxState<#uint DATA_WIDTH> {
+    Idle,
+    WaitHalf{time: uint<15>},
+    WaitData{time: uint<15>, bit_idx: uint<16>, data: uint<DATA_WIDTH>, odd_parity: bool},
+    WaitParity{time: uint<15>, data: uint<DATA_WIDTH>, odd_parity: bool},
+    WaitExtraStop{time: uint<15>, count: uint<3>},
+    WaitHigh,
+}
+
+fn uart_rx_shift_in<#uint DATA_WIDTH>(data: uint<DATA_WIDTH>, rx_sync: bool) -> uint<DATA_WIDTH> {
+    let incoming_base: uint<DATA_WIDTH> = if rx_sync { 1 } else { 0 };
+    let incoming = incoming_base << (DATA_WIDTH - 1);
+    trunc((data >> 1) | incoming)
+}
+
+fn uart_rx_after_stop_bits<#uint DATA_WIDTH>(stops_after_first: StopBits) -> RxState<DATA_WIDTH> {
+    if stops_after_first == 0 {
+        RxState::WaitHigh()
+    } else {
+        RxState::WaitExtraStop(0, stops_after_first)
+    }
+}
+
+fn uart_rx_after_data<#uint DATA_WIDTH>(
+    parity: bool,
+    stops_after_first: StopBits,
+    data: uint<DATA_WIDTH>,
+    odd_parity: bool,
+) -> RxState<DATA_WIDTH> {
+    if parity {
+        RxState::WaitParity(0, data, odd_parity)
+    } else {
+        uart_rx_after_stop_bits::<DATA_WIDTH>(stops_after_first)
+    }
+}
+
+pub entity uart_rx<#uint DATA_WIDTH>(
+    clk: clock,
+    rst: bool,
+    rx: bool,
+    bit_time: BitTime,
+    parity: bool,
+    stop_bits: StopBits,
+) -> UartRxOut<uint<DATA_WIDTH>> {
+    let _ = require_positive::<DATA_WIDTH>();
+
+    let last = bit_time.bit_time_last();
+    let half = bit_time >> 1;
+    let stops_after_first = stop_bits.extra_stop_bits();
+    let last_bit_idx: uint<16> = DATA_WIDTH - 1;
+
+    // Alchitry compatibility: use the shared 3-stage synchronizer and sample
+    // from the oldest stage for start/bit detection.
+    let rx_sync = inst sync_delay::<3>(clk, rx);
+
+    reg(clk) state: RxState<DATA_WIDTH> reset(rst: RxState::Idle()) = {
+        match state {
+            RxState::Idle => {
+                if !rx_sync {
+                    RxState::WaitHalf(0)
+                } else {
+                    RxState::Idle()
+                }
+            },
+            RxState::WaitHalf(time) => {
+                if time == half {
+                    RxState::WaitData(0, 0, 0, false)
+                } else {
+                    RxState::WaitHalf(time +. 1)
+                }
+            },
+            RxState::WaitData$(time, bit_idx, data, odd_parity) => {
+                let next_data = uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync);
+                let next_odd = odd_parity ^^ rx_sync;
+                if time == last {
+                    if bit_idx == last_bit_idx {
+                        uart_rx_after_data::<DATA_WIDTH>(parity, stops_after_first, next_data, next_odd)
+                    } else {
+                        RxState::WaitData(0, bit_idx +. 1, next_data, next_odd)
+                    }
+                } else {
+                    RxState::WaitData(time +. 1, bit_idx, data, odd_parity)
+                }
+            },
+            RxState::WaitParity$(time, data, odd_parity) => {
+                if time == last {
+                    uart_rx_after_stop_bits::<DATA_WIDTH>(stops_after_first)
+                } else {
+                    RxState::WaitParity(time +. 1, data, odd_parity)
+                }
+            },
+            RxState::WaitExtraStop$(time, count) => {
+                if time == last {
+                    if count == 1 {
+                        RxState::WaitHigh()
+                    } else {
+                        RxState::WaitExtraStop(0, count -. 1)
+                    }
+                } else {
+                    RxState::WaitExtraStop(time +. 1, count)
+                }
+            },
+            RxState::WaitHigh => {
+                if rx_sync {
+                    RxState::Idle()
+                } else {
+                    RxState::WaitHigh()
+                }
+            },
+        }
+    };
+
+    reg(clk) capture: UartRxCapture<DATA_WIDTH>
+        reset(rst: UartRxCapture$(valid: false, byte: 0, parity_error: false))
+        = {
+        match state {
+            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
+                let _ = odd_parity;
+                UartRxCapture$(
+                    valid: true,
+                    byte: uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync),
+                    parity_error: false,
+                )
+            },
+            RxState::WaitParity$(time, data, odd_parity) if time == last => {
+                UartRxCapture$(
+                    valid: true,
+                    byte: data,
+                    parity_error: odd_parity ^^ rx_sync,
+                )
+            },
+            _ => UartRxCapture$(
+                valid: false,
+                byte: capture.byte,
+                parity_error: capture.parity_error,
+            ),
+        }
+    };
+
+    let out_valid = capture.valid;
+    let out_byte = capture.byte;
+    let out_parity_error = capture.parity_error;
+
+    UartRxOut$(
+        valid: out_valid,
+        parity_error: if out_valid { out_parity_error } else { false },
+        byte: if out_valid { out_byte } else { 0 },
+    )
+}
+
+pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<DATA_WIDTH>,
+    ft_be_in: uint<BE_WIDTH>,
+    ui_din: uint<DATA_WIDTH>,
+    ui_din_be: uint<BE_WIDTH>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+) -> FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>> {
+    let _ = require_positive::<DATA_WIDTH>();
+    let _ = require_positive::<BE_WIDTH>();
+    let _ = require_at_least_two::<TX_BUFFER>();
+    let _ = require_at_least_two::<RX_BUFFER>();
+    let _ = require_power_of_two::<TX_BUFFER>();
+    let _ = require_power_of_two::<RX_BUFFER>();
+
+    let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port;
+
+    #[verilog_attrs(keep_hierarchy = "yes")]
+    let _ = inst ft_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ft_w.ft_data_out,
+        ft_w.ft_be_out,
+        ft_w.ft_rd,
+        ft_w.ft_wr,
+        ft_w.ft_oe,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ft_w.ui_din_full,
+        ft_w.ui_dout,
+        ft_w.ui_dout_be,
+        ft_w.ui_dout_empty,
+        ui_dout_get,
+    );
+
+    FtOut$(
+        ft_data_out: *ft.ft_data_out,
+        ft_be_out: *ft.ft_be_out,
+        ft_rd: *ft.ft_rd,
+        ft_wr: *ft.ft_wr,
+        ft_oe: *ft.ft_oe,
+        ui_din_full: *ft.ui_din_full,
+        ui_dout: *ft.ui_dout,
+        ui_dout_be: *ft.ui_dout_be,
+        ui_dout_empty: *ft.ui_dout_empty,
+    )
+}
+
+#[inline]
+pub entity ft_out_tap<TData, TBe>(
+    out: FtOut<TData, TBe>,
+    ft_data_out: inv &TData,
+    ft_be_out: inv &TBe,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &TData,
+    ui_dout_be: inv &TBe,
+    ui_dout_empty: inv &bool,
+) {
+    set ft_data_out = &out.ft_data_out;
+    set ft_be_out = &out.ft_be_out;
+    set ft_rd = &out.ft_rd;
+    set ft_wr = &out.ft_wr;
+    set ft_oe = &out.ft_oe;
+    set ui_din_full = &out.ui_din_full;
+    set ui_dout = &out.ui_dout;
+    set ui_dout_be = &out.ui_dout_be;
+    set ui_dout_empty = &out.ui_dout_empty;
+}
+
+pub entity ft_tap<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
+    clk: clock,
+    rst: bool,
+    ft_clk: clock,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data_in: uint<DATA_WIDTH>,
+    ft_be_in: uint<BE_WIDTH>,
+    ui_din: uint<DATA_WIDTH>,
+    ui_din_be: uint<BE_WIDTH>,
+    ui_din_valid: bool,
+    ui_dout_get: bool,
+    ft_data_out: inv &uint<DATA_WIDTH>,
+    ft_be_out: inv &uint<BE_WIDTH>,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+    ui_din_full: inv &bool,
+    ui_dout: inv &uint<DATA_WIDTH>,
+    ui_dout_be: inv &uint<BE_WIDTH>,
+    ui_dout_empty: inv &bool,
+) {
+    #[verilog_attrs(keep_hierarchy = "yes")]
+    let out = inst ft::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
+        clk,
+        rst,
+        ft_clk,
+        ft_rxf,
+        ft_txe,
+        ft_data_in,
+        ft_be_in,
+        ui_din,
+        ui_din_be,
+        ui_din_valid,
+        ui_dout_get,
+    );
+    inst ft_out_tap(
+        out,
+        ft_data_out,
+        ft_be_out,
+        ft_rd,
+        ft_wr,
+        ft_oe,
+        ui_din_full,
+        ui_dout,
+        ui_dout_be,
+        ui_dout_empty,
+    );
+}

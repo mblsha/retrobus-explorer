@@ -1,0 +1,171 @@
+mod build_info;
+mod streaming_rom;
+
+use shared_components::{
+    boot_banner::au_usb_uart_banner_then_loopback,
+    clocking::sampled_bool_clock,
+    primitives::{falling_edge, reset_conditioner, rising_edge, sync_bundle, sync_delay, sync_z80_controls_n},
+    serial::{FtBe, FtData, FtWirePort, ft_tap},
+};
+
+use self::streaming_rom::{
+    RomAddr,
+    RomBank,
+    RomData,
+    StreamingRomInputs,
+    streaming_rom_core,
+};
+
+#[no_mangle(all)]
+entity main_core(
+    clk: clock,
+    rst_n: bool,
+    led: inv &[bool; 8],
+    usb_rx: bool,
+    usb_tx: inv &bool,
+
+    ft_clk: bool,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: FtData,
+    ft_be: FtBe,
+    ft_data_drive: inv &FtData,
+    ft_be_drive: inv &FtBe,
+    ft_rd: inv &bool,
+    ft_wr: inv &bool,
+    ft_oe: inv &bool,
+
+    saleae: inv &[bool; 8],
+
+    z80_mreq: bool,
+    z80_m1: bool,
+    z80_ioreset: bool,
+    z80_iorq: bool,
+    z80_int1: bool,
+    z80_wait: bool,
+    z80_rd: bool,
+    z80_wr: bool,
+
+    data_drive: inv &RomData,
+    data_oe: inv &bool,
+    addr: RomAddr,
+
+    addr_bnk: RomBank,
+    addr_ceram2: bool,
+    addr_cerom2: bool,
+
+    read_state_debug: inv &uint<3>,
+    streaming_state_debug: inv &uint<3>,
+    streaming_bank_debug: inv &RomBank,
+    request_count_debug: inv &uint<16>,
+    streaming_size_debug: inv &uint<16>,
+    streaming_index_debug: inv &uint<16>,
+) {
+    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
+
+    let z80_sync = inst sync_z80_controls_n::<6, 4, 4, 2, 2>(
+        clk,
+        z80_m1,
+        z80_mreq,
+        z80_iorq,
+        z80_rd,
+        z80_wr,
+    );
+    let addr_sync_bits = inst sync_bundle::<2, 16>(clk, addr.to_bits());
+    let bank_sync_bits = inst sync_bundle::<2, 2>(clk, addr_bnk.to_bits());
+    let addr_sync: RomAddr = addr_sync_bits.to_uint();
+    let bank_sync: RomBank = bank_sync_bits.to_uint();
+    let addr_ceram2_sync = inst sync_delay::<2>(clk, addr_ceram2);
+    let addr_cerom2_sync = inst sync_delay::<2>(clk, addr_cerom2);
+
+    let mreq_fall = inst falling_edge(clk, z80_sync.mreq);
+    let mreq_rise = inst rising_edge(clk, z80_sync.mreq);
+
+    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port;
+    let stream = inst streaming_rom_core(
+        clk,
+        rst,
+        StreamingRomInputs$(
+            ft_ui_din_full: *ft_io.ui_din_full,
+            ft_ui_dout_empty: *ft_io.ui_dout_empty,
+            ft_ui_dout: *ft_io.ui_dout,
+            mreq_fall: mreq_fall,
+            mreq_rise: mreq_rise,
+            addr_sync: addr_sync,
+            addr_bnk_sync: bank_sync,
+            addr_cerom2_sync: addr_cerom2_sync,
+        ),
+    );
+
+    inst ft_tap::<16, 2, 64, 16384, 1, 0>(
+        clk,
+        rst,
+        ft_clk_clock,
+        ft_rxf,
+        ft_txe,
+        ft_data,
+        ft_be,
+        stream.ft_ui_din,
+        stream.ft_ui_din_be,
+        stream.ft_ui_din_valid,
+        stream.ft_ui_dout_get,
+        ft_io_w.ft_data_out,
+        ft_io_w.ft_be_out,
+        ft_io_w.ft_rd,
+        ft_io_w.ft_wr,
+        ft_io_w.ft_oe,
+        ft_io_w.ui_din_full,
+        ft_io_w.ui_dout,
+        ft_io_w.ui_dout_be,
+        ft_io_w.ui_dout_empty,
+    );
+
+    inst au_usb_uart_banner_then_loopback::<8, 103>(
+        clk,
+        rst,
+        usb_rx,
+        build_info::boot_banner_text(),
+        usb_tx,
+    );
+
+    let read_bits = stream.read_state_code.to_bits();
+    let streaming_bits = stream.streaming_state_code.to_bits();
+    set led = &[
+        read_bits[0],
+        read_bits[1],
+        read_bits[2],
+        false,
+        streaming_bits[0],
+        streaming_bits[1],
+        streaming_bits[2],
+        false,
+    ];
+    set saleae = &[
+        z80_sync.wr,
+        z80_sync.rd,
+        z80_sync.iorq,
+        z80_sync.mreq,
+        z80_sync.m1,
+        addr_cerom2_sync,
+        streaming_bits[0],
+        read_bits[0],
+    ];
+
+    set ft_data_drive = &*ft_io.ft_data_out;
+    set ft_be_drive = &*ft_io.ft_be_out;
+    set ft_rd = &*ft_io.ft_rd;
+    set ft_wr = &*ft_io.ft_wr;
+    set ft_oe = &*ft_io.ft_oe;
+    set data_drive = &stream.data_drive;
+    set data_oe = &stream.data_oe;
+    set read_state_debug = &stream.read_state_code;
+    set streaming_state_debug = &stream.streaming_state_code;
+    set streaming_bank_debug = &stream.num_streaming_bank;
+    set request_count_debug = &stream.num_data_request;
+    set streaming_size_debug = &stream.streaming_data_size;
+    set streaming_index_debug = &stream.streaming_index;
+
+    let _unused_bus = z80_ioreset || z80_int1 || z80_wait || addr_ceram2_sync;
+    let _unused_ft_be = *ft_io.ui_dout_be;
+}

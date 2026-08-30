@@ -1,0 +1,29 @@
+name = "sharp_pc_e500_card_spade"
+preprocessing = ["python3 ../../tools/gen_build_info.py --project ."]
+
+[libraries]
+shared_components = { path = "../../lib/shared-components" }
+
+[constraints]
+top_entity = "main_core"
+extra_signals = ["data"]
+acf = [
+    "../../constraints/boards/alchitry-au1/alchitry.acf",
+    "../../constraints/interfaces/saleae.acf",
+    "../../constraints/boards/alchitry-au1/ft_v1.acf",
+    "constraints/pc-e500-ffc.acf",
+]
+
+[verilog]
+sources = [
+    "verilog/main_wrapper.v",
+    "verilog/card_ram_2k_v.v",
+    "../../lib/shared-components/verilog/**/*.v",
+]
+
+[tooling]
+top = "main"
+test_module = "test_sharp_pc_e500_card"
+
+[simulation]
+testbench_dir = "test"

@@ -23,8 +23,7 @@ jobs:
         with:
           filters: |
             spade:
-              - 'gateware/reference/spade-projects/**'
-              - 'gateware/reference/binary-counter/**'
+              - 'gateware/**'
               - '.github/workflows/spade-testbenches.yml'
 
   run-spade-testbenches:
@@ -33,9 +32,10 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: gateware/reference/spade-projects
+        working-directory: gateware
     env:
       CARGO_TERM_COLOR: always
+      GATEWARE_PYTHON: ${{ github.workspace }}/gateware/.venv/bin/python
       PYTHONUNBUFFERED: "1"
       SPADE_COMPILER_CACHE_ROOT: /home/runner/.cache/spade-compilers
     steps:
@@ -62,7 +62,7 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
-          key: spade-swim-${{ runner.os }}-${{ hashFiles('gateware/reference/spade/src/swim/install.md') }}
+          key: spade-swim-${{ runner.os }}-${{ hashFiles('.github/workflows/spade-testbenches.yml') }}
           restore-keys: |
             spade-swim-${{ runner.os }}-
 
@@ -71,7 +71,7 @@ jobs:
         with:
           path: |
             /home/runner/.cache/spade-compilers
-          key: spade-compilers-${{ runner.os }}-${{ hashFiles('gateware/reference/spade-projects/*/swim.lock', 'gateware/reference/binary-counter/swim.lock') }}
+          key: spade-compilers-${{ runner.os }}-${{ hashFiles('gateware/projects/*/swim.lock', 'gateware/lib/shared-components/swim.lock') }}
           restore-keys: |
             spade-compilers-${{ runner.os }}-
 
@@ -91,15 +91,32 @@ jobs:
           verilator --version
 
       - name: Sync Python dependencies
-        run: uv sync
+        run: |
+          uv sync --locked --all-packages
+          test -x "${GATEWARE_PYTHON}"
+          echo "$(dirname "${GATEWARE_PYTHON}")" >> "${GITHUB_PATH}"
+          "${GATEWARE_PYTHON}" --version
+
+      - name: Validate Spade project inventory
+        run: |
+          "${GATEWARE_PYTHON}" -m unittest discover -s tools -p 'test_*.py'
+          "${GATEWARE_PYTHON}" tools/project_inventory.py --check
+
+      - name: Run host-side gateware unit tests
+        run: |
+          "${GATEWARE_PYTHON}" -m unittest discover \
+            -s projects/ft-uart-hex-bridge/test \
+            -p 'test_ft_uart_hex_bridge_host.py'
+          "${GATEWARE_PYTHON}" -m pytest projects/sharp-pc-e500-card/tests
 
       - name: Prepare shared compiler directories and pin swim compiler paths
         run: |
           set -euo pipefail
-          python <<'PY'
+          "${GATEWARE_PYTHON}" <<'PY'
           import os
           import re
           import subprocess
+          import sys
           from pathlib import Path
 
           root = Path(".").resolve()
@@ -154,10 +171,11 @@ jobs:
                   text += "\n" + section
               swim_toml.write_text(text)
 
-          projects = sorted(root.glob("*/swim.toml"))
-          binary_counter_swim = root.parent / "binary-counter" / "swim.toml"
-          if binary_counter_swim.is_file():
-              projects.append(binary_counter_swim)
+          project_paths = subprocess.check_output(
+              [sys.executable, "tools/project_inventory.py"], text=True
+          ).splitlines()
+          projects = [root / project / "swim.toml" for project in project_paths]
+          projects.append(root / "lib/shared-components/swim.toml")
           resolved: dict[str, Path] = {}
           for swim_toml in projects:
               project_dir = swim_toml.parent
@@ -173,33 +191,36 @@ jobs:
               print(f"{project_dir.name}: compiler commit {commit} -> {compiler_dir}")
           PY
 
+      - name: Run application characterization testbenches
+        run: |
+          set -euo pipefail
+          "${GATEWARE_PYTHON}" tools/run_tb.py \
+            --project projects/sharp-organizer-card \
+            --top tb_trace_events \
+            --test-module test_trace_events \
+            --build-dir build/tb_trace_events_cocotb
+          cp projects/sharp-organizer-card/test/results.xml \
+            projects/sharp-organizer-card/test/trace_events.results.xml
+          "${GATEWARE_PYTHON}" tools/run_tb.py \
+            --project projects/sharp-pc-g850-bus \
+            --top tb_bus_debug \
+            --test-module test_bus_debug \
+            --build-dir build/tb_bus_debug_cocotb
+          cp projects/sharp-pc-g850-bus/test/results.xml \
+            projects/sharp-pc-g850-bus/test/bus_debug.results.xml
+
       - name: Run project testbenches
         run: |
           set -euo pipefail
-          projects=(
-            test-minimal-spade
-            pin-tester-spade
-            sharp-organizer-card-spade
-            sharp-pc-g850-bus-spade
-            sharp-pc-g850-streaming-rom-spade
-            uart-saleae-loopback-spade
-          )
-          for project in "${projects[@]}"; do
+          project_list="$("${GATEWARE_PYTHON}" tools/project_inventory.py)"
+          while IFS= read -r project; do
             echo "== Running ${project} testbench =="
-            (cd "${project}" && python scripts/test_with_vcd.py)
-          done
-
-      - name: Run binary-counter testbench
-        run: |
-          set -euo pipefail
-          echo "== Running binary-counter testbench =="
-          python tools/run_tb.py --project ../binary-counter
+            "${GATEWARE_PYTHON}" "${project}/scripts/test_with_vcd.py"
+          done <<< "${project_list}"
 
       - name: Run shared-components testbenches
         run: |
-          set -euo pipefail
-          cd shared-components
-          python scripts/test_all_components.py
+          "${GATEWARE_PYTHON}" lib/shared-components/scripts/test_all_components.py
 
       - name: Upload Spade waveform artifacts
         uses: actions/upload-artifact@v4
@@ -207,15 +228,13 @@ jobs:
         with:
           name: spade-waveforms-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
-            gateware/reference/spade-projects/*-spade/test/dump.vcd
-            gateware/reference/spade-projects/*-spade/test/dump.surfer.vcd
-            gateware/reference/spade-projects/*-spade/test/results.xml
-            gateware/reference/binary-counter/test/dump.vcd
-            gateware/reference/binary-counter/test/dump.surfer.vcd
-            gateware/reference/binary-counter/test/results.xml
-            gateware/reference/spade-projects/shared-components/test/waveforms/*.vcd
-            gateware/reference/spade-projects/shared-components/test/waveforms/*.surfer.vcd
-            gateware/reference/spade-projects/shared-components/test/waveforms/*.results.xml
+            gateware/projects/*/test/dump.vcd
+            gateware/projects/*/test/dump.surfer.vcd
+            gateware/projects/*/test/results.xml
+            gateware/projects/*/test/*.results.xml
+            gateware/lib/shared-components/test/waveforms/*.vcd
+            gateware/lib/shared-components/test/waveforms/*.surfer.vcd
+            gateware/lib/shared-components/test/waveforms/*.results.xml
           if-no-files-found: warn
           retention-days: 14
 
