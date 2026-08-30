@@ -119,6 +119,8 @@ class NoLegacyGatewareTest(unittest.TestCase):
     def test_spade_ci_uses_the_canonical_workspace_and_local_test_paths(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "spade-testbenches.yml").read_text()
         self.assertIn("working-directory: gateware", workflow)
+        self.assertIn("uses: astral-sh/setup-uv@v10.0.1", workflow)
+        self.assertIn('version: "0.12.7"', workflow)
         self.assertIn("uv sync --locked --all-packages", workflow)
         self.assertIn(
             "GATEWARE_PYTHON: ${{ github.workspace }}/gateware/.venv/bin/python",
