@@ -117,7 +117,7 @@ class SharpPcE500RamCardCircuit(Circuit):
 
         self.nets.append(gnd_data_net)
 
-        self.place(self.ffc, Placement((0.0, 0.0), 180, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.ffc, Placement((0.0, 0.0), 180, on=Side.Bottom))
         self.place(self.bus, Placement((0.0, 42.0 / 2.0 - BUS_PAD_HEIGHT / 2.0), on=Side.Top))
 
         label_text = f"SHARP PC-E500 adapter v1 (c) mblsha {BOARD_DATE}"

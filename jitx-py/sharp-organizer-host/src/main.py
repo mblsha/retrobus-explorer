@@ -166,7 +166,7 @@ class SharpOrganizerHostCircuit(Circuit):
         self.nets.append(gnd_net)
 
         self.place(self.gnd_testpads, Placement((0.0, 0.0), on=Side.Top))
-        self.place(self.ffc, Placement((0.0, -9.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.ffc, Placement((0.0, -9.0), 180, on=Side.Top))
         self.place(self.bus, Placement((0.0, 30.0 / 2.0 - BUS_PAD_HEIGHT / 2.0), on=Side.Top))
 
         self += Silkscreen(Text("SHARP Organizer Host adapter v1", 1.5).at(0.0, 1.5), side=FeatureSide.Top)

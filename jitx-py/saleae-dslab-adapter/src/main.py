@@ -92,7 +92,7 @@ class SaleaeDslabAdapterCircuit(Circuit):
             Net(name="SALEAE7") + self.right.p3 + self.saleae.data[7],
         ]
 
-        self.place(self.saleae, Placement((0.0, OFFSET_Y), 270, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.saleae, Placement((0.0, OFFSET_Y), 270, on=Side.Bottom))
         self.place(self.left, Placement((-6.5, 4.1 + OFFSET_Y), on=Side.Bottom))
         self.place(self.right, Placement((6.5, 4.1 + OFFSET_Y), on=Side.Bottom))
 
