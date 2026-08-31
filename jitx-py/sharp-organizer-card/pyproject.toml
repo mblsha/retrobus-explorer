@@ -9,7 +9,7 @@ description = "Python JITX port scaffold for the retrobus sharp-organizer-card b
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "jitx>=4.0.0,<5",
+  "jitx>=4.4.0,<5",
   "jitxlib-parts>=1.0.0,<2",
   "jitxlib-standard>=4.0.0,<5",
   "jitxexamples-components>=1.0.0,<2",
@@ -22,8 +22,11 @@ packages = ["src"]
 [project.optional-dependencies]
 dev = [
   "ruff",
-  "ty",
+  "ty>=0.0.75",
 ]
+
+[tool.uv]
+exclude-newer = "2026-08-31T00:00:00Z"
 
 [tool.uv.sources]
 shared-components = { path = "../shared-components", editable = true }

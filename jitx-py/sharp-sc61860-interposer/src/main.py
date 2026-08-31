@@ -144,7 +144,7 @@ class SharpSc61860InterposerCircuit(Circuit):
         self.nets.append(Net(name='DATA47') + self.ffc.data47)
 
         self.place(self.ffc, Placement((0.0, 19.0), on=Side.Top))
-        self.place(self.cpu, Placement((4.0, -12.0), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.cpu, Placement((4.0, -12.0), 90, on=Side.Top))
         self.place(self.tp_gnd, Placement((-17.0, 16.0), on=Side.Top))
         self.place(self.tp_vcc, Placement((17.0, 16.0), on=Side.Top))
 

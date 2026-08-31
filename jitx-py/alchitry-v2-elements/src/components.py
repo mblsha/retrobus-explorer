@@ -136,12 +136,9 @@ def _build_symbol(self: Component, attr_names: tuple[str, ...]) -> BoxSymbol:
     rows: list[Row] = []
     total_rows = max(len(left_names), len(right_names))
     for index in range(total_rows):
-        row_kwargs = {}
-        if index < len(left_names):
-            row_kwargs["left"] = PinGroup([cast(Port, getattr(self, left_names[index]))])
-        if index < len(right_names):
-            row_kwargs["right"] = PinGroup([cast(Port, getattr(self, right_names[index]))])
-        rows.append(Row(**row_kwargs))
+        left = PinGroup([cast(Port, getattr(self, left_names[index]))]) if index < len(left_names) else ()
+        right = PinGroup([cast(Port, getattr(self, right_names[index]))]) if index < len(right_names) else ()
+        rows.append(Row(left=left, right=right))
     return BoxSymbol(rows=rows, config=BoxConfig(group_spacing=2))
 
 

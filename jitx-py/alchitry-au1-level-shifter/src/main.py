@@ -191,9 +191,9 @@ class LevelShifter(Circuit):
             chain_net(None, self.hi[7], self.shifter.B8),
         ]
 
-        self.place(self.shifter, Placement((0.0, 0.0), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.cap_lo, Placement((-2.0, 3.9), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.cap_hi, Placement((2.0, 3.9), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.shifter, Placement((0.0, 0.0), 270, on=Side.Top))
+        self.place(self.cap_lo, Placement((-2.0, 3.9), 90, on=Side.Top))
+        self.place(self.cap_hi, Placement((2.0, 3.9), 270, on=Side.Top))
 
 
 class AlchitryElementBottom(Circuit):
@@ -350,10 +350,10 @@ class AlchitryElementBottom(Circuit):
         left_to_side = 5.40
         case_width = 15.20
         b_d_offset_left = BOARD_WIDTH / -2.0 + left_to_side + case_width / 2.0
-        self.place(self.b, Placement((b_d_offset_left, vertical_outer_spacing / 2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.a, Placement((b_d_offset_left + 10.3 + case_width, vertical_outer_spacing / 2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.d, Placement((b_d_offset_left, vertical_outer_spacing / -2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.c, Placement((b_d_offset_left + 6.3 + case_width, vertical_outer_spacing / -2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.b, Placement((b_d_offset_left, vertical_outer_spacing / 2.0), 180, on=Side.Top))
+        self.place(self.a, Placement((b_d_offset_left + 10.3 + case_width, vertical_outer_spacing / 2.0), 180, on=Side.Top))
+        self.place(self.d, Placement((b_d_offset_left, vertical_outer_spacing / -2.0), 180, on=Side.Top))
+        self.place(self.c, Placement((b_d_offset_left + 6.3 + case_width, vertical_outer_spacing / -2.0), 180, on=Side.Top))
 
 
 @dataclass(frozen=True)
@@ -447,18 +447,18 @@ class AlchitryAu1LevelShifterCircuit(Circuit):
                 )
 
         self.place(self.fpga, Placement((0.0, 0.0), on=Side.Top))
-        self.place(self.shift[0], Placement((14.734, 9.468), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[1], Placement((4.8113, 9.468), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[2], Placement((0.3, -9.468), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[3], Placement((-9.2, -9.468), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[4], Placement((9.8165, -9.468), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[5], Placement((-7.0, 9.468), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.shift[0], Placement((14.734, 9.468), 270, on=Side.Top))
+        self.place(self.shift[1], Placement((4.8113, 9.468), 270, on=Side.Top))
+        self.place(self.shift[2], Placement((0.3, -9.468), 90, on=Side.Top))
+        self.place(self.shift[3], Placement((-9.2, -9.468), 90, on=Side.Top))
+        self.place(self.shift[4], Placement((9.8165, -9.468), 90, on=Side.Top))
+        self.place(self.shift[5], Placement((-7.0, 9.468), 270, on=Side.Top))
 
         self.place(self.tp_gnd, Placement((0.0, 0.0), on=Side.Top))
-        self.place(self.ffc1, Placement((2.3960, FFC_OFFSET_Y - FFC_DISTANCE / 2.0), 180, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.ffc2, Placement((2.3960, FFC_OFFSET_Y + FFC_DISTANCE / 2.0), 180, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.ffc1, Placement((2.3960, FFC_OFFSET_Y - FFC_DISTANCE / 2.0), 180, on=Side.Bottom))
+        self.place(self.ffc2, Placement((2.3960, FFC_OFFSET_Y + FFC_DISTANCE / 2.0), 180, on=Side.Bottom))
         self.place(self.saleae, Placement((BOARD_WIDTH / -2.0 + 10.0, 0.0), on=Side.Bottom))
-        self.place(self.vcc_select, Placement((BOARD_WIDTH / 2.0 - 7.0, 0.0), 180, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.vcc_select, Placement((BOARD_WIDTH / 2.0 - 7.0, 0.0), 180, on=Side.Bottom))
 
         self += Silkscreen(Text("Level Shifter Element (Au1) v2", 1.5).at(0.0, 1.0), side=FeatureSide.Bottom)
         self += Silkscreen(Text(f"(c) mblsha {BOARD_DATE}", 1.5).at(0.0, -1.0), side=FeatureSide.Bottom)

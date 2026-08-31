@@ -188,7 +188,7 @@ class SharpOrganizerCardCircuit(Circuit):
 
         self.nets.append(gnd_net)
 
-        self.place(self.ffc, Placement((0.0, -15.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.ffc, Placement((0.0, -15.0), 180, on=Side.Top))
         self.place(self.bus, Placement((0.0, BOARD_HEIGHT / 2.0 - BUS_PAD_HEIGHT / 2.0), on=Side.Top))
 
         self += Silkscreen(Text("SHARP Organizer Card adapter v1", 1.5).at(0.0, 1.5), side=FeatureSide.Bottom)

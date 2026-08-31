@@ -131,7 +131,7 @@ class PinTesterCircuit(Circuit):
         for index, header in enumerate(self.test_headers):
             x = DATA_HEADER_XS[index]
             y = HEADER_ROW_Y if index % 2 == 0 else -HEADER_ROW_Y
-            self.place(header, Placement((x, y), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
+            self.place(header, Placement((x, y), 90, on=Side.Top))
             self += Silkscreen(
                 Circle(diameter=DATA_HEADER_MARKER_DIAMETER).at(
                     x + DATA_HEADER_MARKER_OFFSET_X,

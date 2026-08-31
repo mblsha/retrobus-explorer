@@ -93,9 +93,9 @@ class EspiDebugBreakoutCircuit(Circuit):
             self.nets.append(Net(name=f'GPIO_SIG_{index}') + self.ffc.p[9 - index] + self.gpio_header.p[index * 2])
             self.nets.append(Net(name=f'GPIO_GND_{index}') + self.gnd + self.gpio_header.p[index * 2 + 1])
 
-        self.place(self.ffc, Placement((0.0, -10.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.saleae, Placement((0.0, 0.0), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.gpio_header, Placement((0.0, 10.0), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.ffc, Placement((0.0, -10.0), 180, on=Side.Top))
+        self.place(self.saleae, Placement((0.0, 0.0), 270, on=Side.Top))
+        self.place(self.gpio_header, Placement((0.0, 10.0), 90, on=Side.Top))
 
         self += Silkscreen(Text('1', 1.0).at(8.5, -10.0), side=FeatureSide.Top)
 

@@ -64,8 +64,8 @@ class RPiPico(Circuit):
         self.left_header = PinHeader1x20()
         self.right_header = PinHeader1x20()
 
-        self.place(self.left_header, Placement((-PICO_WIDTH / 2.0, 0.0), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.right_header, Placement((PICO_WIDTH / 2.0, 0.0), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.left_header, Placement((-PICO_WIDTH / 2.0, 0.0), 90, on=Side.Top))
+        self.place(self.right_header, Placement((PICO_WIDTH / 2.0, 0.0), 270, on=Side.Top))
 
         self.nets = [
             Net(name="pico_header0_p1") + self.left_header.p[0],
@@ -109,7 +109,7 @@ class RaspberryPi40PinHeader(Circuit):
     def __init__(self):
         super().__init__()
         self.header = PinHeader2x20()
-        self.place(self.header, Placement((0.0, 0.0), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.header, Placement((0.0, 0.0), 90, on=Side.Top))
 
         self.nets = [
             Net(name="header_p1") + self.header.p[0] + self.header.p[16],
@@ -157,8 +157,8 @@ class RpiPico40PinAdapterCircuit(Circuit):
         self.pico = RPiPico()
         self.forty_pin = RaspberryPi40PinHeader()
 
-        self.place(self.pico, Placement((0.0, PICO_WIDTH / 2.0 + Y_OFFSET), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.forty_pin, Placement((0.0, -CONNECTORS_SPACING + Y_OFFSET), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.pico, Placement((0.0, PICO_WIDTH / 2.0 + Y_OFFSET), 270, on=Side.Top))
+        self.place(self.forty_pin, Placement((0.0, -CONNECTORS_SPACING + Y_OFFSET), 270, on=Side.Top))
 
         self.nets = [
             Net(name="GND") + self.gnd + self.pico.gnd + self.forty_pin.gnd,
