@@ -1,0 +1,30 @@
+.jitx/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.vscode/
+.socket.jitx
+__pycache__/
+*.pyc
+render/
+verification/*.kicad_*
+.venv_sync_last
+designs/
+parts-db/
+manufacturing/jlcpcb/bottom-header/
+manufacturing/jlcpcb/top-header-r180/
+renders/*/render-manifest.json
+renders/**/*.svg
+renders/**/*.png
+
+# Keep only final, replayable acceptance evidence. Exploratory routing records
+# are local diagnostics and should not become public project history.
+verification/*
+!verification/emulator-bottom.filled-drc.json
+!verification/emulator-bottom.gnd-fill.drc-diff.json
+!verification/emulator-bottom.raw-drc.json
+!verification/emulator-bottom.topology-continuity.json
+!verification/emulator-top.filled-drc.json
+!verification/emulator-top.gnd-fill.drc-diff.json
+!verification/emulator-top.raw-drc.json
+!verification/emulator-top.topology-continuity.json

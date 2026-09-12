@@ -1,0 +1,136 @@
+use shared_components::sd::{crc7_bit, crc8_byte, crc32_byte};
+use shared_components::serial::{uart_rx, uart_tx};
+
+// Physical Pmod GPIO ordering: 1,2,3,4,7,8,9,10. No drive path exists.
+#[no_mangle(all)]
+entity probe_core(
+    clk: clock,
+    rst: bool,
+    pmod: uint<8>,
+    top_header: uint<2>,
+    rx_valid: bool,
+    rx_byte: uint<8>,
+    tx_ready: bool,
+    tx_valid: inv &bool,
+    tx_byte: inv &uint<8>,
+) {
+    reg(clk) meta reset(rst: 0) = pmod;
+    reg(clk) pins reset(rst: 0) = meta;
+    reg(clk) previous reset(rst: 0) = pins;
+    reg(clk) settling: uint<3> reset(rst: 0) = if settling == 7 { 7 } else { settling +. 1 };
+
+    decl timeout, request_crc, sending, index, response_crc;
+
+    // Request: A5 01 opcode sequence CRC8(01,opcode,sequence) 5A.
+    // Opcodes: 1=snapshot, 2=clear. Invalid packets have no effects.
+    reg(clk) parser: uint<3> reset(rst: 0) = {
+        if timeout == 100_000 { 0 }
+        else if rx_valid {
+            match parser {
+                0 => if rx_byte == 0xa5 { 1 } else { 0 },
+                1 => if rx_byte == 1 { 2 } else { 0 },
+                2 => if rx_byte == 1 || rx_byte == 2 { 3 } else { 0 },
+                3 => 4,
+                4 => if rx_byte == request_crc { 5 } else { 0 },
+                _ => 0,
+            }
+        } else { parser }
+    };
+    reg(clk) timeout: uint<17> reset(rst: 0) = {
+        if parser == 0 || rx_valid || timeout == 100_000 { 0 } else { timeout +. 1 }
+    };
+    reg(clk) opcode: uint<8> reset(rst: 0) = if rx_valid && parser == 2 { rx_byte } else { opcode };
+    reg(clk) sequence: uint<8> reset(rst: 0) = if rx_valid && parser == 3 { rx_byte } else { sequence };
+    reg(clk) request_crc: uint<8> reset(rst: 0) = {
+        if rx_valid && parser == 1 { crc8_byte(0, rx_byte) }
+        else if rx_valid && (parser == 2 || parser == 3) { crc8_byte(request_crc, rx_byte) }
+        else { request_crc }
+    };
+    reg(clk) accept reset(rst: false) = rx_valid && parser == 5 && rx_byte == 0x5a && !sending && timeout != 100_000;
+    let clear = accept && opcode == 2;
+    let changed = pins ^ previous;
+    reg(clk) cycles: uint<32> reset(rst: 0) = if clear { 0 } else { cycles +. 1 };
+    reg(clk) seen_high: uint<8> reset(rst: 0) = if clear { 0 } else if settling == 7 { seen_high | pins } else { seen_high };
+    reg(clk) seen_low: uint<8> reset(rst: 0) = if clear { 0 } else if settling == 7 { seen_low | (pins ^ 255) } else { seen_low };
+    reg(clk) edges: [uint<32>; 8] reset(rst: [0; 8]) = {
+        edges.enumerate().map(fn |(index, count)| {
+            if clear { 0 }
+            else if settling == 7 && changed.to_bits()[index] && count != 0xffffffff { count +. 1 }
+            else { count }
+        })
+    };
+
+    let clock_index: uint<3> = if top_header != 0 { 6 } else { 2 };
+    let command_index: uint<3> = if top_header != 0 { 2 } else { 6 };
+    let sd_edge = settling == 7 && pins.to_bits()[clock_index] && !previous.to_bits()[clock_index];
+    let command_bit = pins.to_bits()[command_index];
+    reg(clk) bits_left: uint<6> reset(rst: 0) = {
+        if clear { 0 }
+        else if sd_edge {
+            if bits_left == 0 { if command_bit { 0 } else { 47 } }
+            else { bits_left -. 1 }
+        } else { bits_left }
+    };
+    reg(clk) command: uint<48> reset(rst: 0) = {
+        if sd_edge { (command << 1) | (if command_bit { 1 } else { 0 }) } else { command }
+    };
+    reg(clk) command_crc: uint<7> reset(rst: 0) = {
+        if clear { 0 }
+        else if sd_edge && bits_left == 0 { 0 }
+        else if sd_edge && bits_left >= 9 { crc7_bit(command_crc, command_bit) }
+        else { command_crc }
+    };
+    let complete = sd_edge && bits_left == 1 && command_bit &&
+        trunc::<uint<48>, uint<7>>(command) == command_crc && command.to_bits()[45] && !command.to_bits()[46];
+    reg(clk) last_command: uint<48> reset(rst: 0) = {
+        if clear { 0 } else if complete { (command << 1) | 1 } else { last_command }
+    };
+    reg(clk) command_count: uint<32> reset(rst: 0) = {
+        if clear { 0 } else if complete && command_count != 0xffffffff { command_count +. 1 } else { command_count }
+    };
+
+    // Fixed 64-byte response: a 60-byte atomic snapshot plus IEEE CRC32.
+    let edge_word: uint<256> = zext(edges[0]) | (zext(edges[1]) << 32) |
+        (zext(edges[2]) << 64) | (zext(edges[3]) << 96) |
+        (zext(edges[4]) << 128) | (zext(edges[5]) << 160) |
+        (zext(edges[6]) << 192) | (zext(edges[7]) << 224);
+    let saturated_bits = edges.map(fn |count| { count == 0xffffffff });
+    let saturated: uint<8> = std::conv::bits_to_uint(saturated_bits);
+    let snapshot: uint<480> = 0x01504d | (zext(opcode) << 24) | (zext(sequence) << 32) |
+        (zext(pins) << 40) | (zext(seen_high) << 48) | (zext(seen_low) << 56) |
+        (zext(cycles) << 64) | (zext(edge_word) << 96) |
+        (zext(last_command) << 352) | (zext(command_count) << 400) |
+        (zext(saturated) << 432) | (zext(top_header) << 440);
+    reg(clk) saved: uint<480> reset(rst: 0) = if accept { snapshot } else { saved };
+    reg(clk) sending: bool reset(rst: false) = if accept { true } else if tx_ready && index == 63 { false } else { sending };
+    reg(clk) index: uint<6> reset(rst: 0) = if accept { 0 } else if sending && tx_ready { index +. 1 } else { index };
+    let shift: uint<480> = zext(index) << 3;
+    let crc_shift: uint<32> = zext(index -. 60) << 3;
+    let data: uint<8> = if index < 60 { trunc(saved >> shift) } else { trunc((response_crc ^ 0xffffffff) >> crc_shift) };
+    reg(clk) response_crc: uint<32> reset(rst: 0xffffffff) = {
+        if accept { 0xffffffff }
+        else if sending && tx_ready && index < 60 { crc32_byte(response_crc, data) }
+        else { response_crc }
+    };
+    set tx_valid = &sending;
+    set tx_byte = &data;
+}
+
+#[no_mangle(all)]
+entity probe_uart(
+    clk: clock, rst_n: bool, pmod: uint<8>, top_header: uint<2>,
+    usb_rx: bool, usb_tx: inv &bool,
+) {
+    let rst = !rst_n;
+    let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
+    let (valid, valid_w): (&bool, inv &bool) = port;
+    let (byte, byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (busy, busy_w): (&bool, inv &bool) = port;
+    reg(clk) issued reset(rst: false) = *valid && !*busy && !issued;
+    let send = *valid && !*busy && !issued;
+    let _ = inst probe_core(clk, rst, pmod, top_header, rx.valid && !rx.parity_error,
+        rx.byte, send, valid_w, byte_w);
+    let tx = inst uart_tx::<100_000_000, 1_000_000, 8>(clk, rst, false, *byte, send);
+    set busy_w = &tx.busy;
+    set usb_tx = &tx.tx;
+}

@@ -11,6 +11,7 @@ from web_wave_server import list_projects
 
 
 EXPECTED_PATHS = (
+    "projects/microsd-pin-tester",
     "projects/ft-uart-hex-bridge",
     "projects/pin-tester",
     "projects/sharp-organizer-card",
@@ -21,6 +22,7 @@ EXPECTED_PATHS = (
     "projects/uart-saleae-loopback",
     "projects/binary-counter",
     "projects/ws2812b",
+    "projects/microsd-emulator",
 )
 
 

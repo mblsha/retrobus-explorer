@@ -1,0 +1,86 @@
+// SD CRCs are MSB-first; Ethernet/UART image CRC32 is reflected IEEE CRC32.
+pub fn crc7_bit(crc: uint<7>, bit: bool) -> uint<7> {
+    (crc << 1) ^ (if crc.to_bits()[6] ^^ bit { 0x09 } else { 0 })
+}
+
+pub fn crc16_bit(crc: uint<16>, bit: bool) -> uint<16> {
+    (crc << 1) ^ (if crc.to_bits()[15] ^^ bit { 0x1021 } else { 0 })
+}
+
+fn crc32_bit(crc: uint<32>, bit: bool) -> uint<32> {
+    (crc >> 1) ^ (if crc.to_bits()[0] ^^ bit { 0xedb88320 } else { 0 })
+}
+
+pub fn crc32_byte(crc: uint<32>, byte: uint<8>) -> uint<32> {
+    let b = byte.to_bits();
+    let c0 = crc32_bit(crc, b[0]);
+    let c1 = crc32_bit(c0, b[1]);
+    let c2 = crc32_bit(c1, b[2]);
+    let c3 = crc32_bit(c2, b[3]);
+    let c4 = crc32_bit(c3, b[4]);
+    let c5 = crc32_bit(c4, b[5]);
+    let c6 = crc32_bit(c5, b[6]);
+    crc32_bit(c6, b[7])
+}
+
+fn crc8_bit(crc: uint<8>) -> uint<8> {
+    (crc << 1) ^ (if crc.to_bits()[7] { 7 } else { 0 })
+}
+
+pub fn crc8_byte(crc: uint<8>, byte: uint<8>) -> uint<8> {
+    let c0 = crc8_bit(crc ^ byte);
+    let c1 = crc8_bit(c0);
+    let c2 = crc8_bit(c1);
+    let c3 = crc8_bit(c2);
+    let c4 = crc8_bit(c3);
+    let c5 = crc8_bit(c4);
+    let c6 = crc8_bit(c5);
+    crc8_bit(c6)
+}
+
+// CRC over the 40 transmitted header/payload bits of an R1/R6/R7 response.
+pub fn response48(index: uint<6>, payload: uint<32>) -> uint<48> {
+    let body: uint<40> = (zext(index) << 32) | zext(payload);
+    let c0: uint<7> = 0;
+    let c1 = crc7_bit(c0, body.to_bits()[39]);
+    let c2 = crc7_bit(c1, body.to_bits()[38]);
+    let c3 = crc7_bit(c2, body.to_bits()[37]);
+    let c4 = crc7_bit(c3, body.to_bits()[36]);
+    let c5 = crc7_bit(c4, body.to_bits()[35]);
+    let c6 = crc7_bit(c5, body.to_bits()[34]);
+    let c7 = crc7_bit(c6, body.to_bits()[33]);
+    let c8 = crc7_bit(c7, body.to_bits()[32]);
+    let c9 = crc7_bit(c8, body.to_bits()[31]);
+    let c10 = crc7_bit(c9, body.to_bits()[30]);
+    let c11 = crc7_bit(c10, body.to_bits()[29]);
+    let c12 = crc7_bit(c11, body.to_bits()[28]);
+    let c13 = crc7_bit(c12, body.to_bits()[27]);
+    let c14 = crc7_bit(c13, body.to_bits()[26]);
+    let c15 = crc7_bit(c14, body.to_bits()[25]);
+    let c16 = crc7_bit(c15, body.to_bits()[24]);
+    let c17 = crc7_bit(c16, body.to_bits()[23]);
+    let c18 = crc7_bit(c17, body.to_bits()[22]);
+    let c19 = crc7_bit(c18, body.to_bits()[21]);
+    let c20 = crc7_bit(c19, body.to_bits()[20]);
+    let c21 = crc7_bit(c20, body.to_bits()[19]);
+    let c22 = crc7_bit(c21, body.to_bits()[18]);
+    let c23 = crc7_bit(c22, body.to_bits()[17]);
+    let c24 = crc7_bit(c23, body.to_bits()[16]);
+    let c25 = crc7_bit(c24, body.to_bits()[15]);
+    let c26 = crc7_bit(c25, body.to_bits()[14]);
+    let c27 = crc7_bit(c26, body.to_bits()[13]);
+    let c28 = crc7_bit(c27, body.to_bits()[12]);
+    let c29 = crc7_bit(c28, body.to_bits()[11]);
+    let c30 = crc7_bit(c29, body.to_bits()[10]);
+    let c31 = crc7_bit(c30, body.to_bits()[9]);
+    let c32 = crc7_bit(c31, body.to_bits()[8]);
+    let c33 = crc7_bit(c32, body.to_bits()[7]);
+    let c34 = crc7_bit(c33, body.to_bits()[6]);
+    let c35 = crc7_bit(c34, body.to_bits()[5]);
+    let c36 = crc7_bit(c35, body.to_bits()[4]);
+    let c37 = crc7_bit(c36, body.to_bits()[3]);
+    let c38 = crc7_bit(c37, body.to_bits()[2]);
+    let c39 = crc7_bit(c38, body.to_bits()[1]);
+    let c40 = crc7_bit(c39, body.to_bits()[0]);
+    (zext(body) << 8) | (zext(c40) << 1) | 1
+}

@@ -1,6 +1,11 @@
 version = 1
 
 [[projects]]
+path = "projects/microsd-pin-tester"
+kind = "diagnostic"
+ci = true
+
+[[projects]]
 path = "projects/ft-uart-hex-bridge"
 kind = "diagnostic"
 ci = true
@@ -48,4 +53,9 @@ ci = true
 [[projects]]
 path = "projects/ws2812b"
 kind = "example"
+ci = true
+
+[[projects]]
+path = "projects/microsd-emulator"
+kind = "diagnostic"
 ci = true
