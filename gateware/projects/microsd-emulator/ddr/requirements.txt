@@ -1,0 +1,7 @@
+migen @ git+https://github.com/m-labs/migen.git@e19524c963a8342952840983047557707fbe0b6a
+litex @ git+https://github.com/enjoy-digital/litex.git@cfb382f54f81a1b3e6d7fcaa9db1a011007dd764
+litedram @ git+https://github.com/enjoy-digital/litedram.git@3cf585a60a37113f18a9f6c6f3ee774be521623e
+PyYAML==6.0.3
+pythondata-software-picolibc @ git+https://github.com/litex-hub/pythondata-software-picolibc.git@6a13ccce7c575b32c102dd9dc52178505b81fe39
+pythondata-software-compiler_rt @ git+https://github.com/litex-hub/pythondata-software-compiler_rt.git@6eb76609c9627bf26635e57c63fb22cda7115887
+pythondata-cpu-vexriscv==1.0.1.post407

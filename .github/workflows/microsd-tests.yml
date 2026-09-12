@@ -1,0 +1,42 @@
+name: microSD support tests
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  pcb:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jitx-py/microsd-pmod-breakout
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.7"
+          python-version: "3.12"
+      - run: uv sync --locked --extra dev
+      - run: uv run --no-sync pytest -q tests ../shared-components/tests
+
+  ddr:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateware
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.7"
+          python-version: "3.11"
+      - run: |
+          uv venv --python 3.11 build/litedram-py311
+          uv pip install --python build/litedram-py311/bin/python -r projects/microsd-emulator/ddr/requirements.txt
+      - run: build/litedram-py311/bin/python -m unittest discover -s projects/microsd-emulator/ddr -p 'test_*.py'
+      - name: Check operational guards under optimized Python
+        run: |
+          build/litedram-py311/bin/python -O -m unittest discover -s projects/microsd-emulator/ddr -p 'test_*timing.py'
+          build/litedram-py311/bin/python -O -m unittest discover -s projects/microsd-emulator/ddr -p 'test_build_manifest.py'

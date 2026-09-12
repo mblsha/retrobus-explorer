@@ -1,0 +1,103 @@
+{
+  "profile": "as-connected-jd-row-swapped-bottom",
+  "active_mask": 207,
+  "records": [
+    {
+      "signal": "DAT0",
+      "linux_gpio": 64,
+      "drive": 1,
+      "expected_raw": 8,
+      "observed_raw": 24,
+      "passed": true
+    },
+    {
+      "signal": "DAT0",
+      "linux_gpio": 64,
+      "drive": 0,
+      "expected_raw": 0,
+      "observed_raw": 16,
+      "passed": true
+    },
+    {
+      "signal": "DAT1",
+      "linux_gpio": 65,
+      "drive": 1,
+      "expected_raw": 128,
+      "observed_raw": 144,
+      "passed": true
+    },
+    {
+      "signal": "DAT1",
+      "linux_gpio": 65,
+      "drive": 0,
+      "expected_raw": 0,
+      "observed_raw": 16,
+      "passed": true
+    },
+    {
+      "signal": "DAT2",
+      "linux_gpio": 66,
+      "drive": 1,
+      "expected_raw": 1,
+      "observed_raw": 17,
+      "passed": true
+    },
+    {
+      "signal": "DAT2",
+      "linux_gpio": 66,
+      "drive": 0,
+      "expected_raw": 0,
+      "observed_raw": 16,
+      "passed": true
+    },
+    {
+      "signal": "DAT3",
+      "linux_gpio": 67,
+      "drive": 1,
+      "expected_raw": 2,
+      "observed_raw": 18,
+      "passed": true
+    },
+    {
+      "signal": "DAT3",
+      "linux_gpio": 67,
+      "drive": 0,
+      "expected_raw": 0,
+      "observed_raw": 16,
+      "passed": true
+    },
+    {
+      "signal": "CMD",
+      "linux_gpio": 68,
+      "drive": 1,
+      "expected_raw": 4,
+      "observed_raw": 20,
+      "passed": true
+    },
+    {
+      "signal": "CMD",
+      "linux_gpio": 68,
+      "drive": 0,
+      "expected_raw": 0,
+      "observed_raw": 16,
+      "passed": true
+    },
+    {
+      "signal": "CLK",
+      "linux_gpio": 69,
+      "drive": 1,
+      "expected_raw": 64,
+      "observed_raw": 80,
+      "passed": true
+    },
+    {
+      "signal": "CLK",
+      "linux_gpio": 69,
+      "drive": 0,
+      "expected_raw": 0,
+      "observed_raw": 48,
+      "passed": true
+    }
+  ],
+  "host_driver_restored": true
+}

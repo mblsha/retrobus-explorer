@@ -1,0 +1,12 @@
+--- a/xilinx/arch.cc
++++ b/xilinx/arch.cc
+@@ -2509,5 +2509,9 @@
+     info.clockToQ = getDelayFromNS(0.1);
+     info.clock_port = xc7 ? id_CK : id_CLK;
+     info.edge = RISING_EDGE;
++    // Packed negative-edge slice FFs share the clock net with positive-edge
++    // FFs; their polarity lives in the cell, not in a separate clock net.
++    if (cell->type == id_SLICE_FFX && cell->ffInfo.is_clkinv)
++        info.edge = FALLING_EDGE;
+     return info;
+ }

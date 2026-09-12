@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "name": "Optimized bottom-header microSD emulator to PMOD routing",
+  "design": "src.main.MicroSdPmodEmulatorDesign",
+  "defaults": {
+    "via": "StandardVia",
+    "viaRequirements": {
+      "minimumDiameter": 0.6,
+      "minimumHoleDiameter": 0.3,
+      "minimumAnnularRing": 0.15
+    },
+    "configure": {
+      "trace-width": 0.2,
+      "trace-space": 0.2
+    }
+  },
+  "phases": [
+    {
+      "name": "six optimized direct bottom-copper data routes",
+      "operations": [
+        { "type": "connect", "side": "bottom", "pairs": [{ "segment_id": "sd-cmd",  "from": "card.CMD",  "to": "pmod.p[8]" }] },
+        { "type": "connect", "side": "bottom", "pairs": [{ "segment_id": "sd-clk",  "from": "card.CLK",  "to": "pmod.p[2]" }] },
+        { "type": "connect", "side": "bottom", "pairs": [{ "segment_id": "sd-dat3", "from": "card.DAT3", "to": "pmod.p[7]" }] },
+        { "type": "connect", "side": "bottom", "pairs": [{ "segment_id": "sd-dat0", "from": "card.DAT0", "to": "pmod.p[9]" }] },
+        { "type": "connect", "side": "bottom", "pairs": [{ "segment_id": "sd-dat2", "from": "card.DAT2", "to": "pmod.p[6]" }] },
+        { "type": "connect", "side": "bottom", "pairs": [{ "segment_id": "sd-dat1", "from": "card.DAT1", "to": "pmod.p[3]" }] },
+        { "type": "assert", "routes": 6, "vias": 0, "preliminaryRoutes": 0, "blockedPathIssues": 0 }
+      ]
+    }
+  ]
+}
