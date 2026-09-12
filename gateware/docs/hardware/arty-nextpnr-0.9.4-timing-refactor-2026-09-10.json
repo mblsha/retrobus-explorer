@@ -1,0 +1,677 @@
+{
+  "date": "2026-09-10",
+  "board": "Arty A7-35T",
+  "fresh_source_build": true,
+  "ethernet_hardware_used": false,
+  "changes": [
+    "Independent sector-writer command/data acknowledgment tracking.",
+    "Registered fast-mode SD ownership for UART/SD DDR arbitration, preserving accepted-commit priority."
+  ],
+  "toolchain": {
+    "release": "0.9.4",
+    "source_commit": "ece39e171b03180c0efd6ba024ef175ce3ad0aad",
+    "submodules": "-aea0b4bac59e07e0c5088a0966af73abdd8ab217 tests\n a4af910cac907f2cbd3a545f26f8e26573e860de xilinx/external/nextpnr-xilinx-meta (heads/master)\n e8b8e8e46a91334f6232df84d36954323e15a1d1 xilinx/external/prjxray-db (0.9.1-26-ge8b8e8e)",
+    "patch": "gateware/experiments/openxc7-macos/nextpnr-negative-edge-timing.patch",
+    "patch_sha256": "3928deb168cb81e12a7b20b8253c061905df1301eb12381f5d0dc34f8898e1d2",
+    "nextpnr_sha256": "2e7df53b7d46d12db59292acaa307c62afb61845bdd0b4747b5d24e56d543719",
+    "chipdb_sha256": "04803defd62c99ef1f30b539a85185cb5a7055553eaa50d7b13ab4b78647a6cf",
+    "ethernet_enabled": false
+  },
+  "build": {
+    "sd_csd": "0026001a115903ffc002800002400023",
+    "sd_capacity_bytes": 268435456,
+    "sd_max_clock_hz": 13000000,
+    "verified_configuration_bits": 604397,
+    "bitstream_sha256": "f17bb7a5c60b467dae1c19712f55b2edbd0d1d806b11c8d1583b4122280f2ef0",
+    "bitstream_bytes": 2192116,
+    "clocks_mhz": {
+      "core.clk": [
+        1095.29,
+        "PASS",
+        100.0
+      ],
+      "fclk": [
+        106.62,
+        "PASS",
+        100.0
+      ],
+      "dclk": [
+        80.8,
+        "PASS",
+        80.0
+      ],
+      "core.iodelay_clk": [
+        346.38,
+        "PASS",
+        200.0
+      ]
+    },
+    "placement_seed": 8,
+    "nextpnr_binary_sha256": "2e7df53b7d46d12db59292acaa307c62afb61845bdd0b4747b5d24e56d543719",
+    "negative_edge_timing_checked": true,
+    "with_sd": true,
+    "ethernet_sd": false,
+    "fast_sd": true,
+    "native_fifo_registers": true,
+    "sd_io_slew": "FAST",
+    "sd_output_fabric_edge": "falling",
+    "sd_io_clock_hz": 100000000,
+    "cpu_mailbox": false,
+    "no_lutram": false,
+    "register_cache": false,
+    "registered_bank": true,
+    "register_command_buffers": true,
+    "native_bist": true,
+    "native_bist_bytes": 268435456,
+    "bist_detail_format": 1,
+    "sd_writable": true,
+    "sys_clk_freq": 80000000,
+    "reset_source": "button0",
+    "register_cpu_regfile": false,
+    "distributed_cpu_regfile": false,
+    "configuration": "# Derived from LiteDRAM's official Arty configuration (BSD-2-Clause).\n# BIOS performs upstream PHY initialization/training and memory smoke test.\nspeedgrade: -1\ncpu: vexriscv\ncpu_variant: minimal\nmemtype: DDR3\nuart: rs232\ncmd_latency: 0\nsdram_module: MT41K128M16\nsdram_module_nb: 2\nsdram_rank_nb: 1\nsdram_phy: A7DDRPHY\nrtt_nom: 60ohm\nrtt_wr: 60ohm\nron: 34ohm\ninput_clk_freq: 100e6\nsys_clk_freq: 80e6\niodelay_clk_freq: 200e6\ncmd_buffer_depth: 2\ncmd_buffer_buffered: True\nwith_auto_precharge: True\nuser_ports:\n  native_0:\n    type: native\n    data_width: 128\n    block_until_ready: true\n"
+  },
+  "source_hashes": {
+    "projects/microsd-emulator/src/main.spade": "e3320f29b5b3c53e67b608d5a49e7f0112a979d05322a1fe421b63ef5b734da3",
+    "projects/microsd-emulator/src/storage.spade": "f8197fff24b77fda03fca3d7b1b3d468919f36c6d6452db4bb04052825c81014",
+    "experiments/openxc7-macos/build_ddr_bios.py": "b6069c9dc3ce609bd4898c86ab1f6158f7c2eb3f781b5b543bc35e00443664da",
+    "projects/microsd-emulator/build/spade.sv": "2ab232f1f88005574de65afa3d62847d805d49bb475b3fee0194388bfe94ee0b",
+    "synthesized_netlist": "460569a27c68dfe9a0787a669abae872208baaff624fea59971281e2836a28fb"
+  },
+  "placements": {
+    "selected_seed": 8,
+    "candidates": {
+      "4": {
+        "core.clk": [
+          1015.23,
+          "PASS",
+          100.0
+        ],
+        "fclk": [
+          94.24,
+          "FAIL",
+          100.0
+        ],
+        "dclk": [
+          86.74,
+          "PASS",
+          80.0
+        ],
+        "core.iodelay_clk": [
+          387.0,
+          "PASS",
+          200.0
+        ]
+      },
+      "8": {
+        "core.clk": [
+          1095.29,
+          "PASS",
+          100.0
+        ],
+        "fclk": [
+          106.62,
+          "PASS",
+          100.0
+        ],
+        "dclk": [
+          80.8,
+          "PASS",
+          80.0
+        ],
+        "core.iodelay_clk": [
+          346.38,
+          "PASS",
+          200.0
+        ]
+      },
+      "10": {
+        "core.clk": [
+          1015.23,
+          "PASS",
+          100.0
+        ],
+        "fclk": [
+          99.07,
+          "FAIL",
+          100.0
+        ],
+        "dclk": [
+          89.62,
+          "PASS",
+          80.0
+        ],
+        "core.iodelay_clk": [
+          287.85,
+          "PASS",
+          200.0
+        ]
+      }
+    }
+  },
+  "acknowledgment_only_placements": {
+    "selected_seed": 10,
+    "candidates": {
+      "4": {
+        "core.clk": [
+          1018.33,
+          "PASS",
+          100.0
+        ],
+        "fclk": [
+          96.17,
+          "FAIL",
+          100.0
+        ],
+        "dclk": [
+          76.49,
+          "FAIL",
+          80.0
+        ],
+        "core.iodelay_clk": [
+          369.14,
+          "PASS",
+          200.0
+        ]
+      },
+      "8": {
+        "core.clk": [
+          1015.23,
+          "PASS",
+          100.0
+        ],
+        "fclk": [
+          95.79,
+          "FAIL",
+          100.0
+        ],
+        "dclk": [
+          82.58,
+          "PASS",
+          80.0
+        ],
+        "core.iodelay_clk": [
+          306.37,
+          "PASS",
+          200.0
+        ]
+      },
+      "10": {
+        "core.clk": [
+          1015.23,
+          "PASS",
+          100.0
+        ],
+        "fclk": [
+          97.87,
+          "FAIL",
+          100.0
+        ],
+        "dclk": [
+          82.47,
+          "PASS",
+          80.0
+        ],
+        "core.iodelay_clk": [
+          333.22,
+          "PASS",
+          200.0
+        ]
+      }
+    }
+  },
+  "cdc_paths": [
+    {
+      "net": "sd_memory_crossing.async_fifo_0.async_fifo_v_0.grsync",
+      "route_delay_ps": 572.0,
+      "source_period_ps": 12500.0
+    },
+    {
+      "net": "sd_memory_crossing.async_fifo_0.async_fifo_v_0.gwsync",
+      "route_delay_ps": 665.0,
+      "source_period_ps": 10000
+    },
+    {
+      "net": "sd_memory_crossing.async_fifo_1.async_fifo_v_0.grsync",
+      "route_delay_ps": 791.0,
+      "source_period_ps": 12500.0
+    },
+    {
+      "net": "sd_memory_crossing.async_fifo_1.async_fifo_v_0.gwsync",
+      "route_delay_ps": 798.0,
+      "source_period_ps": 10000
+    },
+    {
+      "net": "sd_memory_crossing.async_fifo_2.async_fifo_v_0.grsync",
+      "route_delay_ps": 814.0,
+      "source_period_ps": 10000
+    },
+    {
+      "net": "sd_memory_crossing.async_fifo_2.async_fifo_v_0.gwsync",
+      "route_delay_ps": 713.0,
+      "source_period_ps": 12500.0
+    }
+  ],
+  "sd_output_paths": [
+    {
+      "pmod_pin_index": 0,
+      "pmod_pin": 1,
+      "signal": "DAT2",
+      "register": "$auto$ff.cc:337:slice$45139",
+      "route_delay_ps": 2159.0
+    },
+    {
+      "pmod_pin_index": 1,
+      "pmod_pin": 2,
+      "signal": "DAT3",
+      "register": "$auto$ff.cc:337:slice$45140",
+      "route_delay_ps": 2539.0
+    },
+    {
+      "pmod_pin_index": 2,
+      "pmod_pin": 3,
+      "signal": "CMD",
+      "register": "$auto$ff.cc:337:slice$44940",
+      "route_delay_ps": 2155.0
+    },
+    {
+      "pmod_pin_index": 3,
+      "pmod_pin": 4,
+      "signal": "DAT0",
+      "register": "$auto$ff.cc:337:slice$45137",
+      "route_delay_ps": 2630.0
+    },
+    {
+      "pmod_pin_index": 7,
+      "pmod_pin": 10,
+      "signal": "DAT1",
+      "register": "$auto$ff.cc:337:slice$45138",
+      "route_delay_ps": 2765.0
+    }
+  ],
+  "ddr_support_tests": {
+    "tests": 30,
+    "passed": 30,
+    "seconds": 175.963
+  },
+  "simulation_tests": [
+    {
+      "top": "ddr_sector_writer",
+      "module": "test_sector_writer",
+      "tests": 2,
+      "passed": 2,
+      "failed": 0
+    },
+    {
+      "top": "sd_write_transaction",
+      "module": "test_write_transaction",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "top": "sd_frontend",
+      "module": "test_sd_write",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "top": "sd_frontend",
+      "module": "test_sd_write_busy",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "top": "ddr_emulator",
+      "module": "test_ddr_ownership",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "top": "ddr_emulator_cdc",
+      "module": "test_ddr_rw",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "top": "ddr_uart_100",
+      "module": "test_ddr_uart",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    },
+    {
+      "top": "network_ddr",
+      "module": "test_network_sd",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0
+    }
+  ],
+  "characterization_before_refactor": {
+    "independent_acknowledgments": true,
+    "stalled_sd_commit_disarm_loader": true
+  },
+  "simulation_clock": {
+    "fabric_mhz": 100,
+    "sd_half_period_ns": 19.9,
+    "jitter": false
+  },
+  "boot": {
+    "bios_crc": "2b584b23",
+    "bios_crc_passed": true,
+    "ddr_training_passed": true,
+    "initial_status": "status=0x20000047; initialized=True cmd_ready=True wdata_ready=True armed=False rdata_valid=False\nbist_busy=False bist_passed=True bist_failed=False bist_sector=0 bist_phase=4 bist_error=0"
+  },
+  "uart_upload": "Loaded 65536 resident bytes; CRC32 f13a9dff; armed=True",
+  "prefix_qualification": {
+    "passed": true,
+    "problems": [],
+    "command": [
+      "python3",
+      "microsd_network_roundtrip_linux.py"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "before": {
+      "uptime_seconds": 227904.58,
+      "power_control": "on",
+      "runtime_status": "active",
+      "max_sectors_kb": "256",
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "errors": "# Command Timeout Occurred:\t 0\n# Command CRC Errors Occurred:\t 0\n# Data Timeout Occurred:\t 0\n# Data CRC Errors Occurred:\t 0\n# Auto-Cmd Error Occurred:\t 0\n# ADMA Error Occurred:\t 0\n# Tuning Error Occurred:\t 0\n# CMDQ RED Errors:\t 0\n# CMDQ GCE Errors:\t 0\n# CMDQ ICCE Errors:\t 0\n# Request Timedout:\t 0\n# CMDQ Request Timedout:\t 0\n# ICE Config Errors:\t 0\n# Controller Timedout errors:\t 0\n# Unexpected IRQ errors:\t 0\n"
+    },
+    "after": {
+      "uptime_seconds": 227904.83,
+      "power_control": "on",
+      "runtime_status": "active",
+      "max_sectors_kb": "256",
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "errors": "# Command Timeout Occurred:\t 0\n# Command CRC Errors Occurred:\t 0\n# Data Timeout Occurred:\t 0\n# Data CRC Errors Occurred:\t 0\n# Auto-Cmd Error Occurred:\t 0\n# ADMA Error Occurred:\t 0\n# Tuning Error Occurred:\t 0\n# CMDQ RED Errors:\t 0\n# CMDQ GCE Errors:\t 0\n# CMDQ ICCE Errors:\t 0\n# Request Timedout:\t 0\n# CMDQ Request Timedout:\t 0\n# ICE Config Errors:\t 0\n# Controller Timedout errors:\t 0\n# Unexpected IRQ errors:\t 0\n"
+    },
+    "kernel_messages": [],
+    "test_results": {
+      "verified_prefix_bytes": 65536,
+      "modified_offset": 4096,
+      "modified_bytes": 4096,
+      "before_sha256": "a87b587b1288dbbd45093f921e8e889d61c3adb8b9decb1cbdf6c5e32c29cf56",
+      "after_sha256": "5c3aa35098ee3af4a78043c119bdf4dcfd6bf8f611465d7b5110dc0ab57bf6c5",
+      "readback_sha256": [
+        "5c3aa35098ee3af4a78043c119bdf4dcfd6bf8f611465d7b5110dc0ab57bf6c5",
+        "5c3aa35098ee3af4a78043c119bdf4dcfd6bf8f611465d7b5110dc0ab57bf6c5",
+        "5c3aa35098ee3af4a78043c119bdf4dcfd6bf8f611465d7b5110dc0ab57bf6c5"
+      ],
+      "untouched_tail_and_last_page_zero": true
+    }
+  },
+  "full_memory": {
+    "passed": true,
+    "problems": [],
+    "command": [
+      "python3",
+      "microsd_stress_linux.py",
+      "--capacity-mib",
+      "256",
+      "--span-mib",
+      "256",
+      "--clock-hz",
+      "13000000",
+      "--actual-clock-hz",
+      "12913043",
+      "--bus-width",
+      "4",
+      "--random-writes",
+      "256",
+      "--passes",
+      "2",
+      "--verify-whole-card"
+    ],
+    "returncode": 0,
+    "stderr": "sequential-write: 268435456 bytes in 59.09s\ninitial-full-readback: 268435456 bytes verified in 62.76s\nfull-readback-0: 268435456 bytes verified in 62.84s\nfull-readback-1: 268435456 bytes verified in 63.00s\n",
+    "before": {
+      "uptime_seconds": 227923.18,
+      "power_control": "on",
+      "runtime_status": "active",
+      "max_sectors_kb": "256",
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "errors": "# Command Timeout Occurred:\t 0\n# Command CRC Errors Occurred:\t 0\n# Data Timeout Occurred:\t 0\n# Data CRC Errors Occurred:\t 0\n# Auto-Cmd Error Occurred:\t 0\n# ADMA Error Occurred:\t 0\n# Tuning Error Occurred:\t 0\n# CMDQ RED Errors:\t 0\n# CMDQ GCE Errors:\t 0\n# CMDQ ICCE Errors:\t 0\n# Request Timedout:\t 0\n# CMDQ Request Timedout:\t 0\n# ICE Config Errors:\t 0\n# Controller Timedout errors:\t 0\n# Unexpected IRQ errors:\t 0\n"
+    },
+    "after": {
+      "uptime_seconds": 228174.39,
+      "power_control": "on",
+      "runtime_status": "active",
+      "max_sectors_kb": "256",
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "errors": "# Command Timeout Occurred:\t 0\n# Command CRC Errors Occurred:\t 0\n# Data Timeout Occurred:\t 0\n# Data CRC Errors Occurred:\t 0\n# Auto-Cmd Error Occurred:\t 0\n# ADMA Error Occurred:\t 0\n# Tuning Error Occurred:\t 0\n# CMDQ RED Errors:\t 0\n# CMDQ GCE Errors:\t 0\n# CMDQ ICCE Errors:\t 0\n# Request Timedout:\t 0\n# CMDQ Request Timedout:\t 0\n# ICE Config Errors:\t 0\n# Controller Timedout errors:\t 0\n# Unexpected IRQ errors:\t 0\n"
+    },
+    "kernel_messages": [],
+    "test_results": {
+      "configuration": {
+        "capacity_mib": 256,
+        "clock_hz": 13000000,
+        "bus_width": 4,
+        "span_mib": 256,
+        "random_writes": 256,
+        "passes": 2,
+        "seed": 20260908,
+        "verify_whole_card": true,
+        "actual_clock_hz": 12913043
+      },
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "direct_io": true,
+      "results": [
+        {
+          "stage": "sequential-write",
+          "bytes": 268435456,
+          "seconds": 59.08663653401891,
+          "bytes_per_second": 4543082.357470954,
+          "passed": true
+        },
+        {
+          "stage": "initial-full-readback",
+          "bytes": 268435456,
+          "seconds": 62.75915383201209,
+          "bytes_per_second": 4277231.919323247,
+          "passed": true
+        },
+        {
+          "stage": "mixed-round-0",
+          "operations": 256,
+          "seconds": 1.6690479649987537,
+          "passed": true
+        },
+        {
+          "stage": "full-readback-0",
+          "bytes": 268435456,
+          "seconds": 62.8385590010148,
+          "bytes_per_second": 4271827.048033755,
+          "passed": true
+        },
+        {
+          "stage": "mixed-round-1",
+          "operations": 256,
+          "seconds": 1.6261645829945337,
+          "passed": true
+        },
+        {
+          "stage": "full-readback-1",
+          "bytes": 268435456,
+          "seconds": 62.998295637982665,
+          "bytes_per_second": 4260995.528237053,
+          "passed": true
+        }
+      ],
+      "untouched_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    }
+  },
+  "filesystem": {
+    "passed": true,
+    "problems": [],
+    "command": [
+      "python3",
+      "microsd_verify_linux_fs.py",
+      "--capacity-mib",
+      "256",
+      "--clock-hz",
+      "13000000",
+      "--actual-clock-hz",
+      "12913043",
+      "--bus-width",
+      "4"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "before": {
+      "uptime_seconds": 228187.95,
+      "power_control": "on",
+      "runtime_status": "active",
+      "max_sectors_kb": "256",
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "errors": "# Command Timeout Occurred:\t 0\n# Command CRC Errors Occurred:\t 0\n# Data Timeout Occurred:\t 0\n# Data CRC Errors Occurred:\t 0\n# Auto-Cmd Error Occurred:\t 0\n# ADMA Error Occurred:\t 0\n# Tuning Error Occurred:\t 0\n# CMDQ RED Errors:\t 0\n# CMDQ GCE Errors:\t 0\n# CMDQ ICCE Errors:\t 0\n# Request Timedout:\t 0\n# CMDQ Request Timedout:\t 0\n# ICE Config Errors:\t 0\n# Controller Timedout errors:\t 0\n# Unexpected IRQ errors:\t 0\n"
+    },
+    "after": {
+      "uptime_seconds": 228189.0,
+      "power_control": "on",
+      "runtime_status": "active",
+      "max_sectors_kb": "256",
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "errors": "# Command Timeout Occurred:\t 0\n# Command CRC Errors Occurred:\t 0\n# Data Timeout Occurred:\t 0\n# Data CRC Errors Occurred:\t 0\n# Auto-Cmd Error Occurred:\t 0\n# ADMA Error Occurred:\t 0\n# Tuning Error Occurred:\t 0\n# CMDQ RED Errors:\t 0\n# CMDQ GCE Errors:\t 0\n# CMDQ ICCE Errors:\t 0\n# Request Timedout:\t 0\n# CMDQ Request Timedout:\t 0\n# ICE Config Errors:\t 0\n# Controller Timedout errors:\t 0\n# Unexpected IRQ errors:\t 0\n"
+    },
+    "kernel_messages": [
+      "[228194.539734]  mmcblk1: p1",
+      "[228194.639004] FAT-fs (mmcblk1): utf8 is not a recommended IO charset for FAT filesystems, filesystem will be case sensitive!",
+      "[228195.141033] FAT-fs (mmcblk1): utf8 is not a recommended IO charset for FAT filesystems, filesystem will be case sensitive!"
+    ],
+    "test_results": {
+      "ios": "clock:\t\t13000000 Hz\nactual clock:\t12913043 Hz\nvdd:\t\t21 (3.3 ~ 3.4 V)\nbus mode:\t2 (push-pull)\nchip select:\t0 (don't care)\npower mode:\t2 (on)\nbus width:\t2 (4 bits)\ntiming spec:\t0 (legacy)\nsignal voltage:\t0 (3.30 V)\ndriver type:\t0 (driver type B)\n",
+      "cid": "7f52425350414445101234567801916b",
+      "csd": "0026001a115903ffc002800002400023",
+      "checks": [
+        {
+          "path": "CHECK.TXT",
+          "bytes": 51,
+          "sha256": "b857c8995919c5b4df7e6fd1122899dcf5c8c9a4c57f09f3a777c543a7908713",
+          "passed": true
+        },
+        {
+          "path": "TESTDIR/RENAMED.BIN",
+          "bytes": 65536,
+          "sha256": "35b0dc347f758ccebf78aadbf7538ce4e093df7b9049e908c5a688bdb944ab27",
+          "passed": true
+        },
+        {
+          "path": "TESTDIR/SMALL.BIN",
+          "bytes": 4096,
+          "sha256": "e601b829ed9aa8388f71e8c70e9a388a14270ba82d49617cde6638fe9678bf0d",
+          "passed": true
+        }
+      ],
+      "commands": [
+        {
+          "argv": [
+            "mkfs.fat",
+            "-F",
+            "16",
+            "-n",
+            "SPADETEST",
+            "/dev/mmcblk1"
+          ],
+          "stdout": "mkfs.fat 4.2 (2021-01-31)\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "fsck.fat",
+            "-n",
+            "/dev/mmcblk1"
+          ],
+          "stdout": "fsck.fat 4.2 (2021-01-31)\n/dev/mmcblk1: 1 files, 0/65467 clusters\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "mount",
+            "-t",
+            "vfat",
+            "-o",
+            "rw,sync,nodev,nosuid,noexec",
+            "/dev/mmcblk1",
+            "/tmp/codex-spade-fs-rv8t_idv"
+          ],
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "umount",
+            "/tmp/codex-spade-fs-rv8t_idv"
+          ],
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "fsck.fat",
+            "-n",
+            "/dev/mmcblk1"
+          ],
+          "stdout": "fsck.fat 4.2 (2021-01-31)\n/dev/mmcblk1: 5 files, 19/65467 clusters\n",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "mount",
+            "-t",
+            "vfat",
+            "-o",
+            "ro,nodev,nosuid,noexec",
+            "/dev/mmcblk1",
+            "/tmp/codex-spade-fs-rv8t_idv"
+          ],
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "umount",
+            "/tmp/codex-spade-fs-rv8t_idv"
+          ],
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "argv": [
+            "fsck.fat",
+            "-n",
+            "/dev/mmcblk1"
+          ],
+          "stdout": "fsck.fat 4.2 (2021-01-31)\n/dev/mmcblk1: 5 files, 19/65467 clusters\n",
+          "stderr": ""
+        }
+      ],
+      "unmounted": true
+    }
+  },
+  "final_status": "status=0x2000004f; initialized=True cmd_ready=True wdata_ready=True armed=True rdata_valid=False\nbist_busy=False bist_passed=True bist_failed=False bist_sector=0 bist_phase=4 bist_error=0",
+  "final_state": {
+    "fpga_image": "fresh-source 0.9.4 SD-only seed 8, SRAM",
+    "sd_armed": true,
+    "external_controller_bound": true,
+    "filesystem_mounted": false,
+    "image_contents": "FAT16 SPADETEST",
+    "actual_sd_clock_hz": 12913043,
+    "default_toolchain_replaced": false
+  },
+  "limitations": [
+    "Only seed 8 of this three-seed set meets timing.",
+    "DDR routed estimate has 0.80 MHz margin at 80 MHz.",
+    "Negative-edge timing patch is still required.",
+    "Ethernet consumer simulated, but Ethernet hardware was disconnected.",
+    "No increase to SD clock or external timing constraints."
+  ]
+}

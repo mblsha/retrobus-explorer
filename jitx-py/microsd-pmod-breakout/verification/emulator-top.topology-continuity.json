@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "routing-topology-continuity",
+  "reference": {
+    "design": "src.main.MicroSdPmodEmulatorTopHeaderDesign",
+    "route_count": 6,
+    "via_count": 0,
+    "file_set_fingerprint": "124715a0d8d42c221334191f7b3b2c2c93c597f8d5c9eb23417b5e713fd1057e"
+  },
+  "candidate": {
+    "design": "src.main.MicroSdPmodEmulatorTopHeaderDesign",
+    "route_count": 6,
+    "via_count": 0,
+    "file_set_fingerprint": "921888e765740f0ed9021130c03c51eab862902facb4ed5de487e8310636ac27"
+  },
+  "delta": {
+    "added_route_ids": [],
+    "removed_route_ids": [],
+    "changed_route_ids": [],
+    "added_via_ids": [],
+    "removed_via_ids": []
+  },
+  "gates": [
+    {
+      "name": "design-identity",
+      "status": "pass",
+      "detail": "reference=src.main.MicroSdPmodEmulatorTopHeaderDesign; watch=src.main.MicroSdPmodEmulatorTopHeaderDesign; inspect=src.main.MicroSdPmodEmulatorTopHeaderDesign"
+    },
+    {
+      "name": "candidate-observation-agreement",
+      "status": "pass",
+      "detail": "candidate watch and inspect contain the same route, via, lifecycle, and persistence observation"
+    },
+    {
+      "name": "candidate-durable-persistence",
+      "status": "pass",
+      "detail": "status=matched; generation=true; files=true"
+    },
+    {
+      "name": "candidate-via-persistence",
+      "status": "pass",
+      "detail": "live=0; durable=0"
+    },
+    {
+      "name": "candidate-quiet-window",
+      "status": "pass",
+      "detail": "requirement=durable-realized; quiet=1500ms; stable=2044ms; minimum=1000ms"
+    },
+    {
+      "name": "exact-topology-continuity",
+      "status": "pass",
+      "detail": "routes +0/-0/~0; vias +0/-0"
+    },
+    {
+      "name": "candidate-jitx-safety",
+      "status": "pass",
+      "detail": "design checks=0; unsafe route configurations=0; preliminary routes=0"
+    }
+  ],
+  "result": "pass"
+}

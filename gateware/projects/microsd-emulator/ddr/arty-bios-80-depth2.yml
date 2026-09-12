@@ -1,0 +1,26 @@
+# Derived from LiteDRAM's official Arty configuration (BSD-2-Clause).
+# BIOS performs upstream PHY initialization/training and memory smoke test.
+speedgrade: -1
+cpu: vexriscv
+cpu_variant: minimal
+memtype: DDR3
+uart: rs232
+cmd_latency: 0
+sdram_module: MT41K128M16
+sdram_module_nb: 2
+sdram_rank_nb: 1
+sdram_phy: A7DDRPHY
+rtt_nom: 60ohm
+rtt_wr: 60ohm
+ron: 34ohm
+input_clk_freq: 100e6
+sys_clk_freq: 80e6
+iodelay_clk_freq: 200e6
+cmd_buffer_depth: 2
+cmd_buffer_buffered: True
+with_auto_precharge: True
+user_ports:
+  native_0:
+    type: native
+    data_width: 128
+    block_until_ready: true

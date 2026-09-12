@@ -1,0 +1,476 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-08-24T09:40:24+1000",
+    "kicad_version": "9.0.6",
+    "schematic_parity": [],
+    "source": "src.main.MicroSdPmodEmulatorTopHeaderDesign.kicad_pcb",
+    "unconnected_items": [],
+    "violations": [
+        {
+            "description": "Footprint 'MICROSDCARDEDGELANDPATTERN' does not match copy in library 'src.main.MicroSdPmodEmulatorTopHeaderDesign'.",
+            "items": [
+                {
+                    "description": "Footprint J1",
+                    "pos": {
+                        "x": 139.5,
+                        "y": 97.84
+                    },
+                    "uuid": "12c1fb66-237b-f227-5053-4705f2727467"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.6600 mm)",
+            "items": [
+                {
+                    "description": "PCB text 'microSD EMULATOR' on F.Silkscreen",
+                    "pos": {
+                        "x": 152.7,
+                        "y": 99.0
+                    },
+                    "uuid": "c986833b-7b91-e980-9e5a-b6c933d2d534"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.5600 mm)",
+            "items": [
+                {
+                    "description": "PCB text 'PMOD HEADER TOP R180' on F.Silkscreen",
+                    "pos": {
+                        "x": 152.7,
+                        "y": 100.3
+                    },
+                    "uuid": "f164a06a-6bc0-0980-cc64-577c98312ece"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.5000 mm)",
+            "items": [
+                {
+                    "description": "PCB text 'PWR NC / 0.8mm ENIG' on F.Silkscreen",
+                    "pos": {
+                        "x": 152.7,
+                        "y": 101.6
+                    },
+                    "uuid": "21cdadb0-0afa-02ec-3481-b18ebd5e44cf"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.6000 mm)",
+            "items": [
+                {
+                    "description": "PCB text 'INSERT' on F.Silkscreen",
+                    "pos": {
+                        "x": 146.5,
+                        "y": 103.8
+                    },
+                    "uuid": "1c2be592-30b1-d2a8-b01c-1b2faa327ab9"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.9000 mm)",
+            "items": [
+                {
+                    "description": "PCB text '<' on F.Silkscreen",
+                    "pos": {
+                        "x": 143.4,
+                        "y": 103.8
+                    },
+                    "uuid": "c5af677c-1afb-d00f-c0a5-516d799f06da"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.5200 mm)",
+            "items": [
+                {
+                    "description": "PCB text 'microSD-PMOD 2026-08-23' on B.Silkscreen",
+                    "pos": {
+                        "x": 151.5,
+                        "y": 107.0
+                    },
+                    "uuid": "b24722ce-5cc8-c36e-526f-86086e44da74"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '6 VCC' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 95.79
+                    },
+                    "uuid": "71be30bd-02a6-7d00-3cf7-f9974df4abaf"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '6 VCC' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 95.79
+                    },
+                    "uuid": "a8e3d131-8fee-4030-ceaf-8d6191c3a54c"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '12 VCC' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 96.51
+                    },
+                    "uuid": "66d0cb62-0136-d0b3-60cb-ac51d1280cd5"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '12 VCC' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 96.51
+                    },
+                    "uuid": "23ae8e94-9431-da89-85e9-e1ae1969948c"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '5 GND' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 98.33
+                    },
+                    "uuid": "e037fa01-9374-c489-276f-84c83f467e0d"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '5 GND' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 98.33
+                    },
+                    "uuid": "302157d2-09f2-e0c1-714c-d10b744a0487"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '11 GND' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 99.05
+                    },
+                    "uuid": "d462b611-60f9-672d-63da-50262b28ec7f"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '11 GND' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 99.05
+                    },
+                    "uuid": "551f5d79-af2f-2da1-ef55-9683c05330b2"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '4 IO4/SD_DAT2' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 100.87
+                    },
+                    "uuid": "146bd755-336f-4f92-7665-bf02a7469056"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '4 IO4/SD_DAT2' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 100.87
+                    },
+                    "uuid": "b118426f-b0ac-d9f5-5ee0-d3b215ebaaac"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '10 IO8/SD_DAT3' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 101.59
+                    },
+                    "uuid": "8ef3211c-2f3c-d57d-69de-1dc9e257dbc3"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '10 IO8/SD_DAT3' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 101.59
+                    },
+                    "uuid": "625404cc-9bd8-c0ed-ddd0-6136406cb63a"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '3 IO3/SD_CMD' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 103.41
+                    },
+                    "uuid": "31eb3af2-a482-6872-deef-38fee2f52134"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '3 IO3/SD_CMD' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 103.41
+                    },
+                    "uuid": "29017176-9bdc-bcf3-f71e-8504df09debb"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '9 IO7/SD_CLK' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 104.13
+                    },
+                    "uuid": "6166311d-6022-6cc8-9300-49dd4ebe6f04"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '9 IO7/SD_CLK' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 104.13
+                    },
+                    "uuid": "9bd41687-a32c-002c-77ba-954683a83601"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '2 IO2' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 105.95
+                    },
+                    "uuid": "b925d1e4-3d20-b42e-db09-8e3687aa7d95"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '2 IO2' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 105.95
+                    },
+                    "uuid": "b9e53ddf-e2e0-92a7-91c3-d8ef158fc5fa"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '8 IO6/SD_DAT0' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 106.67
+                    },
+                    "uuid": "5398095f-223d-d1c1-db6a-ddf074e94d31"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '8 IO6/SD_DAT0' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 106.67
+                    },
+                    "uuid": "b4000d02-8aca-1c52-2ec4-6fd7d44eda2c"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '1 IO1' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 108.49
+                    },
+                    "uuid": "499c8077-01a1-3778-f6d9-d24d79ba1b5b"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '1 IO1' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 108.49
+                    },
+                    "uuid": "de3402e0-1549-cb85-3f2e-3fd06ee483e4"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '7 IO5/SD_DAT1' on F.Silkscreen",
+                    "pos": {
+                        "x": 163.7,
+                        "y": 109.21
+                    },
+                    "uuid": "ddcc1b51-f69e-796e-f927-7e0847104ba3"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        },
+        {
+            "description": "Text height out of range (board setup constraints silk text height min height 1.0000 mm; actual 0.4300 mm)",
+            "items": [
+                {
+                    "description": "PCB text '7 IO5/SD_DAT1' on B.Silkscreen",
+                    "pos": {
+                        "x": 163.15,
+                        "y": 109.21
+                    },
+                    "uuid": "16417717-27b8-82b7-fd7f-a0b18cf8633d"
+                }
+            ],
+            "severity": "warning",
+            "type": "text_height"
+        }
+    ]
+}

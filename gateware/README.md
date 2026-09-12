@@ -123,3 +123,10 @@ uv run python tools/web_wave_server.py --host 0.0.0.0 --port 8090
 ```
 
 Then open `http://<host>:8090`.
+
+## Arty A7-35T microSD card emulator
+
+The [microSD project](projects/microsd-emulator/README.md) provides a tested
+DDR-backed native SD card, with a separate [input-only pin probe](projects/microsd-pin-tester/README.md),
+[native macOS build tools](experiments/openxc7-macos/README.md), and
+[two microSD-Pmod PCB variants](../jitx-py/microsd-pmod-breakout/README.md).

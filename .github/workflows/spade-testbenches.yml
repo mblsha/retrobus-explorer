@@ -219,6 +219,10 @@ jobs:
             "${GATEWARE_PYTHON}" "${project}/scripts/test_with_vcd.py"
           done <<< "${project_list}"
 
+      - name: Run microSD storage and UART integration testbenches
+        run: |
+          "${GATEWARE_PYTHON}" tools/test_microsd_suite.py --extra-only --fast-sd
+
       - name: Run shared-components testbenches
         run: |
           "${GATEWARE_PYTHON}" lib/shared-components/scripts/test_all_components.py
@@ -233,6 +237,8 @@ jobs:
             gateware/projects/*/test/dump.surfer.vcd
             gateware/projects/*/test/results.xml
             gateware/projects/*/test/*.results.xml
+            gateware/build/microsd-tests/*.xml
+            gateware/build/microsd-tests/*.log
             gateware/lib/shared-components/test/waveforms/*.vcd
             gateware/lib/shared-components/test/waveforms/*.surfer.vcd
             gateware/lib/shared-components/test/waveforms/*.results.xml
