@@ -28,6 +28,7 @@ class Socket:
         self.status = 0
         self.drop = False
         self.corrupt = False
+        self.queue = []
 
     def bind(self, address):
         self.bound = address
@@ -46,16 +47,19 @@ class Socket:
 
     def send(self, data):
         self.sent.append(data)
-
-    def recv(self, size):
         if self.drop:
             self.drop = False
-            raise socket.timeout()
-        result = reply(self.sent[-1], self.status)
+            return
+        result = reply(data, self.status)
         if self.corrupt:
             self.corrupt = False
             result = result[:-1] + bytes([result[-1] ^ 1])
-        return result
+        self.queue.append(result)
+
+    def recv(self, size):
+        if not self.queue:
+            raise socket.timeout()
+        return self.queue.pop(0)
 
 
 class HostTests(unittest.TestCase):
@@ -77,10 +81,10 @@ class HostTests(unittest.TestCase):
             client = images.Images()
             client.session, client.sequence = 123, 7
             client.command(2, 31, 1, b"hello")
-        self.assertEqual(len(sock.sent), 2)
+        self.assertEqual(len(sock.sent), 3)
         self.assertEqual(sock.sent[0], sock.sent[1])
         self.assertEqual(client.sequence, 8)
-        self.assertEqual(client.retries, 1)
+        self.assertEqual(client.retries, 2)
 
     def test_ordered_error_and_session_file(self):
         sock = Socket()
@@ -92,7 +96,9 @@ class HostTests(unittest.TestCase):
                 sock.status = 4
                 with self.assertRaises(images.RemoteError):
                     client.command(2, 31, 1)
+                client.close()
                 resumed = images.Images(state=path)
+                self.addCleanup(resumed.close)
                 self.assertEqual((resumed.session, resumed.sequence), (123, 8))
                 sock.status = 3
                 with self.assertRaises(images.RemoteError):
@@ -109,16 +115,25 @@ class HostTests(unittest.TestCase):
                 with patch.object(client, "exchange", side_effect=TimeoutError):
                     with self.assertRaises(TimeoutError):
                         client.command(2, 31, 1, b"hello")
+                client.close()
                 resumed = images.Images(state=path)
+                self.addCleanup(resumed.close)
                 resumed.command(images.Opcode.DISARM)
                 self.assertEqual([request[4] for request in sock.sent], [2, 5])
                 self.assertEqual(resumed.sequence, 9)
                 self.assertIsNone(resumed.pending)
 
     def test_upload_verification_precedes_arm(self):
-        client = object.__new__(images.Images)
+        with patch.object(images.socket, "socket", return_value=Socket()):
+            client = images.Images()
+        client.initial_upload = {"verified": False}
         calls = []
-        client.begin = lambda n: calls.append(("begin", n))
+
+        def begin(n):
+            client.initial_upload = {"verified": False}
+            calls.append(("begin", n))
+
+        client.begin = begin
         client.command = lambda *args: calls.append(args)
         client.download = lambda n: bytes(512 * n)
         client.upload(bytes(1024))
@@ -136,7 +151,7 @@ class BulkHostTests(unittest.TestCase):
                 self.lost = False
 
             def send(self, request):
-                super().send(request)
+                self.sent.append(request)
                 lba, count = struct.unpack("<II", request[16:24])
                 data = b"".join(bytes([n & 255]) * 512 for n in range(lba, lba + count))
                 if lba == 2 and not self.lost:
@@ -220,10 +235,17 @@ class BulkHostTests(unittest.TestCase):
             self.assertEqual(client.sequence, 7)
 
     def test_bulk_upload_verifies_after_ordered_writes(self):
-        client = object.__new__(images.Images)
+        with patch.object(images.socket, "socket", return_value=Socket()):
+            client = images.Images()
+        client.initial_upload = {"verified": False}
         calls = []
         image = bytes(range(256)) * 4
-        client.begin = lambda count: calls.append(("begin", count))
+
+        def begin(count):
+            client.initial_upload = {"verified": False}
+            calls.append(("begin", count))
+
+        client.begin = begin
         client.command = lambda *args: calls.append(args)
 
         def readback(count, window):
@@ -363,6 +385,233 @@ class BenchmarkTests(unittest.TestCase):
                 client.close.assert_called_once()
                 if case == "wrong DDR data":
                     client.exchange.assert_not_called()
+
+
+class ProtocolPeer(Socket):
+    """Independent ordered peer: effects survive a lost acknowledgement."""
+
+    def __init__(self):
+        super().__init__()
+        self.session, self.sequence = 123, 1
+        self.declared, self.written = 1, 0
+        self.armed = False
+        self.memory = {}
+        self.cached_request = self.cached_reply = None
+        self.lose_replies = self.lose_reads = self.bad_readback = False
+        self.effects = []
+
+    def send(self, request):
+        self.sent.append(request)
+        opcode = request[4]
+        session, sequence, lba, count = struct.unpack("<IIII", request[8:24])
+        payload, status = bytes(512), 0
+        if request == self.cached_request:
+            response = self.cached_reply
+        else:
+            if opcode == 1:
+                self.session, self.sequence = session, 1
+                self.declared, self.written = count, 0
+                self.armed = False
+            elif session != self.session:
+                status = 2
+            elif sequence != self.sequence:
+                status = 3
+            else:
+                if opcode == 2:
+                    if self.armed:
+                        status = 4
+                    elif lba != self.written or self.written == self.declared:
+                        status = 5
+                    else:
+                        self.memory[lba] = request[24:536]
+                        self.written += 1
+                        self.effects.append((opcode, lba))
+                elif opcode == 3:
+                    payload = (
+                        bytes([0xFF]) * 512
+                        if self.bad_readback
+                        else self.memory.get(lba, bytes(512))
+                    )
+                elif opcode == 4:
+                    if self.armed or self.written != self.declared:
+                        status = 8
+                    else:
+                        self.armed = True
+                        self.effects.append((opcode, lba))
+                elif opcode == 5:
+                    self.armed = False
+                self.sequence = (self.sequence + 1) & 0xFFFFFFFF
+            response = reply(request, status, payload)
+            if status not in (2, 3):
+                self.cached_request, self.cached_reply = request, response
+        if not self.lose_replies and not (opcode == 3 and self.lose_reads):
+            self.queue.append(response)
+
+
+class RecoveryPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "session.json"
+        self.peer = ProtocolPeer()
+        self.factory = patch.object(images.socket, "socket", return_value=self.peer)
+        self.factory.start()
+        self.addCleanup(self.factory.stop)
+
+    def client(self):
+        client = images.Images(state=self.path)
+        self.addCleanup(client.close)
+        return client
+
+    def test_same_arm_and_write_after_executed_but_lost_reply(self):
+        for opcode, arguments in (
+            (images.Opcode.ARM, ()),
+            (images.Opcode.WRITE, (0, 1, b"hello")),
+        ):
+            with self.subTest(opcode=opcode):
+                self.path.unlink(missing_ok=True)
+                self.peer.__init__()
+                client = self.client()
+                client.session, client.sequence = 123, 1
+                client.initial_upload = {
+                    "session": 123,
+                    "sectors": 1,
+                    "sha256": "known",
+                    "verified": True,
+                }
+                if opcode == images.Opcode.ARM:
+                    self.peer.written = 1
+                self.peer.lose_replies = True
+                with self.assertRaises(TimeoutError):
+                    client.command(opcode, *arguments)
+                pending = client.pending
+                client.close()
+                self.peer.lose_replies = False
+                resumed = self.client()
+                before = len(self.peer.sent)
+                resumed.command(opcode, *arguments)
+                self.assertEqual(self.peer.sent[before:], [pending])
+                self.assertEqual(len(self.peer.effects), 1)
+                self.assertEqual(resumed.sequence, self.peer.sequence)
+                self.assertIsNone(resumed.pending)
+                resumed.close()
+
+    def test_unsupported_ordered_opcodes_have_no_side_effects(self):
+        client = self.client()
+        client.session, client.sequence = 123, 1
+        client.pending = images.encode(images.Opcode.WRITE, 123, 1, 0, 1, b"old")
+        client.save()
+        original = self.path.read_bytes()
+        pending = client.pending
+        for opcode in (images.Opcode.BEGIN, images.Opcode.BULK_READ, 99):
+            with self.subTest(opcode=opcode), self.assertRaises(ValueError):
+                client.command(opcode)
+            self.assertEqual(self.peer.sent, [])
+            self.assertEqual(client.pending, pending)
+            self.assertEqual(client.sequence, 1)
+            self.assertEqual(self.path.read_bytes(), original)
+
+    def test_failed_or_interrupted_verification_cannot_arm_after_restart(self):
+        for mode in ("mismatch", "interrupted"):
+            with self.subTest(mode=mode):
+                self.path.unlink(missing_ok=True)
+                self.peer.__init__()
+                self.peer.bad_readback = mode == "mismatch"
+                self.peer.lose_reads = mode == "interrupted"
+                client = self.client()
+                with self.assertRaises((RuntimeError, TimeoutError)):
+                    client.upload(b"x" * 512)
+                self.assertFalse(client.initial_upload["verified"])
+                client.close()
+                resumed = self.client()
+                sent = len(self.peer.sent)
+                with self.assertRaisesRegex(RuntimeError, "not verified"):
+                    resumed.command(images.Opcode.ARM)
+                self.assertEqual(len(self.peer.sent), sent)
+                resumed.close()
+
+    def test_verified_initial_upload_survives_restart_and_later_sd_writes(self):
+        client = self.client()
+        client.upload(b"x" * 512)
+        identity = dict(client.initial_upload)
+        client.close()
+        resumed = self.client()
+        self.assertEqual(resumed.initial_upload, identity)
+        resumed.command(images.Opcode.ARM)
+        self.peer.memory[0] = b"SD modification".ljust(512, b"\0")
+        resumed.command(images.Opcode.DISARM)
+        resumed.command(images.Opcode.ARM)
+        self.assertTrue(self.peer.armed)
+        self.assertEqual(resumed.initial_upload, identity)
+
+    def test_invalid_begin_does_not_recover_mutation(self):
+        client = self.client()
+        client.pending = images.encode(images.Opcode.WRITE, 123, 1, 0, 1, b"pending")
+        for blocks in (0, 524289):
+            with self.assertRaises(ValueError):
+                client.begin(blocks)
+        self.assertEqual(self.peer.sent, [])
+        self.assertIsNotNone(client.pending)
+
+    def test_session_lock_is_held_until_close(self):
+        first = self.client()
+        with self.assertRaisesRegex(RuntimeError, "already in use"):
+            self.client()
+        first.close()
+        second = self.client()
+        second.close()
+
+    def test_stale_packet_does_not_extend_deadline(self):
+        now = [0.0]
+        client = self.client()
+        client.socket.settimeout(1.0)
+        request = images.encode(images.Opcode.STATUS, 123, 1)
+        calls = []
+
+        def receive(size):
+            calls.append(client.socket.gettimeout())
+            if len(calls) == 1:
+                now[0] = 0.9
+                return b"stale"
+            now[0] += client.socket.gettimeout()
+            raise socket.timeout()
+
+        with (
+            patch.object(images.time, "monotonic", side_effect=lambda: now[0]),
+            patch.object(client.socket, "recv", side_effect=receive),
+        ):
+            with self.assertRaises(TimeoutError):
+                client.exchange(request, retries=1)
+        self.assertAlmostEqual(now[0], 1.0)
+        self.assertAlmostEqual(calls[1], 0.1)
+        self.assertEqual(client.socket.gettimeout(), 1.0)
+
+    def test_atomic_download_preserves_previous_file_on_write_failure(self):
+        output = Path(self.temp.name) / "backup.img"
+        output.write_bytes(b"old")
+        with patch.object(images.os, "fsync", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                images.atomic_download(output, b"new")
+        self.assertEqual(output.read_bytes(), b"old")
+        self.assertEqual(list(output.parent.iterdir()), [output])
+        images.atomic_download(output, b"new")
+        self.assertEqual(output.read_bytes(), b"new")
+
+    def test_irrelevant_cli_arguments_do_not_open_client(self):
+        for args in (
+            ("--upload", "image", "--start", "0"),
+            ("--status", "--bulk"),
+            ("--download", "out", "--blocks", "1", "--window", "2"),
+        ):
+            with (
+                patch("sys.argv", ["images", "--state", "unused", *args]),
+                patch.object(images, "Images") as create,
+                patch("sys.stderr", new_callable=io.StringIO),
+            ):
+                with self.assertRaises(SystemExit) as result:
+                    images.main()
+                self.assertEqual(result.exception.code, 2)
+                create.assert_not_called()
 
 
 if __name__ == "__main__":

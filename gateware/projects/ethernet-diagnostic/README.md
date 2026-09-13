@@ -51,8 +51,12 @@ reads retain DDR ownership until they finish.
 
 An upload declares a sector count, writes that prefix in order, then reads it
 back completely and compares every byte. Arming is a separate operation and
-requires the declared upload to be complete. Use one client/session file at a
-time. Bulk downloads are read-only, but require the image to stay disarmed and
+requires a completed upload. The host also requires a persisted record that
+the initial upload passed full readback verification. Failed or interrupted
+verification leaves ARM disabled across client restarts. This is a host-side
+guard, not a hardware interlock; the FPGA itself checks upload completeness.
+Later legitimate SD writes do not invalidate initial-upload verification.
+The client exclusively locks its session file until it closes. Bulk downloads are read-only, but require the image to stay disarmed and
 unchanged for the entire transfer.
 
 Power loss, BTN0, or FPGA reprogramming destroys the volatile card. Startup
@@ -119,8 +123,17 @@ uv run python projects/ethernet-diagnostic/scripts/images.py \
 Keep that session file between commands: it journals sequence state and an
 outstanding ordered request so restarting the client can safely retry it.
 Read/download/status operations refuse to replay an unfinished mutating request;
-resume its original operation explicitly first. A new FPGA boot requires a new
-upload session.
+resume its original operation explicitly first. Requesting the exact pending
+command (including its address, count, and payload) returns the recovered reply
+without issuing a second command. A different mutating command first completes
+the pending operation, then performs the new one. BEGIN and bulk reads use
+dedicated protocol paths, outside the ordered-command API.
+
+The journal binds verification to the upload session, sector count, and image
+SHA-256. Older journals without this record remain usable for reads, status,
+and disarm, but require a new verified upload before ARM. A new FPGA boot also
+requires a new upload session. Completed downloads replace their destination
+atomically, preserving an existing file if writing the replacement fails.
 
 On the GKD, bind the external controller and apply the 13 MHz, four-bit,
 keep-awake settings from the [DDR guide](../microsd-emulator/ddr/README.md).
