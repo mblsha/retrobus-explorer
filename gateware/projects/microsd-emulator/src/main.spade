@@ -8,6 +8,48 @@ pub mod write_response;
 pub mod write_transaction;
 use shared_components::sd::{crc7_bit, crc16_bit, response48};
 
+// Protocol status bits are combinational; the caller owns response capture.
+fn card_status_word(
+    card_state: uint<4>,
+    committing: bool,
+    write_active: bool,
+    reading: bool,
+    write_crc_error: bool,
+) -> uint<32> {
+    let SENDING_DATA: uint<4> = 5;
+    let RECEIVING_DATA: uint<4> = 6;
+    let PROGRAMMING: uint<4> = 7;
+    let current_state = if committing {
+        PROGRAMMING
+    } else if write_active {
+        RECEIVING_DATA
+    } else if reading {
+        SENDING_DATA
+    } else {
+        card_state
+    };
+    (zext(current_state) << 9)
+        | (if write_active { 0 } else { 0x100 })
+        | (if write_crc_error { 1 << 23 } else { 0 })
+}
+
+// Select a four-bit transfer or DAT0 bit without changing serializer state.
+fn read_data_nibble(data_byte: uint<8>, bit_index: uint<12>, wide: bool) -> uint<4> {
+    if wide {
+        if bit_index.to_bits()[2] {
+            trunc(data_byte)
+        } else {
+            trunc(data_byte >> 4)
+        }
+    } else {
+        if data_byte.to_bits()[7 -. trunc::<uint<12>, uint<3>>(bit_index)] {
+            15
+        } else {
+            14
+        }
+    }
+}
+
 // Management clock 80 MHz or faster; the 12 MHz candidate requires SD high/low
 // pulses >= 41 ns. Hardware qualification is recorded separately. Outputs
 // change after synchronized falling edges.
@@ -77,6 +119,8 @@ pub entity sd_frontend(
     let CARD_STANDBY: uint<4> = 3;
     let CARD_TRANSFER: uint<4> = 4;
 
+
+    // Input synchronization and SD sampling/output-advance events.
     reg(clk) clk_meta reset(rst: false) = sd_clk;
     reg(clk) clk_sync reset(rst: false) = clk_meta;
     reg(clk) clk_prev reset(rst: false) = clk_sync;
@@ -120,6 +164,8 @@ pub entity sd_frontend(
         local_rst
     };
     decl response_left, response_delay, data_state, lba, epoch, pending, multi, short_data, status_data, app, bit_index, crc_index;
+
+    // Command reception and registered decode.
     reg(clk) remaining: uint<6> reset(local_rst: 0) = {
         if sd_sample_tick && response_left == 0 {
             if remaining == 0 {
@@ -170,6 +216,8 @@ pub entity sd_frontend(
     } else {
         command_argument_zero
     };
+
+    // Card state and address/command legality retain their protocol encodings.
     reg(clk) state: uint<4> reset(local_rst: CARD_IDLE) = {
         if valid {
             if command_index == CMD_GO_IDLE {
@@ -226,6 +274,8 @@ pub entity sd_frontend(
     let scr = valid && transfer_idle && app && command_index == ACMD_SEND_SCR;
     let ssr = valid && transfer_idle && app && command_index == CMD_SEND_STATUS && command_argument_zero;
     let range_error = (command_argument & 511) != 0 || command_argument >= capacity_bytes;
+
+    // Write-transaction controls: accepted commits outlive protocol cancellation.
     let raw_write_request = valid && transfer_idle && writable && write_command && !range_error;
     let raw_write_next = *write_done && *write_good && write_mode == WRITE_MULTIPLE && write_lba < last_lba && !stop;
     // Register fast command-to-receiver controls rather than letting
@@ -313,16 +363,15 @@ pub entity sd_frontend(
     } else {
         write_crc_error
     };
-    let status: uint<32> = (zext(if *committing {
-                7
-            } else if write_active {
-                6
-            } else if data_state != READ_IDLE || pending {
-                5
-            } else {
-                state
-            }) << 9) | (if write_active { 0 } else { 0x100 }) |
-    (if write_crc_error { 1 << 23 } else { 0 });
+
+    // Command legality, status, and response payload selection.
+    let status: uint<32> = card_status_word$(
+        card_state: state,
+        committing: *committing,
+        write_active,
+        reading: data_state != READ_IDLE || pending,
+        write_crc_error,
+    );
     let addressed = command_argument == 0x00010000;
     let legal = match command_index {
         0 => true,
@@ -481,6 +530,8 @@ pub entity sd_frontend(
     set cmd_oe = &(command_pin_drive && armed);
     set cmd_out = &command_output;
 
+
+    // Read requests, sector ownership, and data serialization.
     let data_end = sd_output_advance && data_state == READ_RELEASE;
     let next_sector = data_end && multi && lba < last_lba;
     reg(clk) epoch: uint<32> reset(rst: 0) = if stop || !armed || read || next_sector {
@@ -601,19 +652,7 @@ pub entity sd_frontend(
     } else {
         sector_byte
     };
-    let nibble: uint<4> = if wide {
-        if bit_index.to_bits()[2] {
-            trunc(selected_byte)
-        } else {
-            trunc(selected_byte >> 4)
-        }
-    } else {
-        if selected_byte.to_bits()[7 -. trunc::<uint<12>, uint<3>>(bit_index)] {
-            15
-        } else {
-            14
-        }
-    };
+    let nibble: uint<4> = read_data_nibble(selected_byte, bit_index, wide);
     reg(clk) crcs: [uint<16>; 4] reset(local_rst: [0; 4]) = {
         if data_state == READ_IDLE {
             [0; 4]
@@ -637,6 +676,8 @@ pub entity sd_frontend(
         });
     // Decode during a full fabric cycle; opposite-edge pad registers only
     // select prepared values. Index/CRC state advances after each pad launch.
+
+    // Prepared data and opposite-edge pad registers.
     reg(clk) prepared_nibble: uint<4> reset(local_rst: 15) = nibble;
     reg(clk) prepared_crc: uint<4> reset(local_rst: 15) = std::conv::bits_to_uint(crc_bits);
     let pad_nibble = if fast_mode {
