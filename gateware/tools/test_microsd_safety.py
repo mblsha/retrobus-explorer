@@ -242,7 +242,9 @@ class PreparationTests(TargetFixture, unittest.TestCase):
                 elif usage == "holder":
                     holder.touch()
                 else:
-                    swaps.write_text(f"Filename Type Size Used Priority\n{alias} partition 1 0 -2\n")
+                    swaps.write_text(
+                        f"Filename Type Size Used Priority\n{alias} partition 1 0 -2\n"
+                    )
                 with self.assertRaises(RuntimeError):
                     self.run_prepare()
                 self.assertEqual(self.unbind.read_text(), "")
@@ -256,6 +258,7 @@ class PreparationTests(TargetFixture, unittest.TestCase):
 
     def test_first_use_no_card_detaches(self):
         import shutil
+
         shutil.rmtree(self.card)
         shutil.rmtree(self.disk)
         self.assertEqual(self.run_prepare(), "no-card")
@@ -280,6 +283,54 @@ class PreparationTests(TargetFixture, unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "controller is missing"):
             self.run_prepare()
         self.assertEqual(self.unbind.read_text(), "")
+
+
+class TargetArgumentTests(unittest.TestCase):
+    def test_shared_target_defaults_and_overrides(self):
+        parser = host_tools.target_parser("test")
+        self.assertEqual(
+            vars(parser.parse_args(["--bus-width", "4"])),
+            dict(
+                bus_width=4,
+                capacity_mib=8,
+                clock_hz=1_000_000,
+                actual_clock_hz=None,
+            ),
+        )
+        self.assertEqual(
+            vars(
+                parser.parse_args(
+                    [
+                        "--bus-width",
+                        "1",
+                        "--capacity-mib",
+                        "256",
+                        "--clock-hz",
+                        "13000000",
+                        "--actual-clock-hz",
+                        "12913043",
+                    ]
+                )
+            ),
+            dict(
+                bus_width=1,
+                capacity_mib=256,
+                clock_hz=13_000_000,
+                actual_clock_hz=12_913_043,
+            ),
+        )
+        for arguments in (
+            [],
+            ["--bus-width", "8"],
+            ["--bus-width", "4", "--capacity-mib", "32"],
+        ):
+            with (
+                self.subTest(arguments=arguments),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    parser.parse_args(arguments)
+                self.assertEqual(error.exception.code, 2)
 
 
 class DirectIOTests(unittest.TestCase):
@@ -335,7 +386,11 @@ class DirectIOTests(unittest.TestCase):
             ]:
                 stack.enter_context(patch.object(rw.os, name, value))
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
-            rw.main()
+            with patch.object(rw.os, "close") as closed:
+                try:
+                    rw.main()
+                finally:
+                    closed.assert_called_once_with(123)
         return calls, memory
 
     def test_actual_io_and_readback_are_not_optimized_away(self):

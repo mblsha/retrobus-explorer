@@ -6,28 +6,19 @@ validates the exact external controller, card identity, read-only state, clock,
 width, and lack of mounts before opening the block device.
 """
 
-import argparse
 from microsd_qualify_linux import qualification
 import hashlib
 import json
 import os
-from microsd_host import validate_target, direct_read
+from microsd_host import direct_device, target_parser, validate_target, direct_read
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bus-width", type=int, choices=(1, 4), required=True)
+    parser = target_parser(__doc__)
     parser.add_argument(
         "--writable-card",
         action="store_true",
         help="Expect writable SPADE media but perform reads only",
-    )
-    parser.add_argument("--capacity-mib", type=int, choices=(8, 256), default=8)
-    parser.add_argument("--clock-hz", type=int, default=1_000_000)
-    parser.add_argument(
-        "--actual-clock-hz",
-        type=int,
-        help="Expected divider output; defaults to requested clock",
     )
     args = parser.parse_args()
     with qualification(args):
@@ -39,9 +30,8 @@ def main():
             args.actual_clock_hz,
             writable=args.writable_card,
         )
-        fd = os.open("/dev/mmcblk1", os.O_RDONLY | os.O_DIRECT)
         checks = []
-        try:
+        with direct_device(os.O_RDONLY) as fd:
             for offset, size in [
                 (0, 512),
                 (127 * 512, 512),
@@ -66,8 +56,6 @@ def main():
                         passed=True,
                     )
                 )
-        finally:
-            os.close(fd)
         print(
             json.dumps(
                 dict(

@@ -45,6 +45,17 @@ class BuildManifestTests(unittest.TestCase):
             self.assertEqual((output / "result.json").read_text(), '{"checked": true}')
 
 
+def previous_manifests(root, folder, profiles, suffix=""):
+    manifests = [
+        root / "build" / folder / (profile + suffix) / "result.json"
+        for profile in profiles
+    ]
+    for manifest in manifests:
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("old success")
+    return manifests
+
+
 class DiagnosticManifestTests(unittest.TestCase):
     def test_compile_failure_invalidates_every_requested_profile(self):
         for builder, folder, options in (
@@ -58,13 +69,7 @@ class DiagnosticManifestTests(unittest.TestCase):
             ):
                 root = Path(directory)
                 suffix = "-one-bit" if options else ""
-                manifests = [
-                    root / "build" / folder / (profile + suffix) / "result.json"
-                    for profile in builder.PROFILES
-                ]
-                for manifest in manifests:
-                    manifest.parent.mkdir(parents=True)
-                    manifest.write_text("old success")
+                manifests = previous_manifests(root, folder, builder.PROFILES, suffix)
                 with (
                     patch.object(builder, "GATEWARE", root),
                     patch("sys.argv", ["build", *options]),
@@ -88,13 +93,7 @@ class DiagnosticManifestTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as directory,
             ):
                 root = Path(directory)
-                manifests = [
-                    root / "build" / folder / profile / "result.json"
-                    for profile in builder.PROFILES
-                ]
-                for manifest in manifests:
-                    manifest.parent.mkdir(parents=True)
-                    manifest.write_text("old success")
+                manifests = previous_manifests(root, folder, builder.PROFILES)
                 with (
                     patch.object(builder, "GATEWARE", root),
                     patch("sys.argv", ["build", "--toolchain", str(root / "tools")]),

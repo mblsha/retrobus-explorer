@@ -5,7 +5,6 @@ This formats only the
 positively identified external FPGA card and leaves it unmounted afterwards.
 """
 
-import argparse
 from microsd_qualify_linux import qualification
 import hashlib
 import json
@@ -14,19 +13,12 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from microsd_host import CID, validate_target
+from microsd_host import target_parser, CID, validate_target
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bus-width", type=int, choices=(1, 4), required=True)
-    parser.add_argument("--capacity-mib", type=int, choices=(8, 256), default=8)
-    parser.add_argument("--clock-hz", type=int, default=1_000_000)
-    parser.add_argument(
-        "--actual-clock-hz",
-        type=int,
-        help="Expected divider output; defaults to requested clock",
-    )
+    parser = target_parser(__doc__)
+
     parser.add_argument(
         "--read-only",
         action="store_true",

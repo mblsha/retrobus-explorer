@@ -16,7 +16,13 @@ import random
 import sys
 import time
 
-from microsd_host import validate_target, read_into, write_from, direct_read
+from microsd_host import (
+    direct_device,
+    validate_target,
+    read_into,
+    write_from,
+    direct_read,
+)
 
 BLOCK = 4096
 
@@ -42,8 +48,7 @@ def verify_windows(args, capacity):
     for _ in range(args.passes * args.random_writes):
         versions[rng.randrange(len(versions))] += 1
     checks = []
-    fd = os.open("/dev/mmcblk1", os.O_RDONLY | os.O_DIRECT)
-    try:
+    with direct_device(os.O_RDONLY) as fd:
         for offset in (0, 127 << 20, 255 << 20):
             size = 1 << 20
             expected = b"".join(
@@ -58,8 +63,6 @@ def verify_windows(args, capacity):
                     offset=offset, bytes=size, sha256=hashlib.sha256(actual).hexdigest()
                 )
             )
-    finally:
-        os.close(fd)
     print(
         json.dumps(dict(passed=True, configuration=vars(args), checks=checks), indent=2)
     )

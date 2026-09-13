@@ -6,7 +6,7 @@ import json
 import argparse
 from microsd_qualify_linux import qualification
 import os
-from microsd_host import validate_target, direct_read, direct_write
+from microsd_host import direct_device, validate_target, direct_read, direct_write
 
 
 def image_prefix():
@@ -24,34 +24,23 @@ def main():
         original = image_prefix()
         expected = bytearray(original)
         expected[4096:8192] = bytes(byte ^ 0xA5 for byte in expected[4096:8192])
-        fd = os.open("/dev/mmcblk1", os.O_RDWR | os.O_DIRECT)
         checks = []
-        try:
-
-            def read(offset, size):
-                return direct_read(fd, offset, size)
-
-            if read(0, len(original)) != original:
-                raise RuntimeError("Check failed: read(0, len(original)) == original")
+        with direct_device(os.O_RDWR) as fd:
+            if direct_read(fd, 0, len(original)) != original:
+                raise RuntimeError("Uploaded prefix does not match the expected image")
             for offset in (65536, (256 << 20) - 4096):
-                if read(offset, 4096) != bytes(4096):
-                    raise RuntimeError(
-                        "Check failed: read(offset, 4096) == bytes(4096)"
-                    )
+                if direct_read(fd, offset, 4096) != bytes(4096):
+                    raise RuntimeError("Expected zero-filled tail or final page")
             direct_write(fd, 4096, expected[4096:8192])
             os.fsync(fd)
             for _ in range(3):
-                actual = read(0, len(expected))
+                actual = direct_read(fd, 0, len(expected))
                 if actual != expected:
-                    raise RuntimeError("Check failed: actual == expected")
+                    raise RuntimeError("Modified prefix readback mismatch")
                 checks.append(hashlib.sha256(actual).hexdigest())
             for offset in (65536, (256 << 20) - 4096):
-                if read(offset, 4096) != bytes(4096):
-                    raise RuntimeError(
-                        "Check failed: read(offset, 4096) == bytes(4096)"
-                    )
-        finally:
-            os.close(fd)
+                if direct_read(fd, offset, 4096) != bytes(4096):
+                    raise RuntimeError("Expected zero-filled tail or final page")
         validate_target(args.bus_width, 256 << 20, args.clock_hz, args.actual_clock_hz)
         print(
             json.dumps(
