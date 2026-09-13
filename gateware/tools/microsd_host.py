@@ -2,6 +2,8 @@
 
 import mmap
 import os
+import re
+import stat
 from pathlib import Path
 
 CAPACITY = 8 * 1024 * 1024
@@ -11,6 +13,41 @@ CID = "7f52425350414445101234567801916b"
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+def require_unused(disk):
+    """Reject use of this disk or any of its direct sysfs partitions."""
+    devices = [disk] + [
+        entry for entry in disk.iterdir() if (entry / "partition").exists()
+    ]
+    numbers = set()
+    for device in devices:
+        major, minor = (device / "dev").read_text().strip().split(":")
+        numbers.add((int(major), int(minor)))
+        require(
+            not list((device / "holders").iterdir()), f"Active holder on {device.name}"
+        )
+    for line in Path("/proc/self/mountinfo").read_text().splitlines():
+        major, minor = line.split()[2].split(":")
+        require((int(major), int(minor)) not in numbers, "Card or partition is mounted")
+    for line in Path("/proc/swaps").read_text().splitlines()[1:]:
+        # proc escapes whitespace in pathnames using octal sequences.
+        filename = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), line.split()[0])
+        try:
+            info = Path(filename).stat()  # Follow aliases to their device identity.
+        except OSError as error:
+            raise RuntimeError(
+                f"Cannot establish active swap identity: {filename}"
+            ) from error
+        require(
+            stat.S_ISBLK(info.st_mode) or stat.S_ISREG(info.st_mode),
+            f"Unexpected swap object: {filename}",
+        )
+        number = info.st_rdev if stat.S_ISBLK(info.st_mode) else info.st_dev
+        require(
+            (os.major(number), os.minor(number)) not in numbers,
+            "Card or partition contains active swap",
+        )
 
 
 def validate_target(
@@ -43,13 +80,7 @@ def validate_target(
     require(
         int((disk / "size").read_text()) * 512 == capacity, "Unexpected card capacity"
     )
-    require(not list((disk / "holders").iterdir()), "Card has active device holders")
-    for filename, skip_header in (("/proc/mounts", False), ("/proc/swaps", True)):
-        lines = Path(filename).read_text().splitlines()[int(skip_header) :]
-        require(
-            not any(line.split()[0].startswith("/dev/mmcblk1") for line in lines),
-            f"Card is in use: {filename}",
-        )
+    require_unused(disk)
     ios = Path("/sys/kernel/debug/mmc1/ios").read_text()
     require(f"({bus_width} bits)" in ios, "Unexpected bus width")
     fields = dict(line.split(":", 1) for line in ios.splitlines())

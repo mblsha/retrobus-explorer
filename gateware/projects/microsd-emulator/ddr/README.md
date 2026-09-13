@@ -38,9 +38,13 @@ build/litedram-py311/bin/python -m unittest discover \
   -s projects/microsd-emulator/ddr -p 'test_*.py'
 uv run python tools/test_microsd_suite.py --fast-sd
 python3 experiments/openxc7-macos/build_ddr.py \
-  --toolchain build/openxc7-0.9.4 --output build/microsd-ddr-sd \
+  --toolchain build/openxc7-macos --output build/microsd-ddr-sd \
   --route-seeds 8
 ```
+
+The default toolchain prefix is `build/openxc7-macos`, shared with the probe
+and BRAM builders. Every invocation reruns support tests and regenerates DDR
+HDL/firmware; multiple placement seeds share one synthesis within that run.
 
 The build checks support tests, clock timing, native Gray-pointer crossings,
 direct SD outputs and a configuration-frame round trip. The builder removes any old success manifest before preflight and publishes

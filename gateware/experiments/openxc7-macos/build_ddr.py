@@ -10,7 +10,13 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from build_common import GATEWARE, verify_frames, begin_build, publish_result
+from build_common import (
+    GATEWARE,
+    DEFAULT_TOOLCHAIN,
+    pack_and_verify_bitstream,
+    begin_build,
+    publish_result,
+)
 
 
 # The supported card contract is checked against actual CMD9 responses by
@@ -32,45 +38,11 @@ def sd_properties():
     )
 
 
-def generation_record(config, env, out):
-    """Fingerprint the checked DDR generator inputs and generated HDL/ROM files."""
-    inputs = [config.resolve(), BOARD]
-    for directory, pattern in [
-        (GATEWARE / "projects/microsd-emulator/ddr", "*.py"),
-        (GATEWARE / "projects/microsd-emulator/src", "*.spade"),
-        (GATEWARE / "lib/shared-components/src", "*.spade"),
-        (GATEWARE / "experiments/openxc7-macos", "*.py"),
-    ]:
-        inputs.extend(sorted(directory.glob(pattern)))
-    generated = sorted((out / "gateware").glob("*"))
-    generated += [out / "software/include/generated/soc.h"]
-    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
-    return {
-        "inputs": {str(path): digest(path) for path in inputs},
-        "options": {
-            key: env[key]
-            for key in (
-                "MICROSD_REGISTERED_BANK",
-                "MICROSD_FAST_SD",
-                "MICROSD_NATIVE_BIST",
-            )
-        },
-        "generated": {str(path): digest(path) for path in generated if path.is_file()},
-    }
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--toolchain", type=Path, default=GATEWARE / "build/openxc7-0.9.4"
-    )
+    parser.add_argument("--toolchain", type=Path, default=DEFAULT_TOOLCHAIN)
     parser.add_argument(
         "--output", type=Path, default=GATEWARE / "build/microsd-ddr-sd"
-    )
-    parser.add_argument(
-        "--reuse-ddr-generation",
-        action="store_true",
-        help="Reuse fingerprint-matched generation and passed support tests",
     )
     parser.add_argument(
         "--route-seeds",
@@ -88,9 +60,6 @@ def main():
     env = dict(os.environ)
     env["PYTHONHASHSEED"] = "0"
     env["SOURCE_DATE_EPOCH"] = "0"
-    env["MICROSD_REGISTERED_BANK"] = "1"
-    env["MICROSD_FAST_SD"] = "1"
-    env["MICROSD_NATIVE_BIST"] = "1"
     env["PATH"] = (
         str(GATEWARE / "build/xpack-riscv-none-elf-gcc-15.2.0-1/bin")
         + os.pathsep
@@ -103,58 +72,40 @@ def main():
 
     check_edge_timing(tc, out / "negative-edge-timing-check")
 
-    def run(stage, command, stdout=None):
+    def run(stage, command):
         print(stage, flush=True)
         with (out / (stage + ".log")).open("w") as log:
             subprocess.run(
-                command, cwd=out, env=env, check=True, stdout=stdout or log, stderr=log
+                command, cwd=out, env=env, check=True, stdout=log, stderr=log
             )
 
-    cache = out / "generation-inputs.json"
-    if args.reuse_ddr_generation:
-        if not cache.exists() or json.loads(cache.read_text()) != generation_record(
-            CONFIG, env, out
-        ):
-            raise RuntimeError(
-                "DDR generation fingerprint changed; omit --reuse-ddr-generation"
-            )
-        if "\nOK\n" not in (out / "support-tests.log").read_text():
-            raise RuntimeError("Cached DDR support tests did not pass")
-        print(
-            "Reusing fingerprint-matched DDR generation and passed support tests",
-            flush=True,
-        )
-    else:
-        run(
-            "support-tests",
-            [
-                str(GATEWARE / "build/litedram-py311/bin/python"),
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                str(GATEWARE / "projects/microsd-emulator/ddr"),
-                "-p",
-                "test_*.py",
-            ],
-        )
-        run(
-            "generate",
-            [
-                str(GATEWARE / "build/litedram-py311/bin/python"),
-                str(GATEWARE / "projects/microsd-emulator/ddr/generate_bios.py"),
-                str(CONFIG.resolve()),
-                "--output-dir",
-                str(out),
-                "--name",
-                "arty_ddr_bios",
-                "--csr-csv",
-                str(out / "csr.csv"),
-            ],
-        )
-        cache.write_text(
-            json.dumps(generation_record(CONFIG, env, out), indent=2) + "\n"
-        )
+    run(
+        "support-tests",
+        [
+            str(GATEWARE / "build/litedram-py311/bin/python"),
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            str(GATEWARE / "projects/microsd-emulator/ddr"),
+            "-p",
+            "test_*.py",
+        ],
+    )
+    run(
+        "generate",
+        [
+            str(GATEWARE / "build/litedram-py311/bin/python"),
+            str(GATEWARE / "projects/microsd-emulator/ddr/generate_bios.py"),
+            str(CONFIG.resolve()),
+            "--output-dir",
+            str(out),
+            "--name",
+            "arty_ddr_bios",
+            "--csr-csv",
+            str(out / "csr.csv"),
+        ],
+    )
     source = out / "gateware/arty_ddr_bios.v"
     clock_header = (out / "software/include/generated/soc.h").read_text()
     sys_clk_freq = int(
@@ -230,8 +181,8 @@ def main():
         GATEWARE
         / "build/litedram-py311/lib/python3.11/site-packages/pythondata_cpu_vexriscv/verilog/VexRiscv_Min.v"
     )
-    if not (cpu.exists()):
-        raise RuntimeError(cpu)
+    if not cpu.exists():
+        raise RuntimeError(f"Missing initialization CPU HDL: {cpu}")
     project = GATEWARE / "projects/microsd-emulator"
     subprocess.run(["swim", "build"], cwd=project, env=env, check=True)
     hdl = f"{project}/build/spade.sv {GATEWARE}/lib/shared-components/verilog/fifo_v.v"
@@ -242,7 +193,7 @@ def main():
         r"reg \[23:0\] (storage(?:_\d+)?)\[0:\d+\];", source.read_text()
     )
     if len(memories) != 8:
-        raise RuntimeError(memories)
+        raise RuntimeError(f"Expected eight bank command memories, found {memories}")
     selection = " ".join("arty_ddr_bios/" + name for name in memories)
     cache_mapping += f'select -assert-count 8 {selection}; setattr -set ram_style "registers" {selection}; '
     run(
@@ -265,18 +216,19 @@ def main():
         if name.endswith("\\async_fifo_v")
     }
     if len(fifo_counts) != 3:
-        raise RuntimeError(fifo_counts)
-    if not (
-        all(
-            (
-                not any((kind.startswith(("RAM", "SRL")) for kind in counts))
-                for counts in fifo_counts.values()
-            )
-        )
+        raise RuntimeError(f"Expected three native FIFOs, found {list(fifo_counts)}")
+    if any(
+        kind.startswith(("RAM", "SRL"))
+        for counts in fifo_counts.values()
+        for kind in counts
     ):
-        raise RuntimeError(fifo_counts)
-    if not (sum((counts.get("FDRE", 0) for counts in fifo_counts.values())) >= 594):
-        raise RuntimeError(fifo_counts)
+        raise RuntimeError(
+            f"Native FIFO storage mapped to RAM/SRL instead of registers: {fifo_counts}"
+        )
+    if sum(counts.get("FDRE", 0) for counts in fifo_counts.values()) < 594:
+        raise RuntimeError(
+            f"Native FIFOs have fewer than the required 594 registers: {fifo_counts}"
+        )
     (out / "fifo-synthesis.json").write_text(json.dumps(fifo_counts, indent=2) + "\n")
 
     def route(seed):
@@ -310,18 +262,16 @@ def main():
             timing,
         ):
             clocks[name] = (float(fmax), verdict, float(target))
-        if not (clocks):
+        if not clocks:
             raise RuntimeError(f"No timing results for seed {seed}")
-        if not ("fclk" in clocks and clocks["fclk"][2] == 100):
-            raise RuntimeError(clocks)
-        if not (any((v[2] == 100 for v in clocks.values()))):
-            raise RuntimeError(clocks)
-        if not (
-            any((abs(v[2] - sys_clk_freq / 1000000.0) < 0.02 for v in clocks.values()))
+        if "fclk" not in clocks or clocks["fclk"][2] != 100:
+            raise RuntimeError(f"Missing 100 MHz SD fabric timing constraint: {clocks}")
+        if not any(
+            abs(v[2] - sys_clk_freq / 1_000_000) < 0.02 for v in clocks.values()
         ):
-            raise RuntimeError(clocks)
-        if not (any((v[2] == 200 for v in clocks.values()))):
-            raise RuntimeError(clocks)
+            raise RuntimeError(f"Missing DDR controller timing constraint: {clocks}")
+        if not any(v[2] == 200 for v in clocks.values()):
+            raise RuntimeError(f"Missing 200 MHz IDELAY timing constraint: {clocks}")
         return seed, clocks
 
     with ThreadPoolExecutor(max_workers=len(seeds)) as pool:
@@ -355,65 +305,15 @@ def main():
         out / f"routed-seed-{selected_seed}.sdf",
     )
     (out / "output-timing.json").write_text(json.dumps(output_paths, indent=2) + "\n")
-    if not (clocks and all((v[1] == "PASS" for v in clocks.values()))):
-        raise RuntimeError(clocks)
-    if not (any((v[2] == 100 for v in clocks.values()))):
-        raise RuntimeError(clocks)
-    if not (
-        any((abs(v[2] - sys_clk_freq / 1000000.0) < 0.02 for v in clocks.values()))
-    ):
-        raise RuntimeError(clocks)
-    if not (any((v[2] == 200 for v in clocks.values()))):
-        raise RuntimeError(clocks)
-    part = "xc7a35tcsg324-1"
-    db = tc / "share/prjxray/artix7"
-    with (out / "design.frames").open("w") as frames:
-        run(
-            "frames",
-            [
-                str(tc / "venv/bin/python"),
-                str(tc / "libexec/fasm2frames.py"),
-                "--db-root",
-                str(db),
-                "--part",
-                part,
-                "design.fasm",
-            ],
-            stdout=frames,
-        )
-    run(
-        "bitstream",
-        [
-            str(tc / "bin/xc7frames2bit"),
-            "--part_file",
-            str(db / part / "part.yaml"),
-            "--part_name",
-            part,
-            "--frm_file",
-            "design.frames",
-            "--output_file",
-            "design.bit",
-        ],
-    )
-    run(
-        "decode",
-        [
-            str(tc / "bin/bitread"),
-            "--part_file",
-            str(db / part / "part.yaml"),
-            "-y",
-            "-z",
-            "-o",
-            "decoded.bits",
-            "design.bit",
-        ],
-    )
+    if not all(v[1] == "PASS" for v in clocks.values()):
+        raise RuntimeError(f"Selected placement failed clock timing: {clocks}")
+    verified_bits = pack_and_verify_bitstream(tc, out, env=env)
     publish_result(
         out,
         json.dumps(
             {
                 **sd_properties(),
-                "verified_configuration_bits": verify_frames(out),
+                "verified_configuration_bits": verified_bits,
                 "bitstream_sha256": hashlib.sha256(
                     (out / "design.bit").read_bytes()
                 ).hexdigest(),

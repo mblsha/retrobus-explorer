@@ -5,7 +5,14 @@ import argparse
 import json
 import subprocess
 import sys
-from build_common import GATEWARE, verify_frames, begin_build, publish_result
+from pathlib import Path
+from build_common import (
+    GATEWARE,
+    DEFAULT_TOOLCHAIN,
+    pack_and_verify_bitstream,
+    begin_build,
+    publish_result,
+)
 
 sys.path.insert(0, str(GATEWARE / "tools"))
 from microsd_probe import PMOD_PINS, PROFILES
@@ -19,21 +26,25 @@ def main():
         action="store_true",
         help="Connect only DAT0 output; requires host four-bit capability disabled",
     )
+    parser.add_argument("--toolchain", type=Path, default=DEFAULT_TOOLCHAIN)
     args = parser.parse_args()
-    tc = GATEWARE / "build/openxc7-macos"
+    tc = args.toolchain.resolve()
     project = GATEWARE / "projects/microsd-emulator"
-    db = tc / "share/prjxray/artix7"
-    part = "xc7a35tcsg324-1"
-    subprocess.run(["swim", "build"], cwd=project, check=True)
-    for top, profile in enumerate(PROFILES):
-        if args.profile and profile != args.profile:
-            continue
-        out = (
+    requested = [
+        (
+            top,
+            profile,
             GATEWARE
             / "build/microsd-emulator"
-            / (profile + ("-one-bit" if args.one_bit else ""))
+            / (profile + ("-one-bit" if args.one_bit else "")),
         )
-        begin_build(out)
+        for top, profile in enumerate(PROFILES)
+        if args.profile is None or profile == args.profile
+    ]
+    for _, _, output in requested:
+        begin_build(output)
+    subprocess.run(["swim", "build"], cwd=project, check=True)
+    for top, profile, out in requested:
         wrapper = out / "board.v"
         mapping = {
             signal: PMOD_PINS.index(pin) for signal, pin in PROFILES[profile].items()
@@ -71,58 +82,13 @@ def main():
                     "100",
                 ],
             ),
-            (
-                "frames",
-                [
-                    str(tc / "venv/bin/python"),
-                    str(tc / "libexec/fasm2frames.py"),
-                    "--db-root",
-                    str(db),
-                    "--part",
-                    part,
-                    "design.fasm",
-                ],
-            ),
-            (
-                "bitstream",
-                [
-                    str(tc / "bin/xc7frames2bit"),
-                    "--part_file",
-                    str(db / part / "part.yaml"),
-                    "--part_name",
-                    part,
-                    "--frm_file",
-                    "design.frames",
-                    "--output_file",
-                    "design.bit",
-                ],
-            ),
-            (
-                "decode",
-                [
-                    str(tc / "bin/bitread"),
-                    "--part_file",
-                    str(db / part / "part.yaml"),
-                    "-y",
-                    "-z",
-                    "-o",
-                    "decoded.bits",
-                    "design.bit",
-                ],
-            ),
         ]
         for stage, cmd in steps:
             print(f"{profile}: {stage}", flush=True)
             with (out / f"{stage}.log").open("w") as log:
-                if stage == "frames":
-                    with (out / "design.frames").open("w") as data:
-                        subprocess.run(
-                            cmd, cwd=out, stdout=data, stderr=log, check=True
-                        )
-                else:
-                    subprocess.run(
-                        cmd, cwd=out, stdout=log, stderr=subprocess.STDOUT, check=True
-                    )
+                subprocess.run(
+                    cmd, cwd=out, stdout=log, stderr=subprocess.STDOUT, check=True
+                )
             if stage == "route":
                 timing = (out / "route.log").read_text()
                 final = timing.split("Max frequency for clock")[-1]
@@ -134,7 +100,7 @@ def main():
                 ]
                 if design["ports"]["pmod"]["direction"] != "inout":
                     raise RuntimeError(
-                        "Check failed: design['ports']['pmod']['direction'] == 'inout'"
+                        "BRAM emulator Pmod port must support tri-state SD outputs"
                     )
                 if sum(
                     (
@@ -143,14 +109,13 @@ def main():
                         for c in design["cells"].values()
                     )
                 ) != (2 if args.one_bit else 5):
-                    raise RuntimeError(
-                        "Check failed: sum((c['type'] in ('IOBUF', 'OBUFT') and c['connections']['T'] != ['1'] for c in design['cells'].values())) == (2 if args.one_bit else 5)"
-                    )
+                    raise RuntimeError("Unexpected number of enabled SD output buffers")
+        verified_bits = pack_and_verify_bitstream(tc, out)
         result = {
             "profile": profile,
             "sd_driven_lanes": 2 if args.one_bit else 5,
             "board_data_lanes": 1 if args.one_bit else 4,
-            "verified_configuration_bits": verify_frames(out),
+            "verified_configuration_bits": verified_bits,
             "bitstream_bytes": (out / "design.bit").stat().st_size,
         }
         publish_result(out, json.dumps(result, indent=2) + "\n")

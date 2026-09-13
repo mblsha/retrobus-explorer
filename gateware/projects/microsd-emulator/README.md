@@ -6,8 +6,8 @@ and runs at **12,913,043 Hz**, with sustained reads around **4.27 MB/s**.
 The SD link uses ordinary single-data-rate signaling; DDR3 is the backing
 memory, not SD DDR50 mode. Native 1-bit and 4-bit transfers are supported.
 
-The staged targets are an input-only pin probe, a read-only BRAM card with a
-64 KiB resident prefix, and the writable DDR card. SPI, SDHC, UHS and voltage
+An input-only pin probe verifies new assemblies; a read-only BRAM card is
+available as an optional diagnostic. SPI, SDHC, UHS and voltage
 switching are not implemented. The hardware results establish this board/host
 pairing, not universal SD-reader compatibility.
 
@@ -30,7 +30,8 @@ or top-header-r180 profile. The DDR board wrapper uses this measured mapping:
 | DAT2 | 1 | D4 |
 | DAT3 | 2 | D3 |
 
-The explicit common ground was confirmed. JD7/JD8 are unused and remain inputs.
+Connect an explicit common ground between the host/adapter and FPGA; the
+adapter Pmod ground pins are NC. JD7/JD8 are unused and remain inputs.
 CLK also remains input-only. All six lanes passed independent high/low tests
 with the [input-only probe](../microsd-pin-tester/README.md); see the
 [measured pinout](../../docs/hardware/gkd-arty-jd-pinout-2026-09-07.md).
@@ -44,18 +45,37 @@ runs triggered host recovery; signal integrity remains a possible contributor.
 
 ## Build and test
 
-From `gateware/`, after the [native toolchain setup](../../experiments/openxc7-macos/README.md):
+1. Install the [native toolchain](../../experiments/openxc7-macos/README.md) and
+   the [DDR generator prerequisites](ddr/README.md#build). All builders default
+   to `gateware/build/openxc7-macos`; `--toolchain` overrides that prefix.
+2. Verify a new assembly with the [input-only pin probe](../microsd-pin-tester/README.md)
+   and the measured JD mapping above before enabling card outputs.
+3. From `gateware/`, test and build the supported DDR card:
 
 ```sh
 uv sync --locked --all-packages
 uv run python tools/test_microsd_suite.py --fast-sd
-python3 experiments/openxc7-macos/build_probe.py
-python3 experiments/openxc7-macos/build_emulator.py --profile bottom-header-row-swap
+python3 experiments/openxc7-macos/build_ddr.py --route-seeds 8
 ```
 
-The full suite checks nonempty JUnit results and records each top/test-module
-under `build/microsd-tests/`. The [DDR guide](ddr/README.md) gives the full build,
-programming, memory qualification and Linux read/write test commands.
+4. Follow [program and initialize](ddr/README.md#program-and-initialize) to program
+   the FPGA, wait for full-memory BIST, and upload/arm a prefix.
+5. Run the [guarded host integrity checks](ddr/README.md#hardware-integrity-and-speed-checks).
+   They verify card identity and reject mounted media, active swap, holders, and
+   controller errors or recovery.
+
+The suite checks nonempty JUnit results and records each top/test-module under
+`build/microsd-tests/`. The detailed DDR guide contains the programming and
+Linux read/write commands.
+
+### Optional diagnostics
+
+```sh
+# Verify wiring with all Pmod pins kept input-only.
+python3 experiments/openxc7-macos/build_probe.py --profile bottom-header-row-swap
+# Read-only BRAM card with a 64 KiB resident prefix, without the DDR backend.
+python3 experiments/openxc7-macos/build_emulator.py --profile bottom-header-row-swap
+```
 
 The UART loader replaces the first 64 KiB. Inputs may contain 1..65536 bytes
 and are padded to 64 KiB. It validates packet CRC32, commits all 128 sectors,

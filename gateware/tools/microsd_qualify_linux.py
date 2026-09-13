@@ -12,7 +12,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from microsd_host import CID
+from microsd_host import CID, require_unused
 
 DEBUG = Path("/sys/kernel/debug/mmc1")
 CARD = Path("/sys/class/mmc_host/mmc1/mmc1:0001")
@@ -20,18 +20,10 @@ CARD = Path("/sys/class/mmc_host/mmc1/mmc1:0001")
 
 def snapshot():
     if "2a310000.mmc" not in str(CARD.resolve()):
-        raise RuntimeError("Check failed: '2a310000.mmc' in str(CARD.resolve())")
+        raise RuntimeError("Wrong external MMC controller during qualification")
     if (CARD / "cid").read_text().strip() != CID:
-        raise RuntimeError("Check failed: (CARD / 'cid').read_text().strip() == CID")
-    if any(
-        (
-            line.split()[0].startswith("/dev/mmcblk1")
-            for line in Path("/proc/mounts").read_text().splitlines()
-        )
-    ):
-        raise RuntimeError(
-            "Check failed: not any((line.split()[0].startswith('/dev/mmcblk1') for line in Path('/proc/mounts').read_text().splitlines()))"
-        )
+        raise RuntimeError("Wrong card CID during qualification")
+    require_unused(Path("/sys/class/block/mmcblk1"))
     return {
         "uptime_seconds": float(Path("/proc/uptime").read_text().split()[0]),
         "power_control": (CARD / "power/control").read_text().strip(),

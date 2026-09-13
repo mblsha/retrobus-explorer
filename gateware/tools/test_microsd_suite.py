@@ -70,8 +70,11 @@ def main():
     ):
         subprocess.run(command, cwd=GATEWARE, check=True)
     for project, top, module in CASES:
-        if args.extra_only and module in ("test_probe", "test_sd"):
-            continue
+        if args.extra_only:
+            if module == "test_probe":
+                continue
+            if module == "test_sd" and not args.fast_sd:
+                continue
         env = dict(os.environ)
         if args.fast_sd:
             env.update(
