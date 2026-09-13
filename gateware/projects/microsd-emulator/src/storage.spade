@@ -5,63 +5,152 @@ use std::mem::{clocked_memory, clocked_memory_init, read_memory};
 // the whole resident image before arming; RAM is deliberately not reset.
 #[no_mangle(all)]
 pub entity bram_backend(
-    clk: clock, rst: bool, armed: bool,
-    load_valid: bool, load_address: uint<32>, load_byte: uint<8>, load_ready: inv &bool,
-    request_valid: bool, request_lba: uint<32>, generation: uint<32>, buffer_release: bool,
-    sector_ready: inv &bool, sector_generation: inv &uint<32>,
-    byte_index: uint<9>, sector_byte: inv &uint<8>,
+    clk: clock,
+    rst: bool,
+    armed: bool,
+    load_valid: bool,
+    load_address: uint<32>,
+    load_byte: uint<8>,
+    load_ready: inv &bool,
+    request_valid: bool,
+    request_lba: uint<32>,
+    generation: uint<32>,
+    buffer_release: bool,
+    sector_ready: inv &bool,
+    sector_generation: inv &uint<32>,
+    byte_index: uint<9>,
+    sector_byte: inv &uint<8>,
 ) {
     decl state, saved_epoch, offset, saved_lba;
     let accept_load = !armed && load_address < 65536 && !rst;
     // Independent 4 KiB banks avoid RAMB36 cascade placement in nextpnr-xilinx.
-    let image_address: uint<12> = (trunc::<uint<32>,uint<12>>(saved_lba) << 9) | zext(offset);
-    let image_0: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 0, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_address: uint<12> = (trunc::<uint<32>, uint<12>>(saved_lba) << 9) | zext(offset);
+    let image_0: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 0, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_0 = inst read_memory(image_0, image_address);
-    let image_1: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 1, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_1: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 1, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_1 = inst read_memory(image_1, image_address);
-    let image_2: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 2, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_2: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 2, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_2 = inst read_memory(image_2, image_address);
-    let image_3: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 3, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_3: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 3, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_3 = inst read_memory(image_3, image_address);
-    let image_4: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 4, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_4: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 4, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_4 = inst read_memory(image_4, image_address);
-    let image_5: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 5, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_5: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 5, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_5 = inst read_memory(image_5, image_address);
-    let image_6: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 6, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_6: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 6, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_6 = inst read_memory(image_6, image_address);
-    let image_7: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 7, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_7: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 7, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_7 = inst read_memory(image_7, image_address);
-    let image_8: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 8, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_8: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 8, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_8 = inst read_memory(image_8, image_address);
-    let image_9: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 9, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_9: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 9, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_9 = inst read_memory(image_9, image_address);
-    let image_10: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 10, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_10: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 10, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_10 = inst read_memory(image_10, image_address);
-    let image_11: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 11, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_11: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 11, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_11 = inst read_memory(image_11, image_address);
-    let image_12: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 12, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_12: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 12, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_12 = inst read_memory(image_12, image_address);
-    let image_13: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 13, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_13: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 13, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_13 = inst read_memory(image_13, image_address);
-    let image_14: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 14, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_14: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 14, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_14 = inst read_memory(image_14, image_address);
-    let image_15: Memory<uint<8>,4096> = inst clocked_memory(clk, [(load_valid && accept_load && (load_address >> 12) == 15, trunc::<uint<32>,uint<12>>(load_address), load_byte)]);
+    let image_15: Memory<uint<8>, 4096> = inst clocked_memory(
+        clk,
+        [(load_valid && accept_load && (load_address >> 12) == 15, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
+    );
     reg(clk) read_15 = inst read_memory(image_15, image_address);
     let bank: uint<4> = trunc(saved_lba >> 3);
     let image_byte = [read_0, read_1, read_2, read_3, read_4, read_5, read_6, read_7, read_8, read_9, read_10, read_11, read_12, read_13, read_14, read_15][bank];
     let cancel = buffer_release || generation != saved_epoch || !armed;
     let start = state == 0 && request_valid && armed && !buffer_release;
-    reg(clk) saved_epoch: uint<32> reset(rst: 0) = if start { generation } else { saved_epoch };
-    reg(clk) saved_lba: uint<32> reset(rst: 0) = if start { request_lba } else { saved_lba };
-    reg(clk) offset: uint<9> reset(rst: 0) = if start { 0 } else if state == 2 { offset +. 1 } else { offset };
-    reg(clk) state: uint<2> reset(rst: 0) = {
-        if state != 0 && cancel { 0 }
-        else if start { 1 }
-        else if state == 1 { 2 }
-        else if state == 2 { if offset == 511 { 3 } else { 1 } }
-        else { state }
+    reg(clk) saved_epoch: uint<32> reset(rst: 0) = if start {
+        generation
+    } else {
+        saved_epoch
     };
-    let buffer: Memory<uint<8>,512> = inst clocked_memory(clk, [(state == 2 && !cancel, offset, if saved_lba < 128 { image_byte } else { 0 })]);
+    reg(clk) saved_lba: uint<32> reset(rst: 0) = if start {
+        request_lba
+    } else {
+        saved_lba
+    };
+    reg(clk) offset: uint<9> reset(rst: 0) = if start {
+        0
+    } else if state == 2 {
+        offset +. 1
+    } else {
+        offset
+    };
+    reg(clk) state: uint<2> reset(rst: 0) = {
+        if state != 0 && cancel {
+            0
+        } else if start {
+            1
+        } else if state == 1 {
+            2
+        } else if state == 2 {
+            if offset == 511 {
+                3
+            } else {
+                1
+            }
+        } else {
+            state
+        }
+    };
+    let buffer: Memory<uint<8>, 512> = inst clocked_memory(
+        clk,
+        [(state == 2 && !cancel, offset, if saved_lba < 128 {
+                image_byte
+            } else {
+                0
+            })],
+    );
     let data = inst read_memory(buffer, byte_index);
     set load_ready = &accept_load;
     set sector_ready = &(state == 3 && !cancel);
@@ -74,13 +163,25 @@ pub entity bram_backend(
 // a late response can never be mistaken for a new generation's sector.
 #[no_mangle(all)]
 pub entity ddr_backend(
-    clk: clock, rst: bool, armed: bool, initialized: bool,
+    clk: clock,
+    rst: bool,
+    armed: bool,
+    initialized: bool,
     resident_bytes: uint<32>,
-    request_valid: bool, request_lba: uint<32>, generation: uint<32>, buffer_release: bool,
-    sector_ready: inv &bool, sector_generation: inv &uint<32>,
-    byte_index: uint<9>, sector_byte: inv &uint<8>,
-    cmd_valid: inv &bool, cmd_ready: bool, cmd_address: inv &uint<24>,
-    rdata_valid: bool, rdata_ready: inv &bool, rdata: uint<128>,
+    request_valid: bool,
+    request_lba: uint<32>,
+    generation: uint<32>,
+    buffer_release: bool,
+    sector_ready: inv &bool,
+    sector_generation: inv &uint<32>,
+    byte_index: uint<9>,
+    sector_byte: inv &uint<8>,
+    cmd_valid: inv &bool,
+    cmd_ready: bool,
+    cmd_address: inv &uint<24>,
+    rdata_valid: bool,
+    rdata_ready: inv &bool,
+    rdata: uint<128>,
 ) {
     decl state, saved_epoch, saved_lba, word, byte_offset, held_word;
     let available = armed && initialized;
@@ -88,26 +189,82 @@ pub entity ddr_backend(
     let start = state == 0 && request_valid && available && !buffer_release && request_lba < 524288;
     let sparse = (saved_lba << 9) >= resident_bytes;
     let issue = state == 1 && !stale && !sparse;
-    let address: uint<24> = (trunc::<uint<32>,uint<24>>(saved_lba) << 5) | zext(word);
-    reg(clk) saved_epoch: uint<32> reset(rst: 0) = if start { generation } else { saved_epoch };
-    reg(clk) saved_lba: uint<32> reset(rst: 0) = if start { request_lba } else { saved_lba };
-    reg(clk) discarded reset(rst: false) = if start { false } else if stale && state != 0 { true } else { discarded };
-    reg(clk) state: uint<3> reset(rst: 0) = {
-        if state == 2 { if rdata_valid { if stale || discarded { 0 } else { 3 } } else { 2 } }
-        else if state != 0 && (stale || discarded) { 0 }
-        else if start { 1 }
-        else if state == 1 { if sparse { 3 } else if cmd_ready { 2 } else { 1 } }
-        else if state == 3 && byte_offset == 15 { if word == 31 { 4 } else { 1 } }
-        else { state }
+    let address: uint<24> = (trunc::<uint<32>, uint<24>>(saved_lba) << 5) | zext(word);
+    reg(clk) saved_epoch: uint<32> reset(rst: 0) = if start {
+        generation
+    } else {
+        saved_epoch
     };
-    reg(clk) held_word: uint<128> reset(rst: 0) = if state == 2 && rdata_valid { rdata }
-        else if state == 1 && sparse { 0 } else { held_word };
-    reg(clk) word: uint<5> reset(rst: 0) = if start { 0 }
-        else if state == 3 && byte_offset == 15 { word +. 1 } else { word };
-    reg(clk) byte_offset: uint<4> reset(rst: 0) = if state != 3 { 0 } else { byte_offset +. 1 };
+    reg(clk) saved_lba: uint<32> reset(rst: 0) = if start {
+        request_lba
+    } else {
+        saved_lba
+    };
+    reg(clk) discarded reset(rst: false) = if start {
+        false
+    } else if stale && state != 0 {
+        true
+    } else {
+        discarded
+    };
+    reg(clk) state: uint<3> reset(rst: 0) = {
+        if state == 2 {
+            if rdata_valid {
+                if stale || discarded {
+                    0
+                } else {
+                    3
+                }
+            } else {
+                2
+            }
+        } else if state != 0 && (stale || discarded) {
+            0
+        } else if start {
+            1
+        } else if state == 1 {
+            if sparse {
+                3
+            } else if cmd_ready {
+                2
+            } else {
+                1
+            }
+        } else if state == 3 && byte_offset == 15 {
+            if word == 31 {
+                4
+            } else {
+                1
+            }
+        } else {
+            state
+        }
+    };
+    reg(clk) held_word: uint<128> reset(rst: 0) = if state == 2 && rdata_valid {
+        rdata
+    } else if state == 1 && sparse {
+        0
+    } else {
+        held_word
+    };
+    reg(clk) word: uint<5> reset(rst: 0) = if start {
+        0
+    } else if state == 3 && byte_offset == 15 {
+        word +. 1
+    } else {
+        word
+    };
+    reg(clk) byte_offset: uint<4> reset(rst: 0) = if state != 3 {
+        0
+    } else {
+        byte_offset +. 1
+    };
     let address_byte: uint<9> = (zext(word) << 4) | zext(byte_offset);
-    let selected: uint<8> = trunc(held_word >> (zext::<4,128>(byte_offset) << 3));
-    let buffer: Memory<uint<8>,512> = inst clocked_memory(clk, [(state == 3 && !stale && !discarded, address_byte, selected)]);
+    let selected: uint<8> = trunc(held_word >> (zext::<4, 128>(byte_offset) << 3));
+    let buffer: Memory<uint<8>, 512> = inst clocked_memory(
+        clk,
+        [(state == 3 && !stale && !discarded, address_byte, selected)],
+    );
     let data = inst read_memory(buffer, byte_index);
     set cmd_valid = &issue;
     set cmd_address = &address;
@@ -122,28 +279,62 @@ pub entity ddr_backend(
 // overwriting neighbouring bytes. reset must be shared with the controller.
 #[no_mangle(all)]
 pub entity ddr_byte_writer(
-    clk: clock, rst: bool, enabled: bool, load_valid: bool,
-    load_address: uint<32>, load_byte: uint<8>, load_ready: inv &bool,
-    cmd_valid: inv &bool, cmd_ready: bool, cmd_address: inv &uint<24>,
-    wdata_valid: inv &bool, wdata_ready: bool, wdata: inv &uint<128>, wdata_mask: inv &uint<16>,
+    clk: clock,
+    rst: bool,
+    enabled: bool,
+    load_valid: bool,
+    load_address: uint<32>,
+    load_byte: uint<8>,
+    load_ready: inv &bool,
+    cmd_valid: inv &bool,
+    cmd_ready: bool,
+    cmd_address: inv &uint<24>,
+    wdata_valid: inv &bool,
+    wdata_ready: bool,
+    wdata: inv &uint<128>,
+    wdata_mask: inv &uint<16>,
 ) {
     decl state, command_sent, data_sent;
     let start = state == 0 && enabled && load_valid && load_address < 268_435_456;
-    reg(clk) address: uint<32> reset(rst: 0) = if start { load_address } else { address };
-    reg(clk) byte: uint<8> reset(rst: 0) = if start { load_byte } else { byte };
-    reg(clk) command_sent reset(rst: false) = if start { false }
-        else if state == 1 && cmd_ready { true } else { command_sent };
-    reg(clk) data_sent reset(rst: false) = if start { false }
-        else if state == 1 && wdata_ready { true } else { data_sent };
-    reg(clk) state: uint<2> reset(rst: 0) = if start { 1 }
-        else if state == 1 && command_sent && data_sent { 2 }
-        else if state == 2 { 0 } else { state };
+    reg(clk) address: uint<32> reset(rst: 0) = if start {
+        load_address
+    } else {
+        address
+    };
+    reg(clk) byte: uint<8> reset(rst: 0) = if start {
+        load_byte
+    } else {
+        byte
+    };
+    reg(clk) command_sent reset(rst: false) = if start {
+        false
+    } else if state == 1 && cmd_ready {
+        true
+    } else {
+        command_sent
+    };
+    reg(clk) data_sent reset(rst: false) = if start {
+        false
+    } else if state == 1 && wdata_ready {
+        true
+    } else {
+        data_sent
+    };
+    reg(clk) state: uint<2> reset(rst: 0) = if start {
+        1
+    } else if state == 1 && command_sent && data_sent {
+        2
+    } else if state == 2 {
+        0
+    } else {
+        state
+    };
     let lane: uint<4> = trunc(address);
-    let data: uint<128> = zext(byte) << (zext::<4,128>(lane) << 3);
+    let data: uint<128> = zext(byte) << (zext::<4, 128>(lane) << 3);
     let one: uint<16> = 1;
     let mask = one << zext(lane);
     set cmd_valid = &(state == 1 && !command_sent);
-    set cmd_address = &trunc::<uint<32>,uint<24>>(address >> 4);
+    set cmd_address = &trunc::<uint<32>, uint<24>>(address >> 4);
     set wdata_valid = &(state == 1 && !data_sent);
     set wdata = &data;
     set wdata_mask = &mask;
@@ -155,34 +346,89 @@ pub entity ddr_byte_writer(
 // only the shared DDR/global reset may reset this engine.
 #[no_mangle(all)]
 pub entity ddr_sector_writer(
-    clk: clock, rst: bool, start: bool, lba: uint<32>,
-    byte_index: inv &uint<9>, sector_byte: uint<8>,
-    cmd_valid: inv &bool, cmd_ready: bool, cmd_address: inv &uint<24>,
-    wdata_valid: inv &bool, wdata_ready: bool, wdata: inv &uint<128>, wdata_mask: inv &uint<16>,
-    busy: inv &bool, complete: inv &bool, failed: inv &bool,
+    clk: clock,
+    rst: bool,
+    start: bool,
+    lba: uint<32>,
+    byte_index: inv &uint<9>,
+    sector_byte: uint<8>,
+    cmd_valid: inv &bool,
+    cmd_ready: bool,
+    cmd_address: inv &uint<24>,
+    wdata_valid: inv &bool,
+    wdata_ready: bool,
+    wdata: inv &uint<128>,
+    wdata_mask: inv &uint<16>,
+    busy: inv &bool,
+    complete: inv &bool,
+    failed: inv &bool,
 ) {
     decl state, offset, word_index, command_sent, data_sent;
     let begin = state == 0 && start;
     let sent = state == 3 && (command_sent || cmd_ready) && (data_sent || wdata_ready);
-    reg(clk) saved_lba: uint<32> reset(rst: 0) = if begin { lba } else { saved_lba };
-    reg(clk) error reset(rst: false) = if begin { lba >= 524288 } else { error };
-    reg(clk) offset: uint<9> reset(rst: 0) = if begin { 0 } else if state == 2 { offset +. 1 } else { offset };
-    reg(clk) word_index: uint<5> reset(rst: 0) = if begin { 0 } else if sent { word_index +. 1 } else { word_index };
-    reg(clk) word: uint<128> = if state == 2 { (word >> 8) | (zext::<8,128>(sector_byte) << 120) } else { word };
+    reg(clk) saved_lba: uint<32> reset(rst: 0) = if begin {
+        lba
+    } else {
+        saved_lba
+    };
+    reg(clk) error reset(rst: false) = if begin {
+        lba >= 524288
+    } else {
+        error
+    };
+    reg(clk) offset: uint<9> reset(rst: 0) = if begin {
+        0
+    } else if state == 2 {
+        offset +. 1
+    } else {
+        offset
+    };
+    reg(clk) word_index: uint<5> reset(rst: 0) = if begin {
+        0
+    } else if sent {
+        word_index +. 1
+    } else {
+        word_index
+    };
+    reg(clk) word: uint<128> = if state == 2 {
+        (word >> 8) | (zext::<8, 128>(sector_byte) << 120)
+    } else {
+        word
+    };
     // Each channel remembers only its own acknowledgment. Both flags clear
     // during the staging state before the next word is offered. Clearing on
     // `sent` as well would needlessly put the opposite ready signal (and its
     // reset/FIFO fanout) on this register's reset path.
     reg(clk) command_sent reset(rst: false) = state == 3 && (command_sent || cmd_ready);
     reg(clk) data_sent reset(rst: false) = state == 3 && (data_sent || wdata_ready);
-    reg(clk) state: uint<3> reset(rst: 0) = if begin { if lba >= 524288 { 4 } else { 1 } }
-        else if state == 1 { 2 }
-        else if state == 2 { if (offset & 15) == 15 { 3 } else { 1 } }
-        else if sent { if word_index == 31 { 4 } else { 1 } }
-        else if state == 4 { 0 } else { state };
+    reg(clk) state: uint<3> reset(rst: 0) = if begin {
+        if lba >= 524288 {
+            4
+        } else {
+            1
+        }
+    } else if state == 1 {
+        2
+    } else if state == 2 {
+        if (offset & 15) == 15 {
+            3
+        } else {
+            1
+        }
+    } else if sent {
+        if word_index == 31 {
+            4
+        } else {
+            1
+        }
+    } else if state == 4 {
+        0
+    } else {
+        state
+    };
     set byte_index = &offset;
     set cmd_valid = &(state == 3 && !command_sent && !rst);
-    set cmd_address = &((trunc::<uint<32>,uint<24>>(saved_lba) << 5) | zext(word_index));
+    set cmd_address = &((trunc::<uint<32>, uint<24>>(saved_lba) << 5) | zext(word_index));
     set wdata_valid = &(state == 3 && !data_sent && !rst);
     set wdata = &word;
     set wdata_mask = &(0xffff);

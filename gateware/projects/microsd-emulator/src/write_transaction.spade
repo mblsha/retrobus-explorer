@@ -3,36 +3,109 @@
 // the complete staged sector continues to commit under the global reset.
 #[no_mangle(all)]
 pub entity sd_write_transaction(
-    clk: clock, rst: bool, prepared_mode: bool, start: bool, cancel: bool, stop: bool, wide: bool, lba: uint<32>,
-    sample: bool, fall: bool, dat: uint<4>, dat_out: inv &uint<4>, dat_oe: inv &uint<4>,
-    active: inv &bool, complete: inv &bool, good: inv &bool, commit_busy: inv &bool, commit_complete: inv &bool,
-    cmd_valid: inv &bool, cmd_ready: bool, cmd_address: inv &uint<24>,
-    wdata_valid: inv &bool, wdata_ready: bool, wdata: inv &uint<128>, wdata_mask: inv &uint<16>,
+    clk: clock,
+    rst: bool,
+    prepared_mode: bool,
+    start: bool,
+    cancel: bool,
+    stop: bool,
+    wide: bool,
+    lba: uint<32>,
+    sample: bool,
+    fall: bool,
+    dat: uint<4>,
+    dat_out: inv &uint<4>,
+    dat_oe: inv &uint<4>,
+    active: inv &bool,
+    complete: inv &bool,
+    good: inv &bool,
+    commit_busy: inv &bool,
+    commit_complete: inv &bool,
+    cmd_valid: inv &bool,
+    cmd_ready: bool,
+    cmd_address: inv &uint<24>,
+    wdata_valid: inv &bool,
+    wdata_ready: bool,
+    wdata: inv &uint<128>,
+    wdata_mask: inv &uint<16>,
 ) {
-    reg(clk) saved_lba: uint<32> reset(rst: 0) = if start { lba } else { saved_lba };
-    let (rx_active,rx_active_w): (&bool,inv &bool) = port;
-    let (rx_done,rx_done_w): (&bool,inv &bool) = port;
-    let (rx_good,rx_good_w): (&bool,inv &bool) = port;
-    let (offset,offset_w): (&uint<9>,inv &uint<9>) = port;
-    let (byte,byte_w): (&uint<8>,inv &uint<8>) = port;
-    let (writing,writing_w): (&bool,inv &bool) = port;
-    let (write_failed,write_failed_w): (&bool,inv &bool) = port;
-    let (response_active,response_active_w): (&bool,inv &bool) = port;
+    reg(clk) saved_lba: uint<32> reset(rst: 0) = if start {
+        lba
+    } else {
+        saved_lba
+    };
+    let (rx_active, rx_active_w): (&bool, inv &bool) = port;
+    let (rx_done, rx_done_w): (&bool, inv &bool) = port;
+    let (rx_good, rx_good_w): (&bool, inv &bool) = port;
+    let (offset, offset_w): (&uint<9>, inv &uint<9>) = port;
+    let (byte, byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (writing, writing_w): (&bool, inv &bool) = port;
+    let (write_failed, write_failed_w): (&bool, inv &bool) = port;
+    let (response_active, response_active_w): (&bool, inv &bool) = port;
     // Validate the stable sector address when reception starts, rather than
     // keeping a 32-bit range comparison on the DDR arbitration/loader path.
-    reg(clk) saved_lba_valid reset(rst: false) = if start { (lba >> 19) == 0 } else { saved_lba_valid };
+    reg(clk) saved_lba_valid reset(rst: false) = if start {
+        (lba >> 19) == 0
+    } else {
+        saved_lba_valid
+    };
     let accepted = *rx_good && saved_lba_valid;
     let commit = *rx_done && accepted;
-    reg(clk) packet_good reset(rst: false) = if start { false } else if *rx_done { accepted } else { packet_good };
+    reg(clk) packet_good reset(rst: false) = if start {
+        false
+    } else if *rx_done {
+        accepted
+    } else {
+        packet_good
+    };
     // CMD12 stops reception but must preserve the CRC response/programming
     // busy for an already accepted packet. CMD0/deselect use cancel instead.
-    let _ = inst super::write_rx::sd_write_receiver(clk,rst,start,cancel || stop,wide,sample,dat,
-        rx_active_w,rx_done_w,rx_good_w,*offset,byte_w);
-    let _ = inst super::storage::ddr_sector_writer(clk,rst,commit,saved_lba,offset_w,*byte,
-        cmd_valid,cmd_ready,cmd_address,wdata_valid,wdata_ready,wdata,wdata_mask,
-        writing_w,commit_complete,write_failed_w);
-    let _ = inst super::write_response::sd_write_response(clk,rst,prepared_mode,cancel,*rx_done,accepted,fall,
-        *writing || commit,dat_out,dat_oe,response_active_w,complete);
+    let _ = inst super::write_rx::sd_write_receiver$(
+        clk,
+        rst,
+        start,
+        cancel: cancel || stop,
+        wide,
+        sample,
+        dat,
+        active: rx_active_w,
+        complete: rx_done_w,
+        good: rx_good_w,
+        byte_index: *offset,
+        sector_byte: byte_w,
+    );
+    let _ = inst super::storage::ddr_sector_writer$(
+        clk,
+        rst,
+        start: commit,
+        lba: saved_lba,
+        byte_index: offset_w,
+        sector_byte: *byte,
+        cmd_valid,
+        cmd_ready,
+        cmd_address,
+        wdata_valid,
+        wdata_ready,
+        wdata,
+        wdata_mask,
+        busy: writing_w,
+        complete: commit_complete,
+        failed: write_failed_w,
+    );
+    let _ = inst super::write_response::sd_write_response$(
+        clk,
+        rst,
+        prepared_mode,
+        cancel,
+        start: *rx_done,
+        accepted,
+        fall,
+        busy: *writing || commit,
+        dat_out,
+        dat_oe,
+        active: response_active_w,
+        complete,
+    );
     set active = &(*rx_active || *response_active || *writing || commit);
     set good = &(packet_good && !*write_failed);
     set commit_busy = &(*writing || commit);
