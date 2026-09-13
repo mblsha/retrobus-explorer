@@ -33,6 +33,7 @@ pub entity image_loader(
     let SEND_ACK: uint<3> = 3;
     let DISPATCH_PACKET: uint<3> = 4;
 
+    // Receive the complete packet before validation can affect memory.
     decl state, count, crc, timeout, copy_index, reply_index, ack_crc, arm, loaded, saved_status;
     let receiving = state == RECEIVE_PACKET;
     let expected_magic: uint<8> = match count {
@@ -132,6 +133,7 @@ pub entity image_loader(
     } else {
         saved_status
     };
+    // Validation and dispatch are distinct cycles; retain both stages.
     reg(clk) state: uint<3> reset(rst: RECEIVE_PACKET) = {
         if complete {
             VALIDATE_PACKET
@@ -175,6 +177,7 @@ pub entity image_loader(
     } else {
         sequence
     };
+    // Serialize the captured result and its acknowledgement CRC.
     let reply: uint<96> = 0x3141534d | (zext(opcode) << 32) | (zext(saved_status) << 40) | (zext(reply_sequence) << 64);
     let out_byte: uint<8> = if reply_index < 12 {
         trunc(reply >> (zext::<4, 96>(reply_index) << 3))
