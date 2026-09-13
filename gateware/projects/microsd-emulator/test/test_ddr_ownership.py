@@ -2,9 +2,9 @@
 import cocotb
 from cocotb_helpers import tick
 from microsd_image import packet
-from test_ddr_integration import memory_model
+from ddr_support import memory_model
 from test_integration import exercise_image, upload
-from test_sd_write import send_packet
+from sd_support import send_packet
 
 
 @cocotb.test()

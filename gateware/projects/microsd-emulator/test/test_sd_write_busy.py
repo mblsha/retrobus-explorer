@@ -1,7 +1,7 @@
 import cocotb
 from cocotb.triggers import FallingEdge, Timer
-from test_sd import setup
-from test_sd_write import send_packet
+from sd_support import setup
+from sd_support import send_packet
 
 
 @cocotb.test()

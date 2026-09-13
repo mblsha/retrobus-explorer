@@ -105,16 +105,16 @@ pub entity network_ddr(
     // Ownership waits for this registered enable to clear before starting its
     // two quiet samples, so a final accepted SD write still drains completely.
     reg(clk) frontend_armed reset(rst: false) = *sd_armed && initialized;
-    let client_idle = *client_cmd_ready && *client_wdata_ready;
-    reg(clk) quiet_sample reset(rst: false) = !*sd_armed && !frontend_armed && !*write_busy && !*read_pending && client_idle;
+    let native_stage_empty = *client_cmd_ready && *client_wdata_ready;
+    reg(clk) quiet_sample reset(rst: false) = !*sd_armed && !frontend_armed && !*write_busy && !*read_pending && native_stage_empty;
     // Once granted, retain ownership throughout a network transaction. The
     // stage may be busy then; only a new ARM revokes the grant. Before a grant
     // (and before ARM), buffered writes must have left the registered stage.
     reg(clk) owner_grant reset(rst: false) = if *sd_armed { false }
         else if owner_grant { true }
-        else { quiet_sample && !frontend_armed && !*write_busy && !*read_pending && client_idle };
+        else { quiet_sample && !frontend_armed && !*write_busy && !*read_pending && native_stage_empty };
     let network_owner = owner_grant && !*sd_armed;
-    let quiescent = network_owner && !*network_busy && client_idle;
+    let quiescent = network_owner && !*network_busy && native_stage_empty;
     let _ = inst server::network_frontend(clk, rx_clk, tx_clk, rst, initialized, quiescent,
         eth_rxd, eth_rx_dv, eth_rxerr, eth_txd, eth_tx_en, eth_ref_clk, eth_rstn,
         network_request_w, network_write_w, network_lba_w, network_count_w, *network_write_index,

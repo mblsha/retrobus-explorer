@@ -3,7 +3,7 @@ from cocotb.triggers import Timer
 from cocotb_helpers import start_clock, tick
 from microsd_image import packet
 from test_emulator_uart import receive
-from test_ddr_integration import memory_model
+from ddr_support import memory_model
 
 
 @cocotb.test()

@@ -5,13 +5,12 @@ from pathlib import Path
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer, with_timeout
-from test_blocks import packet
-from test_network import udp
+from packet_support import packet, udp
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "microsd-emulator/test"))
-from test_ddr_integration import memory_model
-from test_sd import Host
-from test_sd_write import send_packet
+from ddr_support import memory_model
+from sd_support import Host
+from sd_support import send_packet
 
 
 @cocotb.test()
@@ -45,7 +44,7 @@ async def ethernet_sd_ethernet_roundtrip(d):
             await FallingEdge(d.clk)
             owner = bool(d.network_owner.value)
             if owner and not previous_owner:
-                assert int(d.client_idle.value)
+                assert int(d.native_stage_empty.value)
             previous_owner = owner
             if owner:
                 assert not int(d.frontend_armed.value)
