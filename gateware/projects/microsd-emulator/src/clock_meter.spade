@@ -2,30 +2,82 @@
 // complete fixed window measure active clock rate despite host clock gating.
 #[no_mangle(all)]
 pub entity sd_clock_meter(
-    clk: clock, rst: bool, sd_clk: bool, window_cycles: uint<17>,
-    peak_edges: inv &uint<16>, minimum_period: inv &uint<24>, latest_period: inv &uint<24>, total_edges: inv &uint<32>,
+    clk: clock,
+    rst: bool,
+    sd_clk: bool,
+    window_cycles: uint<17>,
+    peak_edges: inv &uint<16>,
+    minimum_period: inv &uint<24>,
+    latest_period: inv &uint<24>,
+    total_edges: inv &uint<32>,
 ) {
     reg(clk) meta reset(rst: false) = sd_clk;
     reg(clk) sync reset(rst: false) = meta;
     reg(clk) previous reset(rst: false) = sync;
     let rise = sync && !previous;
-    reg(clk) window: uint<17> reset(rst: 0) = if window +. 1 >= window_cycles { 0 } else { window +. 1 };
+    reg(clk) window: uint<17> reset(rst: 0) = if window +. 1 >= window_cycles {
+        0
+    } else {
+        window +. 1
+    };
     let boundary = window +. 1 >= window_cycles;
     decl edges, peak, period, shortest, seen;
-    let total = edges +. if rise { 1 } else { 0 };
-    reg(clk) edges: uint<16> reset(rst: 0) = if boundary { 0 } else { total };
-    reg(clk) completed_count: uint<16> reset(rst: 0) = if boundary { total } else { completed_count };
+    let total = edges +. if rise {
+        1
+    } else {
+        0
+    };
+    reg(clk) edges: uint<16> reset(rst: 0) = if boundary {
+        0
+    } else {
+        total
+    };
+    reg(clk) completed_count: uint<16> reset(rst: 0) = if boundary {
+        total
+    } else {
+        completed_count
+    };
     reg(clk) completed_window reset(rst: false) = boundary;
-    reg(clk) peak: uint<16> reset(rst: 0) = if completed_window && completed_count > peak { completed_count } else { peak };
+    reg(clk) peak: uint<16> reset(rst: 0) = if completed_window && completed_count > peak {
+        completed_count
+    } else {
+        peak
+    };
     reg(clk) seen reset(rst: false) = seen || rise;
-    reg(clk) period: uint<24> reset(rst: 0) = if rise { 0 } else if period != 0xffffff { period +. 1 } else { period };
-    let measured = if period == 0xffffff { period } else { period +. 1 };
+    reg(clk) period: uint<24> reset(rst: 0) = if rise {
+        0
+    } else if period != 0xffffff {
+        period +. 1
+    } else {
+        period
+    };
+    let measured = if period == 0xffffff {
+        period
+    } else {
+        period +. 1
+    };
     reg(clk) measured_event reset(rst: false) = rise && seen;
-    reg(clk) measured_period: uint<24> reset(rst: 0) = if rise && seen { measured } else { measured_period };
-    reg(clk) shortest: uint<24> reset(rst: 0) = if measured_event && (shortest == 0 || measured_period < shortest) { measured_period } else { shortest };
-    reg(clk) latest: uint<24> reset(rst: 0) = if rise && seen { measured } else { latest };
+    reg(clk) measured_period: uint<24> reset(rst: 0) = if rise && seen {
+        measured
+    } else {
+        measured_period
+    };
+    reg(clk) shortest: uint<24> reset(rst: 0) = if measured_event && (shortest == 0 || measured_period < shortest) {
+        measured_period
+    } else {
+        shortest
+    };
+    reg(clk) latest: uint<24> reset(rst: 0) = if rise && seen {
+        measured
+    } else {
+        latest
+    };
     set latest_period = &latest;
-    reg(clk) all_edges: uint<32> reset(rst: 0) = if rise { all_edges +. 1 } else { all_edges };
+    reg(clk) all_edges: uint<32> reset(rst: 0) = if rise {
+        all_edges +. 1
+    } else {
+        all_edges
+    };
     set total_edges = &all_edges;
     set peak_edges = &peak;
     set minimum_period = &shortest;

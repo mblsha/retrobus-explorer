@@ -3,26 +3,60 @@
 // changed for a rejected sector; busy reflects an accepted commit in progress.
 #[no_mangle(all)]
 pub entity sd_write_response(
-    clk: clock, rst: bool, prepared_mode: bool, cancel: bool, start: bool, accepted: bool,
-    fall: bool, busy: bool, dat_out: inv &uint<4>, dat_oe: inv &uint<4>,
-    active: inv &bool, complete: inv &bool,
+    clk: clock,
+    rst: bool,
+    prepared_mode: bool,
+    cancel: bool,
+    start: bool,
+    accepted: bool,
+    fall: bool,
+    busy: bool,
+    dat_out: inv &uint<4>,
+    dat_oe: inv &uint<4>,
+    active: inv &bool,
+    complete: inv &bool,
 ) {
     decl state, prepared_output, delayed_prepared_output;
     let clear = rst || cancel;
-    reg(clk) ok reset(clear: false) = if start && state == 0 { accepted } else { ok };
+    reg(clk) ok reset(clear: false) = if start && state == 0 {
+        accepted
+    } else {
+        ok
+    };
     let hold_busy = ok && (if prepared_mode { !delayed_prepared_output } else { busy });
     let token_drive = state >= 2 && state <= 8;
-    reg(clk) state: uint<4> reset(clear: 0) =
-        if start && state == 0 { 1 }
-        else if fall && state != 0 {
-            if state == 8 { if hold_busy { 8 } else { 9 } }
-            else if state == 9 { 0 } else { state +. 1 }
-        } else { state };
-    let next_output = match state {
-        2 => false, 3 => !ok, 4 => ok, 5 => !ok,
-        6 => true, 7 => false, 8 => !(busy && ok), _ => true,
+    reg(clk) state: uint<4> reset(clear: 0) = if start && state == 0 {
+        1
+    } else if fall && state != 0 {
+        if state == 8 {
+            if hold_busy {
+                8
+            } else {
+                9
+            }
+        } else if state == 9 {
+            0
+        } else {
+            state +. 1
+        }
+    } else {
+        state
     };
-    reg(clk) output reset(clear: true) = if fall { next_output } else { output };
+    let next_output = match state {
+        2 => false,
+        3 => !ok,
+        4 => ok,
+        5 => !ok,
+        6 => true,
+        7 => false,
+        8 => !(busy && ok),
+        _ => true,
+    };
+    reg(clk) output reset(clear: true) = if fall {
+        next_output
+    } else {
+        output
+    };
     // The fast frontend launches these prepared values at its pad registers.
     reg(clk) prepared_output reset(clear: true) = next_output;
     // Mirror the caller's full-cycle preparation stage: retire busy only
@@ -30,10 +64,22 @@ pub entity sd_write_response(
     // asynchronous change of the DDR commit-busy input.
     reg(clk) delayed_prepared_output reset(clear: true) = prepared_output;
     reg(clk) prepared_drive reset(clear: false) = token_drive;
-    reg(clk) drive reset(clear: false) = if fall { token_drive } else { drive };
+    reg(clk) drive reset(clear: false) = if fall {
+        token_drive
+    } else {
+        drive
+    };
     reg(clk) finished reset(clear: false) = fall && state == 9;
-    set dat_out = &(if (if prepared_mode { prepared_output } else { output }) { 15 } else { 14 });
-    set dat_oe = &(if (if prepared_mode { prepared_drive } else { drive }) && !clear { 1 } else { 0 });
+    set dat_out = &(if (if prepared_mode { prepared_output } else { output }) {
+            15
+        } else {
+            14
+        });
+    set dat_oe = &(if (if prepared_mode { prepared_drive } else { drive }) && !clear {
+            1
+        } else {
+            0
+        });
     set active = &(state != 0 && !clear);
     set complete = &finished;
 }

@@ -5,38 +5,94 @@ use shared_components::memory::async_fifo;
 
 #[no_mangle(all)]
 pub entity native_cdc(
-    s_clk: clock, s_rst: bool, m_clk: clock, m_rst: bool,
-    s_cmd_valid: bool, s_cmd_ready: inv &bool, s_cmd_address: uint<24>, s_cmd_write: bool,
-    m_cmd_valid: inv &bool, m_cmd_ready: bool, m_cmd_address: inv &uint<24>, m_cmd_write: inv &bool,
-    s_wdata_valid: bool, s_wdata_ready: inv &bool, s_wdata: uint<128>, s_wmask: uint<16>,
-    m_wdata_valid: inv &bool, m_wdata_ready: bool, m_wdata: inv &uint<128>, m_wmask: inv &uint<16>,
-    m_rdata_valid: bool, m_rdata_ready: inv &bool, m_rdata: uint<128>,
-    s_rdata_valid: inv &bool, s_rdata_ready: bool, s_rdata: inv &uint<128>,
+    s_clk: clock,
+    s_rst: bool,
+    m_clk: clock,
+    m_rst: bool,
+    s_cmd_valid: bool,
+    s_cmd_ready: inv &bool,
+    s_cmd_address: uint<24>,
+    s_cmd_write: bool,
+    m_cmd_valid: inv &bool,
+    m_cmd_ready: bool,
+    m_cmd_address: inv &uint<24>,
+    m_cmd_write: inv &bool,
+    s_wdata_valid: bool,
+    s_wdata_ready: inv &bool,
+    s_wdata: uint<128>,
+    s_wmask: uint<16>,
+    m_wdata_valid: inv &bool,
+    m_wdata_ready: bool,
+    m_wdata: inv &uint<128>,
+    m_wmask: inv &uint<16>,
+    m_rdata_valid: bool,
+    m_rdata_ready: inv &bool,
+    m_rdata: uint<128>,
+    s_rdata_valid: inv &bool,
+    s_rdata_ready: bool,
+    s_rdata: inv &uint<128>,
 ) {
     let command: uint<25> = zext(s_cmd_address) | (if s_cmd_write { 1 << 24 } else { 0 });
     // Register the output to break controller-ready through FIFO prefetch RAM.
     // A bubble after consumption is acceptable for this low-rate SD backend.
     decl cmd_full;
-    let cmds = inst async_fifo::<25,2,3>(s_clk,s_rst,command,s_cmd_valid && !s_rst,
-        m_clk,m_rst,!cmd_full);
-    reg(m_clk) cmd_full: bool reset(m_rst: false) = if cmd_full { !m_cmd_ready } else { !cmds.empty };
-    reg(m_clk) cmd_payload: uint<25> = if !cmd_full { cmds.dout } else { cmd_payload };
+    let cmds = inst async_fifo::<25, 2, 3>$(
+        wclk: s_clk,
+        wrst: s_rst,
+        din: command,
+        wput: s_cmd_valid && !s_rst,
+        rclk: m_clk,
+        rrst: m_rst,
+        rget: !cmd_full,
+    );
+    reg(m_clk) cmd_full: bool reset(m_rst: false) = if cmd_full {
+        !m_cmd_ready
+    } else {
+        !cmds.empty
+    };
+    reg(m_clk) cmd_payload: uint<25> = if !cmd_full {
+        cmds.dout
+    } else {
+        cmd_payload
+    };
     set s_cmd_ready = &(!cmds.full && !s_rst);
     set m_cmd_valid = &(cmd_full && !m_rst);
     set m_cmd_address = &trunc(cmd_payload);
     set m_cmd_write = &cmd_payload.to_bits()[24];
-    let write: uint<144> = zext(s_wdata) | (zext::<16,144>(s_wmask) << 128);
+    let write: uint<144> = zext(s_wdata) | (zext::<16, 144>(s_wmask) << 128);
     decl write_full;
-    let writes = inst async_fifo::<144,2,3>(s_clk,s_rst,write,s_wdata_valid && !s_rst,
-        m_clk,m_rst,!write_full);
-    reg(m_clk) write_full: bool reset(m_rst: false) = if write_full { !m_wdata_ready } else { !writes.empty };
-    reg(m_clk) write_payload: uint<144> = if !write_full { writes.dout } else { write_payload };
+    let writes = inst async_fifo::<144, 2, 3>$(
+        wclk: s_clk,
+        wrst: s_rst,
+        din: write,
+        wput: s_wdata_valid && !s_rst,
+        rclk: m_clk,
+        rrst: m_rst,
+        rget: !write_full,
+    );
+    reg(m_clk) write_full: bool reset(m_rst: false) = if write_full {
+        !m_wdata_ready
+    } else {
+        !writes.empty
+    };
+    reg(m_clk) write_payload: uint<144> = if !write_full {
+        writes.dout
+    } else {
+        write_payload
+    };
     set s_wdata_ready = &(!writes.full && !s_rst);
     set m_wdata_valid = &(write_full && !m_rst);
     set m_wdata = &trunc(write_payload);
-    set m_wmask = &trunc::<uint<144>,uint<16>>(write_payload >> 128);
-    let reads = inst async_fifo::<128,2,3>(m_clk,m_rst,m_rdata,m_rdata_valid && !m_rst,
-        s_clk,s_rst,s_rdata_ready && !s_rst);
+    set m_wmask = &trunc::<uint<144>, uint<16>>(write_payload >> 128);
+    let reads = inst async_fifo::<128, 2, 3>$(
+        wclk: m_clk,
+        wrst: m_rst,
+        din: m_rdata,
+        wput: m_rdata_valid && !m_rst,
+        rclk: s_clk,
+        rrst: s_rst,
+        rget: s_rdata_ready && !s_rst,
+    );
     set m_rdata_ready = &(!reads.full && !m_rst);
     set s_rdata_valid = &(!reads.empty && !s_rst);
     set s_rdata = &reads.dout;
@@ -48,13 +104,30 @@ pub entity native_cdc(
 // One-entry registers also cut combinational readiness paths.
 #[no_mangle(all)]
 pub entity native_stage(
-    clk: clock, rst: bool,
-    s_cmd_valid: bool, s_cmd_ready: inv &bool, s_cmd_address: uint<24>, s_cmd_write: bool,
-    s_wdata_valid: bool, s_wdata_ready: inv &bool, s_wdata: uint<128>, s_wmask: uint<16>,
-    s_rdata_valid: inv &bool, s_rdata_ready: bool, s_rdata: inv &uint<128>,
-    m_cmd_valid: inv &bool, m_cmd_ready: bool, m_cmd_address: inv &uint<24>, m_cmd_write: inv &bool,
-    m_wdata_valid: inv &bool, m_wdata_ready: bool, m_wdata: inv &uint<128>, m_wmask: inv &uint<16>,
-    m_rdata_valid: bool, m_rdata_ready: inv &bool, m_rdata: uint<128>,
+    clk: clock,
+    rst: bool,
+    s_cmd_valid: bool,
+    s_cmd_ready: inv &bool,
+    s_cmd_address: uint<24>,
+    s_cmd_write: bool,
+    s_wdata_valid: bool,
+    s_wdata_ready: inv &bool,
+    s_wdata: uint<128>,
+    s_wmask: uint<16>,
+    s_rdata_valid: inv &bool,
+    s_rdata_ready: bool,
+    s_rdata: inv &uint<128>,
+    m_cmd_valid: inv &bool,
+    m_cmd_ready: bool,
+    m_cmd_address: inv &uint<24>,
+    m_cmd_write: inv &bool,
+    m_wdata_valid: inv &bool,
+    m_wdata_ready: bool,
+    m_wdata: inv &uint<128>,
+    m_wmask: inv &uint<16>,
+    m_rdata_valid: bool,
+    m_rdata_ready: inv &bool,
+    m_rdata: uint<128>,
 ) {
     decl command_full, command_issued, write_full, read_full, write_command;
     let take_command = !command_full && s_cmd_valid;
@@ -68,16 +141,56 @@ pub entity native_stage(
     let consume_write = command_full && write_command && command_issued && write_full && m_wdata_ready;
     let consume_read = read_full && s_rdata_ready;
     let receive_read = command_full && !write_command && command_issued && !read_full && m_rdata_valid;
-    let done = if write_command { consume_write } else { consume_read };
-    reg(clk) command_full reset(rst: false) = if done { false } else { command_full || take_command };
-    reg(clk) command_issued reset(rst: false) = if !command_full || done { false } else { issued };
-    reg(clk) write_full reset(rst: false) = if consume_write { false } else { write_full || take_write };
-    reg(clk) read_full reset(rst: false) = if consume_read { false } else { read_full || receive_read };
-    reg(clk) address = if take_command { s_cmd_address } else { address };
-    reg(clk) write_command = if take_command { s_cmd_write } else { write_command };
-    reg(clk) write_data = if take_write { s_wdata } else { write_data };
-    reg(clk) write_mask = if take_write { s_wmask } else { write_mask };
-    reg(clk) read_data = if receive_read { m_rdata } else { read_data };
+    let done = if write_command {
+        consume_write
+    } else {
+        consume_read
+    };
+    reg(clk) command_full reset(rst: false) = if done {
+        false
+    } else {
+        command_full || take_command
+    };
+    reg(clk) command_issued reset(rst: false) = if !command_full || done {
+        false
+    } else {
+        issued
+    };
+    reg(clk) write_full reset(rst: false) = if consume_write {
+        false
+    } else {
+        write_full || take_write
+    };
+    reg(clk) read_full reset(rst: false) = if consume_read {
+        false
+    } else {
+        read_full || receive_read
+    };
+    reg(clk) address = if take_command {
+        s_cmd_address
+    } else {
+        address
+    };
+    reg(clk) write_command = if take_command {
+        s_cmd_write
+    } else {
+        write_command
+    };
+    reg(clk) write_data = if take_write {
+        s_wdata
+    } else {
+        write_data
+    };
+    reg(clk) write_mask = if take_write {
+        s_wmask
+    } else {
+        write_mask
+    };
+    reg(clk) read_data = if receive_read {
+        m_rdata
+    } else {
+        read_data
+    };
     set s_cmd_ready = &(!command_full && !rst);
     set s_wdata_ready = &(!write_full && !rst);
     set m_rdata_ready = &(command_full && !write_command && command_issued && !read_full && !rst);
