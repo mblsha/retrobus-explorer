@@ -1,8 +1,10 @@
 """Shared paths and bitstream round-trip verification for Arty SD builds."""
 
 from pathlib import Path
+import subprocess
 
 GATEWARE = Path(__file__).resolve().parents[2]
+DEFAULT_TOOLCHAIN = GATEWARE / "build/openxc7-macos"
 
 
 def verify_frames(output):
@@ -41,3 +43,70 @@ def publish_result(output, result_text):
         temporary.replace(output / "result.json")
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def pack_and_verify_bitstream(toolchain, output, *, env=None):
+    """Package this Arty's routed FASM and verify the decoded configuration bits."""
+    toolchain, output = Path(toolchain).resolve(), Path(output).resolve()
+    part = "xc7a35tcsg324-1"
+    db = toolchain / "share/prjxray/artix7"
+    part_file = str(db / part / "part.yaml")
+    steps = [
+        (
+            "frames",
+            [
+                str(toolchain / "venv/bin/python"),
+                str(toolchain / "libexec/fasm2frames.py"),
+                "--db-root",
+                str(db),
+                "--part",
+                part,
+                "design.fasm",
+            ],
+        ),
+        (
+            "bitstream",
+            [
+                str(toolchain / "bin/xc7frames2bit"),
+                "--part_file",
+                part_file,
+                "--part_name",
+                part,
+                "--frm_file",
+                "design.frames",
+                "--output_file",
+                "design.bit",
+            ],
+        ),
+        (
+            "decode",
+            [
+                str(toolchain / "bin/bitread"),
+                "--part_file",
+                part_file,
+                "-y",
+                "-z",
+                "-o",
+                "decoded.bits",
+                "design.bit",
+            ],
+        ),
+    ]
+    for stage, command in steps:
+        print(stage, flush=True)
+        with (output / f"{stage}.log").open("w") as log:
+            if stage == "frames":
+                with (output / "design.frames").open("w") as frames:
+                    subprocess.run(
+                        command,
+                        cwd=output,
+                        env=env,
+                        stdout=frames,
+                        stderr=log,
+                        check=True,
+                    )
+            else:
+                subprocess.run(
+                    command, cwd=output, env=env, stdout=log, stderr=log, check=True
+                )
+    return verify_frames(output)

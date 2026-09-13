@@ -3,6 +3,9 @@
 import contextlib
 import io
 import tempfile
+import os
+import stat
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -30,8 +33,30 @@ class TargetSafetyTests(unittest.TestCase):
         (self.disk / "ro").write_text("0")
         (self.disk / "size").write_text(str((256 << 20) // 512))
         (self.disk / "holders").mkdir()
+        (self.disk / "dev").write_text("179:8")
+        self.partition = self.disk / "mmcblk1p1"
+        self.partition.mkdir()
+        (self.partition / "partition").write_text("1")
+        (self.partition / "dev").write_text("179:9")
+        (self.partition / "holders").mkdir()
         (self.root / "proc").mkdir()
         (self.root / "proc/mounts").write_text("")
+        (self.root / "proc/self").mkdir()
+        (self.root / "proc/self/mountinfo").write_text("")
+        self.swap_stats = {}
+        original_stat = Path.stat
+
+        def fixture_stat(path, *args, **kwargs):
+            if str(path) in self.swap_stats:
+                value = self.swap_stats[str(path)]
+                if isinstance(value, Exception):
+                    raise value
+                return value
+            return original_stat(path, *args, **kwargs)
+
+        self.stat_patch = patch.object(Path, "stat", fixture_stat)
+        self.stat_patch.start()
+        self.addCleanup(self.stat_patch.stop)
         (self.root / "proc/swaps").write_text("Filename Type Size Used Priority\n")
         self.ios = self.root / "sys/kernel/debug/mmc1/ios"
         self.ios.parent.mkdir(parents=True)
@@ -58,7 +83,10 @@ class TargetSafetyTests(unittest.TestCase):
             (self.card / "name", "OTHER"),
             (self.disk / "size", "1"),
             (self.disk / "ro", "1"),
-            (self.root / "proc/mounts", "/dev/mmcblk1p1 /mnt vfat rw 0 0\n"),
+            (
+                self.root / "proc/self/mountinfo",
+                "21 1 179:9 / /mnt rw - vfat /dev/mmcblk1p1 rw\n",
+            ),
             (
                 self.root / "proc/swaps",
                 "Filename Type Size Used Priority\n/dev/mmcblk1p1 partition 1 0 -2\n",
@@ -75,6 +103,72 @@ class TargetSafetyTests(unittest.TestCase):
                 finally:
                     path.write_text(original)
         (self.disk / "holders/dm-0").touch()
+        with self.assertRaises(RuntimeError):
+            self.validate()
+
+    def test_mount_identity_rejects_aliases_and_partitions(self):
+        info = self.root / "proc/self/mountinfo"
+        for number in ("179:8", "179:9"):
+            for source in ("/dev/mmcblk1p1", "/dev/disk/by-label/SPADE", "UUID=abc"):
+                with self.subTest(number=number, source=source):
+                    info.write_text(f"21 1 {number} / /mnt rw - vfat {source} rw\n")
+                    with self.assertRaises(RuntimeError):
+                        self.validate()
+        info.write_text("21 1 8:1 / /mnt rw - ext4 /dev/other rw\n")
+        self.validate()
+
+    def test_partition_holder_is_rejected(self):
+        (self.partition / "holders/dm-0").touch()
+        with self.assertRaises(RuntimeError):
+            self.validate()
+
+    def test_swap_identity_rejects_aliases_and_files(self):
+        swaps = self.root / "proc/swaps"
+        for mode, device, number in (
+            (stat.S_IFBLK, "st_rdev", 8),
+            (stat.S_IFBLK, "st_rdev", 9),
+            (stat.S_IFREG, "st_dev", 9),
+        ):
+            alias = "/dev/disk/by-label/SPADE"
+            self.swap_stats[str(self.root / alias.lstrip("/"))] = SimpleNamespace(
+                st_mode=mode, st_dev=0, st_rdev=0
+            )
+            setattr(
+                self.swap_stats[str(self.root / alias.lstrip("/"))],
+                device,
+                os.makedev(179, number),
+            )
+            swaps.write_text(
+                f"Filename Type Size Used Priority\n{alias} partition 1 0 -2\n"
+            )
+            with (
+                self.subTest(mode=mode, number=number),
+                self.assertRaises(RuntimeError),
+            ):
+                self.validate()
+
+    def test_escaped_swap_path_uses_file_device_identity(self):
+        alias = self.root / "swap file"
+        self.swap_stats[str(alias)] = SimpleNamespace(
+            st_mode=stat.S_IFREG, st_dev=os.makedev(179, 9)
+        )
+        (self.root / "proc/swaps").write_text(
+            "Filename Type Size Used Priority\n/swap\\040file file 1 0 -2\n"
+        )
+        with self.assertRaisesRegex(RuntimeError, "active swap"):
+            self.validate()
+
+    def test_unrelated_swap_is_allowed_but_unresolvable_swap_fails_closed(self):
+        alias = self.root / "dev/other"
+        swaps = self.root / "proc/swaps"
+        swaps.write_text(
+            "Filename Type Size Used Priority\n/dev/other partition 1 0 -2\n"
+        )
+        self.swap_stats[str(alias)] = SimpleNamespace(
+            st_mode=stat.S_IFBLK, st_rdev=os.makedev(8, 2)
+        )
+        self.validate()
+        self.swap_stats[str(alias)] = FileNotFoundError("missing swap")
         with self.assertRaises(RuntimeError):
             self.validate()
 
