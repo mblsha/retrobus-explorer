@@ -229,7 +229,7 @@ class SaleaePro8LogicMsoAdapterCircuit(Circuit):
 
         self.place(
             self.pro8,
-            Placement(PRO8_ASSEMBLY_CENTER, PRO8_ROTATION, on=Side.Top),  # ty: ignore[no-matching-overload]
+            Placement(PRO8_ASSEMBLY_CENTER, PRO8_ROTATION, on=Side.Top),
         )
         self.place(self.logic_mso, Placement((0.0, LOGIC_MSO_BANK_Y), on=Side.Top))
 

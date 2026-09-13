@@ -18,7 +18,7 @@ for project in "${projects[@]}"; do
   echo "==> Ty: ${project#./}"
   (
     cd "$project"
-    uv sync --extra dev
-    uv run ty check .
+    uv sync --all-extras
+    uv run --all-extras ty check .
   )
 done

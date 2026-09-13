@@ -20,6 +20,7 @@ packages = ["src/shared_components"]
 
 [project.optional-dependencies]
 dev = [
+  "pytest>=8",
   "ruff",
   "ty>=0.0.75",
 ]

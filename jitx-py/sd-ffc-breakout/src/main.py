@@ -271,8 +271,8 @@ class FullSizeSdFfcBreakoutCircuit(Circuit):
         self.nets = [ground_net, vdd_net, *signal_nets]
 
         # This reproduces SparkFun's bottom-side MR270 card-finger transform.
-        self.place(self.card, Placement(SD_EDGE_ORIGIN, SD_EDGE_ROTATION, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.ffc, Placement(FFC_ORIGIN, FFC_ROTATION, on=FFC_SIDE))  # ty: ignore[no-matching-overload]
+        self.place(self.card, Placement(SD_EDGE_ORIGIN, SD_EDGE_ROTATION, on=Side.Bottom))
+        self.place(self.ffc, Placement(FFC_ORIGIN, FFC_ROTATION, on=FFC_SIDE))
 
         self += Silkscreen(
             Text("Full-size SD -> RetroBus 60P FFC", 1.2).at(17.0, 20.0),

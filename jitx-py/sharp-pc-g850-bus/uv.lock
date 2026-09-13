@@ -597,6 +597,7 @@ requires-dist = [
     { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.75" },
 ]

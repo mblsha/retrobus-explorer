@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from jitx.shapes.primitive import Circle
+
 from shared_components.testpads import (
     DEFAULT_PTH_SOLDERMASK_EXPANSION,
     GroundedPthPad,
@@ -15,6 +17,10 @@ def test_grounded_pth_defaults_to_exposed_annuli_on_both_faces() -> None:
     with instantiation.activate():
         pad = GroundedPthPad(diameter=3.6, hole_diameter=2.2)
     assert DEFAULT_PTH_SOLDERMASK_EXPANSION == 0.05
+    assert isinstance(pad.shape, Circle)
+    assert isinstance(pad.cutout.shape, Circle)
+    assert isinstance(pad.soldermask_top.shape, Circle)
+    assert isinstance(pad.soldermask_bottom.shape, Circle)
     assert pad.shape.radius == approx(1.8)
     assert pad.cutout.shape.radius == approx(1.1)
     assert {pad.soldermask_top.side, pad.soldermask_bottom.side} == {Side.Top, Side.Bottom}

@@ -314,8 +314,8 @@ class SdGlasgowBreakoutCircuit(Circuit):
 
         self.nets = [ground_net, vdd_net, *signal_nets]
 
-        self.place(self.card, Placement(SD_EDGE_ORIGIN, SD_EDGE_ROTATION, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.glasgow, Placement(GLASGOW_ORIGIN, GLASGOW_ROTATION, on=GLASGOW_SIDE))  # ty: ignore[no-matching-overload]
+        self.place(self.card, Placement(SD_EDGE_ORIGIN, SD_EDGE_ROTATION, on=Side.Bottom))
+        self.place(self.glasgow, Placement(GLASGOW_ORIGIN, GLASGOW_ROTATION, on=GLASGOW_SIDE))
 
         self += Silkscreen(
             Text("Full-size SD -> Glasgow", 1.2).at(17.0, 20.5),

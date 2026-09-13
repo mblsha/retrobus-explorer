@@ -449,18 +449,18 @@ class AlchitryAu1LevelShifterCircuit(Circuit):
         # Changing the parent placement side lets JITX mirror each complete
         # assembly, including its nested components and footprint artwork.
         self.place(self.fpga, Placement((0.0, 0.0), on=Side.Bottom))
-        self.place(self.shift[0], Placement((-14.734, 9.468), 90, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[1], Placement((-4.8113, 9.468), 90, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[2], Placement((-0.3, -9.468), 270, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[3], Placement((9.2, -9.468), 270, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[4], Placement((-9.8165, -9.468), 270, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.shift[5], Placement((7.0, 9.468), 90, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.shift[0], Placement((-14.734, 9.468), 90, on=Side.Bottom))
+        self.place(self.shift[1], Placement((-4.8113, 9.468), 90, on=Side.Bottom))
+        self.place(self.shift[2], Placement((-0.3, -9.468), 270, on=Side.Bottom))
+        self.place(self.shift[3], Placement((9.2, -9.468), 270, on=Side.Bottom))
+        self.place(self.shift[4], Placement((-9.8165, -9.468), 270, on=Side.Bottom))
+        self.place(self.shift[5], Placement((7.0, 9.468), 90, on=Side.Bottom))
 
         self.place(self.tp_gnd, Placement((0.0, 0.0), on=Side.Bottom))
-        self.place(self.ffc1, Placement((-2.3960, FFC_OFFSET_Y - FFC_DISTANCE / 2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.ffc2, Placement((-2.3960, FFC_OFFSET_Y + FFC_DISTANCE / 2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.ffc1, Placement((-2.3960, FFC_OFFSET_Y - FFC_DISTANCE / 2.0), 180, on=Side.Top))
+        self.place(self.ffc2, Placement((-2.3960, FFC_OFFSET_Y + FFC_DISTANCE / 2.0), 180, on=Side.Top))
         self.place(self.saleae, Placement((BOARD_WIDTH / 2.0 - 10.0, 0.0), on=Side.Top))
-        self.place(self.vcc_select, Placement((BOARD_WIDTH / -2.0 + 7.0, 0.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.vcc_select, Placement((BOARD_WIDTH / -2.0 + 7.0, 0.0), 180, on=Side.Top))
 
         self += Silkscreen(Text("Level Shifter Element (Au1) v2", 1.5).at(0.0, 1.0), side=FeatureSide.Top)
         self += Silkscreen(Text(f"(c) mblsha {BOARD_DATE}", 1.5).at(0.0, -1.0), side=FeatureSide.Top)
