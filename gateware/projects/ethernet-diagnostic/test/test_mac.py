@@ -9,12 +9,16 @@ def frame(body):
     return b"\x55" * 7 + b"\xd5" + body + zlib.crc32(body).to_bytes(4, "little")
 
 
-@cocotb.test()
-async def mailbox_frames(dut):
+async def exercise_mailbox(dut, phase_ns=0):
     cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
     receive = hasattr(dut, "rx_clk")
     phy_clock = dut.rx_clk if receive else dut.tx_clk
-    cocotb.start_soon(Clock(phy_clock, 40, units="ns").start())
+    async def start_phy():
+        if phase_ns:
+            await Timer(phase_ns, units="ns")
+        await Clock(phy_clock, 40, units="ns").start()
+
+    cocotb.start_soon(start_phy())
     dut.rst.value = 1
     dut.address.value = 0
     if receive:
@@ -134,3 +138,52 @@ async def mailbox_frames(dut):
             dut.submit.value = 0
             await FallingEdge(dut.clk)
         assert await capture == [frame(body) for body in bodies]
+
+
+@cocotb.test()
+async def mailbox_frames(dut):
+    await exercise_mailbox(dut)
+
+
+@cocotb.test()
+async def mailbox_frames_offset_clock(dut):
+    await exercise_mailbox(dut, phase_ns=7)
+
+
+@cocotb.test()
+async def reset_release_follows_each_phy_clock_phase(dut):
+    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    receive = hasattr(dut, "rx_clk")
+    phy_clock = dut.rx_clk if receive else dut.tx_clk
+    local_reset = dut.rx_reset if receive else dut.tx_reset
+    phy_clock.value = 0
+    dut.rst.value = 1
+    dut.address.value = 0
+    if receive:
+        dut.consume.value = dut.dv.value = dut.er.value = dut.rxd.value = 0
+    else:
+        dut.write.value = dut.data.value = dut.submit.value = dut.length.value = 0
+
+    # Deliberately stop the PHY clock during assertion, then run it while reset
+    # is held. This is the startup contract, including a late-starting PHY clock.
+    await Timer(113, units="ns")
+    assert int(local_reset.value)
+    clock_task = cocotb.start_soon(Clock(phy_clock, 40, units="ns").start())
+    edge = RisingEdge if receive else FallingEdge
+    for phase in (1, 7, 19, 39):
+        dut.rst.value = 1
+        await Timer(160, units="ns")
+        await edge(phy_clock)
+        await Timer(phase, units="ns")
+        dut.rst.value = 0
+        await Timer(1, units="ps")
+        assert int(local_reset.value)
+        await edge(phy_clock)
+        await Timer(1, units="ps")
+        assert int(local_reset.value)
+        await edge(phy_clock)
+        await Timer(1, units="ps")
+        assert not int(local_reset.value)
+        await Timer(160, units="ns")
+        assert not int(dut.available.value if receive else dut.tx_en.value)
+    clock_task.kill()

@@ -115,6 +115,8 @@ jobs:
         run: |
           "${GATEWARE_PYTHON}" -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
           "${GATEWARE_PYTHON}" -O -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
+          "${GATEWARE_PYTHON}" -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
+          "${GATEWARE_PYTHON}" -O -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
 
       - name: Prepare shared compiler directories and pin swim compiler paths
         run: |
