@@ -48,14 +48,16 @@ pub entity sd_write_response(
     } else {
         state
     };
+    // DAT0 sends start=0, status=010 (accepted) or 101 (CRC rejected),
+    // end=1, then a low programming-busy bit before polling commit completion.
     let next_output = match state {
-        2 => false,
-        3 => !ok,
-        4 => ok,
-        5 => !ok,
-        6 => true,
-        7 => false,
-        8 => !(busy && ok),
+        2 => false, // start bit
+        3 => !ok, // status bit 2
+        4 => ok, // status bit 1
+        5 => !ok, // status bit 0
+        6 => true, // end bit
+        7 => false, // enter busy
+        8 => !(busy && ok), // hold busy until commit completes
         _ => true,
     };
     reg(clk) output reset(clear: true) = if fall {
@@ -76,16 +78,10 @@ pub entity sd_write_response(
         drive
     };
     reg(clk) finished reset(clear: false) = fall && state == RESPONSE_COMPLETE;
-    set dat_out = &(if (if prepared_mode { prepared_output } else { output }) {
-            15
-        } else {
-            14
-        });
-    set dat_oe = &(if (if prepared_mode { prepared_drive } else { drive }) && !clear {
-            1
-        } else {
-            0
-        });
+    let response_bit = if prepared_mode { prepared_output } else { output };
+    let response_drive = if prepared_mode { prepared_drive } else { drive };
+    set dat_out = &(if response_bit { 15 } else { 14 });
+    set dat_oe = &(if response_drive && !clear { 1 } else { 0 });
     set active = &(state != IDLE && !clear);
     set complete = &finished;
 }

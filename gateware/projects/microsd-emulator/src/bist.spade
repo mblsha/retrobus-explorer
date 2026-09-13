@@ -12,15 +12,20 @@ pub fn pattern(address: uint<24>, inverted: bool) -> uint<128> {
     }
 }
 
-// Exclusive native-port ownership until both BIST passes finish. A failure
-// never grants the client access; recovery requires the shared global reset.
+// Exclusive native-port ownership until all qualification passes, including
+// zero-fill verification, finish. Failure never grants client access; recovery
+// requires the shared global reset.
 #[no_mangle(all)]
 pub entity qualified_ddr(
+
+    // Qualification control
     clk: clock,
     rst: bool,
     start: bool,
     word_count: uint<25>,
     timeout_cycles: uint<20>,
+
+    // Native DDR port
     cmd_valid: inv &bool,
     cmd_ready: bool,
     cmd_address: inv &uint<24>,
@@ -32,17 +37,25 @@ pub entity qualified_ddr(
     rdata_valid: bool,
     rdata_ready: inv &bool,
     rdata: uint<128>,
+
+    // Client command channel
     client_cmd_valid: bool,
     client_cmd_ready: inv &bool,
     client_cmd_address: uint<24>,
     client_cmd_write: bool,
+
+    // Client write channel
     client_wdata_valid: bool,
     client_wdata_ready: inv &bool,
     client_wdata: uint<128>,
     client_wdata_mask: uint<16>,
+
+    // Client read channel
     client_rdata_valid: inv &bool,
     client_rdata_ready: bool,
     client_rdata: inv &uint<128>,
+
+    // Qualification results
     busy: inv &bool,
     passed: inv &bool,
     failed: inv &bool,
@@ -51,33 +64,33 @@ pub entity qualified_ddr(
     expected_word: inv &uint<128>,
     actual_word: inv &uint<128>,
 ) {
-    let (ok, ok_w): (&bool, inv &bool) = port;
-    let (cv, cv_w): (&bool, inv &bool) = port;
-    let (ca, ca_w): (&uint<24>, inv &uint<24>) = port;
-    let (cw, cw_w): (&bool, inv &bool) = port;
-    let (wv, wv_w): (&bool, inv &bool) = port;
-    let (wd, wd_w): (&uint<128>, inv &uint<128>) = port;
-    let (wm, wm_w): (&uint<16>, inv &uint<16>) = port;
-    let (rr, rr_w): (&bool, inv &bool) = port;
+    let (bist_passed, bist_passed_w): (&bool, inv &bool) = port;
+    let (bist_cmd_valid, bist_cmd_valid_w): (&bool, inv &bool) = port;
+    let (bist_cmd_address, bist_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (bist_cmd_write, bist_cmd_write_w): (&bool, inv &bool) = port;
+    let (bist_write_valid, bist_write_valid_w): (&bool, inv &bool) = port;
+    let (bist_write_data, bist_write_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (bist_write_mask, bist_write_mask_w): (&uint<16>, inv &uint<16>) = port;
+    let (bist_read_ready, bist_read_ready_w): (&bool, inv &bool) = port;
     let _ = inst native_bist$(
         clk,
         rst,
         start,
         word_count,
         timeout_cycles,
-        cmd_valid: cv_w,
-        cmd_ready: cmd_ready && !*ok,
-        cmd_address: ca_w,
-        cmd_write: cw_w,
-        wdata_valid: wv_w,
-        wdata_ready: wdata_ready && !*ok,
-        wdata: wd_w,
-        wdata_mask: wm_w,
-        rdata_valid: rdata_valid && !*ok,
-        rdata_ready: rr_w,
+        cmd_valid: bist_cmd_valid_w,
+        cmd_ready: cmd_ready && !*bist_passed,
+        cmd_address: bist_cmd_address_w,
+        cmd_write: bist_cmd_write_w,
+        wdata_valid: bist_write_valid_w,
+        wdata_ready: wdata_ready && !*bist_passed,
+        wdata: bist_write_data_w,
+        wdata_mask: bist_write_mask_w,
+        rdata_valid: rdata_valid && !*bist_passed,
+        rdata_ready: bist_read_ready_w,
         rdata,
         busy,
-        passed: ok_w,
+        passed: bist_passed_w,
         failed,
         progress,
         diagnostic,
@@ -86,26 +99,26 @@ pub entity qualified_ddr(
     );
     // Register ownership separately from reset and the BIST state decoder.
     // This also inserts an idle cycle between the final response and handover.
-    reg(clk) qualified reset(rst: false) = *ok;
+    reg(clk) qualified reset(rst: false) = *bist_passed;
     set passed = &qualified;
     set cmd_valid = &(!rst && if qualified {
             client_cmd_valid
         } else {
-            *cv
+            *bist_cmd_valid
         });
-    set cmd_address = &(if qualified { client_cmd_address } else { *ca });
-    set cmd_write = &(if qualified { client_cmd_write } else { *cw });
+    set cmd_address = &(if qualified { client_cmd_address } else { *bist_cmd_address });
+    set cmd_write = &(if qualified { client_cmd_write } else { *bist_cmd_write });
     set wdata_valid = &(!rst && if qualified {
             client_wdata_valid
         } else {
-            *wv
+            *bist_write_valid
         });
-    set wdata = &(if qualified { client_wdata } else { *wd });
-    set wdata_mask = &(if qualified { client_wdata_mask } else { *wm });
+    set wdata = &(if qualified { client_wdata } else { *bist_write_data });
+    set wdata_mask = &(if qualified { client_wdata_mask } else { *bist_write_mask });
     set rdata_ready = &(!rst && if qualified {
             client_rdata_ready
         } else {
-            *rr
+            *bist_read_ready
         });
     set client_cmd_ready = &(qualified && !rst && cmd_ready);
     set client_wdata_ready = &(qualified && !rst && wdata_ready);
