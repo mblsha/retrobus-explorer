@@ -1,0 +1,16 @@
+.jitx/
+.socket.jitx
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+manufacturing/
+.render.tmp-*/
+
+.venv_sync_last
+*.pyc
+designs/
+parts-db/
+
+# Generated JITX/KiCad board export.
+/kicad

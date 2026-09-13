@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.27.0,<2.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sc62015-au2-tester"
+version = "0.1.0"
+description = "Cycle-accurate SHARP SC62015 tester element for Alchitry Au2"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "jitx>=4.0.0,<5",
+  "jitxlib-parts>=1.0.0,<2",
+  "jitxlib-standard>=4.0.0,<5",
+  "jitxexamples-components>=1.0.0,<2",
+  "alchitry-v2-elements-py",
+  "shared-components",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "ty",
+]
+
+[tool.uv.sources]
+alchitry-v2-elements-py = { path = "../alchitry-v2-elements", editable = true }
+shared-components = { path = "../shared-components", editable = true }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP"]
+ignore = ["E501"]

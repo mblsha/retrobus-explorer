@@ -1,0 +1,11 @@
+.socket.jitx
+.venv/
+.venv_sync_last
+__pycache__/
+*.pyc
+designs/
+parts-db/
+.ruff_cache/
+.jitx/
+render/
+*.lck

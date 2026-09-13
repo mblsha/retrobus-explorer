@@ -1,0 +1,10 @@
+.jitx/
+.socket.jitx
+.venv/
+.venv_sync_last
+__pycache__/
+*.pyc
+designs/
+manufacturing/
+parts-db/
+render/
