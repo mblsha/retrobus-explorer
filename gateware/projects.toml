@@ -59,3 +59,8 @@ ci = true
 path = "projects/microsd-emulator"
 kind = "diagnostic"
 ci = true
+
+[[projects]]
+path = "projects/ethernet-diagnostic"
+kind = "application"
+ci = true

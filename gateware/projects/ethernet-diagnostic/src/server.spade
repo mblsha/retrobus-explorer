@@ -1,0 +1,63 @@
+use super::{mac, network, blocks};
+
+#[no_mangle(all)]
+pub entity network_frontend(
+    clk: clock,
+    rx_clk: clock,
+    tx_clk: clock,
+    rst: bool,
+    initialized: bool,
+    sd_quiescent: bool,
+    rxd: uint<4>,
+    rx_dv: bool,
+    rx_er: bool,
+    txd: inv &uint<4>,
+    tx_en: inv &bool,
+    phy_ref: inv &bool,
+    phy_rst_n: inv &bool,
+    memory_request: inv &bool,
+    memory_write: inv &bool,
+    memory_lba: inv &uint<32>,
+    memory_count: inv &uint<2>,
+    memory_write_index: uint<9>,
+    memory_write_data: inv &uint<8>,
+    memory_read_valid: bool,
+    memory_read_index: uint<10>,
+    memory_read_data: uint<8>,
+    memory_done: bool,
+    memory_error: bool,
+    armed: inv &bool,
+) {
+    reg(clk) divider: uint<2> reset(rst: 0) = divider +. 1;
+    reg(clk) startup: uint<25> reset(rst: 0) = if startup == 20_000_000 { startup } else { startup +. 1 };
+    set phy_ref = &divider.to_bits()[1];
+    set phy_rst_n = &(startup >= 1_000_000 && !rst);
+    let local_rst = rst || startup != 20_000_000;
+    let (ra, ra_w): (&uint<11>, inv &uint<11>) = port;
+    let (rd, rd_w): (&uint<8>, inv &uint<8>) = port;
+    let (rl, rl_w): (&uint<11>, inv &uint<11>) = port;
+    let (rv, rv_w): (&bool, inv &bool) = port;
+    let (rc, rc_w): (&bool, inv &bool) = port;
+    let (tw, tw_w): (&bool, inv &bool) = port;
+    let (ta, ta_w): (&uint<11>, inv &uint<11>) = port;
+    let (td, td_w): (&uint<8>, inv &uint<8>) = port;
+    let (tl, tl_w): (&uint<11>, inv &uint<11>) = port;
+    let (ts, ts_w): (&bool, inv &bool) = port;
+    let (tr, tr_w): (&bool, inv &bool) = port;
+    let (aq, aq_w): (&bool, inv &bool) = port;
+    let (al, al_w): (&uint<11>, inv &uint<11>) = port;
+    let (aa, aa_w): (&uint<10>, inv &uint<10>) = port;
+    let (ad, ad_w): (&uint<8>, inv &uint<8>) = port;
+    let (aw, aw_w): (&bool, inv &bool) = port;
+    let (wa, wa_w): (&uint<11>, inv &uint<11>) = port;
+    let (wd, wd_w): (&uint<8>, inv &uint<8>) = port;
+    let (done, done_w): (&bool, inv &bool) = port;
+    let (length, length_w): (&uint<11>, inv &uint<11>) = port;
+    let _ = inst mac::frame_receiver(rx_clk, clk, local_rst, rxd, rx_dv, rx_er, *rc, *ra, rd_w, rv_w, rl_w);
+    let _ = inst mac::frame_transmitter(clk, tx_clk, local_rst, *tw, *ta, *td, *tl, *ts, tr_w, txd, tx_en);
+    let _ = inst network::network_engine(clk, local_rst, *rv, *rl, ra_w, *rd, rc_w,
+        *tr, tw_w, ta_w, td_w, ts_w, tl_w, aq_w, al_w, *aa, ad_w, *aw, *wa, *wd, *done, *length);
+    let _ = inst blocks::block_service(clk, local_rst, initialized, sd_quiescent, *aq, *al, aa_w, *ad,
+        aw_w, wa_w, wd_w, done_w, length_w, memory_request, memory_write, memory_lba,
+        memory_count, memory_write_index, memory_write_data, memory_read_valid, memory_read_index, memory_read_data, memory_done, memory_error, armed);
+}

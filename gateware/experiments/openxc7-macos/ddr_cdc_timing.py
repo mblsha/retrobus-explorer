@@ -1,6 +1,6 @@
 """Check routed Gray-pointer crossings against their source clock periods.
 
-This is a bounded delay check for the three known native FIFOs, not a complete
+This is a bounded delay check for the three native FIFOs and optional Ethernet queues, not a complete
 CDC or external-I/O static timing analysis. SDF comes from the same route as
 its packed JSON; reloading routed Xilinx JSON is unsupported by this toolchain.
 """
@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 
-def verify_native_cdc(routed: Path, sdf: Path, sys_clk_freq=80_000_000):
+def verify_native_cdc(routed: Path, sdf: Path, sys_clk_freq=80_000_000, *, ethernet=False):
     modules = json.loads(routed.read_text())["modules"]
     if len(modules) != 1:
         raise RuntimeError("Check failed: len(modules) == 1")
@@ -20,6 +20,10 @@ def verify_native_cdc(routed: Path, sdf: Path, sys_clk_freq=80_000_000):
         nets["fclk"]["bits"][0]: 10_000,
         nets["dclk"]["bits"][0]: 1e12 / sys_clk_freq,
     }
+    if ethernet:
+        clock_periods.update(
+            {nets[name]["bits"][0]: 40_000 for name in ("eth_rx_global", "eth_tx_global")}
+        )
     delays = {}
     sdf_text = sdf.read_text()
     if "(TIMESCALE 1ps)" not in sdf_text:
@@ -41,6 +45,18 @@ def verify_native_cdc(routed: Path, sdf: Path, sys_clk_freq=80_000_000):
         raise RuntimeError(
             f"Expected 6 registered Gray-pointer bits, found {len(pointers)}"
         )
+    if ethernet:
+        ethernet_pointers = {
+            name: data["bits"][0]
+            for name, data in nets.items()
+            if re.fullmatch(
+                r"sd\.network_frontend_0\.frame_(?:receiver|transmitter)_0\.(?:published|consumed)_gray\[[0-3]\]",
+                name,
+            )
+        }
+        if len(ethernet_pointers) != 12:
+            raise RuntimeError("Expected twelve registered Ethernet Gray-pointer bits")
+        pointers.update(ethernet_pointers)
     terminals = {bit: [] for bit in pointers.values()}
     for name, cell in module["cells"].items():
         for port, bits in cell["connections"].items():

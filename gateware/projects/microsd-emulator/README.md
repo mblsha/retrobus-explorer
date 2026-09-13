@@ -110,3 +110,9 @@ and acknowledgments; use it instead of constructing packets manually.
 
 BTN0, loss of power, or reprogramming erases the volatile card and reruns BIST.
 Opening UART preserves SD state and DDR contents in the BTN0 configuration.
+
+## Ethernet image management
+
+For upload and readback over the onboard 100 Mbps RJ45, build the
+[Ethernet SD image service](../ethernet-diagnostic/README.md). It shares this
+SD/DDR implementation and replaces the UART loader with a checked UDP client.

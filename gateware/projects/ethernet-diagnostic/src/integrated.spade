@@ -1,0 +1,141 @@
+use super::{server, native};
+
+// Native DDR remains exclusively owned by SD until pending reads and accepted
+// SD commits finish. Network transactions can start only after that drain.
+#[no_mangle(all)]
+pub entity network_ddr(
+    clk: clock,
+    rx_clk: clock,
+    tx_clk: clock,
+    rst: bool,
+    initialized: bool,
+    diagnostic_status: uint<27>,
+    status_selector: inv &uint<7>,
+    writable: bool,
+    dat_in: uint<4>,
+    usb_rx: bool,
+    usb_tx: inv &bool,
+    ddr_cmd_valid: inv &bool,
+    ddr_cmd_ready: bool,
+    ddr_cmd_address: inv &uint<24>,
+    ddr_cmd_write: inv &bool,
+    ddr_rdata_valid: bool,
+    ddr_rdata_ready: inv &bool,
+    ddr_rdata: uint<128>,
+    ddr_wdata_valid: inv &bool,
+    ddr_wdata_ready: bool,
+    ddr_wdata: inv &uint<128>,
+    ddr_wdata_mask: inv &uint<16>,
+    sd_clk: bool,
+    cmd_in: bool,
+    cmd_out: inv &bool,
+    cmd_oe: inv &bool,
+    dat_out: inv &uint<4>,
+    dat_oe: inv &uint<4>,
+    armed_status: inv &bool,
+    eth_rxd: uint<4>,
+    eth_rx_dv: bool,
+    eth_rxerr: bool,
+    eth_txd: inv &uint<4>,
+    eth_tx_en: inv &bool,
+    eth_ref_clk: inv &bool,
+    eth_rstn: inv &bool,
+) {
+    let (sd_armed, sd_armed_w): (&bool, inv &bool) = port;
+    let (network_request, network_request_w): (&bool, inv &bool) = port;
+    let (network_write, network_write_w): (&bool, inv &bool) = port;
+    let (network_lba, network_lba_w): (&uint<32>, inv &uint<32>) = port;
+    let (network_count, network_count_w): (&uint<2>, inv &uint<2>) = port;
+    let (network_write_index, network_write_index_w): (&uint<9>, inv &uint<9>) = port;
+    let (network_write_byte, network_write_byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (network_read_valid, network_read_valid_w): (&bool, inv &bool) = port;
+    let (network_read_index, network_read_index_w): (&uint<10>, inv &uint<10>) = port;
+    let (network_read_byte, network_read_byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (network_done, network_done_w): (&bool, inv &bool) = port;
+    let (network_error, network_error_w): (&bool, inv &bool) = port;
+    let (network_busy, network_busy_w): (&bool, inv &bool) = port;
+    let (network_cmd_valid, network_cmd_valid_w): (&bool, inv &bool) = port;
+    let (network_cmd_address, network_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (network_cmd_write, network_cmd_write_w): (&bool, inv &bool) = port;
+    let (network_rdata_ready, network_rdata_ready_w): (&bool, inv &bool) = port;
+    let (network_wdata_valid, network_wdata_valid_w): (&bool, inv &bool) = port;
+    let (network_wdata, network_wdata_w): (&uint<128>, inv &uint<128>) = port;
+    let (network_wmask, network_wmask_w): (&uint<16>, inv &uint<16>) = port;
+    let (sd_request, sd_request_w): (&bool, inv &bool) = port;
+    let (sd_lba, sd_lba_w): (&uint<32>, inv &uint<32>) = port;
+    let (sd_epoch, sd_epoch_w): (&uint<32>, inv &uint<32>) = port;
+    let (sector_ready, sector_ready_w): (&bool, inv &bool) = port;
+    let (sector_epoch, sector_epoch_w): (&uint<32>, inv &uint<32>) = port;
+    let (sector_offset, sector_offset_w): (&uint<9>, inv &uint<9>) = port;
+    let (buffered_byte, buffered_byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (sector_release, sector_release_w): (&bool, inv &bool) = port;
+    let (read_cmd_valid, read_cmd_valid_w): (&bool, inv &bool) = port;
+    let (read_cmd_address, read_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (read_pending, read_pending_w): (&bool, inv &bool) = port;
+    let (write_cmd_valid, write_cmd_valid_w): (&bool, inv &bool) = port;
+    let (write_cmd_address, write_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (write_data_valid, write_data_valid_w): (&bool, inv &bool) = port;
+    let (write_data, write_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (write_mask, write_mask_w): (&uint<16>, inv &uint<16>) = port;
+    let (write_busy, write_busy_w): (&bool, inv &bool) = port;
+    // commit_busy includes a combinational final-CRC acceptance term. The
+    // writer first gathers a sector_release native word, so registering arbitration
+    // ownership cannot delay its first valid command/data handshake. Retain
+    // ownership for one extra idle cycle after its final accepted write.
+    reg(clk) sd_commit_owner reset(rst: false) = *write_busy;
+    // Require two quiet cycles after disarming. A final SD CRC acceptance
+    // may assert commit_busy on the same edge that clears armed. Once granted,
+    // SD cannot start another transaction until ARM, which requires no network
+    // transaction in flight. The registered grant cuts the SD commit decode
+    // out of the network state-machine enable and ready paths.
+    reg(clk) quiet_sample reset(rst: false) = !*sd_armed && !*write_busy && !*read_pending;
+    reg(clk) owner_grant reset(rst: false) = quiet_sample && !*sd_armed && !*write_busy &&
+        !*read_pending;
+    let network_owner = owner_grant && !*sd_armed;
+    let quiescent = network_owner && !*network_busy;
+    let _ = inst server::network_frontend(clk, rx_clk, tx_clk, rst, initialized, quiescent,
+        eth_rxd, eth_rx_dv, eth_rxerr, eth_txd, eth_tx_en, eth_ref_clk, eth_rstn,
+        network_request_w, network_write_w, network_lba_w, network_count_w, *network_write_index,
+            network_write_byte_w, *network_read_valid, *network_read_index, *network_read_byte,
+            *network_done, *network_error, sd_armed_w);
+    let _ = inst native::network_native(clk, rst, network_owner && initialized, *network_request,
+        *network_write, *network_lba, *network_count,
+        network_write_index_w, *network_write_byte, network_read_valid_w, network_read_index_w,
+            network_read_byte_w, network_done_w, network_error_w, network_busy_w,
+        network_cmd_valid_w, ddr_cmd_ready && network_owner, network_cmd_address_w,
+            network_cmd_write_w,
+        ddr_rdata_valid && network_owner, network_rdata_ready_w, ddr_rdata,
+        network_wdata_valid_w, ddr_wdata_ready && network_owner, network_wdata_w, network_wmask_w);
+    // Preserve the existing registered request bundle used by the 100 MHz SD frontend.
+    reg(clk) backend_inputs: (bool, bool, bool, uint<32>, uint<32>, bool)
+        reset(rst: (false, false, false, 0, 0, true)) = (*sd_armed, initialized, *sd_request,
+            *sd_lba, *sd_epoch, *sector_release);
+    let (backend_arm, backend_initialized, backend_request, backend_lba, backend_epoch,
+        backend_release) = backend_inputs;
+    let _ = inst microsd_emulator::storage::ddr_backend(clk, rst, backend_arm, backend_initialized,
+        268_435_456,
+        backend_request, backend_lba, backend_epoch, backend_release, sector_ready_w,
+            sector_epoch_w, *sector_offset, buffered_byte_w,
+        read_cmd_valid_w, ddr_cmd_ready && *sd_armed && !sd_commit_owner, read_cmd_address_w,
+            ddr_rdata_valid && *read_pending, read_pending_w, ddr_rdata);
+    let _ = inst microsd_emulator::sd_frontend(clk, rst, *sd_armed && initialized, sd_clk, cmd_in,
+        cmd_out, cmd_oe, dat_out, dat_oe,
+        sd_request_w, sd_lba_w, sd_epoch_w, *sector_ready, *sector_epoch, *buffered_byte,
+            sector_offset_w, sector_release_w,
+        true, writable, dat_in, write_cmd_valid_w, ddr_cmd_ready && sd_commit_owner,
+            write_cmd_address_w, write_data_valid_w, ddr_wdata_ready && sd_commit_owner,
+            write_data_w, write_mask_w, write_busy_w);
+    set ddr_cmd_valid = &(if sd_commit_owner { *write_cmd_valid } else if *sd_armed {
+        *read_cmd_valid } else if network_owner { *network_cmd_valid } else { false });
+    set ddr_cmd_address = &(if sd_commit_owner { *write_cmd_address } else if *sd_armed {
+        *read_cmd_address } else { *network_cmd_address });
+    set ddr_cmd_write = &(sd_commit_owner || (network_owner && *network_cmd_write));
+    set ddr_rdata_ready = &(*read_pending || (network_owner && *network_rdata_ready));
+    set ddr_wdata_valid = &(if sd_commit_owner { *write_data_valid } else { network_owner &&
+        *network_wdata_valid });
+    set ddr_wdata = &(if sd_commit_owner { *write_data } else { *network_wdata });
+    set ddr_wdata_mask = &(if sd_commit_owner { *write_mask } else { *network_wmask });
+    set armed_status = &(*sd_armed && initialized);
+    set status_selector = &0;
+    set usb_tx = &true;
+}

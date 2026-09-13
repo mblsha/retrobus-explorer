@@ -1,0 +1,119 @@
+use std::mem::{clocked_memory, read_memory};
+use shared_components::sd::crc32_byte;
+
+// Eight receive frames and two transmit frames per asynchronous queue. Binary pointers select RAM slots;
+// registered Gray pointers cross two synchronizer stages. Slot data and length
+// stay stable until consumed. Overflow drops an entire incoming frame.
+#[no_mangle(all)]
+pub entity frame_receiver(
+    rx_clk: clock,
+    clk: clock,
+    rst: bool,
+    rxd: uint<4>,
+    dv: bool,
+    er: bool,
+    consume: bool,
+    address: uint<11>,
+    data: inv &uint<8>,
+    available: inv &bool,
+    frame_length: inv &uint<11>,
+) {
+    decl published, consumed, half, inside, count, crc;
+    reg(clk) consumed_gray: uint<4> reset(rst: 0) = consumed ^ (consumed >> 1);
+    reg(rx_clk) consumed_meta: uint<4> reset(rst: 0) = consumed_gray;
+    reg(rx_clk) consumed_sync reset(rst: 0) = consumed_meta;
+    let consumed_binary = consumed_sync ^ (consumed_sync >> 1) ^ (consumed_sync >> 2) ^ (consumed_sync >> 3);
+    let free = published != (consumed_binary ^ 8);
+    reg(rx_clk) was_dv reset(rst: false) = dv;
+    reg(rx_clk) dropping reset(rst: false) = if !dv { false }
+        else if !was_dv { !free } else { dropping };
+    reg(rx_clk) half reset(rst: false) = if !dv { false } else { !half };
+    reg(rx_clk) low: uint<4> reset(rst: 0) = if dv && !half { rxd } else { low };
+    let octet = dv && half;
+    let byte: uint<8> = (zext(rxd) << 4) | zext(low);
+    reg(rx_clk) preamble reset(rst: false) = if !dv { false }
+        else if octet && !inside { byte == 0x55 } else { preamble };
+    reg(rx_clk) inside reset(rst: false) = if !dv { false }
+        else if octet && preamble && byte == 0xd5 { true } else { inside };
+    reg(rx_clk) count: uint<12> reset(rst: 0) = if !dv { 0 }
+        else if octet && inside && count != 4095 { count +. 1 } else { count };
+    reg(rx_clk) crc: uint<32> reset(rst: 0xffffffff) = if !dv { 0xffffffff }
+        else if octet && inside { crc32_byte(crc, byte) } else { crc };
+    reg(rx_clk) error reset(rst: false) = if !dv { false } else { error || er };
+    let finish = was_dv && !dv && inside && !half && !error && !dropping && free
+        && count >= 64 && count <= 1518 && crc == 0xdebb20e3;
+    let memory: Memory<uint<8>, 16384> = inst clocked_memory(rx_clk,
+        [(octet && inside && !dropping && free && count < 2048, ((zext::<4, 14>(published & 7) << 11) | zext(count)), byte)]);
+    reg(rx_clk) length0: uint<11> reset(rst: 0) = if finish && (published & 7) == 0 { trunc(count -. 4) } else { length0 };
+    reg(rx_clk) length1: uint<11> reset(rst: 0) = if finish && (published & 7) == 1 { trunc(count -. 4) } else { length1 };
+    reg(rx_clk) length2: uint<11> reset(rst: 0) = if finish && (published & 7) == 2 { trunc(count -. 4) } else { length2 };
+    reg(rx_clk) length3: uint<11> reset(rst: 0) = if finish && (published & 7) == 3 { trunc(count -. 4) } else { length3 };
+    reg(rx_clk) length4: uint<11> reset(rst: 0) = if finish && (published & 7) == 4 { trunc(count -. 4) } else { length4 };
+    reg(rx_clk) length5: uint<11> reset(rst: 0) = if finish && (published & 7) == 5 { trunc(count -. 4) } else { length5 };
+    reg(rx_clk) length6: uint<11> reset(rst: 0) = if finish && (published & 7) == 6 { trunc(count -. 4) } else { length6 };
+    reg(rx_clk) length7: uint<11> reset(rst: 0) = if finish && (published & 7) == 7 { trunc(count -. 4) } else { length7 };
+    reg(rx_clk) published: uint<4> reset(rst: 0) = if finish { published +. 1 } else { published };
+    reg(rx_clk) published_gray: uint<4> reset(rst: 0) = published ^ (published >> 1);
+    reg(clk) published_meta: uint<4> reset(rst: 0) = published_gray;
+    reg(clk) published_sync reset(rst: 0) = published_meta;
+    let available_now = (consumed ^ (consumed >> 1)) != published_sync;
+    reg(clk) consumed: uint<4> reset(rst: 0) = if consume && available_now { consumed +. 1 } else { consumed };
+    reg(clk) read_data = inst read_memory(memory, (zext::<4, 14>(consumed & 7) << 11) | zext(address));
+    set data = &read_data;
+    set available = &available_now;
+    let lengths = [length0, length1, length2, length3, length4, length5, length6, length7];
+    set frame_length = &lengths[trunc(consumed)];
+}
+
+#[no_mangle(all)]
+pub entity frame_transmitter(
+    clk: clock,
+    tx_clk: clock,
+    rst: bool,
+    write: bool,
+    address: uint<11>,
+    data: uint<8>,
+    length: uint<11>,
+    submit: bool,
+    ready: inv &bool,
+    txd: inv &uint<4>,
+    tx_en: inv &bool,
+) {
+    decl published, consumed, active, index, half, crc;
+    let launch = unsafe { inst std::conv::bool_to_clock(!inst std::conv::clock_to_bool(tx_clk)) };
+    reg(launch) consumed_gray: uint<2> reset(rst: 0) = consumed ^ (consumed >> 1);
+    reg(clk) consumed_meta: uint<2> reset(rst: 0) = consumed_gray;
+    reg(clk) consumed_sync reset(rst: 0) = consumed_meta;
+    let consumed_binary = consumed_sync ^ (consumed_sync >> 1);
+    let free = published != (consumed_binary ^ 2);
+    reg(clk) length0: uint<11> reset(rst: 0) = if submit && free && (published & 1) == 0 { length } else { length0 };
+    reg(clk) length1: uint<11> reset(rst: 0) = if submit && free && (published & 1) == 1 { length } else { length1 };
+    let payload_length = if (consumed & 1) == 0 { length0 } else { length1 };
+    let saved_length: uint<11> = if payload_length < 60 { 60 } else { payload_length };
+    reg(clk) published: uint<2> reset(rst: 0) = if submit && free { published +. 1 } else { published };
+    reg(clk) published_gray: uint<2> reset(rst: 0) = published ^ (published >> 1);
+    let memory: Memory<uint<8>, 4096> = inst clocked_memory(clk,
+        [(write && free, (zext::<2, 12>(published & 1) << 11) | zext(address), data)]);
+    reg(launch) published_meta: uint<2> reset(rst: 0) = published_gray;
+    reg(launch) published_sync reset(rst: 0) = published_meta;
+    reg(launch) gap: uint<5> reset(rst: 0) = if active { 0 } else if gap == 31 { gap } else { gap +. 1 };
+    let begin = !active && published_sync != (consumed ^ (consumed >> 1)) && gap >= 24;
+    let last = active && half && index == zext(saved_length) +. 11;
+    reg(launch) active reset(rst: false) = if last { false } else if begin { true } else { active };
+    reg(launch) consumed: uint<2> reset(rst: 0) = if last { consumed +. 1 } else { consumed };
+    reg(launch) half reset(rst: false) = if !active { false } else { !half };
+    reg(launch) index: uint<12> reset(rst: 0) = if !active { 0 }
+        else if half { index +. 1 } else { index };
+    // Prefetch the next octet on its predecessor's high nibble.
+    let next_index = if active && half { index +. 1 } else { index };
+    reg(launch) memory_byte = inst read_memory(memory, (zext::<2, 12>(consumed & 1) << 11) | (next_index -. 8 & 2047));
+    let payload = if index -. 8 < zext(payload_length) { memory_byte } else { 0 };
+    let byte: uint<8> = if index < 7 { 0x55 } else if index == 7 { 0xd5 }
+        else if index < zext(saved_length) +. 8 { payload }
+        else { trunc((crc ^ 0xffffffff) >> (zext::<12, 32>(index -. zext(saved_length) -. 8) << 3)) };
+    reg(launch) crc: uint<32> reset(rst: 0xffffffff) = if !active { 0xffffffff }
+        else if half && index >= 8 && index < zext(saved_length) +. 8 { crc32_byte(crc, payload) } else { crc };
+    set ready = &free;
+    set tx_en = &active;
+    set txd = &(if active { if half { trunc(byte >> 4) } else { trunc(byte) } } else { 0 });
+}

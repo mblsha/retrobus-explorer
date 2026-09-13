@@ -1,0 +1,7 @@
+// Ethernet packet processing, image transactions, and exclusive DDR ownership.
+pub mod mac;
+pub mod network;
+pub mod blocks;
+pub mod native;
+pub mod server;
+pub mod integrated;
