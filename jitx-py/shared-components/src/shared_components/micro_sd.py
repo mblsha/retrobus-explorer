@@ -205,6 +205,9 @@ class MicroSdSmtPad(Pad):
 
 
 class Molex1040310811Landpattern(Landpattern):
+    p9: Pad
+    p10: Pad
+
     def __init__(self):
         for number, (x, y, width, height) in MOLEX_104031_0811_SIGNAL_PAD_SPECS.items():
             setattr(self, f"p{number}", MicroSdSmtPad(width=width, height=height).at(x, y))

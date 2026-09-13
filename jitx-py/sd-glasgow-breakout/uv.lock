@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-07-06T10:55:50.843822Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -207,7 +207,7 @@ wheels = [
 
 [[package]]
 name = "jitx"
-version = "4.2.2"
+version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -216,25 +216,26 @@ dependencies = [
     { name = "packaging" },
     { name = "pint" },
     { name = "psutil" },
+    { name = "rich" },
     { name = "shapely" },
     { name = "typer" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/a7/75cdee054be2ce32e04e7d1750bc6d74e144d29e4e7a81b1a78f20e11e1e/jitx-4.2.2.tar.gz", hash = "sha256:65676ac2eae87d7f2e3e1ba78e61f98aa3f7b4edf80f07db049b25426bf438b5", size = 371366, upload-time = "2026-06-26T21:49:23.894Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/17/bdbb9382e3b41c08d47889b8a66c52c7add164bf152b160bbdfa0dbb3eda/jitx-4.4.0.tar.gz", hash = "sha256:81feafa29b605eb3771a15764a0d869c01cd66e07065b8fab956b07707e981c7", size = 444968, upload-time = "2026-08-27T22:01:58.893Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/e4/c625af0ed1cad3f5b392554df616460c668f696ce5684cafe266b75a31c3/jitx-4.2.2-py3-none-any.whl", hash = "sha256:ec7ccb28faf5b749d123aca0debdf0bf69d0f880d9ed28aa9c4086236c762d55", size = 313295, upload-time = "2026-06-26T21:49:22.29Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/1f/467bcabdfa3a7bfd2f24239729400ac0fc4534610187b734b6e66996458f/jitx-4.4.0-py3-none-any.whl", hash = "sha256:fd4de3056071a4cb96dcda418dddb0e8e4a2abaa73caeea5a5797268286404ed", size = 380441, upload-time = "2026-08-27T22:01:57.369Z" },
 ]
 
 [[package]]
 name = "jitxcore"
-version = "4.2.0"
+version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/0c/489cd6283e0f17ea2c53bfce9abd9f330baa42f07209e328a2e3889f1ff3/jitxcore-4.2.0.tar.gz", hash = "sha256:3113d285cab7195455baf7932629d89c3277f1df518b976e65a3638887413a9e", size = 38811, upload-time = "2026-06-10T02:53:01.78Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/ab/6bca94a69a791e9d87ba349a875088eb9d9fb898ef8ef4139d4b7ea142e0/jitxcore-4.4.0.tar.gz", hash = "sha256:67caaa599b6da41a69ab125bb885ab75190726be89c8ad96eeaf12229a940d3a", size = 52141, upload-time = "2026-08-27T21:58:46.141Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/38/9cfbf5658d43287893fb29c1d6a43acf1f79ec1471390782de87b5c4b01b/jitxcore-4.2.0-py3-none-any.whl", hash = "sha256:ca1f1bf9045736389ef82f42122d48eaa7104928f0844f33038283507a7c8989", size = 72590, upload-time = "2026-06-10T02:53:00.363Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/11/2fc9daeb4da33d2ce8d513d80d02e98e0142cb745de4f29f39bb493d068d/jitxcore-4.4.0-py3-none-any.whl", hash = "sha256:d593860559f092f804e98fe276dda16c4c0be5360d8db9c289e389bac1b4caee", size = 90239, upload-time = "2026-08-27T21:58:44.901Z" },
 ]
 
 [[package]]
@@ -255,7 +256,7 @@ wheels = [
 
 [[package]]
 name = "jitxlib-parts"
-version = "1.2.0"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "black" },
@@ -264,34 +265,34 @@ dependencies = [
     { name = "jitxlib-standard" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/a2/aa6a895e045c63a029d10f8a72e69102d78a783015cc321788442e1f71d3/jitxlib_parts-1.2.0.tar.gz", hash = "sha256:30d6cd41699140e4fafe9f19a22a931ba068e00d034b267829c4e39ea0eb8125", size = 73714, upload-time = "2026-06-10T02:54:26.706Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/61/b1/b67f414b6c9bc9412788c41851db479d9d9e02972dfeb819faa2f9dce494/jitxlib_parts-1.3.0.tar.gz", hash = "sha256:5acf1646c21cd6aa2063e201ceee776ad26ccc7320df1761cfc692156e6f5600", size = 73467, upload-time = "2026-08-27T22:03:27.202Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/36/3ac9cde49ed625520a3587224fb895efaf204d35b1e331208252e8134346/jitxlib_parts-1.2.0-py3-none-any.whl", hash = "sha256:db4c5b2ceedb81e222d59ef4f69043fdfa70e2f4795cdc967a4a0f795c2a9823", size = 54242, upload-time = "2026-06-10T02:54:25.363Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/7c/14c9a3c905adb829ff3b4d4c944cea1a6f0729b08970fc85a2b3b0bea494/jitxlib_parts-1.3.0-py3-none-any.whl", hash = "sha256:6de8681020415332cdbf5c98ae03ceaa8cd3e52811684e750c2cf2fc5b119c3d", size = 53841, upload-time = "2026-08-27T22:03:25.814Z" },
 ]
 
 [[package]]
 name = "jitxlib-standard"
-version = "4.2.0"
+version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jitx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/eb/f97e8586dc80101d7f0747fa2b2c86b27dd47226896f5b9d3e40cd11eea1/jitxlib_standard-4.2.0.tar.gz", hash = "sha256:176cd25664b22f4316007364c661a8061a767aa792fb2a245a413fdb0d2760da", size = 128762, upload-time = "2026-06-10T02:53:43.386Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/bc/55bc85b0245efb9170b20b9983bce624993ac1707a318a3b1d06a65579f5/jitxlib_standard-4.4.0.tar.gz", hash = "sha256:5245916c314ea4adea631100e753e42ef2963fa8af5ce566651a05dd0f63d178", size = 134835, upload-time = "2026-08-27T22:02:37.79Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/50/2c9d7c9e90e65bac88ac5456a2dcbedcf209368284a7b5bb1269b54a5b15/jitxlib_standard-4.2.0-py3-none-any.whl", hash = "sha256:0483148a8a1bd0949681131fafb78b0044fbb651e78fb4110ce03b93dea1bc3a", size = 153516, upload-time = "2026-06-10T02:53:42.125Z" },
+    { url = "https://files.pythonhosted.org/packages/28/48/68c87f81d4f06ee6b40c6eaf7ed56ae54337ea915085d4ea199e4f586aab/jitxlib_standard-4.4.0-py3-none-any.whl", hash = "sha256:2858803a58ec37b13d762a7b6f44fc4113ef9eb42993dc348d889689c581921b", size = 155802, upload-time = "2026-08-27T22:02:36.585Z" },
 ]
 
 [[package]]
 name = "jitxlib-voltage-divider"
-version = "1.1.0"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jitx" },
     { name = "jitxlib-parts" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/6e/e5e2fd964fe11841acb116e2699f9d61b5bf23bc9a408e1bf8be953928da/jitxlib_voltage_divider-1.1.0.tar.gz", hash = "sha256:b242bb8fc3ac1ffa34c9836aa113737492b5d2baef2ef50af99d7caff9082ea2", size = 19596, upload-time = "2026-06-23T16:46:25.147Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/1f/146ef10965041fed80ee0b433bd3765da98b2fd0b60b7c5072d2195b8f8a/jitxlib_voltage_divider-1.2.0.tar.gz", hash = "sha256:a1e4cf8a286611b7755f6e6edfb21bdfd8ace85eb942fd5016c6b08b1a1034e1", size = 19086, upload-time = "2026-08-27T22:05:08.467Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f0/30/a5990484d9a9c37f5ae3d717a3a0da29226b36f9d16cebcc131bea137689/jitxlib_voltage_divider-1.1.0-py3-none-any.whl", hash = "sha256:668634d16969e518665fde297706ec156bb4b8089271dedc3969b1c315db9dd8", size = 12941, upload-time = "2026-06-23T16:46:24.083Z" },
+    { url = "https://files.pythonhosted.org/packages/85/42/dc90ac7fcc961660a6f3a39c235f74839b66c39e38e29188b651e4cab8c1/jitxlib_voltage_divider-1.2.0-py3-none-any.whl", hash = "sha256:bbfc1aa82da371ce942480c91e976328a1a87bce44c0e2256ba2e589935bfba7", size = 12384, upload-time = "2026-08-27T22:05:07.335Z" },
 ]
 
 [[package]]
@@ -483,15 +484,15 @@ wheels = [
 
 [[package]]
 name = "rich"
-version = "15.0.0"
+version = "14.3.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown-it-py" },
     { name = "pygments" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz", hash = "sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36", size = 230680, upload-time = "2026-04-12T08:24:00.75Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/67/cae617f1351490c25a4b8ac3b8b63a4dda609295d8222bad12242dfdc629/rich-14.3.4.tar.gz", hash = "sha256:817e02727f2b25b40ef56f5aa2217f400c8489f79ca8f46ea2b70dd5e14558a9", size = 230524, upload-time = "2026-04-11T02:57:45.419Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/76/6d163cfac87b632216f71879e6b2cf17163f773ff59c00b5ff4900a80fa3/rich-14.3.4-py3-none-any.whl", hash = "sha256:07e7adb4690f68864777b1450859253bed81a99a31ac321ac1817b2313558952", size = 310480, upload-time = "2026-04-11T02:57:47.484Z" },
 ]
 
 [[package]]
@@ -613,12 +614,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "jitx", specifier = ">=4.0.0,<5" },
+    { name = "jitx", specifier = ">=4.4.0,<5" },
     { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "ruff", marker = "extra == 'dev'" },
-    { name = "ty", marker = "extra == 'dev'" },
+    { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.75" },
 ]
 provides-extras = ["dev"]
 

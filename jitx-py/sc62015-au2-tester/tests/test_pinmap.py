@@ -40,7 +40,6 @@ from src.pinmap import (
 )
 
 
-
 def test_cpu_has_complete_unique_pinout() -> None:
     assert len(CPU_PIN_NAMES_BY_NUMBER) == 100
     assert len(set(CPU_PIN_NAMES_BY_NUMBER)) == 100

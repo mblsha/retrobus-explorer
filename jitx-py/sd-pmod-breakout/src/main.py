@@ -225,8 +225,8 @@ class SdPmodBreakoutCircuit(Circuit):
         ]
         self.nets = [ground_net, *signal_nets]
 
-        self.place(self.card, Placement(SD_EDGE_ORIGIN, SD_EDGE_ROTATION, on=Side.Bottom))  # ty: ignore[no-matching-overload]
-        self.place(self.pmod, Placement(PMOD_ORIGIN, PMOD_ROTATION, on=PMOD_SIDE))  # ty: ignore[no-matching-overload]
+        self.place(self.card, Placement(SD_EDGE_ORIGIN, SD_EDGE_ROTATION, on=Side.Bottom))
+        self.place(self.pmod, Placement(PMOD_ORIGIN, PMOD_ROTATION, on=PMOD_SIDE))
 
         self += Silkscreen(Text("SD <-> PMOD GPIO", 1.2).at(17.0, 20.5), side=FeatureSide.Top)
         self += Silkscreen(Text("PMOD 5/6/11/12 NC", 1.0).at(17.0, 17.8), side=FeatureSide.Top)

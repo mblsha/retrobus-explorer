@@ -136,20 +136,21 @@ class PicoPlus2Uln2003CarrierCircuit(Circuit):
             ground_net = ground_net + via
         for layer in GROUND_POUR_LAYERS:
             ground_net = ground_net + Pour(
-                            layer=layer,
+                SIGNAL_AREA,
+                layer=layer,
                 isolate=COPPER_CLEARANCE,
                 orphans=False,
             )
         self.nets.append(ground_net)
 
-        self.place(self.pico, Placement(PICO_CENTER, PICO_ROTATION, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.pico, Placement(PICO_CENTER, PICO_ROTATION, on=Side.Top))
         for driver, h1_position, rotation in zip(
             self.drivers,
             DRIVER_H1_POSITIONS,
             DRIVER_ROTATIONS,
             strict=True,
         ):
-            self.place(driver, Placement(h1_position, rotation, on=Side.Top))  # ty: ignore[no-matching-overload]
+            self.place(driver, Placement(h1_position, rotation, on=Side.Top))
 
         for physical_pin, label in PICO_USED_PIN_LABELS:
             self += top_pin_label(label, pico_pin_label_position(physical_pin))

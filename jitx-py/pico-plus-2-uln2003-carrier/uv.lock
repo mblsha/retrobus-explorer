@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [options]
-exclude-newer = "2026-09-06T11:25:18.84876Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P7D"
 
 [[package]]
@@ -1759,6 +1759,7 @@ requires-dist = [
     { name = "jitxexamples-components", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-parts", specifier = ">=1.0.0,<2" },
     { name = "jitxlib-standard", specifier = ">=4.0.0,<5" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.75" },
 ]

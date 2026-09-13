@@ -199,9 +199,9 @@ class LevelShifter(Circuit):
             *(connect_ports(None, self.lo[index], port_attr(self.shifter, f"A{index + 1}")) for index in range(8)),
             *(connect_ports(None, self.hi[index], port_attr(self.shifter, f"B{index + 1}")) for index in range(8)),
         ]
-        self.place(self.shifter, Placement((0.0, 0.0), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.cap_lo, Placement((-2.0, 3.9), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.cap_hi, Placement((2.0, 3.9), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.shifter, Placement((0.0, 0.0), 270, on=Side.Top))
+        self.place(self.cap_lo, Placement((-2.0, 3.9), 90, on=Side.Top))
+        self.place(self.cap_hi, Placement((2.0, 3.9), 270, on=Side.Top))
 
 
 class AlchitryAu2FtSafeInterface(Circuit):
@@ -305,7 +305,7 @@ class AlchitryAu2LevelShifterCircuit(Circuit):
         # sides so each physical face retains the intended layout.
         self.place(self.fpga, Placement((0.0, 0.0), on=Side.Top))
         for shifter, (position, rotation) in zip(self.shift, SHIFTER_PARENT_PLACEMENTS, strict=True):
-            self.place(shifter, Placement(position, rotation, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+            self.place(shifter, Placement(position, rotation, on=Side.Bottom))
         self.place(self.tp_gnd, Placement(GROUNDED_CORNERS_ORIGIN, on=Side.Bottom))
 
         for ffc, (position, rotation) in zip(
@@ -313,11 +313,11 @@ class AlchitryAu2LevelShifterCircuit(Circuit):
             FFC_PARENT_PLACEMENTS,
             strict=True,
         ):
-            self.place(ffc, Placement(position, rotation, on=Side.Top))  # ty: ignore[no-matching-overload]
+            self.place(ffc, Placement(position, rotation, on=Side.Top))
         saleae_position, saleae_rotation = SALEAE_PARENT_PLACEMENT
-        self.place(self.saleae, Placement(saleae_position, saleae_rotation, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.saleae, Placement(saleae_position, saleae_rotation, on=Side.Top))
         supply_position, supply_rotation = SUPPLY_SELECT_PARENT_PLACEMENT
-        self.place(self.supply_select, Placement(supply_position, supply_rotation, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.supply_select, Placement(supply_position, supply_rotation, on=Side.Top))
 
         self += Silkscreen(Text("Level Shifter Element (Au2)", 1.4).at(3.0, 1.0), side=FeatureSide.Top)
         self += Silkscreen(Text(f"(c) mblsha {BOARD_DATE}", 1.2).at(3.0, -1.0), side=FeatureSide.Top)

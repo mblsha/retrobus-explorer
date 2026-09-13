@@ -8,7 +8,6 @@ from alchitry_v2_elements.generated_data import V2_BOTTOM_SIGNAL_MAP
 from jitx.layerindex import Side
 from shared_components.alchitry_v2 import FT_PROFILE
 
-from src.pinmap import DATA_CONNECTIONS
 from src.main import (
     AU2_CENTER_X,
     AU2_CONNECTOR_ELEMENT,
@@ -38,6 +37,7 @@ from src.main import (
     UPPER_GPIO_LABELS,
     V2_BOTTOM_ELEMENT_ORIGIN,
 )
+from src.pinmap import DATA_CONNECTIONS
 
 
 def _specs_by_name(specs):

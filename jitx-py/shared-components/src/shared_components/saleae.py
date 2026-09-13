@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from jitx.circuit import Circuit
@@ -168,7 +169,7 @@ class Saleae8(Circuit):
     def __init__(
         self,
         *,
-        header_factory: type[SignalGroundHeader2x4] = SaleaeProbeHeader2x4,
+        header_factory: Callable[[], SignalGroundHeader2x4] = SaleaeProbeHeader2x4,
         text_angle: float = 0.0,
         show_labels: bool = True,
     ):
@@ -220,6 +221,9 @@ class LogicMsoHeaderPthPad(Pad):
 
 
 class LogicMsoHeaderLandpattern(Landpattern):
+    p9: Pad
+    p10: Pad
+
     """Nextron Z-231011810106 / LCSC C93713 keyed 2x5 header."""
 
     def __init__(self):

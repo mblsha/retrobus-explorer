@@ -123,6 +123,8 @@ def _validate_assignment() -> None:
         if reference in expected_lvc_references:
             translator_index = int(reference.removeprefix("translators[").removesuffix("]"))
             translator_bank, channel = (row.bank, row.channel)
+            if translator_bank not in (0, 1):
+                raise ValueError(f"invalid LVC bank for {row.signal}")
             bank_index = translator_index * 2 + translator_bank
             expected_b = f"translators[{translator_index}].B[{translator_bank}][{channel}]"
             if row.b_endpoint != expected_b:
@@ -364,7 +366,7 @@ class Sc62015Au2TesterCircuit(Circuit):
         self.place(self.mounting_holes, Placement((BOARD_CENTER_X, 0.0), on=Side.Top))
         self.place(
             self.cpu,
-            Placement(CPU_PLACEMENT.position, CPU_PLACEMENT.rotation, on=Side.Top),  # ty: ignore[no-matching-overload]
+            Placement(CPU_PLACEMENT.position, CPU_PLACEMENT.rotation, on=Side.Top),
         )
 
         for translator, cluster, capacitors in zip(
@@ -372,12 +374,12 @@ class Sc62015Au2TesterCircuit(Circuit):
         ):
             self.place(
                 translator,
-                Placement(cluster.translator.position, cluster.translator.rotation, on=Side.Top),  # ty: ignore[no-matching-overload]
+                Placement(cluster.translator.position, cluster.translator.rotation, on=Side.Top),
             )
             for site, capacitor in zip(cluster.sites, capacitors, strict=True):
                 self.place(
                     capacitor,
-                    Placement(site.capacitor.position, site.capacitor.rotation, on=Side.Top),  # ty: ignore[no-matching-overload]
+                    Placement(site.capacitor.position, site.capacitor.rotation, on=Side.Top),
                 )
 
         self.place(self.power_output_cap, Placement(TARGET_BULK_CAP_PLACEMENT.position, on=Side.Top))
@@ -408,7 +410,7 @@ class Sc62015Au2TesterCircuit(Circuit):
             placement = CONTROL_PULL_PLACEMENTS[name]
             self.place(
                 self.control_pulls[name],
-                Placement(placement.position, placement.rotation, on=Side.Top),  # ty: ignore[no-matching-overload]
+                Placement(placement.position, placement.rotation, on=Side.Top),
             )
 
         self += Silkscreen(

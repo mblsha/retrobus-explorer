@@ -73,8 +73,8 @@ class Pico40PinHeaders(Circuit):
         )
 
         half_spacing = PICO_ROW_SPACING / 2.0
-        self.place(self.left_header, Placement((-half_spacing, 0.0), 90, on=Side.Top))  # ty: ignore[no-matching-overload]
-        self.place(self.right_header, Placement((half_spacing, 0.0), 270, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.left_header, Placement((-half_spacing, 0.0), 90, on=Side.Top))
+        self.place(self.right_header, Placement((half_spacing, 0.0), 270, on=Side.Top))
 
     def pin(self, physical_number: int) -> Port:
         return self.physical[pico_physical_pin_index(physical_number)]
