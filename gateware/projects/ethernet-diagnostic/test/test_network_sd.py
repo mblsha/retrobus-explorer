@@ -38,6 +38,21 @@ async def ethernet_sd_ethernet_roundtrip(d):
     await FallingEdge(d.clk)
     d.network_frontend_0.startup.value = 19_999_990
     await Timer(1000, units="ns")
+
+    async def check_ownership():
+        previous_owner = False
+        while True:
+            await FallingEdge(d.clk)
+            owner = bool(d.network_owner.value)
+            if owner and not previous_owner:
+                assert int(d.client_idle.value)
+            previous_owner = owner
+            if owner:
+                assert not int(d.frontend_armed.value)
+                assert not int(d.write_busy.value)
+                assert not int(d.read_pending.value)
+
+    cocotb.start_soon(check_ownership())
     memory = {}
     allow = [True]
 
