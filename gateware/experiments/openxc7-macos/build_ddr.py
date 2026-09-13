@@ -2,7 +2,6 @@
 """Build the qualified Arty A7-35T writable 256 MiB microSD card."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -44,17 +43,8 @@ def main():
     parser.add_argument(
         "--output", type=Path, default=GATEWARE / "build/microsd-ddr-sd"
     )
-    parser.add_argument(
-        "--route-seeds",
-        type=int,
-        nargs="+",
-        default=[8],
-        help="Compare one to three placements from one synthesis (default: 8)",
-    )
+    parser.add_argument("--seed", type=int, default=8, help="Placement seed (default: 8)")
     args = parser.parse_args()
-    seeds = args.route_seeds
-    if not 1 <= len(seeds) <= 3 or len(set(seeds)) != len(seeds):
-        parser.error("Choose one to three distinct placement seeds")
     out = args.output.resolve()
     tc = args.toolchain.resolve()
     env = dict(os.environ)
@@ -274,23 +264,13 @@ def main():
             raise RuntimeError(f"Missing 200 MHz IDELAY timing constraint: {clocks}")
         return seed, clocks
 
-    with ThreadPoolExecutor(max_workers=len(seeds)) as pool:
-        candidates = list(pool.map(route, seeds))
-    selected_seed, clocks = max(
-        candidates, key=lambda item: min(v[0] / v[2] for v in item[1].values())
-    )
+    selected_seed, clocks = route(args.seed)
     for source_name, target_name in [
         (f"route-seed-{selected_seed}.log", "route.log"),
         (f"routed-seed-{selected_seed}.json", "routed.json"),
         (f"design-seed-{selected_seed}.fasm", "design.fasm"),
     ]:
         shutil.copy2(out / source_name, out / target_name)
-    (out / "placement-results.json").write_text(
-        json.dumps(
-            dict(selected_seed=selected_seed, candidates=dict(candidates)), indent=2
-        )
-        + "\n"
-    )
     from ddr_cdc_timing import verify_native_cdc
     from ddr_output_timing import verify_direct_sd_outputs
 

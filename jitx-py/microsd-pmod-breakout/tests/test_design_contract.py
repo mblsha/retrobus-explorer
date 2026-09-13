@@ -1,3 +1,7 @@
+import pytest
+from jitx._instantiation import instantiation
+from jitx.inspect import extract
+from jitx.net import Net, Port
 from jitx.placement import Side
 from pytest import approx
 from shared_components.micro_sd import MICRO_SD_DATA_PORTS, MICRO_SD_EDGE_PAD_CENTERS
@@ -11,13 +15,12 @@ from src.main import (
     BOTTOM_HEADER_ROTATION,
     BOTTOM_HEADER_SD_TO_PMOD_PIN,
     MICRO_SD_CARD_SHOULDER_X,
-    PMOD_CONNECTED_GROUND_PINS,
-    PMOD_CONNECTED_VCC_PINS,
     PMOD_EDGE_COPPER_CLEARANCE,
     PMOD_ORIGIN,
     PMOD_OUTBOARD_PAD_CENTER_X,
     TOP_HEADER_ROTATION,
     TOP_HEADER_SD_TO_PMOD_PIN,
+    MicroSdPmodEmulatorCircuit,
     micro_sd_pad_center,
     pmod_pad_center,
 )
@@ -47,11 +50,28 @@ def test_both_variants_map_all_six_data_signals_to_unique_pmod_gpio() -> None:
     }
 
 
-def test_emulator_preserves_the_full_size_host_to_host_power_isolation() -> None:
-    assert PMOD_CONNECTED_GROUND_PINS == ()
-    assert PMOD_CONNECTED_VCC_PINS == ()
-    assert PMOD_GROUND_PINS == (5, 11)
-    assert PMOD_VCC_PINS == (6, 12)
+@pytest.mark.parametrize("top", [False, True])
+def test_constructed_circuit_connections_and_power_isolation(top: bool) -> None:
+    mapping = TOP_HEADER_SD_TO_PMOD_PIN if top else BOTTOM_HEADER_SD_TO_PMOD_PIN
+    with instantiation.activate():
+        circuit = MicroSdPmodEmulatorCircuit(
+            pmod_side=Side.Top if top else Side.Bottom,
+            pmod_rotation=TOP_HEADER_ROTATION if top else BOTTOM_HEADER_ROTATION,
+            sd_to_pmod_pin=mapping,
+            header_side_name="top" if top else "bottom",
+        )
+    # Traverse the constructed circuit, including nets added outside self.nets.
+    nets = [{id(port) for port in net if isinstance(port, Port)} for net in extract(circuit, Net, refs=True)]
+    assert len(nets) == 7
+    expected = [{id(circuit.gnd), id(circuit.card.VSS)}] + [
+        {id(getattr(circuit.card, signal)), id(circuit.pmod.pin(pin))}
+        for signal, pin in mapping.items()
+    ]
+    assert {frozenset(net) for net in nets} == {frozenset(net) for net in expected}
+    connected = set().union(*nets)
+    for pin in (1, 2, 5, 6, 11, 12):
+        assert id(circuit.pmod.pin(pin)) not in connected
+    assert id(circuit.card.VDD) not in connected
 
 
 def test_board_uses_a_thin_micro_sd_nose_and_right_angle_header_clearance() -> None:

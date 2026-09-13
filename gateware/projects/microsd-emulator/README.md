@@ -55,7 +55,7 @@ runs triggered host recovery; signal integrity remains a possible contributor.
 ```sh
 uv sync --locked --all-packages
 uv run python tools/test_microsd_suite.py --fast-sd
-python3 experiments/openxc7-macos/build_ddr.py --route-seeds 8
+python3 experiments/openxc7-macos/build_ddr.py --seed 8
 ```
 
 4. Follow [program and initialize](ddr/README.md#program-and-initialize) to program
