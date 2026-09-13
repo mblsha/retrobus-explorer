@@ -44,6 +44,39 @@ pub entity sd_frontend(
     write_mask: inv &uint<16>,
     write_busy: inv &bool,
 ) {
+    let CMD_GO_IDLE: uint<6> = 0;
+    let CMD_ALL_SEND_CID: uint<6> = 2;
+    let CMD_SEND_RCA: uint<6> = 3;
+    let ACMD_SET_BUS_WIDTH: uint<6> = 6;
+    let CMD_SELECT_CARD: uint<6> = 7;
+    let CMD_SEND_IF_COND: uint<6> = 8;
+    let CMD_SEND_CSD: uint<6> = 9;
+    let CMD_STOP_TRANSMISSION: uint<6> = 12;
+    let CMD_SEND_STATUS: uint<6> = 13;
+    let CMD_READ_SINGLE: uint<6> = 17;
+    let CMD_READ_MULTIPLE: uint<6> = 18;
+    let CMD_WRITE_SINGLE: uint<6> = 24;
+    let CMD_WRITE_MULTIPLE: uint<6> = 25;
+    let ACMD_SEND_OP_COND: uint<6> = 41;
+    let ACMD_SEND_SCR: uint<6> = 51;
+    let CMD_APP: uint<6> = 55;
+
+    let WRITE_IDLE: uint<2> = 0;
+    let WRITE_SINGLE: uint<2> = 1;
+    let WRITE_MULTIPLE: uint<2> = 2;
+
+    let READ_IDLE: uint<3> = 0;
+    let READ_PAYLOAD: uint<3> = 1;
+    let READ_CRC: uint<3> = 2;
+    let READ_END_BIT: uint<3> = 3;
+    let READ_RELEASE: uint<3> = 4;
+
+    let CARD_IDLE: uint<4> = 0;
+    let CARD_READY: uint<4> = 1;
+    let CARD_IDENTIFICATION: uint<4> = 2;
+    let CARD_STANDBY: uint<4> = 3;
+    let CARD_TRANSFER: uint<4> = 4;
+
     reg(clk) clk_meta reset(rst: false) = sd_clk;
     reg(clk) clk_sync reset(rst: false) = clk_meta;
     reg(clk) clk_prev reset(rst: false) = clk_sync;
@@ -62,13 +95,13 @@ pub entity sd_frontend(
     // A packet spans hundreds of SD edges. Register its aggregate activity
     // in fast mode to keep reset/CRC-response decode out of read arbitration.
     reg(clk) delayed_writing reset(rst || !armed: false) = *writing;
-    let write_active = write_mode != 0 || (if fast_mode { delayed_writing } else { *writing });
-    let rise = clk_sync && !clk_prev;
+    let write_active = write_mode != WRITE_IDLE || (if fast_mode { delayed_writing } else { *writing });
+    let sd_sample_tick = clk_sync && !clk_prev;
     // Fast mode launches the next output bit after the synchronized rising
     // edge. With falling-edge pad registers at 100 MHz, the 15..25 ns
     // input-to-output pipeline targets the falling edge of a 25 MHz SD clock.
-    let fall = if fast_mode {
-        rise
+    let sd_output_advance = if fast_mode {
+        sd_sample_tick
     } else {
         !clk_sync && clk_prev
     };
@@ -88,7 +121,7 @@ pub entity sd_frontend(
     };
     decl response_left, response_delay, data_state, lba, epoch, pending, multi, short_data, status_data, app, bit_index, crc_index;
     reg(clk) remaining: uint<6> reset(local_rst: 0) = {
-        if rise && response_left == 0 {
+        if sd_sample_tick && response_left == 0 {
             if remaining == 0 {
                 if cmd_sync {
                     0
@@ -102,55 +135,55 @@ pub entity sd_frontend(
             remaining
         }
     };
-    reg(clk) command: uint<48> reset(local_rst: 0) = if rise && response_left == 0 {
+    reg(clk) command: uint<48> reset(local_rst: 0) = if sd_sample_tick && response_left == 0 {
         (command << 1) | (if cmd_sync { 1 } else { 0 })
     } else {
         command
     };
     reg(clk) command_crc: uint<7> reset(local_rst: 0) = {
-        if rise && remaining == 0 {
+        if sd_sample_tick && remaining == 0 {
             0
-        } else if rise && remaining >= 9 {
+        } else if sd_sample_tick && remaining >= 9 {
             crc7_bit(command_crc, cmd_sync)
         } else {
             command_crc
         }
     };
-    let raw_valid = armed && rise && response_left == 0 && remaining == 1 && cmd_sync &&
+    let raw_valid = armed && sd_sample_tick && response_left == 0 && remaining == 1 && cmd_sync &&
     trunc::<uint<48>, uint<7>>(command) == command_crc && command.to_bits()[45] && !command.to_bits()[46];
     // Complete CRC/framing validation before executing a command. SD edges
     // are about 40 ns apart at the fast target; validation adds one fabric cycle.
     reg(clk) valid reset(local_rst: false) = raw_valid;
-    reg(clk) index: uint<6> reset(local_rst: 0) = if raw_valid {
+    reg(clk) command_index: uint<6> reset(local_rst: 0) = if raw_valid {
         trunc(command >> 39)
     } else {
-        index
+        command_index
     };
-    reg(clk) arg: uint<32> reset(local_rst: 0) = if raw_valid {
+    reg(clk) command_argument: uint<32> reset(local_rst: 0) = if raw_valid {
         trunc(command >> 7)
     } else {
-        arg
+        command_argument
     };
     // Reduce the full argument before it fans out into stop/reset decoding.
-    reg(clk) arg_zero reset(local_rst: true) = if raw_valid {
+    reg(clk) command_argument_zero reset(local_rst: true) = if raw_valid {
         trunc::<uint<48>, uint<32>>(command >> 7) == 0
     } else {
-        arg_zero
+        command_argument_zero
     };
-    reg(clk) state: uint<4> reset(local_rst: 0) = {
+    reg(clk) state: uint<4> reset(local_rst: CARD_IDLE) = {
         if valid {
-            if index == 0 {
-                0
-            } else if index == 41 && app && state == 0 && (arg & 0x00ff8000) != 0 {
-                1
-            } else if index == 2 && state == 1 {
-                2
-            } else if index == 3 && state == 2 {
-                3
-            } else if index == 7 && state == 3 && arg == 0x00010000 {
-                4
-            } else if index == 7 && state == 4 && arg_zero {
-                3
+            if command_index == CMD_GO_IDLE {
+                CARD_IDLE
+            } else if command_index == ACMD_SEND_OP_COND && app && state == CARD_IDLE && (command_argument & 0x00ff8000) != 0 {
+                CARD_READY
+            } else if command_index == CMD_ALL_SEND_CID && state == CARD_READY {
+                CARD_IDENTIFICATION
+            } else if command_index == CMD_SEND_RCA && state == CARD_IDENTIFICATION {
+                CARD_STANDBY
+            } else if command_index == CMD_SELECT_CARD && state == CARD_STANDBY && command_argument == 0x00010000 {
+                CARD_TRANSFER
+            } else if command_index == CMD_SELECT_CARD && state == CARD_TRANSFER && command_argument_zero {
+                CARD_STANDBY
             } else {
                 state
             }
@@ -159,25 +192,25 @@ pub entity sd_frontend(
         }
     };
     reg(clk) app reset(local_rst: false) = if valid {
-        index == 55
+        command_index == CMD_APP
     } else {
         app
     };
-    let transfer_idle = state == 4 && !pending && data_state == 0 && !write_active;
-    let read_command = index == 17 || index == 18;
-    let write_command = index == 24 || index == 25;
-    let deselect = index == 7 && arg_zero;
-    let reset_command = index == 0 || deselect;
+    let transfer_idle = state == CARD_TRANSFER && !pending && data_state == READ_IDLE && !write_active;
+    let read_command = command_index == CMD_READ_SINGLE || command_index == CMD_READ_MULTIPLE;
+    let write_command = command_index == CMD_WRITE_SINGLE || command_index == CMD_WRITE_MULTIPLE;
+    let deselect = command_index == CMD_SELECT_CARD && command_argument_zero;
+    let reset_command = command_index == CMD_GO_IDLE || deselect;
     reg(clk) wide reset(local_rst: false) = {
-        if valid && index == 0 {
+        if valid && command_index == CMD_GO_IDLE {
             false
-        } else if valid && app && index == 6 && transfer_idle && (arg_zero || arg == 2) {
-            arg == 2
+        } else if valid && app && command_index == ACMD_SET_BUS_WIDTH && transfer_idle && (command_argument_zero || command_argument == 2) {
+            command_argument == 2
         } else {
             wide
         }
     };
-    let stop = valid && (reset_command || index == 12);
+    let stop = valid && (reset_command || command_index == CMD_STOP_TRANSMISSION);
     let capacity_bytes: uint<32> = if writable {
         268_435_456
     } else {
@@ -189,18 +222,18 @@ pub entity sd_frontend(
         16383
     };
     let read = valid && transfer_idle && read_command &&
-    (arg & 511) == 0 && arg < capacity_bytes;
-    let scr = valid && transfer_idle && app && index == 51;
-    let ssr = valid && transfer_idle && app && index == 13 && arg_zero;
-    let range_error = (arg & 511) != 0 || arg >= capacity_bytes;
+    (command_argument & 511) == 0 && command_argument < capacity_bytes;
+    let scr = valid && transfer_idle && app && command_index == ACMD_SEND_SCR;
+    let ssr = valid && transfer_idle && app && command_index == CMD_SEND_STATUS && command_argument_zero;
+    let range_error = (command_argument & 511) != 0 || command_argument >= capacity_bytes;
     let raw_write_request = valid && transfer_idle && writable && write_command && !range_error;
-    let raw_write_next = *write_done && *write_good && write_mode == 2 && write_lba < last_lba && !stop;
+    let raw_write_next = *write_done && *write_good && write_mode == WRITE_MULTIPLE && write_lba < last_lba && !stop;
     // Register fast command-to-receiver controls rather than letting
     // command decoding and response-active logic feed a receiver-wide reset.
     reg(clk) queued_write_request reset(local_rst: false) = raw_write_request;
     reg(clk) queued_write_next reset(local_rst: false) = raw_write_next;
     reg(clk) queued_write_cancel reset(local_rst: true) = local_rst || (valid && reset_command);
-    reg(clk) queued_write_stop reset(local_rst: false) = valid && index == 12;
+    reg(clk) queued_write_stop reset(local_rst: false) = valid && command_index == CMD_STOP_TRANSMISSION;
     let write_request = if fast_mode {
         queued_write_request
     } else {
@@ -219,23 +252,23 @@ pub entity sd_frontend(
     let write_stop = if fast_mode {
         queued_write_stop
     } else {
-        valid && index == 12
+        valid && command_index == CMD_STOP_TRANSMISSION
     };
-    reg(clk) write_mode: uint<2> reset(local_rst: 0) = if stop {
-        0
+    reg(clk) write_mode: uint<2> reset(local_rst: WRITE_IDLE) = if stop {
+        WRITE_IDLE
     } else if write_request {
-        if index == 25 {
-            2
+        if command_index == CMD_WRITE_MULTIPLE {
+            WRITE_MULTIPLE
         } else {
-            1
+            WRITE_SINGLE
         }
     } else if *write_done && !raw_write_next {
-        0
+        WRITE_IDLE
     } else {
         write_mode
     };
     reg(clk) write_lba: uint<32> reset(local_rst: 0) = if write_request {
-        arg >> 9
+        command_argument >> 9
     } else if write_next {
         write_lba +. 1
     } else {
@@ -250,12 +283,12 @@ pub entity sd_frontend(
         stop: write_stop,
         wide,
         lba: if write_request {
-            arg >> 9
+            command_argument >> 9
         } else {
             write_lba +. 1
         },
-        sample: rise,
-        fall,
+        sample: sd_sample_tick,
+        fall: sd_output_advance,
         dat: dat_sync,
         dat_out: write_dat_w,
         dat_oe: write_oe_w,
@@ -273,7 +306,7 @@ pub entity sd_frontend(
         wdata_mask: write_mask,
     );
     set write_busy = committing;
-    reg(clk) write_crc_error reset(local_rst: false) = if valid && (index == 0 || (index == 13 && !app)) {
+    reg(clk) write_crc_error reset(local_rst: false) = if valid && (command_index == CMD_GO_IDLE || (command_index == CMD_SEND_STATUS && !app)) {
         false
     } else if *write_done && !*write_good {
         true
@@ -284,31 +317,31 @@ pub entity sd_frontend(
                 7
             } else if write_active {
                 6
-            } else if data_state != 0 || pending {
+            } else if data_state != READ_IDLE || pending {
                 5
             } else {
                 state
             }) << 9) | (if write_active { 0 } else { 0x100 }) |
     (if write_crc_error { 1 << 23 } else { 0 });
-    let addressed = arg == 0x00010000;
-    let legal = match index {
+    let addressed = command_argument == 0x00010000;
+    let legal = match command_index {
         0 => true,
-        8 => state == 0,
-        41 => app && state == 0,
-        2 => state == 1,
-        3 => state == 2,
-        9 => state == 3 && addressed,
-        7 => (state == 3 && addressed) || (state == 4 && arg_zero),
-        13 => (addressed && (state == 3 || state == 4)) || ssr,
-        55 => state == 0 || addressed,
-        16 => state == 4 && !write_active && arg == 512,
+        8 => state == CARD_IDLE,
+        41 => app && state == CARD_IDLE,
+        2 => state == CARD_READY,
+        3 => state == CARD_IDENTIFICATION,
+        9 => state == CARD_STANDBY && addressed,
+        7 => (state == CARD_STANDBY && addressed) || (state == CARD_TRANSFER && command_argument_zero),
+        13 => (addressed && (state == CARD_STANDBY || state == CARD_TRANSFER)) || ssr,
+        55 => state == CARD_IDLE || addressed,
+        16 => state == CARD_TRANSFER && !write_active && command_argument == 512,
         24 => writable && transfer_idle,
         25 => writable && transfer_idle,
         17 => transfer_idle,
         18 => transfer_idle,
-        12 => state == 4,
+        12 => state == CARD_TRANSFER,
         51 => app && transfer_idle,
-        6 => app && transfer_idle && (arg_zero || arg == 2),
+        6 => app && transfer_idle && (command_argument_zero || command_argument == 2),
         _ => false,
     };
     let error: uint<32> = if write_command && !writable {
@@ -316,7 +349,7 @@ pub entity sd_frontend(
     } else if !legal {
         1 << 22
     } else if (read_command || write_command) && range_error {
-        if (arg & 511) != 0 {
+        if (command_argument & 511) != 0 {
             1 << 30
         } else {
             1 << 31
@@ -326,16 +359,16 @@ pub entity sd_frontend(
     };
     let payload: uint<32> = if error != 0 {
         status | error
-    } else if index == 8 {
-        arg & 0xfff
-    } else if index == 3 {
+    } else if command_index == CMD_SEND_IF_COND {
+        command_argument & 0xfff
+    } else if command_index == CMD_SEND_RCA {
         0x00010700
-    } else if index == 55 {
+    } else if command_index == CMD_APP {
         status | 0x20
     } else {
         status
     };
-    let r3: uint<48> = if (arg & 0x00ff8000) != 0 {
+    let r3: uint<48> = if (command_argument & 0x00ff8000) != 0 {
         0x3f80ff8000ff
     } else {
         0x3f00ff8000ff
@@ -343,7 +376,7 @@ pub entity sd_frontend(
     // Capture response inputs before the CRC network. The extra <=12 ns stage
     // completes before the next SD falling edge at the 12 MHz candidate limit.
     reg(clk) saved_index: uint<6> reset(local_rst: 0) = if valid {
-        index
+        command_index
     } else {
         saved_index
     };
@@ -358,12 +391,12 @@ pub entity sd_frontend(
         saved_r3
     };
     reg(clk) r3_reply reset(local_rst: false) = if valid {
-        index == 41 && legal
+        command_index == ACMD_SEND_OP_COND && legal
     } else {
         r3_reply
     };
     reg(clk) long_reply reset(local_rst: false) = if valid {
-        legal && (index == 2 || index == 9)
+        legal && (command_index == CMD_ALL_SEND_CID || command_index == CMD_SEND_CSD)
     } else {
         long_reply
     };
@@ -381,10 +414,10 @@ pub entity sd_frontend(
     } else {
         zext(if r3_reply { saved_r3 } else { response48(saved_index, saved_payload) }) << 88
     };
-    reg(clk) reply reset(local_rst: false) = valid && index != 0 && !deselect;
+    reg(clk) reply reset(local_rst: false) = valid && command_index != CMD_GO_IDLE && !deselect;
     reg(clk) response_delay reset(local_rst: false) = if reply {
         true
-    } else if fall {
+    } else if sd_output_advance {
         false
     } else {
         response_delay
@@ -393,14 +426,14 @@ pub entity sd_frontend(
     reg(clk) response: uint<136> reset(local_rst: 0) = {
         if reply {
             answer
-        } else if fall && response_bit_ready {
+        } else if sd_output_advance && response_bit_ready {
             response << 1
         } else {
             response
         }
     };
     reg(clk) response_left: uint<8> reset(local_rst: 0) = {
-        if valid && index == 0 {
+        if valid && command_index == CMD_GO_IDLE {
             0
         } else if reply {
             if long_reply {
@@ -408,13 +441,13 @@ pub entity sd_frontend(
             } else {
                 48
             }
-        } else if fall && response_bit_ready {
+        } else if sd_output_advance && response_bit_ready {
             response_left -. 1
         } else {
             response_left
         }
     };
-    reg(clk) command_drive reset(local_rst: false) = if fall {
+    reg(clk) command_drive reset(local_rst: false) = if sd_output_advance {
         response_bit_ready
     } else {
         command_drive
@@ -431,7 +464,7 @@ pub entity sd_frontend(
     } else {
         response.to_bits()[135]
     };
-    reg(output_clk) command_output reset(output_reset: true) = if fall {
+    reg(output_clk) command_output reset(output_reset: true) = if sd_output_advance {
         if pad_command_enable {
             pad_command_bit
         } else {
@@ -440,7 +473,7 @@ pub entity sd_frontend(
     } else {
         command_output
     };
-    reg(output_clk) command_pin_drive reset(output_reset: false) = if fall {
+    reg(output_clk) command_pin_drive reset(output_reset: false) = if sd_output_advance {
         pad_command_enable
     } else {
         command_pin_drive
@@ -448,7 +481,7 @@ pub entity sd_frontend(
     set cmd_oe = &(command_pin_drive && armed);
     set cmd_out = &command_output;
 
-    let data_end = fall && data_state == 4;
+    let data_end = sd_output_advance && data_state == READ_RELEASE;
     let next_sector = data_end && multi && lba < last_lba;
     reg(clk) epoch: uint<32> reset(rst: 0) = if stop || !armed || read || next_sector {
         epoch +. 1
@@ -456,7 +489,7 @@ pub entity sd_frontend(
         epoch
     };
     reg(clk) lba: uint<32> reset(local_rst: 0) = if read {
-        arg >> 9
+        command_argument >> 9
     } else if next_sector {
         lba +. 1
     } else {
@@ -481,7 +514,7 @@ pub entity sd_frontend(
     reg(clk) multi reset(local_rst: false) = if stop {
         false
     } else if read {
-        index == 18
+        command_index == CMD_READ_MULTIPLE
     } else {
         multi
     };
@@ -515,26 +548,26 @@ pub entity sd_frontend(
     } else {
         raw_data_start
     };
-    reg(clk) data_state: uint<3> reset(local_rst: 0) = {
+    reg(clk) data_state: uint<3> reset(local_rst: READ_IDLE) = {
         if stop {
-            0
-        } else if fall {
-            if data_state == 0 && data_start {
-                1
-            } else if data_state == 1 && bit_index == (if short_data {
+            READ_IDLE
+        } else if sd_output_advance {
+            if data_state == READ_IDLE && data_start {
+                READ_PAYLOAD
+            } else if data_state == READ_PAYLOAD && bit_index == (if short_data {
                     63
                 } else if status_data {
                     511
                 } else {
                     4095
                 }) {
-                2
-            } else if data_state == 2 && crc_index == 15 {
-                3
-            } else if data_state == 3 {
-                4
-            } else if data_state == 4 {
-                0
+                READ_CRC
+            } else if data_state == READ_CRC && crc_index == 15 {
+                READ_END_BIT
+            } else if data_state == READ_END_BIT {
+                READ_RELEASE
+            } else if data_state == READ_RELEASE {
+                READ_IDLE
             } else {
                 data_state
             }
@@ -543,13 +576,13 @@ pub entity sd_frontend(
         }
     };
     reg(clk) bit_index: uint<12> reset(local_rst: 0) = {
-        if stop || data_state == 0 {
+        if stop || data_state == READ_IDLE {
             if wide {
                 3
             } else {
                 0
             }
-        } else if fall && data_state == 1 {
+        } else if sd_output_advance && data_state == READ_PAYLOAD {
             bit_index +. (if wide { 4 } else { 1 })
         } else {
             bit_index
@@ -582,9 +615,9 @@ pub entity sd_frontend(
         }
     };
     reg(clk) crcs: [uint<16>; 4] reset(local_rst: [0; 4]) = {
-        if data_state == 0 {
+        if data_state == READ_IDLE {
             [0; 4]
-        } else if fall && data_state == 1 {
+        } else if sd_output_advance && data_state == READ_PAYLOAD {
             crcs.enumerate().map(fn |(lane, crc)| {
                     crc16_bit(crc, nibble.to_bits()[lane])
                 })
@@ -592,9 +625,9 @@ pub entity sd_frontend(
             crcs
         }
     };
-    reg(clk) crc_index: uint<4> reset(local_rst: 0) = if data_state != 2 {
+    reg(clk) crc_index: uint<4> reset(local_rst: 0) = if data_state != READ_CRC {
         0
-    } else if fall {
+    } else if sd_output_advance {
         crc_index +. 1
     } else {
         crc_index
@@ -616,15 +649,15 @@ pub entity sd_frontend(
     } else {
         std::conv::bits_to_uint(crc_bits)
     };
-    let read_data_bit: uint<4> = if data_state == 1 {
+    let read_data_bit: uint<4> = if data_state == READ_PAYLOAD {
         pad_nibble
-    } else if data_state == 2 {
+    } else if data_state == READ_CRC {
         pad_crc
     } else {
         15
     };
-    let read_data_start = data_state == 0 && data_start;
-    let read_data_drive = read_data_start || data_state == 1 || data_state == 2 || data_state == 3;
+    let read_data_start = data_state == READ_IDLE && data_start;
+    let read_data_drive = read_data_start || data_state == READ_PAYLOAD || data_state == READ_CRC || data_state == READ_END_BIT;
     reg(clk) prepared_pad_write reset(local_rst: false) = *write_oe != 0;
     reg(clk) prepared_pad_data: uint<4> reset(local_rst: 15) = if *write_oe != 0 {
         *write_dat
@@ -640,7 +673,7 @@ pub entity sd_frontend(
     reg(output_clk) data_output: uint<4> reset(output_reset: 15) = {
         if output_stop && !(fast_mode && prepared_pad_write) {
             15
-        } else if fall {
+        } else if sd_output_advance {
             if fast_mode && prepared_pad_write {
                 prepared_pad_data
             } else if read_data_start {
@@ -660,14 +693,14 @@ pub entity sd_frontend(
     };
     reg(output_clk) data_drive reset(output_reset: false) = if output_stop {
         false
-    } else if fall {
+    } else if sd_output_advance {
         read_data_drive
     } else {
         data_drive
     };
     reg(output_clk) pad_data_enable: uint<4> reset(output_reset: 0) = if output_stop && !prepared_pad_write {
         0
-    } else if fall {
+    } else if sd_output_advance {
         if prepared_pad_write {
             1
         } else if read_data_drive {
@@ -734,19 +767,19 @@ entity bram_emulator(
     dat_oe: inv &uint<4>,
     armed_status: inv &bool,
 ) {
-    let (arm, arm_w): (&bool, inv &bool) = port;
-    let (lv, lv_w): (&bool, inv &bool) = port;
-    let (la, la_w): (&uint<32>, inv &uint<32>) = port;
-    let (lb, lb_w): (&uint<8>, inv &uint<8>) = port;
-    let (lr, lr_w): (&bool, inv &bool) = port;
-    let (req, req_w): (&bool, inv &bool) = port;
-    let (lba, lba_w): (&uint<32>, inv &uint<32>) = port;
-    let (epoch, epoch_w): (&uint<32>, inv &uint<32>) = port;
-    let (ready, ready_w): (&bool, inv &bool) = port;
-    let (saved_epoch, saved_epoch_w): (&uint<32>, inv &uint<32>) = port;
-    let (offset, offset_w): (&uint<9>, inv &uint<9>) = port;
-    let (byte, byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (done, done_w): (&bool, inv &bool) = port;
+    let (card_armed, card_armed_w): (&bool, inv &bool) = port;
+    let (loader_valid, loader_valid_w): (&bool, inv &bool) = port;
+    let (loader_address, loader_address_w): (&uint<32>, inv &uint<32>) = port;
+    let (loader_byte, loader_byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (loader_ready, loader_ready_w): (&bool, inv &bool) = port;
+    let (read_request, read_request_w): (&bool, inv &bool) = port;
+    let (read_lba, read_lba_w): (&uint<32>, inv &uint<32>) = port;
+    let (read_generation, read_generation_w): (&uint<32>, inv &uint<32>) = port;
+    let (read_ready, read_ready_w): (&bool, inv &bool) = port;
+    let (buffer_generation, buffer_generation_w): (&uint<32>, inv &uint<32>) = port;
+    let (read_byte_index, read_byte_index_w): (&uint<9>, inv &uint<9>) = port;
+    let (read_byte, read_byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (read_release, read_release_w): (&bool, inv &bool) = port;
     let (_, unused_selector): (&uint<7>, inv &uint<7>) = port;
     let _ = inst loader::image_loader$(
         clk,
@@ -757,29 +790,29 @@ entity bram_emulator(
         tx_ready,
         tx_valid,
         tx_byte,
-        load_ready: *lr,
-        load_valid: lv_w,
-        load_address: la_w,
-        load_byte: lb_w,
-        armed: arm_w,
+        load_ready: *loader_ready,
+        load_valid: loader_valid_w,
+        load_address: loader_address_w,
+        load_byte: loader_byte_w,
+        armed: card_armed_w,
         status_selector: unused_selector,
     );
     let _ = inst storage::bram_backend$(
         clk,
         rst,
-        armed: *arm,
-        load_valid: *lv,
-        load_address: *la,
-        load_byte: *lb,
-        load_ready: lr_w,
-        request_valid: *req,
-        request_lba: *lba,
-        generation: *epoch,
-        buffer_release: *done,
-        sector_ready: ready_w,
-        sector_generation: saved_epoch_w,
-        byte_index: *offset,
-        sector_byte: byte_w,
+        armed: *card_armed,
+        load_valid: *loader_valid,
+        load_address: *loader_address,
+        load_byte: *loader_byte,
+        load_ready: loader_ready_w,
+        request_valid: *read_request,
+        request_lba: *read_lba,
+        generation: *read_generation,
+        buffer_release: *read_release,
+        sector_ready: read_ready_w,
+        sector_generation: buffer_generation_w,
+        byte_index: *read_byte_index,
+        sector_byte: read_byte_w,
     );
     let (unused_wc, unused_wc_w): (&bool, inv &bool) = port;
     let (unused_wa, unused_wa_w): (&uint<24>, inv &uint<24>) = port;
@@ -790,21 +823,21 @@ entity bram_emulator(
     let _ = inst sd_frontend$(
         clk,
         rst,
-        armed: *arm,
+        armed: *card_armed,
         sd_clk,
         cmd_in,
         cmd_out,
         cmd_oe,
         dat_out,
         dat_oe,
-        request_valid: req_w,
-        request_lba: lba_w,
-        generation: epoch_w,
-        sector_ready: *ready,
-        sector_generation: *saved_epoch,
-        sector_byte: *byte,
-        byte_index: offset_w,
-        sector_release: done_w,
+        request_valid: read_request_w,
+        request_lba: read_lba_w,
+        generation: read_generation_w,
+        sector_ready: *read_ready,
+        sector_generation: *buffer_generation,
+        sector_byte: *read_byte,
+        byte_index: read_byte_index_w,
+        sector_release: read_release_w,
         fast_mode: false,
         writable: false,
         dat_in: 15,
@@ -817,7 +850,7 @@ entity bram_emulator(
         write_mask: unused_wm_w,
         write_busy: unused_wb_w,
     );
-    set armed_status = arm;
+    set armed_status = card_armed;
 }
 
 #[no_mangle(all)]
@@ -909,69 +942,69 @@ entity ddr_emulator(
     dat_oe: inv &uint<4>,
     armed_status: inv &bool,
 ) {
-    let (arm, arm_w): (&bool, inv &bool) = port;
-    let (lv, lv_w): (&bool, inv &bool) = port;
-    let (la, la_w): (&uint<32>, inv &uint<32>) = port;
-    let (lb, lb_w): (&uint<8>, inv &uint<8>) = port;
-    let (lr, lr_w): (&bool, inv &bool) = port;
-    let (req, req_w): (&bool, inv &bool) = port;
-    let (lba, lba_w): (&uint<32>, inv &uint<32>) = port;
-    let (epoch, epoch_w): (&uint<32>, inv &uint<32>) = port;
-    let (ready, ready_w): (&bool, inv &bool) = port;
-    let (saved_epoch, saved_epoch_w): (&uint<32>, inv &uint<32>) = port;
-    let (offset, offset_w): (&uint<9>, inv &uint<9>) = port;
-    let (byte, byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (done, done_w): (&bool, inv &bool) = port;
+    let (card_armed, card_armed_w): (&bool, inv &bool) = port;
+    let (loader_valid, loader_valid_w): (&bool, inv &bool) = port;
+    let (loader_address, loader_address_w): (&uint<32>, inv &uint<32>) = port;
+    let (loader_byte, loader_byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (loader_ready, loader_ready_w): (&bool, inv &bool) = port;
+    let (read_request, read_request_w): (&bool, inv &bool) = port;
+    let (read_lba, read_lba_w): (&uint<32>, inv &uint<32>) = port;
+    let (read_generation, read_generation_w): (&uint<32>, inv &uint<32>) = port;
+    let (read_ready, read_ready_w): (&bool, inv &bool) = port;
+    let (buffer_generation, buffer_generation_w): (&uint<32>, inv &uint<32>) = port;
+    let (read_byte_index, read_byte_index_w): (&uint<9>, inv &uint<9>) = port;
+    let (read_byte, read_byte_w): (&uint<8>, inv &uint<8>) = port;
+    let (read_release, read_release_w): (&bool, inv &bool) = port;
     let _ = inst loader::image_loader$(
         clk,
         rst,
-        status_word: (zext::<27, 32>(diagnostic_status) << 5) | zext(std::conv::bits_to_uint([initialized, ddr_cmd_ready, ddr_wdata_ready, *arm, ddr_rdata_valid])),
+        status_word: (zext::<27, 32>(diagnostic_status) << 5) | zext(std::conv::bits_to_uint([initialized, ddr_cmd_ready, ddr_wdata_ready, *card_armed, ddr_rdata_valid])),
         rx_valid,
         rx_byte,
         tx_ready,
         tx_valid,
         tx_byte,
-        load_ready: *lr,
-        load_valid: lv_w,
-        load_address: la_w,
-        load_byte: lb_w,
-        armed: arm_w,
+        load_ready: *loader_ready,
+        load_valid: loader_valid_w,
+        load_address: loader_address_w,
+        load_byte: loader_byte_w,
+        armed: card_armed_w,
         status_selector,
     );
-    let (rc, rc_w): (&bool, inv &bool) = port;
-    let (ra, ra_w): (&uint<24>, inv &uint<24>) = port;
-    let (wc, wc_w): (&bool, inv &bool) = port;
-    let (wa, wa_w): (&uint<24>, inv &uint<24>) = port;
-    let (sc, sc_w): (&bool, inv &bool) = port;
-    let (sa, sa_w): (&uint<24>, inv &uint<24>) = port;
-    let (sv, sv_w): (&bool, inv &bool) = port;
-    let (sd, sd_w): (&uint<128>, inv &uint<128>) = port;
-    let (sm, sm_w): (&uint<16>, inv &uint<16>) = port;
-    let (sb, sb_w): (&bool, inv &bool) = port;
-    let (lvdata, lvdata_w): (&bool, inv &bool) = port;
-    let (ldata, ldata_w): (&uint<128>, inv &uint<128>) = port;
-    let (lmask, lmask_w): (&uint<16>, inv &uint<16>) = port;
+    let (read_cmd_valid, read_cmd_valid_w): (&bool, inv &bool) = port;
+    let (read_cmd_address, read_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (loader_cmd_valid, loader_cmd_valid_w): (&bool, inv &bool) = port;
+    let (loader_cmd_address, loader_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (sd_write_cmd_valid, sd_write_cmd_valid_w): (&bool, inv &bool) = port;
+    let (sd_write_cmd_address, sd_write_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (sd_write_data_valid, sd_write_data_valid_w): (&bool, inv &bool) = port;
+    let (sd_write_data, sd_write_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (sd_write_mask, sd_write_mask_w): (&uint<16>, inv &uint<16>) = port;
+    let (sd_commit_busy, sd_commit_busy_w): (&bool, inv &bool) = port;
+    let (loader_data_valid, loader_data_valid_w): (&bool, inv &bool) = port;
+    let (loader_data, loader_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (loader_mask, loader_mask_w): (&uint<16>, inv &uint<16>) = port;
     // The sector writer stages 16 bytes before issuing its first DDR beat.
     // Register ownership during that staging time, cutting final-CRC decode
     // out of the wide data mux/FIFO enables. Keep it through the final beat
     // and one following idle cycle. Raw busy still blocks a new UART load
     // immediately when SD accepts a packet on the same edge as disarm.
-    reg(clk) sd_commit_owner reset(rst: false) = *sb;
+    reg(clk) sd_commit_owner reset(rst: false) = *sd_commit_busy;
     let sd_owner = if fast_mode {
         sd_commit_owner
     } else {
-        *sb
+        *sd_commit_busy
     };
     // Accepted SD commits retain ownership even if the loader disarms SD.
     // native_stage orders the final buffered write ahead of subsequent reads.
     // Pipeline the whole request/cancellation bundle together. Generation
     // tagging still rejects a stale buffer immediately at the SD frontend.
     reg(clk) backend_inputs: (bool, bool, bool, uint<32>, uint<32>, bool)
-    reset(rst: (false, false, false, 0, 0, true)) = (*arm, initialized, *req, *lba, *epoch, *done);
+    reset(rst: (false, false, false, 0, 0, true)) = (*card_armed, initialized, *read_request, *read_lba, *read_generation, *read_release);
     let (backend_arm, backend_initialized, backend_request, backend_lba, backend_epoch, backend_release) = if fast_mode {
         backend_inputs
     } else {
-        (*arm, initialized, *req, *lba, *epoch, *done)
+        (*card_armed, initialized, *read_request, *read_lba, *read_generation, *read_release)
     };
     let _ = inst storage::ddr_backend$(
         clk,
@@ -983,13 +1016,13 @@ entity ddr_emulator(
         request_lba: backend_lba,
         generation: backend_epoch,
         buffer_release: backend_release,
-        sector_ready: ready_w,
-        sector_generation: saved_epoch_w,
-        byte_index: *offset,
-        sector_byte: byte_w,
-        cmd_valid: rc_w,
-        cmd_ready: ddr_cmd_ready && *arm && !sd_owner,
-        cmd_address: ra_w,
+        sector_ready: read_ready_w,
+        sector_generation: buffer_generation_w,
+        byte_index: *read_byte_index,
+        sector_byte: read_byte_w,
+        cmd_valid: read_cmd_valid_w,
+        cmd_ready: ddr_cmd_ready && *card_armed && !sd_owner,
+        cmd_address: read_cmd_address_w,
         rdata_valid: ddr_rdata_valid,
         rdata_ready: ddr_rdata_ready,
         rdata: ddr_rdata,
@@ -997,68 +1030,68 @@ entity ddr_emulator(
     let _ = inst storage::ddr_byte_writer$(
         clk,
         rst,
-        enabled: !*arm && initialized && !*sb && !sd_owner,
-        load_valid: *lv,
-        load_address: *la,
-        load_byte: *lb,
-        load_ready: lr_w,
-        cmd_valid: wc_w,
-        cmd_ready: ddr_cmd_ready && !*arm && !sd_owner,
-        cmd_address: wa_w,
-        wdata_valid: lvdata_w,
+        enabled: !*card_armed && initialized && !*sd_commit_busy && !sd_owner,
+        load_valid: *loader_valid,
+        load_address: *loader_address,
+        load_byte: *loader_byte,
+        load_ready: loader_ready_w,
+        cmd_valid: loader_cmd_valid_w,
+        cmd_ready: ddr_cmd_ready && !*card_armed && !sd_owner,
+        cmd_address: loader_cmd_address_w,
+        wdata_valid: loader_data_valid_w,
         wdata_ready: ddr_wdata_ready && !sd_owner,
-        wdata: ldata_w,
-        wdata_mask: lmask_w,
+        wdata: loader_data_w,
+        wdata_mask: loader_mask_w,
     );
     set ddr_cmd_valid = &(if sd_owner {
-            *sc
-        } else if *arm {
-            *rc
+            *sd_write_cmd_valid
+        } else if *card_armed {
+            *read_cmd_valid
         } else {
-            *wc
+            *loader_cmd_valid
         });
     set ddr_cmd_address = &(if sd_owner {
-            *sa
-        } else if *arm {
-            *ra
+            *sd_write_cmd_address
+        } else if *card_armed {
+            *read_cmd_address
         } else {
-            *wa
+            *loader_cmd_address
         });
-    set ddr_cmd_write = &(sd_owner || !*arm);
-    set ddr_wdata_valid = &(if sd_owner { *sv } else { *lvdata });
-    set ddr_wdata = &(if sd_owner { *sd } else { *ldata });
-    set ddr_wdata_mask = &(if sd_owner { *sm } else { *lmask });
+    set ddr_cmd_write = &(sd_owner || !*card_armed);
+    set ddr_wdata_valid = &(if sd_owner { *sd_write_data_valid } else { *loader_data_valid });
+    set ddr_wdata = &(if sd_owner { *sd_write_data } else { *loader_data });
+    set ddr_wdata_mask = &(if sd_owner { *sd_write_mask } else { *loader_mask });
     let _ = inst sd_frontend$(
         clk,
         rst,
-        armed: *arm && initialized,
+        armed: *card_armed && initialized,
         sd_clk,
         cmd_in,
         cmd_out,
         cmd_oe,
         dat_out,
         dat_oe,
-        request_valid: req_w,
-        request_lba: lba_w,
-        generation: epoch_w,
-        sector_ready: *ready,
-        sector_generation: *saved_epoch,
-        sector_byte: *byte,
-        byte_index: offset_w,
-        sector_release: done_w,
+        request_valid: read_request_w,
+        request_lba: read_lba_w,
+        generation: read_generation_w,
+        sector_ready: *read_ready,
+        sector_generation: *buffer_generation,
+        sector_byte: *read_byte,
+        byte_index: read_byte_index_w,
+        sector_release: read_release_w,
         fast_mode,
         writable,
         dat_in,
-        write_cmd_valid: sc_w,
+        write_cmd_valid: sd_write_cmd_valid_w,
         write_cmd_ready: ddr_cmd_ready && sd_owner,
-        write_cmd_address: sa_w,
-        write_data_valid: sv_w,
+        write_cmd_address: sd_write_cmd_address_w,
+        write_data_valid: sd_write_data_valid_w,
         write_data_ready: ddr_wdata_ready && sd_owner,
-        write_data: sd_w,
-        write_mask: sm_w,
-        write_busy: sb_w,
+        write_data: sd_write_data_w,
+        write_mask: sd_write_mask_w,
+        write_busy: sd_commit_busy_w,
     );
-    set armed_status = &(*arm && initialized);
+    set armed_status = &(*card_armed && initialized);
 }
 
 // UART divisors track the selected DDR system clock.
@@ -1435,28 +1468,28 @@ entity ddr_emulator_cdc(
     armed_status: inv &bool,
 ) {
     // Exercise the separately clocked frontend / 80 MHz native-memory boundary.
-    let (fcv, fcv_w): (&bool, inv &bool) = port;
-    let (fcr, fcr_w): (&bool, inv &bool) = port;
-    let (fa, fa_w): (&uint<24>, inv &uint<24>) = port;
-    let (fcw, fcw_w): (&bool, inv &bool) = port;
-    let (fwv, fwv_w): (&bool, inv &bool) = port;
-    let (fwr, fwr_w): (&bool, inv &bool) = port;
-    let (fwd, fwd_w): (&uint<128>, inv &uint<128>) = port;
-    let (fwm, fwm_w): (&uint<16>, inv &uint<16>) = port;
-    let (frv, frv_w): (&bool, inv &bool) = port;
-    let (frr, frr_w): (&bool, inv &bool) = port;
-    let (frd, frd_w): (&uint<128>, inv &uint<128>) = port;
-    let (mcv, mcv_w): (&bool, inv &bool) = port;
-    let (mcr, mcr_w): (&bool, inv &bool) = port;
-    let (ma, ma_w): (&uint<24>, inv &uint<24>) = port;
-    let (mcw, mcw_w): (&bool, inv &bool) = port;
-    let (mwv, mwv_w): (&bool, inv &bool) = port;
-    let (mwr, mwr_w): (&bool, inv &bool) = port;
-    let (mwd, mwd_w): (&uint<128>, inv &uint<128>) = port;
-    let (mwm, mwm_w): (&uint<16>, inv &uint<16>) = port;
-    let (mrv, mrv_w): (&bool, inv &bool) = port;
-    let (mrr, mrr_w): (&bool, inv &bool) = port;
-    let (mrd, mrd_w): (&uint<128>, inv &uint<128>) = port;
+    let (frontend_cmd_valid, frontend_cmd_valid_w): (&bool, inv &bool) = port;
+    let (frontend_cmd_ready, frontend_cmd_ready_w): (&bool, inv &bool) = port;
+    let (frontend_cmd_address, frontend_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (frontend_cmd_write, frontend_cmd_write_w): (&bool, inv &bool) = port;
+    let (frontend_data_valid, frontend_data_valid_w): (&bool, inv &bool) = port;
+    let (frontend_data_ready, frontend_data_ready_w): (&bool, inv &bool) = port;
+    let (frontend_write_data, frontend_write_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (frontend_write_mask, frontend_write_mask_w): (&uint<16>, inv &uint<16>) = port;
+    let (frontend_read_valid, frontend_read_valid_w): (&bool, inv &bool) = port;
+    let (frontend_read_ready, frontend_read_ready_w): (&bool, inv &bool) = port;
+    let (frontend_read_data, frontend_read_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (memory_cmd_valid, memory_cmd_valid_w): (&bool, inv &bool) = port;
+    let (memory_cmd_ready, memory_cmd_ready_w): (&bool, inv &bool) = port;
+    let (memory_cmd_address, memory_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
+    let (memory_cmd_write, memory_cmd_write_w): (&bool, inv &bool) = port;
+    let (memory_data_valid, memory_data_valid_w): (&bool, inv &bool) = port;
+    let (memory_data_ready, memory_data_ready_w): (&bool, inv &bool) = port;
+    let (memory_write_data, memory_write_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (memory_write_mask, memory_write_mask_w): (&uint<16>, inv &uint<16>) = port;
+    let (memory_read_valid, memory_read_valid_w): (&bool, inv &bool) = port;
+    let (memory_read_ready, memory_read_ready_w): (&bool, inv &bool) = port;
+    let (memory_read_data, memory_read_data_w): (&uint<128>, inv &uint<128>) = port;
     let _ = inst ddr_emulator$(
         clk,
         rst,
@@ -1466,17 +1499,17 @@ entity ddr_emulator_cdc(
         fast_mode,
         writable,
         dat_in,
-        ddr_cmd_valid: fcv_w,
-        ddr_cmd_ready: *fcr,
-        ddr_cmd_address: fa_w,
-        ddr_cmd_write: fcw_w,
-        ddr_rdata_valid: *frv,
-        ddr_rdata_ready: frr_w,
-        ddr_rdata: *frd,
-        ddr_wdata_valid: fwv_w,
-        ddr_wdata_ready: *fwr,
-        ddr_wdata: fwd_w,
-        ddr_wdata_mask: fwm_w,
+        ddr_cmd_valid: frontend_cmd_valid_w,
+        ddr_cmd_ready: *frontend_cmd_ready,
+        ddr_cmd_address: frontend_cmd_address_w,
+        ddr_cmd_write: frontend_cmd_write_w,
+        ddr_rdata_valid: *frontend_read_valid,
+        ddr_rdata_ready: frontend_read_ready_w,
+        ddr_rdata: *frontend_read_data,
+        ddr_wdata_valid: frontend_data_valid_w,
+        ddr_wdata_ready: *frontend_data_ready,
+        ddr_wdata: frontend_write_data_w,
+        ddr_wdata_mask: frontend_write_mask_w,
         rx_valid,
         rx_byte,
         tx_ready,
@@ -1495,43 +1528,43 @@ entity ddr_emulator_cdc(
         s_rst: rst,
         m_clk: memory_clk,
         m_rst: memory_rst,
-        s_cmd_valid: *fcv,
-        s_cmd_ready: fcr_w,
-        s_cmd_address: *fa,
-        s_cmd_write: *fcw,
-        m_cmd_valid: mcv_w,
-        m_cmd_ready: *mcr,
-        m_cmd_address: ma_w,
-        m_cmd_write: mcw_w,
-        s_wdata_valid: *fwv,
-        s_wdata_ready: fwr_w,
-        s_wdata: *fwd,
-        s_wmask: *fwm,
-        m_wdata_valid: mwv_w,
-        m_wdata_ready: *mwr,
-        m_wdata: mwd_w,
-        m_wmask: mwm_w,
-        m_rdata_valid: *mrv,
-        m_rdata_ready: mrr_w,
-        m_rdata: *mrd,
-        s_rdata_valid: frv_w,
-        s_rdata_ready: *frr,
-        s_rdata: frd_w,
+        s_cmd_valid: *frontend_cmd_valid,
+        s_cmd_ready: frontend_cmd_ready_w,
+        s_cmd_address: *frontend_cmd_address,
+        s_cmd_write: *frontend_cmd_write,
+        m_cmd_valid: memory_cmd_valid_w,
+        m_cmd_ready: *memory_cmd_ready,
+        m_cmd_address: memory_cmd_address_w,
+        m_cmd_write: memory_cmd_write_w,
+        s_wdata_valid: *frontend_data_valid,
+        s_wdata_ready: frontend_data_ready_w,
+        s_wdata: *frontend_write_data,
+        s_wmask: *frontend_write_mask,
+        m_wdata_valid: memory_data_valid_w,
+        m_wdata_ready: *memory_data_ready,
+        m_wdata: memory_write_data_w,
+        m_wmask: memory_write_mask_w,
+        m_rdata_valid: *memory_read_valid,
+        m_rdata_ready: memory_read_ready_w,
+        m_rdata: *memory_read_data,
+        s_rdata_valid: frontend_read_valid_w,
+        s_rdata_ready: *frontend_read_ready,
+        s_rdata: frontend_read_data_w,
     );
     let _ = inst cdc::native_stage$(
         clk: memory_clk,
         rst: memory_rst,
-        s_cmd_valid: *mcv,
-        s_cmd_ready: mcr_w,
-        s_cmd_address: *ma,
-        s_cmd_write: *mcw,
-        s_wdata_valid: *mwv,
-        s_wdata_ready: mwr_w,
-        s_wdata: *mwd,
-        s_wmask: *mwm,
-        s_rdata_valid: mrv_w,
-        s_rdata_ready: *mrr,
-        s_rdata: mrd_w,
+        s_cmd_valid: *memory_cmd_valid,
+        s_cmd_ready: memory_cmd_ready_w,
+        s_cmd_address: *memory_cmd_address,
+        s_cmd_write: *memory_cmd_write,
+        s_wdata_valid: *memory_data_valid,
+        s_wdata_ready: memory_data_ready_w,
+        s_wdata: *memory_write_data,
+        s_wmask: *memory_write_mask,
+        s_rdata_valid: memory_read_valid_w,
+        s_rdata_ready: *memory_read_ready,
+        s_rdata: memory_read_data_w,
         m_cmd_valid: ddr_cmd_valid,
         m_cmd_ready: ddr_cmd_ready,
         m_cmd_address: ddr_cmd_address,

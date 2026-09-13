@@ -139,20 +139,28 @@ pub entity native_bist(
     expected_word: inv &uint<128>,
     actual_word: inv &uint<128>,
 ) {
+    let IDLE: uint<3> = 0;
+    let WRITE_PATTERN: uint<3> = 1;
+    let ISSUE_READ: uint<3> = 2;
+    let WAIT_READ_DATA: uint<3> = 3;
+    let TEST_PASSED: uint<3> = 4;
+    let TEST_FAILED: uint<3> = 5;
+    let CHECK_READ_DATA: uint<3> = 6;
+
     decl state, address, count, timeout, elapsed, command_sent, data_sent, inverted, zero_pass;
-    let begin = state == 0 && start;
-    let waiting = state == 1 || state == 2 || state == 3;
-    let active = waiting || state == 6;
-    let command_fire = (state == 1 && !command_sent || state == 2) && cmd_ready;
-    let data_fire = state == 1 && !data_sent && wdata_ready;
-    let write_complete = state == 1 && (command_sent || command_fire) && (data_sent || data_fire);
-    let receive = state == 3 && rdata_valid;
+    let begin = state == IDLE && start;
+    let waiting = state == WRITE_PATTERN || state == ISSUE_READ || state == WAIT_READ_DATA;
+    let active = waiting || state == CHECK_READ_DATA;
+    let command_fire = (state == WRITE_PATTERN && !command_sent || state == ISSUE_READ) && cmd_ready;
+    let data_fire = state == WRITE_PATTERN && !data_sent && wdata_ready;
+    let write_complete = state == WRITE_PATTERN && (command_sent || command_fire) && (data_sent || data_fire);
+    let receive = state == WAIT_READ_DATA && rdata_valid;
     reg(clk) received_word: uint<128> = if receive {
         rdata
     } else {
         received_word
     };
-    let read_complete = state == 6;
+    let read_complete = state == CHECK_READ_DATA;
     let expected: uint<128> = if zero_pass {
         0
     } else {
@@ -170,11 +178,11 @@ pub entity native_bist(
     let phase: uint<5> = if zero_pass {
         4
     } else {
-        pass_offset | (if state == 1 {
+        pass_offset | (if state == WRITE_PATTERN {
                 1
-            } else if state == 2 {
+            } else if state == ISSUE_READ {
                 2
-            } else if state == 3 || state == 6 {
+            } else if state == WAIT_READ_DATA || state == CHECK_READ_DATA {
                 3
             } else {
                 0
@@ -205,12 +213,12 @@ pub entity native_bist(
     } else {
         elapsed +. 1
     };
-    reg(clk) command_sent reset(rst: false) = if state != 1 || write_complete {
+    reg(clk) command_sent reset(rst: false) = if state != WRITE_PATTERN || write_complete {
         false
     } else {
         command_sent || command_fire
     };
-    reg(clk) data_sent reset(rst: false) = if state != 1 || write_complete {
+    reg(clk) data_sent reset(rst: false) = if state != WRITE_PATTERN || write_complete {
         false
     } else {
         data_sent || data_fire
@@ -236,46 +244,46 @@ pub entity native_bist(
     } else {
         address
     };
-    reg(clk) state: uint<3> reset(rst: 0) = if expired || mismatch {
-        5
+    reg(clk) state: uint<3> reset(rst: IDLE) = if expired || mismatch {
+        TEST_FAILED
     } else if begin {
         if word_count == 0 || word_count > 16777216 || timeout_cycles == 0 {
-            5
+            TEST_FAILED
         } else {
-            1
+            WRITE_PATTERN
         }
-    } else if state == 1 && write_complete && last {
-        2
-    } else if state == 2 && command_fire {
-        3
+    } else if state == WRITE_PATTERN && write_complete && last {
+        ISSUE_READ
+    } else if state == ISSUE_READ && command_fire {
+        WAIT_READ_DATA
     } else if receive {
-        6
+        CHECK_READ_DATA
     } else if read_complete {
         if last {
             if zero_pass {
-                4
+                TEST_PASSED
             } else {
-                1
+                WRITE_PATTERN
             }
         } else {
-            2
+            ISSUE_READ
         }
     } else {
         state
     };
 
-    set cmd_valid = &(!rst && (state == 1 && !command_sent || state == 2));
+    set cmd_valid = &(!rst && (state == WRITE_PATTERN && !command_sent || state == ISSUE_READ));
     set cmd_address = &(address);
-    set cmd_write = &(state == 1);
-    set wdata_valid = &(!rst && state == 1 && !data_sent);
+    set cmd_write = &(state == WRITE_PATTERN);
+    set wdata_valid = &(!rst && state == WRITE_PATTERN && !data_sent);
     set wdata = &expected;
     set wdata_mask = &(0xffff);
-    set rdata_ready = &(!rst && state == 3);
+    set rdata_ready = &(!rst && state == WAIT_READ_DATA);
     set busy = &(active);
-    set passed = &(state == 4);
-    set failed = &(state == 5);
+    set passed = &(state == TEST_PASSED);
+    set failed = &(state == TEST_FAILED);
     set progress = &(address);
-    set diagnostic = &(if state == 5 { failure_diagnostic } else { phase });
+    set diagnostic = &(if state == TEST_FAILED { failure_diagnostic } else { phase });
     set expected_word = &expected;
     set actual_word = &received_word;
 }

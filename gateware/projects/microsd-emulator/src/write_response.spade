@@ -16,26 +16,32 @@ pub entity sd_write_response(
     active: inv &bool,
     complete: inv &bool,
 ) {
+    let IDLE: uint<4> = 0;
+    let RESPONSE_DELAY: uint<4> = 1;
+    let TOKEN_START: uint<4> = 2;
+    let PROGRAMMING_BUSY: uint<4> = 8;
+    let RESPONSE_COMPLETE: uint<4> = 9;
+
     decl state, prepared_output, delayed_prepared_output;
     let clear = rst || cancel;
-    reg(clk) ok reset(clear: false) = if start && state == 0 {
+    reg(clk) ok reset(clear: false) = if start && state == IDLE {
         accepted
     } else {
         ok
     };
     let hold_busy = ok && (if prepared_mode { !delayed_prepared_output } else { busy });
-    let token_drive = state >= 2 && state <= 8;
-    reg(clk) state: uint<4> reset(clear: 0) = if start && state == 0 {
-        1
-    } else if fall && state != 0 {
-        if state == 8 {
+    let token_drive = state >= TOKEN_START && state <= PROGRAMMING_BUSY;
+    reg(clk) state: uint<4> reset(clear: IDLE) = if start && state == IDLE {
+        RESPONSE_DELAY
+    } else if fall && state != IDLE {
+        if state == PROGRAMMING_BUSY {
             if hold_busy {
-                8
+                PROGRAMMING_BUSY
             } else {
-                9
+                RESPONSE_COMPLETE
             }
-        } else if state == 9 {
-            0
+        } else if state == RESPONSE_COMPLETE {
+            IDLE
         } else {
             state +. 1
         }
@@ -69,7 +75,7 @@ pub entity sd_write_response(
     } else {
         drive
     };
-    reg(clk) finished reset(clear: false) = fall && state == 9;
+    reg(clk) finished reset(clear: false) = fall && state == RESPONSE_COMPLETE;
     set dat_out = &(if (if prepared_mode { prepared_output } else { output }) {
             15
         } else {
@@ -80,6 +86,6 @@ pub entity sd_write_response(
         } else {
             0
         });
-    set active = &(state != 0 && !clear);
+    set active = &(state != IDLE && !clear);
     set complete = &finished;
 }

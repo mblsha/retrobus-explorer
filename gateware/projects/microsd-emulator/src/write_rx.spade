@@ -19,6 +19,12 @@ pub entity sd_write_receiver(
     byte_index: uint<9>,
     sector_byte: inv &uint<8>,
 ) {
+    let IDLE: uint<3> = 0;
+    let WAIT_START_BIT: uint<3> = 1;
+    let RECEIVE_DATA: uint<3> = 2;
+    let RECEIVE_CRC: uint<3> = 3;
+    let RECEIVE_END_BIT: uint<3> = 4;
+
     decl bit_index, crc_index, byte_shift;
     let clear = rst || cancel;
     reg(clk) width reset(clear: false) = if start {
@@ -26,30 +32,30 @@ pub entity sd_write_receiver(
     } else {
         width
     };
-    reg(clk) state: uint<3> reset(clear: 0) = if start {
-        1
+    reg(clk) state: uint<3> reset(clear: IDLE) = if start {
+        WAIT_START_BIT
     } else if sample {
-        if state == 1 && (if width { dat == 0 } else { !dat.to_bits()[0] }) {
-            2
-        } else if state == 2 && bit_index == 4095 {
-            3
-        } else if state == 3 && crc_index == 15 {
-            4
-        } else if state == 4 {
-            0
+        if state == WAIT_START_BIT && (if width { dat == 0 } else { !dat.to_bits()[0] }) {
+            RECEIVE_DATA
+        } else if state == RECEIVE_DATA && bit_index == 4095 {
+            RECEIVE_CRC
+        } else if state == RECEIVE_CRC && crc_index == 15 {
+            RECEIVE_END_BIT
+        } else if state == RECEIVE_END_BIT {
+            IDLE
         } else {
             state
         }
     } else {
         state
     };
-    reg(clk) bit_index: uint<12> reset(clear: 0) = if state == 1 {
+    reg(clk) bit_index: uint<12> reset(clear: 0) = if state == WAIT_START_BIT {
         if width {
             3
         } else {
             0
         }
-    } else if sample && state == 2 {
+    } else if sample && state == RECEIVE_DATA {
         bit_index +. (if width { 4 } else { 1 })
     } else {
         bit_index
@@ -57,14 +63,14 @@ pub entity sd_write_receiver(
     let assembled: uint<8> = (byte_shift << (if width { 4 } else { 1 })) | zext(if width { dat } else { dat & 1 });
     reg(clk) byte_shift: uint<8> reset(clear: 0) = if start {
         0
-    } else if sample && state == 2 {
+    } else if sample && state == RECEIVE_DATA {
         assembled
     } else {
         byte_shift
     };
     reg(clk) crcs: [uint<16>; 4] reset(clear: [0; 4]) = if start {
         [0; 4]
-    } else if sample && state == 2 {
+    } else if sample && state == RECEIVE_DATA {
         crcs.enumerate().map(fn |(lane, crc)| {
                 crc16_bit(crc, dat.to_bits()[lane])
             })
@@ -73,7 +79,7 @@ pub entity sd_write_receiver(
     };
     reg(clk) crc_index: uint<4> reset(clear: 0) = if start {
         0
-    } else if sample && state == 3 {
+    } else if sample && state == RECEIVE_CRC {
         crc_index +. 1
     } else {
         crc_index
@@ -83,25 +89,25 @@ pub entity sd_write_receiver(
         });
     reg(clk) bad reset(clear: false) = if start {
         false
-    } else if sample && state == 3 {
+    } else if sample && state == RECEIVE_CRC {
         bad || mismatch[0] || mismatch[1] || mismatch[2] || mismatch[3]
     } else {
         bad
     };
-    reg(clk) finished reset(clear: false) = !start && sample && state == 4;
+    reg(clk) finished reset(clear: false) = !start && sample && state == RECEIVE_END_BIT;
     reg(clk) accepted reset(clear: false) = if start {
         false
-    } else if sample && state == 4 {
+    } else if sample && state == RECEIVE_END_BIT {
         !bad && (if width { dat == 15 } else { dat.to_bits()[0] })
     } else {
         accepted
     };
     let buffer: Memory<uint<8>, 512> = inst clocked_memory(
         clk,
-        [(!clear && !start && sample && state == 2 && (bit_index & 7) == 7, trunc::<uint<12>, uint<9>>(bit_index >> 3), assembled)],
+        [(!clear && !start && sample && state == RECEIVE_DATA && (bit_index & 7) == 7, trunc::<uint<12>, uint<9>>(bit_index >> 3), assembled)],
     );
     reg(clk) read_byte = inst read_memory(buffer, byte_index);
-    set active = &(state != 0 && !clear);
+    set active = &(state != IDLE && !clear);
     set complete = &finished;
     set good = &accepted;
     set sector_byte = &read_byte;
