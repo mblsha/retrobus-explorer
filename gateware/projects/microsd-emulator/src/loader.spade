@@ -22,8 +22,19 @@ pub entity image_loader(
     armed: inv &bool,
     status_selector: inv &uint<7>,
 ) {
+    let WRITE_SECTOR: uint<8> = 1;
+    let ARM_CARD: uint<8> = 2;
+    let DISARM_CARD: uint<8> = 3;
+    let READ_STATUS: uint<8> = 4;
+
+    let RECEIVE_PACKET: uint<3> = 0;
+    let VALIDATE_PACKET: uint<3> = 1;
+    let COPY_PAYLOAD: uint<3> = 2;
+    let SEND_ACK: uint<3> = 3;
+    let DISPATCH_PACKET: uint<3> = 4;
+
     decl state, count, crc, timeout, copy_index, reply_index, ack_crc, arm, loaded, saved_status;
-    let receiving = state == 0;
+    let receiving = state == RECEIVE_PACKET;
     let expected_magic: uint<8> = match count {
         0 => 0x4d,
         1 => 0x53,
@@ -87,28 +98,28 @@ pub entity image_loader(
     let all_loaded = loaded == 0xffffffffffffffffffffffffffffffff;
     let status: uint<8> = if !crc_ok {
         1
-    } else if !header_ok || opcode < 1 || opcode > 4 || sector >= 128 {
+    } else if !header_ok || opcode < WRITE_SECTOR || opcode > READ_STATUS || sector >= 128 {
         2
-    } else if opcode == 1 && arm {
+    } else if opcode == WRITE_SECTOR && arm {
         3
-    } else if opcode == 2 && !all_loaded {
+    } else if opcode == ARM_CARD && !all_loaded {
         4
     } else {
         0
     };
     reg(clk) loaded: uint<128> reset(rst: 0) = {
-        if state == 4 && saved_status == 0 && opcode == 3 {
+        if state == DISPATCH_PACKET && saved_status == 0 && opcode == DISARM_CARD {
             0
-        } else if state == 2 && load_ready && copy_index == 511 {
+        } else if state == COPY_PAYLOAD && load_ready && copy_index == 511 {
             loaded | (zext::<1, 128>(1) << zext::<32, 128>(sector))
         } else {
             loaded
         }
     };
-    reg(clk) arm reset(rst: false) = if state == 4 && saved_status == 0 {
-        if opcode == 2 {
+    reg(clk) arm reset(rst: false) = if state == DISPATCH_PACKET && saved_status == 0 {
+        if opcode == ARM_CARD {
             true
-        } else if opcode == 3 {
+        } else if opcode == DISARM_CARD {
             false
         } else {
             arm
@@ -116,50 +127,50 @@ pub entity image_loader(
     } else {
         arm
     };
-    reg(clk) saved_status: uint<8> reset(rst: 0) = if state == 1 {
+    reg(clk) saved_status: uint<8> reset(rst: 0) = if state == VALIDATE_PACKET {
         status
     } else {
         saved_status
     };
-    reg(clk) state: uint<3> reset(rst: 0) = {
+    reg(clk) state: uint<3> reset(rst: RECEIVE_PACKET) = {
         if complete {
-            1
-        } else if state == 1 {
-            4
-        } else if state == 4 {
-            if saved_status == 0 && opcode == 1 {
-                2
+            VALIDATE_PACKET
+        } else if state == VALIDATE_PACKET {
+            DISPATCH_PACKET
+        } else if state == DISPATCH_PACKET {
+            if saved_status == 0 && opcode == WRITE_SECTOR {
+                COPY_PAYLOAD
             } else {
-                3
+                SEND_ACK
             }
-        } else if state == 2 && load_ready && copy_index == 511 {
-            3
-        } else if state == 3 && tx_ready && reply_index == 15 {
-            0
+        } else if state == COPY_PAYLOAD && load_ready && copy_index == 511 {
+            SEND_ACK
+        } else if state == SEND_ACK && tx_ready && reply_index == 15 {
+            RECEIVE_PACKET
         } else {
             state
         }
     };
-    reg(clk) copy_index: uint<9> reset(rst: 0) = if state != 2 {
+    reg(clk) copy_index: uint<9> reset(rst: 0) = if state != COPY_PAYLOAD {
         0
     } else if load_ready {
         copy_index +. 1
     } else {
         copy_index
     };
-    reg(clk) reply_index: uint<4> reset(rst: 0) = if state != 3 {
+    reg(clk) reply_index: uint<4> reset(rst: 0) = if state != SEND_ACK {
         0
     } else if tx_ready {
         reply_index +. 1
     } else {
         reply_index
     };
-    reg(clk) snapshot: uint<32> reset(rst: 0) = if state == 1 {
+    reg(clk) snapshot: uint<32> reset(rst: 0) = if state == VALIDATE_PACKET {
         status_word
     } else {
         snapshot
     };
-    let reply_sequence = if opcode == 4 && saved_status == 0 {
+    let reply_sequence = if opcode == READ_STATUS && saved_status == 0 {
         snapshot
     } else {
         sequence
@@ -170,16 +181,16 @@ pub entity image_loader(
     } else {
         trunc((ack_crc ^ 0xffffffff) >> (zext::<4, 32>(reply_index -. 12) << 3))
     };
-    reg(clk) ack_crc: uint<32> reset(rst: 0xffffffff) = if state != 3 {
+    reg(clk) ack_crc: uint<32> reset(rst: 0xffffffff) = if state != SEND_ACK {
         0xffffffff
     } else if tx_ready && reply_index < 12 {
         crc32_byte(ack_crc, out_byte)
     } else {
         ack_crc
     };
-    set tx_valid = &(state == 3);
+    set tx_valid = &(state == SEND_ACK);
     set tx_byte = &out_byte;
-    set load_valid = &(state == 2);
+    set load_valid = &(state == COPY_PAYLOAD);
     set load_address = &((sector << 9) | zext(copy_index));
     set load_byte = &packet_byte;
     set armed = &arm;
