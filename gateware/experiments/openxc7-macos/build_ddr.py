@@ -41,11 +41,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", type=Path, default=DEFAULT_TOOLCHAIN)
     parser.add_argument(
-        "--output", type=Path, default=GATEWARE / "build/microsd-ddr-sd"
+        "--output", type=Path, help="Build directory (defaults to the selected transport)"
     )
     parser.add_argument("--seed", type=int, default=8, help="Placement seed (default: 8)")
+    parser.add_argument(
+        "--ethernet", action="store_true",
+        help="Use UDP image management instead of the UART image loader",
+    )
     args = parser.parse_args()
-    out = args.output.resolve()
+    project_name = "ethernet-diagnostic" if args.ethernet else "microsd-emulator"
+    default_output = "microsd-ddr-ethernet" if args.ethernet else "microsd-ddr-sd"
+    out = (args.output or GATEWARE / "build" / default_output).resolve()
     tc = args.toolchain.resolve()
     env = dict(os.environ)
     env["PYTHONHASHSEED"] = "0"
@@ -166,6 +172,9 @@ def main():
         xdc.append(
             f"set_property -dict {{ PACKAGE_PIN {pin} IOSTANDARD LVCMOS33{slew} }} [get_ports {{pmod[{i}]}}]"
         )
+    if args.ethernet:
+        ethernet_xdc = GATEWARE / "projects/ethernet-diagnostic/constraints/pins.xdc"
+        xdc.extend(ethernet_xdc.read_text().splitlines())
     (out / "board.xdc").write_text("\n".join(xdc) + "\n")
     cpu = (
         GATEWARE
@@ -173,7 +182,7 @@ def main():
     )
     if not cpu.exists():
         raise RuntimeError(f"Missing initialization CPU HDL: {cpu}")
-    project = GATEWARE / "projects/microsd-emulator"
+    project = GATEWARE / "projects" / project_name
     subprocess.run(["swim", "build"], cwd=project, env=env, check=True)
     hdl = f"{project}/build/spade.sv {GATEWARE}/lib/shared-components/verilog/fifo_v.v"
     # Register storage preserves the qualified FIFO and bank-command mappings.
@@ -186,12 +195,13 @@ def main():
         raise RuntimeError(f"Expected eight bank command memories, found {memories}")
     selection = " ".join("arty_ddr_bios/" + name for name in memories)
     cache_mapping += f'select -assert-count 8 {selection}; setattr -set ram_style "registers" {selection}; '
+    defines = "-D ETHERNET_SD" if args.ethernet else ""
     run(
         "synthesis",
         [
             str(tc / "bin/yosys"),
             "-p",
-            f"read_verilog -sv {source} {cpu} {wrapper} {hdl}; {cache_mapping}synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top board; check -assert; write_json design.json",
+            f"read_verilog -sv {defines} {source} {cpu} {wrapper} {hdl}; {cache_mapping}synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top board; check -assert; write_json design.json",
         ],
     )
 
@@ -262,6 +272,10 @@ def main():
             raise RuntimeError(f"Missing DDR controller timing constraint: {clocks}")
         if not any(v[2] == 200 for v in clocks.values()):
             raise RuntimeError(f"Missing 200 MHz IDELAY timing constraint: {clocks}")
+        if args.ethernet:
+            for name in ("eth_rx_global", "eth_tx_global"):
+                if name not in clocks or clocks[name][2] != 25:
+                    raise RuntimeError(f"Missing 25 MHz MII timing constraint: {clocks}")
         return seed, clocks
 
     selected_seed, clocks = route(args.seed)
@@ -278,6 +292,7 @@ def main():
         out / f"routed-seed-{selected_seed}.json",
         out / f"routed-seed-{selected_seed}.sdf",
         sys_clk_freq,
+        ethernet=args.ethernet,
     )
     (out / "cdc-timing.json").write_text(json.dumps(cdc_paths, indent=2) + "\n")
     output_paths = verify_direct_sd_outputs(
@@ -305,6 +320,7 @@ def main():
                 ).hexdigest(),
                 "negative_edge_timing_checked": True,
                 "with_sd": True,
+                "ethernet_sd": args.ethernet,
                 "fast_sd": True,
                 "native_fifo_registers": True,
                 "sd_io_slew": "FAST",

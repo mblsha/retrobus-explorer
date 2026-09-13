@@ -8,6 +8,7 @@ dependencies = [
 
 [tool.uv.workspace]
 members = [
+    "projects/ethernet-diagnostic",
     "projects/microsd-emulator",
     "projects/microsd-pin-tester",
     "projects/ft-uart-hex-bridge",

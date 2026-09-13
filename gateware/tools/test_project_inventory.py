@@ -23,6 +23,7 @@ EXPECTED_PATHS = (
     "projects/binary-counter",
     "projects/ws2812b",
     "projects/microsd-emulator",
+    "projects/ethernet-diagnostic",
 )
 
 

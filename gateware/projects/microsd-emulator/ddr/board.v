@@ -18,6 +18,12 @@ input wire clk, reset_button, usb_rx,
 output wire usb_tx,
 output wire [2:0] status,
 inout wire [7:0] pmod
+`ifdef ETHERNET_SD
+,input wire eth_rx_clk, eth_tx_clk, eth_rx_dv, eth_rxerr
+,input wire [3:0] eth_rxd
+,output wire [3:0] eth_txd
+,output wire eth_tx_en, eth_ref_clk, eth_rstn
+`endif
 );
 
 wire dclk,drst;
@@ -32,7 +38,18 @@ wire [127:0] fwdata,frdata;
 wire [15:0] fwmask;
 wire co,ce,armed;
 wire [3:0] dout,doe;
+`ifdef ETHERNET_SD
+wire eth_rx_global, eth_tx_global;
+BUFG eth_rx_buffer(.I(eth_rx_clk), .O(eth_rx_global));
+BUFG eth_tx_buffer(.I(eth_tx_clk), .O(eth_tx_global));
+network_ddr sd(
+.rx_clk(eth_rx_global), .tx_clk(eth_tx_global),
+.eth_rxd(eth_rxd), .eth_rx_dv(eth_rx_dv), .eth_rxerr(eth_rxerr),
+.eth_txd(eth_txd), .eth_tx_en(eth_tx_en),
+.eth_ref_clk(eth_ref_clk), .eth_rstn(eth_rstn),
+`else
 ddr_uart_100 sd(
+`endif
 .writable(1'b1),.dat_in({pmod[1],pmod[0],pmod[7],pmod[3]}),
 .clk(fclk),.rst(frst),.initialized(fast_passed[1]),.diagnostic_status(fast_status),.status_selector(sd_status_selector),.usb_rx(usb_rx),.usb_tx(sd_tx),
 .ddr_cmd_valid(fcv),.ddr_cmd_ready(fcr),.ddr_cmd_address(fa),.ddr_cmd_write(fcw),

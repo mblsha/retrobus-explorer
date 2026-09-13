@@ -130,3 +130,7 @@ The [microSD project](projects/microsd-emulator/README.md) provides a tested
 DDR-backed native SD card, with a separate [input-only pin probe](projects/microsd-pin-tester/README.md),
 [native macOS build tools](experiments/openxc7-macos/README.md), and
 [two microSD-Pmod PCB variants](../jitx-py/microsd-pmod-breakout/README.md).
+
+The [Ethernet image service](projects/ethernet-diagnostic/README.md) adds UDP
+upload, verified readback, and windowed downloads to the same DDR-backed card.
+It uses the onboard RJ45 and requires exclusive SD/network image ownership.

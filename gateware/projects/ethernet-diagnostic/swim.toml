@@ -1,0 +1,12 @@
+name = "ethernet_diagnostic"
+[libraries]
+shared_components = {path = "../../lib/shared-components"}
+microsd_emulator = {path = "../microsd-emulator"}
+[tooling]
+top = "network_ddr"
+test_module = "test_network_sd"
+[simulation]
+testbench_dir = "test"
+
+[verilog]
+sources = ["../../lib/shared-components/verilog/fifo_v.v"]
