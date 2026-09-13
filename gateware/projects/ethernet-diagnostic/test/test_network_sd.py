@@ -187,4 +187,20 @@ async def ethernet_sd_ethernet_roundtrip(d):
     assert [int.from_bytes(x[12:16], "little") for x in burst] == list(range(501, 509))
     for n, response in enumerate(burst):
         assert response[24:-4] == (changed + pending if n % 2 == 0 else pending)
+    # An SD read already admitted to the DDR stage must also drain after DISARM.
+    await exchange(packet(4, 12))
+    await host.init(writable=True)
+    allow[0] = False
+    before_read = dict(memory)
+    await host.command(17, 0)
+    await Timer(1000, units="ns")
+    assert int(d.read_pending.value)
+    await exchange(packet(5, 13))
+    await exchange(packet(3, 14, count=1), 4)
+    assert not int(d.network_owner.value)
+    allow[0] = True
+    await Timer(100000, units="ns")
+    reply = await exchange(packet(3, 15, count=1))
+    assert reply[24:536] == changed
+    assert memory == before_read
     model.kill()

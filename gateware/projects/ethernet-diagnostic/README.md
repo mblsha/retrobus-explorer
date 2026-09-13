@@ -181,3 +181,14 @@ See [wire protocol and bulk reads](PROTOCOL.md) and
 fragmentation, IPv4 options, routing, or half-duplex collision handling. Timing
 checks bound internal clocks and specified crossings; they are not a complete
 external MII setup/hold or signal-integrity qualification.
+
+### PHY reset boundary
+
+The fabric holds MAC reset for 200 ms at startup. RX rising-edge and TX
+falling-edge logic each use the shared two-stage reset conditioner: assertion
+is immediate and release waits for two edges of that local clock. Each PHY
+clock must run while reset is held so its release chain is loaded. If a clock
+is absent throughout startup, hold BTN0 until both PHY clocks are running;
+this design does not detect a stopped PHY clock. Simulation covers delayed
+clock start, reassertion, and release near both sides of a clock edge. These
+checks do not model metastability or replace physical reset/CDC analysis.
