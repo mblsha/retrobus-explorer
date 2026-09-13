@@ -33,31 +33,50 @@ pub entity network_frontend(
     set phy_ref = &divider.to_bits()[1];
     set phy_rst_n = &(startup >= 1_000_000 && !rst);
     let local_rst = rst || startup != 20_000_000;
-    let (ra, ra_w): (&uint<11>, inv &uint<11>) = port;
-    let (rd, rd_w): (&uint<8>, inv &uint<8>) = port;
-    let (rl, rl_w): (&uint<11>, inv &uint<11>) = port;
-    let (rv, rv_w): (&bool, inv &bool) = port;
-    let (rc, rc_w): (&bool, inv &bool) = port;
-    let (tw, tw_w): (&bool, inv &bool) = port;
-    let (ta, ta_w): (&uint<11>, inv &uint<11>) = port;
-    let (td, td_w): (&uint<8>, inv &uint<8>) = port;
-    let (tl, tl_w): (&uint<11>, inv &uint<11>) = port;
-    let (ts, ts_w): (&bool, inv &bool) = port;
-    let (tr, tr_w): (&bool, inv &bool) = port;
-    let (aq, aq_w): (&bool, inv &bool) = port;
-    let (al, al_w): (&uint<11>, inv &uint<11>) = port;
-    let (aa, aa_w): (&uint<10>, inv &uint<10>) = port;
-    let (ad, ad_w): (&uint<8>, inv &uint<8>) = port;
-    let (aw, aw_w): (&bool, inv &bool) = port;
-    let (wa, wa_w): (&uint<11>, inv &uint<11>) = port;
-    let (wd, wd_w): (&uint<8>, inv &uint<8>) = port;
-    let (done, done_w): (&bool, inv &bool) = port;
-    let (length, length_w): (&uint<11>, inv &uint<11>) = port;
-    let _ = inst mac::frame_receiver(rx_clk, clk, local_rst, rxd, rx_dv, rx_er, *rc, *ra, rd_w, rv_w, rl_w);
-    let _ = inst mac::frame_transmitter(clk, tx_clk, local_rst, *tw, *ta, *td, *tl, *ts, tr_w, txd, tx_en);
-    let _ = inst network::network_engine(clk, local_rst, *rv, *rl, ra_w, *rd, rc_w,
-        *tr, tw_w, ta_w, td_w, ts_w, tl_w, aq_w, al_w, *aa, ad_w, *aw, *wa, *wd, *done, *length);
-    let _ = inst blocks::block_service(clk, local_rst, initialized, sd_quiescent, *aq, *al, aa_w, *ad,
-        aw_w, wa_w, wd_w, done_w, length_w, memory_request, memory_write, memory_lba,
-        memory_count, memory_write_index, memory_write_data, memory_read_valid, memory_read_index, memory_read_data, memory_done, memory_error, armed);
+    let (rx_read_address, rx_read_address_w): (&uint<11>, inv &uint<11>) = port;
+    let (rx_read_data, rx_read_data_w): (&uint<8>, inv &uint<8>) = port;
+    let (rx_length, rx_length_w): (&uint<11>, inv &uint<11>) = port;
+    let (rx_available, rx_available_w): (&bool, inv &bool) = port;
+    let (rx_consume, rx_consume_w): (&bool, inv &bool) = port;
+    let (tx_write, tx_write_w): (&bool, inv &bool) = port;
+    let (tx_write_address, tx_write_address_w): (&uint<11>, inv &uint<11>) = port;
+    let (tx_write_data, tx_write_data_w): (&uint<8>, inv &uint<8>) = port;
+    let (tx_length, tx_length_w): (&uint<11>, inv &uint<11>) = port;
+    let (tx_submit, tx_submit_w): (&bool, inv &bool) = port;
+    let (tx_ready, tx_ready_w): (&bool, inv &bool) = port;
+    let (app_request, app_request_w): (&bool, inv &bool) = port;
+    let (app_request_length, app_request_length_w): (&uint<11>, inv &uint<11>) = port;
+    let (app_read_address, app_read_address_w): (&uint<10>, inv &uint<10>) = port;
+    let (app_read_data, app_read_data_w): (&uint<8>, inv &uint<8>) = port;
+    let (app_reply_write, app_reply_write_w): (&bool, inv &bool) = port;
+    let (app_reply_address, app_reply_address_w): (&uint<11>, inv &uint<11>) = port;
+    let (app_reply_data, app_reply_data_w): (&uint<8>, inv &uint<8>) = port;
+    let (app_reply_done, app_reply_done_w): (&bool, inv &bool) = port;
+    let (app_reply_length, app_reply_length_w): (&uint<11>, inv &uint<11>) = port;
+    let _ = inst mac::frame_receiver(
+        rx_clk, clk, local_rst,
+        rxd, rx_dv, rx_er,
+        *rx_consume, *rx_read_address, rx_read_data_w, rx_available_w, rx_length_w,
+    );
+    let _ = inst mac::frame_transmitter(
+        clk, tx_clk, local_rst,
+        *tx_write, *tx_write_address, *tx_write_data, *tx_length, *tx_submit,
+        tx_ready_w, txd, tx_en,
+    );
+    let _ = inst network::network_engine(
+        clk, local_rst,
+        *rx_available, *rx_length, rx_read_address_w, *rx_read_data, rx_consume_w,
+        *tx_ready, tx_write_w, tx_write_address_w, tx_write_data_w, tx_submit_w, tx_length_w,
+        app_request_w, app_request_length_w, *app_read_address, app_read_data_w,
+        *app_reply_write, *app_reply_address, *app_reply_data, *app_reply_done, *app_reply_length,
+    );
+    let _ = inst blocks::block_service(
+        clk, local_rst, initialized, sd_quiescent,
+        *app_request, *app_request_length, app_read_address_w, *app_read_data,
+        app_reply_write_w, app_reply_address_w, app_reply_data_w, app_reply_done_w, app_reply_length_w,
+        memory_request, memory_write, memory_lba, memory_count,
+        memory_write_index, memory_write_data,
+        memory_read_valid, memory_read_index, memory_read_data, memory_done, memory_error,
+        armed,
+    );
 }

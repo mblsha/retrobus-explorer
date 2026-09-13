@@ -3,7 +3,7 @@ import random
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
-from test_write_rx import crc_bit
+from sd_support import crc_bit
 
 
 @cocotb.test()

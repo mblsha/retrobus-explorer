@@ -2,7 +2,7 @@ import cocotb
 import os
 from cocotb_helpers import start_clock, tick
 from microsd_image import packet, decode_ack
-from test_sd import Host
+from sd_support import Host
 
 
 async def upload(d, raw):

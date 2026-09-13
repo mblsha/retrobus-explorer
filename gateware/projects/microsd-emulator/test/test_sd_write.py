@@ -4,54 +4,10 @@ import random
 
 import cocotb
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
-from test_sd import setup
-from test_write_rx import crc_bit
+from sd_support import setup
 
 
-async def send_packet(
-    h, wide, seed, corrupt=False, wait_complete=True, expect_response=True
-):
-    d = h.d
-    data = bytes((i * 37 + seed) & 255 for i in range(512))
-    d.dat_in.value = 0 if wide else 14
-    assert not (await h.cycle())[2]
-    crcs = [0] * (4 if wide else 1)
-    for byte in data:
-        for shift in range(4, -1, -4) if wide else range(7, -1, -1):
-            val = (byte >> shift) & (15 if wide else 1)
-            for lane in range(len(crcs)):
-                crcs[lane] = crc_bit(crcs[lane], (val >> lane) & 1)
-            d.dat_in.value = val if wide else val | 14
-            assert not (await h.cycle())[2], "DAT contention during host packet"
-    for shift in range(15, -1, -1):
-        val = sum(((crc >> shift) & 1) << lane for lane, crc in enumerate(crcs))
-        if corrupt and shift == 5:
-            val ^= 1
-        d.dat_in.value = val if wide else val | 14
-        assert not (await h.cycle())[2]
-    d.dat_in.value = 15
-    await h.cycle()
-    if not expect_response:
-        for _ in range(100):
-            assert not (await h.cycle())[2], "unexpected response beyond card capacity"
-        return data
-    token = []
-    # Keep a 100 us commit allowance as the SD clock changes; 100 clocks
-    # at 10 MHz would expire before the ~14 us sector commit can finish.
-    for _ in range(max(100, int(100_000 // (2 * h.half_ns)))):
-        _, _, oe, val = await h.cycle()
-        if oe:
-            assert oe == 1
-            token.append(val & 1)
-        if len(token) >= 5 and not oe:
-            break
-        if len(token) == 5 and not wait_complete:
-            break
-    else:
-        assert False, "CRC/busy response did not finish"
-    assert token[:5] == ([0, 1, 0, 1, 1] if corrupt else [0, 0, 1, 0, 1])
-    assert token[-1] == 1
-    return data
+from sd_support import send_packet
 
 
 @cocotb.test()

@@ -3,7 +3,7 @@ use shared_components::sd::crc32_byte;
 
 // RBS1 request / RBA1 reply: opcode, status, two reserved bytes, session,
 // sequence, LBA, count (all u32 LE), 512 data bytes, CRC32 over bytes 0..535.
-// Stop-and-wait: cache the last ordered reply, including read data. A duplicate
+// Stop-and-wait: cache the last ordered reply, including read data. A is_exact_retry
 // must match the request CRC; it never re-executes a memory/control operation.
 #[no_mangle(all)]
 pub entity block_service(
@@ -33,21 +33,54 @@ pub entity block_service(
     memory_error: bool,
     armed: inv &bool,
 ) {
-    // State encoding is kept explicit for the byte-memory read latency:
-    // 0 idle; 1 address; 2 capture; 3 validate; 4 dispatch; 5 DDR transfer;
-    // 6 reply address; 11 reply register; 7 emit; 9 complete; 10 reject length;
-    // 8 wait for the caller to release its request.
-    decl state, index, crc, saved_status, session, next_sequence, last_sequence, last_crc, cached, arm, loaded, expected;
-    let capture = state == 2;
-    reg(clk) compact reset(rst: false) = if state == 0 { request_length == 28 } else { compact };
-    let input_length: uint<11> = if compact { 28 } else { 540 };
+    // Keep these encodings and address/capture stages: they preserve RAM latency.
+    let IDLE: uint<4> = 0;
+    let REQUEST_ADDRESS: uint<4> = 1;
+    let REQUEST_CAPTURE: uint<4> = 2;
+    let VALIDATE_REQUEST: uint<4> = 3;
+    let DISPATCH: uint<4> = 4;
+    let DDR_TRANSFER: uint<4> = 5;
+    let REPLY_ADDRESS: uint<4> = 6;
+    let REPLY_EMIT: uint<4> = 7;
+    let WAIT_REQUEST_RELEASE: uint<4> = 8;
+    let COMPLETE: uint<4> = 9;
+    let REJECT_LENGTH: uint<4> = 10;
+    let REPLY_REGISTER: uint<4> = 11;
+
+    let OP_BEGIN: uint<8> = 1;
+    let OP_WRITE: uint<8> = 2;
+    let OP_READ: uint<8> = 3;
+    let OP_ARM: uint<8> = 4;
+    let OP_DISARM: uint<8> = 5;
+    let OP_STATUS: uint<8> = 6;
+    let OP_BULK_READ: uint<8> = 7;
+
+    let STATUS_OK: uint<8> = 0;
+    let STATUS_BAD_FORMAT: uint<8> = 1;
+    let STATUS_BAD_SESSION: uint<8> = 2;
+    let STATUS_BAD_SEQUENCE: uint<8> = 3;
+    let STATUS_IMAGE_BUSY: uint<8> = 4;
+    let STATUS_BAD_RANGE: uint<8> = 5;
+    let STATUS_NOT_INITIALIZED: uint<8> = 6;
+    let STATUS_MEMORY_ERROR: uint<8> = 7;
+    let STATUS_INCOMPLETE_IMAGE: uint<8> = 8;
+    let STATUS_CONFLICTING_RETRY: uint<8> = 9;
+    let SECTOR_CAPACITY: uint<32> = 524288;
+    let LAST_SECTOR: uint<32> = 524287;
+    let REQUEST_BYTES: uint<11> = 540;
+    let COMPACT_BYTES: uint<11> = 28;
+
+    decl state, index, crc, saved_status, session, next_sequence, last_sequence, last_crc, cached, arm, written_sectors, declared_sectors;
+    let capture = state == REQUEST_CAPTURE;
+    reg(clk) compact reset(rst: false) = if state == IDLE { request_length == COMPACT_BYTES } else { compact };
+    let input_length: uint<11> = if compact { COMPACT_BYTES } else { REQUEST_BYTES };
     reg(clk) header: uint<192> reset(rst: 0) = if capture && index < 24 { (header >> 8) | (zext(request_data) << 184) } else { header };
-    reg(clk) crc: uint<32> reset(rst: 0xffffffff) = if state == 0 { 0xffffffff }
+    reg(clk) crc: uint<32> reset(rst: 0xffffffff) = if state == IDLE { 0xffffffff }
         else if capture && index < input_length -. 4 { crc32_byte(crc, request_data) } else { crc };
     reg(clk) expected_crc: uint<32> reset(rst: 0) = if capture && index >= input_length -. 4 { (expected_crc >> 8) | (zext(request_data) << 24) } else { expected_crc };
     let payload: Memory<uint<8>, 512> = inst clocked_memory(clk, [(capture && index >= 24 && index < input_length -. 4, trunc(index -. 24), request_data)]);
     reg(clk) write_byte = inst read_memory(payload, memory_write_index);
-    let returned: Memory<uint<8>, 1024> = inst clocked_memory(clk, [(state == 5 && memory_read_valid, memory_read_index, memory_read_data)]);
+    let returned: Memory<uint<8>, 1024> = inst clocked_memory(clk, [(state == DDR_TRANSFER && memory_read_valid, memory_read_index, memory_read_data)]);
     reg(clk) read_byte = inst read_memory(returned, trunc(index -. 24));
     let opcode: uint<8> = trunc(header >> 32);
     let requested_session: uint<32> = trunc(header >> 64);
@@ -55,82 +88,83 @@ pub entity block_service(
     let lba: uint<32> = trunc(header >> 128);
     let count: uint<32> = trunc(header >> 160);
     let format_ok = trunc::<uint<192>, uint<32>>(header) == 0x31534252 &&
-        trunc::<uint<192>, uint<24>>(header >> 40) == 0 && opcode >= 1 && opcode <= 7 && (!compact || opcode == 7) && expected_crc == (crc ^ 0xffffffff);
-    let bulk = opcode == 7;
-    let read_operation = opcode == 3 || bulk;
+        trunc::<uint<192>, uint<24>>(header >> 40) == 0 && opcode >= OP_BEGIN && opcode <= OP_BULK_READ && (!compact || opcode == OP_BULK_READ) && expected_crc == (crc ^ 0xffffffff);
+    let bulk = opcode == OP_BULK_READ;
+    let read_operation = opcode == OP_READ || bulk;
     // Freeze reply size before DDR starts; avoid a count/status decode on every byte.
-    reg(clk) long_reply reset(rst: false) = if state == 4 { bulk && count == 2 && saved_status == 0 }
-        else if state == 5 && memory_done && memory_error { false } else { long_reply };
+    reg(clk) long_reply reset(rst: false) = if state == DISPATCH { bulk && count == 2 && saved_status == STATUS_OK }
+        else if state == DDR_TRANSFER && memory_done && memory_error { false } else { long_reply };
     let payload_bytes: uint<11> = if long_reply { 1024 } else { 512 };
-    let response_length: uint<11> = payload_bytes +. 28;
+    let response_length: uint<11> = payload_bytes +. COMPACT_BYTES;
     let same_key = !bulk && cached && requested_session == session && sequence == last_sequence;
-    let duplicate = format_ok && same_key && expected_crc == last_crc;
-    let new_session = opcode == 1 && requested_session != 0 && requested_session != session && sequence == 0;
-    let ordered = (new_session && !arm && initialized && count >= 1 && count <= 524288) ||
-        (opcode != 1 && !bulk && requested_session == session && session != 0 && sequence == next_sequence);
-    let status: uint<8> = if !format_ok { 1 }
-        else if same_key && !duplicate { 9 }
-        else if opcode == 1 && arm { 4 }
-        else if !initialized { 6 }
-        else if bulk && (requested_session != session || session == 0) { 2 }
-        else if !ordered && !bulk { if requested_session != session { 2 } else { 3 } }
-        else if (opcode == 2 || read_operation) && (arm || !sd_quiescent) { 4 }
-        else if (opcode == 2 || read_operation) && (lba >= 524288 || (if bulk { count < 1 || count > 2 || (count == 2 && lba == 524287) } else { count != 1 })) { 5 }
-        else if opcode == 2 && (lba != loaded || loaded >= expected) { 5 }
-        else if opcode == 4 && (loaded != expected || expected == 0 || !sd_quiescent) { 8 }
-        else { 0 };
-    reg(clk) replay reset(rst: false) = if state == 3 { duplicate } else { replay };
-    reg(clk) save_reply reset(rst: false) = if state == 3 { format_ok && ordered && !same_key } else { save_reply };
-    reg(clk) saved_status: uint<8> reset(rst: 0) = if state == 0 && request_length != 540 { 1 }
-        else if state == 3 { status } else if state == 5 && memory_done && memory_error { 7 } else { saved_status };
-    reg(clk) arm reset(rst: false) = if state == 4 && saved_status == 0 && !replay {
-        if opcode == 4 { true } else if opcode == 1 || opcode == 5 { false } else { arm }
+    let is_exact_retry = format_ok && same_key && expected_crc == last_crc;
+    let is_new_session = opcode == OP_BEGIN && requested_session != 0 && requested_session != session && sequence == 0;
+    let has_expected_sequence = requested_session == session && session != 0 && sequence == next_sequence;
+    let admitted_ordered_request = (is_new_session && !arm && initialized && count >= 1 && count <= SECTOR_CAPACITY) ||
+        (opcode != OP_BEGIN && !bulk && has_expected_sequence);
+    let status: uint<8> = if !format_ok { STATUS_BAD_FORMAT }
+        else if same_key && !is_exact_retry { STATUS_CONFLICTING_RETRY }
+        else if opcode == OP_BEGIN && arm { STATUS_IMAGE_BUSY }
+        else if !initialized { STATUS_NOT_INITIALIZED }
+        else if bulk && (requested_session != session || session == 0) { STATUS_BAD_SESSION }
+        else if !admitted_ordered_request && !bulk { if requested_session != session { STATUS_BAD_SESSION } else { STATUS_BAD_SEQUENCE } }
+        else if (opcode == OP_WRITE || read_operation) && (arm || !sd_quiescent) { STATUS_IMAGE_BUSY }
+        else if (opcode == OP_WRITE || read_operation) && (lba >= SECTOR_CAPACITY || (if bulk { count < 1 || count > 2 || (count == 2 && lba == LAST_SECTOR) } else { count != 1 })) { STATUS_BAD_RANGE }
+        else if opcode == OP_WRITE && (lba != written_sectors || written_sectors >= declared_sectors) { STATUS_BAD_RANGE }
+        else if opcode == OP_ARM && (written_sectors != declared_sectors || declared_sectors == 0 || !sd_quiescent) { STATUS_INCOMPLETE_IMAGE }
+        else { STATUS_OK };
+    reg(clk) replay reset(rst: false) = if state == VALIDATE_REQUEST { is_exact_retry } else { replay };
+    reg(clk) cache_this_reply reset(rst: false) = if state == VALIDATE_REQUEST { format_ok && admitted_ordered_request && !same_key } else { cache_this_reply };
+    reg(clk) saved_status: uint<8> reset(rst: STATUS_OK) = if state == IDLE && request_length != REQUEST_BYTES { STATUS_BAD_FORMAT }
+        else if state == VALIDATE_REQUEST { status } else if state == DDR_TRANSFER && memory_done && memory_error { STATUS_MEMORY_ERROR } else { saved_status };
+    reg(clk) arm reset(rst: false) = if state == DISPATCH && saved_status == STATUS_OK && !replay {
+        if opcode == OP_ARM { true } else if opcode == OP_BEGIN || opcode == OP_DISARM { false } else { arm }
     } else { arm };
-    reg(clk) session: uint<32> reset(rst: 0) = if state == 4 && opcode == 1 && saved_status == 0 && !replay { requested_session } else { session };
-    reg(clk) expected: uint<32> reset(rst: 0) = if state == 4 && opcode == 1 && saved_status == 0 && !replay { count } else { expected };
-    reg(clk) loaded: uint<32> reset(rst: 0) = if state == 4 && opcode == 1 && saved_status == 0 && !replay { 0 }
-        else if state == 5 && memory_done && !memory_error && opcode == 2 { loaded +. 1 } else { loaded };
-    reg(clk) cached reset(rst: false) = if state == 9 && save_reply { true } else { cached };
-    reg(clk) next_sequence: uint<32> reset(rst: 1) = if state == 9 && save_reply { sequence +. 1 } else { next_sequence };
-    reg(clk) last_sequence: uint<32> reset(rst: 0) = if state == 9 && save_reply { sequence } else { last_sequence };
-    reg(clk) last_crc: uint<32> reset(rst: 0) = if state == 9 && save_reply { expected_crc } else { last_crc };
-    reg(clk) state: uint<4> reset(rst: 0) = {
-        if state == 0 && request { if request_length == 540 || request_length == 28 { 1 } else { 10 } }
-        else if state == 1 { 2 }
-        else if state == 2 { if index == input_length -. 1 { 3 } else { 1 } }
-        else if state == 3 { 4 }
-        else if state == 4 { if !replay && saved_status == 0 && (opcode == 2 || read_operation) { 5 } else { 6 } }
-        else if state == 5 && memory_done { 6 }
-        else if state == 6 { 11 }
-        else if state == 11 { 7 }
-        else if state == 7 { if index == response_length -. 1 { 9 } else { 6 } }
-        else if state == 9 || state == 10 { 8 }
-        else if state == 8 && !request { 0 }
+    reg(clk) session: uint<32> reset(rst: 0) = if state == DISPATCH && opcode == OP_BEGIN && saved_status == STATUS_OK && !replay { requested_session } else { session };
+    reg(clk) declared_sectors: uint<32> reset(rst: 0) = if state == DISPATCH && opcode == OP_BEGIN && saved_status == STATUS_OK && !replay { count } else { declared_sectors };
+    reg(clk) written_sectors: uint<32> reset(rst: 0) = if state == DISPATCH && opcode == OP_BEGIN && saved_status == STATUS_OK && !replay { 0 }
+        else if state == DDR_TRANSFER && memory_done && !memory_error && opcode == OP_WRITE { written_sectors +. 1 } else { written_sectors };
+    reg(clk) cached reset(rst: false) = if state == COMPLETE && cache_this_reply { true } else { cached };
+    reg(clk) next_sequence: uint<32> reset(rst: 1) = if state == COMPLETE && cache_this_reply { sequence +. 1 } else { next_sequence };
+    reg(clk) last_sequence: uint<32> reset(rst: 0) = if state == COMPLETE && cache_this_reply { sequence } else { last_sequence };
+    reg(clk) last_crc: uint<32> reset(rst: 0) = if state == COMPLETE && cache_this_reply { expected_crc } else { last_crc };
+    reg(clk) state: uint<4> reset(rst: IDLE) = {
+        if state == IDLE && request { if request_length == REQUEST_BYTES || request_length == COMPACT_BYTES { REQUEST_ADDRESS } else { REJECT_LENGTH } }
+        else if state == REQUEST_ADDRESS { REQUEST_CAPTURE }
+        else if state == REQUEST_CAPTURE { if index == input_length -. 1 { VALIDATE_REQUEST } else { REQUEST_ADDRESS } }
+        else if state == VALIDATE_REQUEST { DISPATCH }
+        else if state == DISPATCH { if !replay && saved_status == STATUS_OK && (opcode == OP_WRITE || read_operation) { DDR_TRANSFER } else { REPLY_ADDRESS } }
+        else if state == DDR_TRANSFER && memory_done { REPLY_ADDRESS }
+        else if state == REPLY_ADDRESS { REPLY_REGISTER }
+        else if state == REPLY_REGISTER { REPLY_EMIT }
+        else if state == REPLY_EMIT { if index == response_length -. 1 { COMPLETE } else { REPLY_ADDRESS } }
+        else if state == COMPLETE || state == REJECT_LENGTH { WAIT_REQUEST_RELEASE }
+        else if state == WAIT_REQUEST_RELEASE && !request { IDLE }
         else { state }
     };
-    reg(clk) index: uint<11> reset(rst: 0) = if state == 0 || state == 3 || state == 4 || state == 5 { 0 }
-        else if state == 2 || state == 7 { index +. 1 } else { index };
+    reg(clk) index: uint<11> reset(rst: 0) = if state == IDLE || state == VALIDATE_REQUEST || state == DISPATCH || state == DDR_TRANSFER { 0 }
+        else if state == REQUEST_CAPTURE || state == REPLY_EMIT { index +. 1 } else { index };
     let reply_header: uint<192> = (header & 0xffffffffffffffffffffffffffffffff0000000000000000) |
         zext::<32, 192>(0x31414252) | (zext(opcode) << 32) | (zext(saved_status) << 40);
     decl out_byte;
-    let cache: Memory<uint<8>, 2048> = inst clocked_memory(clk, [(state == 7 && save_reply && !replay, index, out_byte)]);
+    let cache: Memory<uint<8>, 2048> = inst clocked_memory(clk, [(state == REPLY_EMIT && cache_this_reply && !replay, index, out_byte)]);
     reg(clk) cached_byte = inst read_memory(cache, index);
-    reg(clk) reply_crc: uint<32> reset(rst: 0xffffffff) = if state != 6 && state != 7 && state != 11 { 0xffffffff }
-        else if state == 7 && index < response_length -. 4 { crc32_byte(reply_crc, out_byte) } else { reply_crc };
+    reg(clk) reply_crc: uint<32> reset(rst: 0xffffffff) = if state != REPLY_ADDRESS && state != REPLY_EMIT && state != REPLY_REGISTER { 0xffffffff }
+        else if state == REPLY_EMIT && index < response_length -. 4 { crc32_byte(reply_crc, out_byte) } else { reply_crc };
     let selected_byte: uint<8> = if replay { cached_byte }
         else if index < 24 { trunc(reply_header >> (zext::<11, 192>(index) << 3)) }
-        else if index < response_length -. 4 { if read_operation && saved_status == 0 { read_byte } else { 0 } }
+        else if index < response_length -. 4 { if read_operation && saved_status == STATUS_OK { read_byte } else { 0 } }
         else { trunc((reply_crc ^ 0xffffffff) >> (zext::<11, 32>(index -. (response_length -. 4)) << 3)) };
     // Separate variable header-byte selection from the CRC feedback path.
-    reg(clk) out_byte: uint<8> reset(rst: 0) = if state == 11 { selected_byte } else { out_byte };
+    reg(clk) out_byte: uint<8> reset(rst: 0) = if state == REPLY_REGISTER { selected_byte } else { out_byte };
     set request_address = &trunc(index);
-    set reply_write = &(state == 7);
+    set reply_write = &(state == REPLY_EMIT);
     set reply_address = &index;
     set reply_data = &out_byte;
-    set reply_done = &(state == 9 || state == 10);
-    set reply_length = &(if state == 10 { 0 } else { response_length });
-    set memory_request = &(state == 5);
-    set memory_write = &(opcode == 2);
+    set reply_done = &(state == COMPLETE || state == REJECT_LENGTH);
+    set reply_length = &(if state == REJECT_LENGTH { 0 } else { response_length });
+    set memory_request = &(state == DDR_TRANSFER);
+    set memory_write = &(opcode == OP_WRITE);
     set memory_lba = &lba;
     set memory_count = &(if long_reply { 2 } else { 1 });
     set memory_write_data = &write_byte;

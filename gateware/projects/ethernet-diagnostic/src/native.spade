@@ -30,55 +30,65 @@ pub entity network_native(
     wdata: inv &uint<128>,
     wdata_mask: inv &uint<16>,
 ) {
-    // 0 idle; 11 validate captured address; 1 read command; 2 read data; 3 serialize; 6 write-byte address;
-    // 7 gather byte; 4 independent write handshakes; 8 done; 9 bounds error;
-    // 10 wait for request release. Gaps preserve the original state encoding.
+    // Keep these encodings and address/capture stages: they preserve RAM latency.
+    let IDLE: uint<4> = 0;
+    let READ_COMMAND: uint<4> = 1;
+    let READ_DATA: uint<4> = 2;
+    let SERIALIZE_READ: uint<4> = 3;
+    let WRITE_HANDSHAKES: uint<4> = 4;
+    let WRITE_BYTE_ADDRESS: uint<4> = 6;
+    let GATHER_WRITE_BYTE: uint<4> = 7;
+    let COMPLETE: uint<4> = 8;
+    let BOUNDS_ERROR: uint<4> = 9;
+    let WAIT_REQUEST_RELEASE: uint<4> = 10;
+    let VALIDATE_ADDRESS: uint<4> = 11;
+
     decl state, word_index, byte_index, command_sent, data_sent;
-    let start = state == 0 && request && enabled;
+    let start = state == IDLE && request && enabled;
     reg(clk) saved_lba: uint<32> reset(rst: 0) = if start { lba } else { saved_lba };
     reg(clk) two_sectors reset(rst: false) = if start { !write && count == 2 } else { two_sectors };
     reg(clk) writing reset(rst: false) = if start { write } else { writing };
-    let write_complete = state == 4 && (command_sent || cmd_ready) && (data_sent || wdata_ready);
-    reg(clk) state: uint<4> reset(rst: 0) = {
+    let write_complete = state == WRITE_HANDSHAKES && (command_sent || cmd_ready) && (data_sent || wdata_ready);
+    reg(clk) state: uint<4> reset(rst: IDLE) = {
         // Capture the request before checking bounds. This keeps the wide
         // address comparison out of the ownership-enable path; no native DDR
         // command or data is issued during this validation cycle.
-        if start { 11 }
-        else if state == 11 {
-            if saved_lba >= 524288 || (two_sectors && saved_lba == 524287) { 9 }
-            else if writing { 6 } else { 1 }
+        if start { VALIDATE_ADDRESS }
+        else if state == VALIDATE_ADDRESS {
+            if saved_lba >= 524288 || (two_sectors && saved_lba == 524287) { BOUNDS_ERROR }
+            else if writing { WRITE_BYTE_ADDRESS } else { READ_COMMAND }
         }
-        else if state == 1 && cmd_ready { 2 }
-        else if state == 2 && rdata_valid { 3 }
-        else if state == 3 && byte_index == 15 { if word_index == (if two_sectors { 63 } else { 31 }) { 8 } else { 1 } }
-        else if state == 6 { 7 }
-        else if state == 7 { if byte_index == 15 { 4 } else { 6 } }
-        else if write_complete { if word_index == 31 { 8 } else { 6 } }
-        else if state == 8 || state == 9 { 10 }
-        else if state == 10 && !request { 0 }
+        else if state == READ_COMMAND && cmd_ready { READ_DATA }
+        else if state == READ_DATA && rdata_valid { SERIALIZE_READ }
+        else if state == SERIALIZE_READ && byte_index == 15 { if word_index == (if two_sectors { 63 } else { 31 }) { COMPLETE } else { READ_COMMAND } }
+        else if state == WRITE_BYTE_ADDRESS { GATHER_WRITE_BYTE }
+        else if state == GATHER_WRITE_BYTE { if byte_index == 15 { WRITE_HANDSHAKES } else { WRITE_BYTE_ADDRESS } }
+        else if write_complete { if word_index == 31 { COMPLETE } else { WRITE_BYTE_ADDRESS } }
+        else if state == COMPLETE || state == BOUNDS_ERROR { WAIT_REQUEST_RELEASE }
+        else if state == WAIT_REQUEST_RELEASE && !request { IDLE }
         else { state }
     };
     reg(clk) word_index: uint<6> reset(rst: 0) = if start { 0 }
-        else if (state == 3 && byte_index == 15) || write_complete { word_index +. 1 } else { word_index };
+        else if (state == SERIALIZE_READ && byte_index == 15) || write_complete { word_index +. 1 } else { word_index };
     reg(clk) byte_index: uint<4> reset(rst: 0) = if start || write_complete { 0 }
-        else if state == 3 || state == 7 { byte_index +. 1 } else { byte_index };
-    reg(clk) word: uint<128> reset(rst: 0) = if state == 2 && rdata_valid { rdata }
-        else if state == 7 { (word >> 8) | (zext(write_data) << 120) } else { word };
-    reg(clk) command_sent reset(rst: false) = if state != 4 { false } else { command_sent || cmd_ready };
-    reg(clk) data_sent reset(rst: false) = if state != 4 { false } else { data_sent || wdata_ready };
+        else if state == SERIALIZE_READ || state == GATHER_WRITE_BYTE { byte_index +. 1 } else { byte_index };
+    reg(clk) word: uint<128> reset(rst: 0) = if state == READ_DATA && rdata_valid { rdata }
+        else if state == GATHER_WRITE_BYTE { (word >> 8) | (zext(write_data) << 120) } else { word };
+    reg(clk) command_sent reset(rst: false) = if state != WRITE_HANDSHAKES { false } else { command_sent || cmd_ready };
+    reg(clk) data_sent reset(rst: false) = if state != WRITE_HANDSHAKES { false } else { data_sent || wdata_ready };
     let offset: uint<10> = (zext(word_index) << 4) | zext(byte_index);
     set write_index = &trunc(offset);
-    set read_valid = &(state == 3);
+    set read_valid = &(state == SERIALIZE_READ);
     set read_index = &offset;
     set read_data = &trunc(word >> (zext::<4, 128>(byte_index) << 3));
-    set done = &(state == 8 || state == 9);
-    set error = &(state == 9);
-    set busy = &(state != 0 && state != 10);
-    set cmd_valid = &(state == 1 || (state == 4 && !command_sent));
+    set done = &(state == COMPLETE || state == BOUNDS_ERROR);
+    set error = &(state == BOUNDS_ERROR);
+    set busy = &(state != IDLE && state != WAIT_REQUEST_RELEASE);
+    set cmd_valid = &(state == READ_COMMAND || (state == WRITE_HANDSHAKES && !command_sent));
     set cmd_address = &((trunc::<uint<32>, uint<24>>(saved_lba) << 5) +. zext(word_index));
     set cmd_write = &writing;
-    set rdata_ready = &(state == 2);
-    set wdata_valid = &(state == 4 && !data_sent);
+    set rdata_ready = &(state == READ_DATA);
+    set wdata_valid = &(state == WRITE_HANDSHAKES && !data_sent);
     set wdata = &word;
     set wdata_mask = &0xffff;
 }

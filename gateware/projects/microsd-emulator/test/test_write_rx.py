@@ -3,8 +3,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 
-def crc_bit(crc, bit):
-    return ((crc << 1) ^ (0x1021 if ((crc >> 15) ^ bit) & 1 else 0)) & 65535
+from sd_support import crc_bit
 
 
 @cocotb.test()
