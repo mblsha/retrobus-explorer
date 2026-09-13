@@ -2,6 +2,9 @@
 """Reliable UDP image upload/download and exclusive SD ownership control."""
 
 import argparse
+import fcntl
+import os
+import tempfile
 from dataclasses import dataclass
 from enum import IntEnum
 import hashlib
@@ -32,6 +35,11 @@ class Opcode(IntEnum):
     DISARM = 5
     STATUS = 6
     BULK_READ = 7
+
+
+ORDERED_OPCODES = frozenset(
+    (Opcode.WRITE, Opcode.READ, Opcode.ARM, Opcode.DISARM, Opcode.STATUS)
+)
 
 
 STATUS_MESSAGES = {
@@ -112,24 +120,44 @@ class Images:
     def __init__(
         self, host="192.168.10.2", source="192.168.10.1", state=None, timeout=0.5
     ):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.bind((source, 0))
-        self.socket.connect((host, 4000))
-        self.socket.settimeout(timeout)
         self.state_path = Path(state) if state else None
-        self.session, self.sequence = 0, 0
-        self.last_request = None
-        self.pending = None
-        if self.state_path and self.state_path.exists():
-            saved = json.loads(self.state_path.read_text())
-            if saved["host"] != host:
-                raise ValueError("State belongs to another FPGA address")
-            self.session, self.sequence = saved["session"], saved["sequence"]
-            self.pending = (
-                bytes.fromhex(saved["pending"]) if saved.get("pending") else None
-            )
-        self.host = host
-        self.retries = 0
+        self._lock = None
+        self.socket = None
+        try:
+            if self.state_path:
+                self._lock = self.state_path.with_suffix(
+                    self.state_path.suffix + ".lock"
+                ).open("a")
+                try:
+                    fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise RuntimeError(
+                        "Session is already in use by another client"
+                    ) from None
+            self.session, self.sequence = 0, 0
+            self.last_request = None
+            self.pending = None
+            self.initial_upload = None
+            self.host = host
+            self.retries = 0
+            if self.state_path and self.state_path.exists():
+                saved = json.loads(self.state_path.read_text())
+                if saved["host"] != host:
+                    raise ValueError("State belongs to another FPGA address")
+                self.session, self.sequence = saved["session"], saved["sequence"]
+                self.pending = (
+                    bytes.fromhex(saved["pending"]) if saved.get("pending") else None
+                )
+                if self.pending is not None and self.pending[4] not in ORDERED_OPCODES:
+                    raise ValueError("Journal contains a non-ordered request")
+                self.initial_upload = saved.get("initial_upload")
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.socket.bind((source, 0))
+            self.socket.connect((host, 4000))
+            self.socket.settimeout(timeout)
+        except BaseException:
+            self.close()
+            raise
 
     def save(self):
         if self.state_path:
@@ -141,6 +169,7 @@ class Images:
                         "session": self.session,
                         "sequence": self.sequence,
                         "pending": self.pending.hex() if self.pending else None,
+                        "initial_upload": self.initial_upload,
                     }
                 )
                 + "\n"
@@ -148,24 +177,34 @@ class Images:
             temporary.replace(self.state_path)
 
     def exchange(self, request, retries=8):
-        for attempt in range(retries):
-            self.socket.send(request)
-            deadline = time.monotonic() + self.socket.gettimeout()
-            while time.monotonic() < deadline:
-                try:
-                    reply = self.socket.recv(2048)
-                except (socket.timeout, ConnectionRefusedError):
-                    break
-                decoded = decode(reply, request)
-                if decoded is not None:
-                    return decoded
-            self.retries += 1
-        raise TimeoutError(f"No validated reply after {retries} identical attempts")
+        timeout = self.socket.gettimeout()
+        try:
+            for _ in range(retries):
+                self.socket.send(request)
+                deadline = time.monotonic() + timeout
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self.socket.settimeout(remaining)
+                    try:
+                        reply = self.socket.recv(2048)
+                    except (socket.timeout, ConnectionRefusedError):
+                        break
+                    decoded = decode(reply, request)
+                    if decoded is not None:
+                        return decoded
+                self.retries += 1
+            raise TimeoutError(f"No validated reply after {retries} identical attempts")
+        finally:
+            self.socket.settimeout(timeout)
 
     def begin(self, blocks, wait=90):
-        self.recover()
         if not 1 <= blocks <= CAPACITY_SECTORS:
             raise ValueError("Image must contain 1..524288 sectors")
+        self.recover()
+        self.initial_upload = None
+        self.save()
         new_session = secrets.randbelow(0xFFFFFFFF) + 1
         request = encode(Opcode.BEGIN, new_session, 0, count=blocks)
         deadline = time.monotonic() + wait
@@ -175,6 +214,12 @@ class Images:
                 if status == 0:
                     self.session, self.sequence = new_session, 1
                     self.last_request = request
+                    self.initial_upload = {
+                        "session": new_session,
+                        "sectors": blocks,
+                        "sha256": None,
+                        "verified": False,
+                    }
                     self.save()
                     return
                 if status != 6:
@@ -210,9 +255,28 @@ class Images:
         return payload
 
     def command(self, opcode, lba=0, count=0, data=b""):
-        self.recover(read_only=opcode in (Opcode.READ, Opcode.STATUS))
+        if opcode not in ORDERED_OPCODES:
+            raise ValueError(
+                "Use begin() or bulk_download() for non-ordered operations"
+            )
         if not self.session:
             raise ValueError("Begin an image session first")
+        request = encode(opcode, self.session, self.sequence, lba, count, data)
+        if opcode == Opcode.ARM and not (
+            self.initial_upload
+            and self.initial_upload.get("verified") is True
+            and self.initial_upload.get("session") == self.session
+            and self.initial_upload.get("sha256")
+        ):
+            raise RuntimeError(
+                "Initial upload is not verified; complete a verified upload before ARM"
+            )
+        # An identical pending request satisfies this call. A different mutating
+        # operation explicitly completes the old request before issuing the new one.
+        same_request = self.pending == request
+        recovered = self.recover(read_only=opcode in (Opcode.READ, Opcode.STATUS))
+        if same_request:
+            return recovered
         request = encode(opcode, self.session, self.sequence, lba, count, data)
         self.pending = request
         self.save()
@@ -221,7 +285,11 @@ class Images:
     def upload(self, image, window=0):
         if not image or len(image) % SECTOR_BYTES:
             raise ValueError("Image must be nonempty and a multiple of 512 bytes")
+        if window and not 1 <= window <= MAX_WINDOW:
+            raise ValueError("Invalid upload readback window")
         self.begin(len(image) // SECTOR_BYTES)
+        self.initial_upload["sha256"] = hashlib.sha256(image).hexdigest()
+        self.save()
         for lba in range(len(image) // SECTOR_BYTES):
             self.command(
                 Opcode.WRITE,
@@ -237,6 +305,8 @@ class Images:
         )
         if downloaded != image:
             raise RuntimeError("DDR upload readback differs from image")
+        self.initial_upload["verified"] = True
+        self.save()
 
     def download(self, blocks, start=0):
         validate_download_range(blocks, start)
@@ -254,12 +324,12 @@ class Images:
         uses identical bytes; duplicate, corrupt and unrelated replies cannot
         complete another request. The caller must keep DDR unchanged throughout.
         """
-        self.recover(read_only=True)
         if not self.session:
             raise ValueError("Begin an image session first")
         validate_download_range(blocks, start)
         if not 1 <= window <= MAX_WINDOW or retry_seconds <= 0:
             raise ValueError("Require window 1..16 and a positive retry interval")
+        self.recover(read_only=True)
         output = bytearray(blocks * SECTOR_BYTES)
         pending: dict[int, PendingRead] = {}
         next_block = 0
@@ -327,7 +397,30 @@ class Images:
             self.retries += 1
 
     def close(self):
-        self.socket.close()
+        if self.socket is not None:
+            self.socket.close()
+            self.socket = None
+        if self._lock is not None:
+            self._lock.close()
+            self._lock = None
+
+
+def atomic_download(destination, image):
+    """Preserve any existing download until the complete replacement is written."""
+    destination = Path(destination)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent, prefix=destination.name + ".", delete=False
+        ) as output:
+            temporary = Path(output.name)
+            output.write(image)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -348,14 +441,25 @@ def main():
         action="store_true",
         help="Use retry-safe two-sector windowed reads (new gateware required)",
     )
-    parser.add_argument(
-        "--window", type=int, default=DEFAULT_WINDOW, choices=range(1, MAX_WINDOW + 1)
-    )
+    parser.add_argument("--window", type=int, choices=range(1, MAX_WINDOW + 1))
     parser.add_argument("--blocks", type=int)
-    parser.add_argument("--start", type=int, default=0)
+    parser.add_argument("--start", type=int)
     args = parser.parse_args()
     if args.download and args.blocks is None:
         parser.error("--download requires --blocks")
+    if not args.download and (args.blocks is not None or args.start is not None):
+        parser.error("--blocks and --start require --download")
+    if (args.bulk or args.window is not None) and not (args.upload or args.download):
+        parser.error("--bulk and --window require an upload or download")
+    if args.window is not None and not args.bulk:
+        parser.error("--window requires --bulk")
+    args.start = 0 if args.start is None else args.start
+    args.window = DEFAULT_WINDOW if args.window is None else args.window
+    if args.download:
+        try:
+            validate_download_range(args.blocks, args.start)
+        except ValueError as error:
+            parser.error(str(error))
     client = Images(args.host, args.source, args.state)
     started = time.monotonic()
     try:
@@ -374,19 +478,19 @@ def main():
                 if args.bulk
                 else client.download(args.blocks, args.start)
             )
-            args.download.write_bytes(image)
+            atomic_download(args.download, image)
             result = {
                 "downloaded_bytes": len(image),
                 "sha256": hashlib.sha256(image).hexdigest(),
             }
         else:
-            client.command(
-                Opcode.ARM
-                if args.arm
-                else Opcode.DISARM
-                if args.disarm
-                else Opcode.STATUS
-            )
+            if args.arm:
+                opcode = Opcode.ARM
+            elif args.disarm:
+                opcode = Opcode.DISARM
+            else:
+                opcode = Opcode.STATUS
+            client.command(opcode)
             result = {
                 "command": "arm" if args.arm else "disarm" if args.disarm else "status",
                 "acknowledged": True,
