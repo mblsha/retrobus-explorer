@@ -10,10 +10,10 @@ from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
 from jitx.net import Net, Port
 from jitx.placement import Placement, Side
-from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Text
 from jitx.substrate import Substrate
+from shared_components.fabrication import jlcpcb_fab_constraints, jlcpcb_stackup
 from shared_components.saleae import SaleaeProbeHeader2x4
 
 from src.components import JushuoAfa01S10Fca00, PinHeader2x10
@@ -32,8 +32,8 @@ SALEAE_DISTANCE = 13.462
 
 class EspiDebugBreakoutSubstrate(Substrate):
     # Python replacement for the Stanza `setup-design(...)` default stackup.
-    stackup = SampleStackup(2)
-    constraints = SampleFabConstraints()
+    stackup = jlcpcb_stackup(2)
+    constraints = jlcpcb_fab_constraints(2)
 
 
 class Saleae8(Circuit):

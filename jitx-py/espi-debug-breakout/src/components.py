@@ -3,6 +3,7 @@ from __future__ import annotations
 from jitx.component import Component
 from jitx.feature import Courtyard, Cutout, Paste, Silkscreen, Soldermask
 from jitx.landpattern import Landpattern, Pad, PadMapping
+from jitx.layerindex import Side
 from jitx.net import Port
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Polyline
@@ -14,7 +15,8 @@ class HeaderPthPad(Pad):
 
     def __init__(self):
         self.cutout = Cutout(Circle(diameter=1.0))
-        self.soldermask = Soldermask(Circle(diameter=1.5))
+        self.soldermask_top = Soldermask(Circle(diameter=1.5), side=Side.Top)
+        self.soldermask_bottom = Soldermask(Circle(diameter=1.5), side=Side.Bottom)
 
 
 class PinHeader2x10Landpattern(Landpattern):

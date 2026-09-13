@@ -7,32 +7,7 @@ from jitx.toleranced import Toleranced
 from jitxlib.landpatterns.generators.header import Header
 from jitxlib.landpatterns.leads import THLead
 from jitxlib.symbols.box import BoxConfig, BoxSymbol, PinGroup, Row
-
-
-class PinHeader1x20(Component):
-    # Python analogue of the generic `pin-header(20, 1)` used by
-    # `components/RPiPico/module` in `jitx/components/RPiPico.stanza`.
-    p = [Port() for _ in range(20)]
-    reference_designator_prefix = "J"
-    manufacturer = "Generic"
-    mpn = "generic-20x1-2.54mm-th"
-    value = "20X1-pin-header"
-
-    def __init__(self):
-        self.landpattern = Header(
-            num_leads=20,
-            num_rows=1,
-            lead=THLead(
-                length=Toleranced.exact(3.0),
-                width=Toleranced.exact(0.64),
-            ),
-            pitch=2.54,
-        )
-        self.symbol = BoxSymbol(
-            rows=[Row(left=PinGroup([self.p[index]])) for index in range(20)],
-            config=BoxConfig(group_spacing=2),
-        )
-        self.pad_mapping = PadMapping({self.p[index]: self.landpattern.p[index + 1] for index in range(20)})
+from shared_components.rpi_pico import PinHeader1x20 as PinHeader1x20
 
 
 class PinHeader2x20(Component):
