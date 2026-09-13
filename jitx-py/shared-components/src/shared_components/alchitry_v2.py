@@ -449,13 +449,28 @@ def make_alchitry_v2_bank(
     top: bool,
     profile: str | AlchitryV2UsageProfile | None = None,
 ) -> Component:
+    class_ = alchitry_v2_bank_class(connector, top=top, profile=profile)
+    return class_()
+
+
+def alchitry_v2_bank_class(
+    connector: Literal["A", "B"],
+    *,
+    top: bool,
+    profile: str | AlchitryV2UsageProfile | None = None,
+) -> type[Component]:
+    """Return a bank component class for declaration at module scope.
+
+    JITX classes cannot be created while a circuit is being instantiated. Use
+    this helper at module scope, then instantiate the returned class inside the
+    circuit constructor.
+    """
     resolved = resolve_profile(profile)
-    class_ = _make_bank_component_class(
+    return _make_bank_component_class(
         connector,
         top=top,
         profile_key=None if resolved is None else resolved.key,
     )
-    return class_()
 
 
 def make_alchitry_v2_bank_top(
@@ -482,6 +497,7 @@ __all__ = [
     "PINOUTS_URL",
     "PROFILES_BY_NAME",
     "PinClaim",
+    "alchitry_v2_bank_class",
     "make_alchitry_v2_bank",
     "make_alchitry_v2_bank_bottom",
     "make_alchitry_v2_bank_top",

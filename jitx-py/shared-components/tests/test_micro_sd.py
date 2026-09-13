@@ -1,4 +1,8 @@
 from shared_components.micro_sd import (
+    MOLEX_104031_0811_COURTYARD_SIZE,
+    MOLEX_104031_0811_DETECT_PAD_SPECS,
+    MOLEX_104031_0811_SHIELD_PAD_SPECS,
+    MOLEX_104031_0811_SIGNAL_PAD_SPECS,
     MICRO_SD_CARD_OUTLINE_LEADING,
     MICRO_SD_CARD_OUTLINE_TRAILING,
     MICRO_SD_DATA_PORTS,
@@ -48,3 +52,13 @@ def test_micro_sd_card_edge_matches_the_proven_sniffer_geometry() -> None:
     assert MICRO_SD_CARD_OUTLINE_LEADING == ((0.0, 0.0), (15.0, 0.0))
     assert MICRO_SD_CARD_OUTLINE_TRAILING[0] == (15.0, 11.0)
     assert MICRO_SD_CARD_OUTLINE_TRAILING[-1] == (0.0, 10.0)
+
+
+def test_molex_landpattern_has_all_contacts_switch_and_shell_tabs() -> None:
+    assert set(MOLEX_104031_0811_SIGNAL_PAD_SPECS) == set(range(1, 9))
+    assert set(MOLEX_104031_0811_DETECT_PAD_SPECS) == {9, 10}
+    assert len(MOLEX_104031_0811_SHIELD_PAD_SPECS) == 4
+    assert MOLEX_104031_0811_SIGNAL_PAD_SPECS[1] == (-3.105, -5.45, 0.85, 1.10)
+    assert MOLEX_104031_0811_SIGNAL_PAD_SPECS[8] == (4.545, -5.45, 0.75, 1.10)
+    assert MOLEX_104031_0811_COURTYARD_SIZE == (13.68, 13.05)
+

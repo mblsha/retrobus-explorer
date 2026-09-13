@@ -1,0 +1,33 @@
+# Generated drawings, meshes, and PCB exports stay local.
+*.svg
+*.stl
+*.kicad_pcb
+# Manufacturing archives may embed the excluded exports.
+**/manufacturing/*.zip
+
+# Generated previews and reports; routing inputs remain versioned.
+*.png
+**/verification/*.json
+**/mechanical/**/manifest.json
+alchitry-au2-level-shifter/routing/au2-live-routing-audit.json
+
+# Generated fabrication layers, drill data, and job manifests.
+*.drl
+*.gbl
+*.gbo
+*.gbp
+*.gbrjob
+*.gbs
+*.gm1
+*.gtl
+*.gto
+*.gtp
+*.gts
+
+# Local routing studies and KiCad exports.
+**/routing/
+**/manufacturing/kicad/
+*.kicad_*
+
+# Local OpenSCAD experiments.
+*.scad

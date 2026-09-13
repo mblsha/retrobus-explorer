@@ -4,11 +4,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from jitx.component import Component
-from jitx.feature import Soldermask
+from jitx.feature import Courtyard, Paste, Silkscreen, Soldermask
 from jitx.landpattern import Landpattern, Pad, PadMapping
 from jitx.net import Port
 from jitx.shapes.composites import rectangle
-from jitx.shapes.primitive import Arc
+from jitx.shapes.primitive import Arc, Circle, Polyline
 from jitxlib.symbols.box import BoxConfig, BoxSymbol, PinGroup, Row
 
 SPARKFUN_MICRO_SD_SNIFFER_SOURCE = (
@@ -161,3 +161,130 @@ class MicroSdCardEdge(Component):
         self.pad_mapping = PadMapping(
             {port: getattr(self.landpattern, f"p{number}") for number, port in enumerate(ports, start=1)}
         )
+
+
+MOLEX_104031_0811_DATASHEET = (
+    "https://www.molex.com/content/dam/molex/molex-dot-com/products/"
+    "automated/en-us/salesdrawingpdf/104/104031/1040310811_sd.pdf"
+)
+
+
+# Exact recommended copper geometry from the Molex 104031-0811 sales drawing,
+# cross-checked against KiCad 9's official microSD_HC_Molex_104031-0811
+# footprint. Values are local (x, y, width, height) in millimetres.
+MOLEX_104031_0811_SIGNAL_PAD_SPECS: dict[int, tuple[float, float, float, float]] = {
+    1: (-3.105, -5.45, 0.85, 1.10),
+    2: (-2.005, -5.45, 0.85, 1.10),
+    3: (-0.905, -5.45, 0.85, 1.10),
+    4: (0.195, -5.45, 0.85, 1.10),
+    5: (1.295, -5.45, 0.85, 1.10),
+    6: (2.395, -5.45, 0.85, 1.10),
+    7: (3.495, -5.45, 0.85, 1.10),
+    8: (4.545, -5.45, 0.75, 1.10),
+}
+MOLEX_104031_0811_DETECT_PAD_SPECS: dict[int, tuple[float, float, float, float]] = {
+    9: (-5.74, 0.70, 1.20, 1.00),
+    10: (-5.74, 4.40, 1.20, 1.00),
+}
+MOLEX_104031_0811_SHIELD_PAD_SPECS: tuple[tuple[float, float, float, float], ...] = (
+    (-5.565, -5.325, 1.55, 1.35),
+    (-2.240, 5.375, 1.90, 1.35),
+    (3.730, 5.375, 1.90, 1.35),
+    (5.755, -5.100, 1.17, 1.80),
+)
+MOLEX_104031_0811_BODY_SIZE = (11.95, 11.40)
+MOLEX_104031_0811_COURTYARD_SIZE = (13.68, 13.05)
+
+
+class MicroSdSmtPad(Pad):
+    def __init__(self, *, width: float, height: float):
+        self.shape = rectangle(width, height)
+        self.soldermask = Soldermask(rectangle(width + 0.10, height + 0.10))
+        self.paste = Paste(rectangle(width, height))
+
+
+
+class Molex1040310811Landpattern(Landpattern):
+    def __init__(self):
+        for number, (x, y, width, height) in MOLEX_104031_0811_SIGNAL_PAD_SPECS.items():
+            setattr(self, f"p{number}", MicroSdSmtPad(width=width, height=height).at(x, y))
+        for number, (x, y, width, height) in MOLEX_104031_0811_DETECT_PAD_SPECS.items():
+            setattr(self, f"p{number}", MicroSdSmtPad(width=width, height=height).at(x, y))
+        for index, (x, y, width, height) in enumerate(MOLEX_104031_0811_SHIELD_PAD_SPECS, start=1):
+            setattr(self, f"shield{index}", MicroSdSmtPad(width=width, height=height).at(x, y))
+
+        half_width = MOLEX_104031_0811_BODY_SIZE[0] / 2.0
+        half_height = MOLEX_104031_0811_BODY_SIZE[1] / 2.0
+        self.outline = Silkscreen(
+            Polyline(
+                0.12,
+                [
+                    (-half_width, -half_height),
+                    (-half_width, half_height),
+                    (half_width, half_height),
+                    (half_width, -half_height),
+                ],
+            )
+        )
+        self.pin_one = Silkscreen(Circle(diameter=0.35).at(-3.105, -6.05))
+        self.courtyard = Courtyard(rectangle(*MOLEX_104031_0811_COURTYARD_SIZE))
+
+
+class Molex1040310811MicroSdSocket(Component):
+    """Molex push-pull micro-SD socket with card-detect and four shell tabs."""
+
+    DAT2 = Port()
+    DAT3 = Port()
+    CMD = Port()
+    VDD = Port()
+    CLK = Port()
+    VSS = Port()
+    DAT0 = Port()
+    DAT1 = Port()
+    DETECT_A = Port()
+    DETECT_B = Port()
+    SHIELD = [Port() for _ in range(4)]
+
+    manufacturer = "Molex"
+    mpn = "104031-0811"
+    datasheet = MOLEX_104031_0811_DATASHEET
+    description = "1.10 mm pitch push-pull micro-SD socket, 1.42 mm high, with detect switch"
+    reference_designator_prefix = "J"
+    value = "microSD"
+
+    def __init__(self):
+        self.landpattern = Molex1040310811Landpattern()
+        self.symbol = BoxSymbol(
+            rows=[
+                Row(left=PinGroup([self.DAT2]), right=PinGroup([self.DAT1])),
+                Row(left=PinGroup([self.DAT3]), right=PinGroup([self.DAT0])),
+                Row(left=PinGroup([self.CMD]), right=PinGroup([self.VSS])),
+                Row(left=PinGroup([self.VDD]), right=PinGroup([self.CLK])),
+                Row(left=PinGroup([self.DETECT_A]), right=PinGroup([self.DETECT_B])),
+                Row(left=PinGroup(self.SHIELD)),
+            ],
+            config=BoxConfig(group_spacing=1),
+        )
+        signal_ports = (
+            self.DAT2,
+            self.DAT3,
+            self.CMD,
+            self.VDD,
+            self.CLK,
+            self.VSS,
+            self.DAT0,
+            self.DAT1,
+        )
+        mapping = {
+            port: getattr(self.landpattern, f"p{number}")
+            for number, port in enumerate(signal_ports, start=1)
+        }
+        mapping[self.DETECT_A] = self.landpattern.p9
+        mapping[self.DETECT_B] = self.landpattern.p10
+        mapping.update(
+            {
+                port: getattr(self.landpattern, f"shield{index}")
+                for index, port in enumerate(self.SHIELD, start=1)
+            }
+        )
+        self.pad_mapping = PadMapping(mapping)
