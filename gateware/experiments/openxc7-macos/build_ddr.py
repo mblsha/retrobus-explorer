@@ -41,11 +41,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", type=Path, default=DEFAULT_TOOLCHAIN)
     parser.add_argument(
-        "--output", type=Path, help="Build directory (defaults to the selected transport)"
+        "--output",
+        type=Path,
+        help="Build directory (defaults to the selected transport)",
     )
-    parser.add_argument("--seed", type=int, default=8, help="Placement seed (default: 8)")
     parser.add_argument(
-        "--ethernet", action="store_true",
+        "--seed", type=int, default=8, help="Placement seed (default: 8)"
+    )
+    parser.add_argument(
+        "--ethernet",
+        action="store_true",
         help="Use UDP image management instead of the UART image loader",
     )
     args = parser.parse_args()
@@ -196,12 +201,15 @@ def main():
     selection = " ".join("arty_ddr_bios/" + name for name in memories)
     cache_mapping += f'select -assert-count 8 {selection}; setattr -set ram_style "registers" {selection}; '
     defines = "-D ETHERNET_SD" if args.ethernet else ""
+    # Include register timing in ABC9 mapping for the combined SD/Ethernet
+    # control paths. Routed CDC and opposite-edge output checks still apply.
+    register_mapping = " -dff" if args.ethernet else ""
     run(
         "synthesis",
         [
             str(tc / "bin/yosys"),
             "-p",
-            f"read_verilog -sv {defines} {source} {cpu} {wrapper} {hdl}; {cache_mapping}synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top board; check -assert; write_json design.json",
+            f"read_verilog -sv {defines} {source} {cpu} {wrapper} {hdl}; {cache_mapping}synth_xilinx -flatten -nowidelut -abc9{register_mapping} -arch xc7 -top board; check -assert; write_json design.json",
         ],
     )
 
@@ -275,7 +283,9 @@ def main():
         if args.ethernet:
             for name in ("eth_rx_global", "eth_tx_global"):
                 if name not in clocks or clocks[name][2] != 25:
-                    raise RuntimeError(f"Missing 25 MHz MII timing constraint: {clocks}")
+                    raise RuntimeError(
+                        f"Missing 25 MHz MII timing constraint: {clocks}"
+                    )
         return seed, clocks
 
     selected_seed, clocks = route(args.seed)
