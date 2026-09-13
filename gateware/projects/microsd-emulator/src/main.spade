@@ -50,22 +50,30 @@ fn read_data_nibble(data_byte: uint<8>, bit_index: uint<12>, wide: bool) -> uint
     }
 }
 
-// Management clock 80 MHz or faster; the 12 MHz candidate requires SD high/low
-// pulses >= 41 ns. Hardware qualification is recorded separately. Outputs
-// change after synchronized falling edges.
-// Backend owns a complete 512-byte sector until release/cancel. byte_index is
-// asynchronous lookup into that stable buffer. No mid-sector backend stalls.
+// Slow mode advances serialization on synchronized SD falling-edge events.
+// Fast mode advances preparation on synchronized SD rising-edge events,
+// then launches prepared values from falling-edge fabric registers.
+// fast_mode is fixed by the hardware wrapper.
+//
+// Backend owns a stable 512-byte sector until release/cancel; byte_index
+// looks up that buffer asynchronously. No stalls during sector serialization.
 #[no_mangle(all)]
 pub entity sd_frontend(
+
+    // Clock and card control
     clk: clock,
     rst: bool,
     armed: bool,
+
+    // SD pins
     sd_clk: bool,
     cmd_in: bool,
     cmd_out: inv &bool,
     cmd_oe: inv &bool,
     dat_out: inv &uint<4>,
     dat_oe: inv &uint<4>,
+
+    // Read-buffer exchange
     request_valid: inv &bool,
     request_lba: inv &uint<32>,
     generation: inv &uint<32>,
@@ -74,12 +82,18 @@ pub entity sd_frontend(
     sector_byte: uint<8>,
     byte_index: inv &uint<9>,
     sector_release: inv &bool,
+
+    // Mode and write-side inputs
     fast_mode: bool,
     writable: bool,
     dat_in: uint<4>,
+
+    // DDR write command
     write_cmd_valid: inv &bool,
     write_cmd_ready: bool,
     write_cmd_address: inv &uint<24>,
+
+    // DDR write data
     write_data_valid: inv &bool,
     write_data_ready: bool,
     write_data: inv &uint<128>,
@@ -119,7 +133,6 @@ pub entity sd_frontend(
     let CARD_STANDBY: uint<4> = 3;
     let CARD_TRANSFER: uint<4> = 4;
 
-
     // Input synchronization and SD sampling/output-advance events.
     reg(clk) clk_meta reset(rst: false) = sd_clk;
     reg(clk) clk_sync reset(rst: false) = clk_meta;
@@ -128,18 +141,18 @@ pub entity sd_frontend(
     reg(clk) cmd_sync reset(rst: true) = cmd_meta;
     reg(clk) dat_meta: uint<4> reset(rst: 15) = dat_in;
     reg(clk) dat_sync: uint<4> reset(rst: 15) = dat_meta;
-    let (writing, writing_w): (&bool, inv &bool) = port;
+    let (write_transaction_active, write_transaction_active_w): (&bool, inv &bool) = port;
     let (committing, committing_w): (&bool, inv &bool) = port;
     let (write_done, write_done_w): (&bool, inv &bool) = port;
     let (write_good, write_good_w): (&bool, inv &bool) = port;
-    let (write_dat, write_dat_w): (&uint<4>, inv &uint<4>) = port;
-    let (write_oe, write_oe_w): (&uint<4>, inv &uint<4>) = port;
+    let (write_response_data, write_response_data_w): (&uint<4>, inv &uint<4>) = port;
+    let (write_response_enable, write_response_enable_w): (&uint<4>, inv &uint<4>) = port;
     let (commit_done, commit_done_w): (&bool, inv &bool) = port;
     decl write_mode, write_lba;
     // A packet spans hundreds of SD edges. Register its aggregate activity
     // in fast mode to keep reset/CRC-response decode out of read arbitration.
-    reg(clk) delayed_writing reset(rst || !armed: false) = *writing;
-    let write_active = write_mode != WRITE_IDLE || (if fast_mode { delayed_writing } else { *writing });
+    reg(clk) delayed_write_transaction_active reset(rst || !armed: false) = *write_transaction_active;
+    let write_active = write_mode != WRITE_IDLE || (if fast_mode { delayed_write_transaction_active } else { *write_transaction_active });
     let sd_sample_tick = clk_sync && !clk_prev;
     // Fast mode launches the next output bit after the synchronized rising
     // edge. With falling-edge pad registers at 100 MHz, the 15..25 ns
@@ -163,7 +176,7 @@ pub entity sd_frontend(
     } else {
         local_rst
     };
-    decl response_left, response_delay, data_state, lba, epoch, pending, multi, short_data, status_data, app, bit_index, crc_index;
+    decl response_left, response_delay, data_state, lba, epoch, pending, multi, sending_scr, sending_sd_status, app, bit_index, crc_index;
 
     // Command reception and registered decode.
     reg(clk) remaining: uint<6> reset(local_rst: 0) = {
@@ -340,9 +353,9 @@ pub entity sd_frontend(
         sample: sd_sample_tick,
         fall: sd_output_advance,
         dat: dat_sync,
-        dat_out: write_dat_w,
-        dat_oe: write_oe_w,
-        active: writing_w,
+        dat_out: write_response_data_w,
+        dat_oe: write_response_enable_w,
+        active: write_transaction_active_w,
         complete: write_done_w,
         good: write_good_w,
         commit_busy: committing_w,
@@ -374,34 +387,56 @@ pub entity sd_frontend(
     );
     let addressed = command_argument == 0x00010000;
     let legal = match command_index {
+        // CMD0: GO_IDLE_STATE
         0 => true,
+        // CMD8: SEND_IF_COND
         8 => state == CARD_IDLE,
+        // ACMD41: SD_SEND_OP_COND
         41 => app && state == CARD_IDLE,
+        // CMD2: ALL_SEND_CID
         2 => state == CARD_READY,
+        // CMD3: SEND_RELATIVE_ADDR
         3 => state == CARD_IDENTIFICATION,
+        // CMD9: SEND_CSD
         9 => state == CARD_STANDBY && addressed,
+        // CMD7: SELECT/DESELECT_CARD
         7 => (state == CARD_STANDBY && addressed) || (state == CARD_TRANSFER && command_argument_zero),
+        // CMD13: SEND_STATUS, or ACMD13: SD_STATUS (ssr)
         13 => (addressed && (state == CARD_STANDBY || state == CARD_TRANSFER)) || ssr,
+        // CMD55: APP_CMD
         55 => state == CARD_IDLE || addressed,
+        // CMD16: SET_BLOCKLEN
         16 => state == CARD_TRANSFER && !write_active && command_argument == 512,
+        // CMD24: WRITE_BLOCK
         24 => writable && transfer_idle,
+        // CMD25: WRITE_MULTIPLE_BLOCK
         25 => writable && transfer_idle,
+        // CMD17: READ_SINGLE_BLOCK
         17 => transfer_idle,
+        // CMD18: READ_MULTIPLE_BLOCK
         18 => transfer_idle,
+        // CMD12: STOP_TRANSMISSION
         12 => state == CARD_TRANSFER,
+        // ACMD51: SEND_SCR
         51 => app && transfer_idle,
+        // ACMD6: SET_BUS_WIDTH
         6 => app && transfer_idle && (command_argument_zero || command_argument == 2),
         _ => false,
     };
+    let STATUS_WRITE_PROTECT_VIOLATION: uint<32> = 1 << 26;
+    let STATUS_ILLEGAL_COMMAND: uint<32> = 1 << 22;
+    let STATUS_ADDRESS_ERROR: uint<32> = 1 << 30;
+    let STATUS_OUT_OF_RANGE: uint<32> = 1 << 31;
+    let STATUS_APP_COMMAND: uint<32> = 1 << 5;
     let error: uint<32> = if write_command && !writable {
-        1 << 26
+        STATUS_WRITE_PROTECT_VIOLATION
     } else if !legal {
-        1 << 22
+        STATUS_ILLEGAL_COMMAND
     } else if (read_command || write_command) && range_error {
         if (command_argument & 511) != 0 {
-            1 << 30
+            STATUS_ADDRESS_ERROR
         } else {
-            1 << 31
+            STATUS_OUT_OF_RANGE
         }
     } else {
         0
@@ -413,7 +448,7 @@ pub entity sd_frontend(
     } else if command_index == CMD_SEND_RCA {
         0x00010700
     } else if command_index == CMD_APP {
-        status | 0x20
+        status | STATUS_APP_COMMAND
     } else {
         status
     };
@@ -422,8 +457,8 @@ pub entity sd_frontend(
     } else {
         0x3f00ff8000ff
     };
-    // Capture response inputs before the CRC network. The extra <=12 ns stage
-    // completes before the next SD falling edge at the 12 MHz candidate limit.
+    // Capture response inputs before the CRC network in a separate fabric cycle.
+    // The response serializer consumes this snapshot on SD output-advance events.
     reg(clk) saved_index: uint<6> reset(local_rst: 0) = if valid {
         command_index
     } else {
@@ -459,7 +494,7 @@ pub entity sd_frontend(
         0x00260012115903ffc0028000024000d5
     };
     let answer: uint<136> = if long_reply {
-        (long_header << 8) | (if saved_index == 2 { cid } else { csd })
+        (long_header << 8) | (if saved_index == CMD_ALL_SEND_CID { cid } else { csd })
     } else {
         zext(if r3_reply { saved_r3 } else { response48(saved_index, saved_payload) }) << 88
     };
@@ -530,7 +565,6 @@ pub entity sd_frontend(
     set cmd_oe = &(command_pin_drive && armed);
     set cmd_out = &command_output;
 
-
     // Read requests, sector ownership, and data serialization.
     let data_end = sd_output_advance && data_state == READ_RELEASE;
     let next_sector = data_end && multi && lba < last_lba;
@@ -569,35 +603,42 @@ pub entity sd_frontend(
     } else {
         multi
     };
-    reg(clk) short_data reset(local_rst: false) = if read || ssr {
+    reg(clk) sending_scr reset(local_rst: false) = if read || ssr {
         false
     } else if scr {
         true
     } else if data_end {
         false
     } else {
-        short_data
+        sending_scr
     };
-    reg(clk) status_data reset(local_rst: false) = if read || scr || data_end {
+    reg(clk) sending_sd_status reset(local_rst: false) = if read || scr || data_end {
         false
     } else if ssr {
         true
     } else {
-        status_data
+        sending_sd_status
     };
-    reg(clk) scr_pending reset(local_rst: false) = if stop || data_end {
+    reg(clk) register_read_pending reset(local_rst: false) = if stop || data_end {
         false
     } else if scr || ssr {
         true
     } else {
-        scr_pending
+        register_read_pending
     };
-    let raw_data_start = response_left == 0 && !command_drive && (buffer_valid || scr_pending);
+    let raw_data_start = response_left == 0 && !command_drive && (buffer_valid || register_read_pending);
     reg(clk) prepared_data_start reset(local_rst: false) = raw_data_start;
     let data_start = if fast_mode {
         prepared_data_start
     } else {
         raw_data_start
+    };
+    let last_payload_bit: uint<12> = if sending_scr {
+        63
+    } else if sending_sd_status {
+        511
+    } else {
+        4095
     };
     reg(clk) data_state: uint<3> reset(local_rst: READ_IDLE) = {
         if stop {
@@ -605,13 +646,7 @@ pub entity sd_frontend(
         } else if sd_output_advance {
             if data_state == READ_IDLE && data_start {
                 READ_PAYLOAD
-            } else if data_state == READ_PAYLOAD && bit_index == (if short_data {
-                    63
-                } else if status_data {
-                    511
-                } else {
-                    4095
-                }) {
+            } else if data_state == READ_PAYLOAD && bit_index == last_payload_bit {
                 READ_CRC
             } else if data_state == READ_CRC && crc_index == 15 {
                 READ_END_BIT
@@ -641,9 +676,9 @@ pub entity sd_frontend(
     };
     let offset: uint<9> = trunc(bit_index >> 3);
     let scr_value: uint<64> = 0x0105000000000000;
-    let selected_byte: uint<8> = if short_data {
+    let selected_byte: uint<8> = if sending_scr {
         trunc(scr_value >> (56 -. (zext(offset) << 3)))
-    } else if status_data {
+    } else if sending_sd_status {
         if offset == 0 && wide {
             0x80
         } else {
@@ -699,9 +734,9 @@ pub entity sd_frontend(
     };
     let read_data_start = data_state == READ_IDLE && data_start;
     let read_data_drive = read_data_start || data_state == READ_PAYLOAD || data_state == READ_CRC || data_state == READ_END_BIT;
-    reg(clk) prepared_pad_write reset(local_rst: false) = *write_oe != 0;
-    reg(clk) prepared_pad_data: uint<4> reset(local_rst: 15) = if *write_oe != 0 {
-        *write_dat
+    reg(clk) prepared_pad_write reset(local_rst: false) = *write_response_enable != 0;
+    reg(clk) prepared_pad_data: uint<4> reset(local_rst: 15) = if *write_response_enable != 0 {
+        *write_response_data
     } else {
         read_data_bit
     };
@@ -760,8 +795,8 @@ pub entity sd_frontend(
     // read/write-response mux between the registers and the output buffers.
     set dat_out = &(if fast_mode {
             data_output
-        } else if *write_oe != 0 {
-            *write_dat
+        } else if *write_response_enable != 0 {
+            *write_response_data
         } else {
             data_output
         });
@@ -769,8 +804,8 @@ pub entity sd_frontend(
             0
         } else if fast_mode {
             pad_data_enable
-        } else if *write_oe != 0 {
-            *write_oe
+        } else if *write_response_enable != 0 {
+            *write_response_enable
         } else if data_drive {
             if wide {
                 15
@@ -862,15 +897,21 @@ entity bram_emulator(
     let (unused_wm, unused_wm_w): (&uint<16>, inv &uint<16>) = port;
     let (unused_wb, unused_wb_w): (&bool, inv &bool) = port;
     let _ = inst sd_frontend$(
+
+        // Clock and card control
         clk,
         rst,
         armed: *card_armed,
+
+        // SD pins
         sd_clk,
         cmd_in,
         cmd_out,
         cmd_oe,
         dat_out,
         dat_oe,
+
+        // Read-buffer exchange
         request_valid: read_request_w,
         request_lba: read_lba_w,
         generation: read_generation_w,
@@ -879,12 +920,18 @@ entity bram_emulator(
         sector_byte: *read_byte,
         byte_index: read_byte_index_w,
         sector_release: read_release_w,
+
+        // Mode and write-side inputs
         fast_mode: false,
         writable: false,
         dat_in: 15,
+
+        // DDR write command
         write_cmd_valid: unused_wc_w,
         write_cmd_ready: false,
         write_cmd_address: unused_wa_w,
+
+        // DDR write data
         write_data_valid: unused_wv_w,
         write_data_ready: false,
         write_data: unused_wd_w,
@@ -996,10 +1043,15 @@ entity ddr_emulator(
     let (read_byte_index, read_byte_index_w): (&uint<9>, inv &uint<9>) = port;
     let (read_byte, read_byte_w): (&uint<8>, inv &uint<8>) = port;
     let (read_release, read_release_w): (&bool, inv &bool) = port;
+    // Low bits expose live interface state; upper bits carry BIST diagnostics.
+    let loader_status_word: uint<32> = (zext::<27, 32>(diagnostic_status) << 5)
+        | zext(std::conv::bits_to_uint([
+            initialized, ddr_cmd_ready, ddr_wdata_ready, *card_armed, ddr_rdata_valid,
+        ]));
     let _ = inst loader::image_loader$(
         clk,
         rst,
-        status_word: (zext::<27, 32>(diagnostic_status) << 5) | zext(std::conv::bits_to_uint([initialized, ddr_cmd_ready, ddr_wdata_ready, *card_armed, ddr_rdata_valid])),
+        status_word: loader_status_word,
         rx_valid,
         rx_byte,
         tx_ready,
@@ -1040,12 +1092,27 @@ entity ddr_emulator(
     // native_stage orders the final buffered write ahead of subsequent reads.
     // Pipeline the whole request/cancellation bundle together. Generation
     // tagging still rejects a stale buffer immediately at the SD frontend.
-    reg(clk) backend_inputs: (bool, bool, bool, uint<32>, uint<32>, bool)
-    reset(rst: (false, false, false, 0, 0, true)) = (*card_armed, initialized, *read_request, *read_lba, *read_generation, *read_release);
+    reg(clk) backend_inputs: (
+        bool, bool, bool,       // armed, initialized, request
+        uint<32>, uint<32>,     // LBA, generation
+        bool,                  // release
+    ) reset(rst: (
+        false, false, false,
+        0, 0,
+        true,
+    )) = (
+        *card_armed, initialized, *read_request,
+        *read_lba, *read_generation,
+        *read_release,
+    );
     let (backend_arm, backend_initialized, backend_request, backend_lba, backend_epoch, backend_release) = if fast_mode {
         backend_inputs
     } else {
-        (*card_armed, initialized, *read_request, *read_lba, *read_generation, *read_release)
+        (
+            *card_armed, initialized, *read_request,
+            *read_lba, *read_generation,
+            *read_release,
+        )
     };
     let _ = inst storage::ddr_backend$(
         clk,
@@ -1103,15 +1170,21 @@ entity ddr_emulator(
     set ddr_wdata = &(if sd_owner { *sd_write_data } else { *loader_data });
     set ddr_wdata_mask = &(if sd_owner { *sd_write_mask } else { *loader_mask });
     let _ = inst sd_frontend$(
+
+        // Clock and card control
         clk,
         rst,
         armed: *card_armed && initialized,
+
+        // SD pins
         sd_clk,
         cmd_in,
         cmd_out,
         cmd_oe,
         dat_out,
         dat_oe,
+
+        // Read-buffer exchange
         request_valid: read_request_w,
         request_lba: read_lba_w,
         generation: read_generation_w,
@@ -1120,12 +1193,18 @@ entity ddr_emulator(
         sector_byte: *read_byte,
         byte_index: read_byte_index_w,
         sector_release: read_release_w,
+
+        // Mode and write-side inputs
         fast_mode,
         writable,
         dat_in,
+
+        // DDR write command
         write_cmd_valid: sd_write_cmd_valid_w,
         write_cmd_ready: ddr_cmd_ready && sd_owner,
         write_cmd_address: sd_write_cmd_address_w,
+
+        // DDR write data
         write_data_valid: sd_write_data_valid_w,
         write_data_ready: ddr_wdata_ready && sd_owner,
         write_data: sd_write_data_w,
@@ -1181,6 +1260,8 @@ entity ddr_uart_core<#uint CLK_FREQ>(
     reg(clk) issued reset(rst: false) = *valid && !*busy && !issued;
     let send = *valid && !*busy && !issued;
     let _ = inst ddr_emulator$(
+
+        // Clock and card control
         clk,
         rst,
         initialized,
@@ -1189,22 +1270,32 @@ entity ddr_uart_core<#uint CLK_FREQ>(
         fast_mode,
         writable,
         dat_in,
+
+        // DDR command channel
         ddr_cmd_valid,
         ddr_cmd_ready,
         ddr_cmd_address,
         ddr_cmd_write,
+
+        // DDR read channel
         ddr_rdata_valid,
         ddr_rdata_ready,
         ddr_rdata,
+
+        // DDR write channel
         ddr_wdata_valid,
         ddr_wdata_ready,
         ddr_wdata,
         ddr_wdata_mask,
+
+        // UART loader
         rx_valid: rx.valid && !rx.parity_error,
         rx_byte: rx.byte,
         tx_ready: send,
         tx_valid: valid_w,
         tx_byte: byte_w,
+
+        // SD pins
         sd_clk,
         cmd_in,
         cmd_out,
@@ -1532,6 +1623,8 @@ entity ddr_emulator_cdc(
     let (memory_read_ready, memory_read_ready_w): (&bool, inv &bool) = port;
     let (memory_read_data, memory_read_data_w): (&uint<128>, inv &uint<128>) = port;
     let _ = inst ddr_emulator$(
+
+        // Clock and card control
         clk,
         rst,
         initialized,
@@ -1540,22 +1633,32 @@ entity ddr_emulator_cdc(
         fast_mode,
         writable,
         dat_in,
+
+        // DDR command channel
         ddr_cmd_valid: frontend_cmd_valid_w,
         ddr_cmd_ready: *frontend_cmd_ready,
         ddr_cmd_address: frontend_cmd_address_w,
         ddr_cmd_write: frontend_cmd_write_w,
+
+        // DDR read channel
         ddr_rdata_valid: *frontend_read_valid,
         ddr_rdata_ready: frontend_read_ready_w,
         ddr_rdata: *frontend_read_data,
+
+        // DDR write channel
         ddr_wdata_valid: frontend_data_valid_w,
         ddr_wdata_ready: *frontend_data_ready,
         ddr_wdata: frontend_write_data_w,
         ddr_wdata_mask: frontend_write_mask_w,
+
+        // UART loader
         rx_valid,
         rx_byte,
         tx_ready,
         tx_valid,
         tx_byte,
+
+        // SD pins
         sd_clk,
         cmd_in,
         cmd_out,
@@ -1565,10 +1668,14 @@ entity ddr_emulator_cdc(
         armed_status,
     );
     let _ = inst cdc::native_cdc$(
+
+        // Clock domains and shared reset
         s_clk: clk,
         s_rst: rst,
         m_clk: memory_clk,
         m_rst: memory_rst,
+
+        // Command channel
         s_cmd_valid: *frontend_cmd_valid,
         s_cmd_ready: frontend_cmd_ready_w,
         s_cmd_address: *frontend_cmd_address,
@@ -1577,6 +1684,8 @@ entity ddr_emulator_cdc(
         m_cmd_ready: *memory_cmd_ready,
         m_cmd_address: memory_cmd_address_w,
         m_cmd_write: memory_cmd_write_w,
+
+        // Write-data channel
         s_wdata_valid: *frontend_data_valid,
         s_wdata_ready: frontend_data_ready_w,
         s_wdata: *frontend_write_data,
@@ -1585,6 +1694,8 @@ entity ddr_emulator_cdc(
         m_wdata_ready: *memory_data_ready,
         m_wdata: memory_write_data_w,
         m_wmask: memory_write_mask_w,
+
+        // Read-data channel
         m_rdata_valid: *memory_read_valid,
         m_rdata_ready: memory_read_ready_w,
         m_rdata: *memory_read_data,
