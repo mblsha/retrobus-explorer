@@ -17,17 +17,29 @@ Python JITX import of the published Alchitry V2 KiCad element library.
 
 The runtime model no longer reads a vendored KiCad library from this repo. Instead:
 
-- the published Alchitry symbol data was converted once into [`src/generated_data.py`](src/generated_data.py)
+- the published Alchitry symbol data was converted once into
+  [`alchitry_v2_elements/generated_data.py`](alchitry_v2_elements/generated_data.py)
 - the reusable connector footprints live in [`shared-components`](../shared-components/src/shared_components/hirose_df40.py)
-- [`src/components.py`](src/components.py) composes those shared Hirose DF40 connectors into the published `V2_TOP`, `V2_BOTTOM`, and `V2_BOTH` Alchitry element footprints
+- [`alchitry_v2_elements/components.py`](alchitry_v2_elements/components.py)
+  composes those shared Hirose DF40 connectors into the published `V2_TOP`,
+  `V2_BOTTOM`, and `V2_BOTH` Alchitry element footprints
 
 This keeps the source provenance explicit while removing the large vendored KiCad snapshot from the project tree.
 
-`src/components.py` builds reusable JITX components for:
+`alchitry_v2_elements/components.py` builds reusable JITX components for:
 
 - `AlchitryV2TopElement`
 - `AlchitryV2BottomElement`
 - `AlchitryV2BothElement`
+- `AlchitryFtV2TopElement`
+- `AlchitryFtV2BottomElement`
+- `AlchitryFtV2BothElement`
+
+Use the `AlchitryFtV2*` variants for boards that stack with an Ft V2. They keep
+the complete mechanical footprint while omitting all 26 Bank A signal ports
+occupied by the Ft. Calling `port()` for one of those signals raises an error
+that identifies the Ft signal using it. The unrestricted `AlchitryV2*` variants
+remain available for stacks without an Ft.
 
 Signal naming:
 - Most ports keep the published Alchitry names directly, for example `A3`, `B42`, `L0`, `RESET`.
@@ -41,5 +53,9 @@ element.port("3.3V")
 element.port("~{PROG}")
 element.port("A3")
 ```
+
+The element constructors accept `include_holes=False` when a board needs to
+replace the reference NPTH mounting holes with plated or otherwise specialized
+mounting-hole components. Connector pads and mounting pads are unaffected.
 
 One upstream quirk is preserved intentionally: the published `V2_BOTTOM` symbol labels `C30` as `GND`, while `V2_TOP` and `V2_BOTH` label the corresponding signal as `L4`.

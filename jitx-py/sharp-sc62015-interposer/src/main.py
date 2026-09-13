@@ -10,11 +10,11 @@ from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
 from jitx.net import Net, Port
 from jitx.placement import Placement, Side
-from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Text
 from jitx.substrate import Substrate
 from shared_components.ffc import RetroBus60FfcConnector
+from shared_components.flex_fabrication import jlcpcb_flex_fab_constraints, jlcpcb_flex_stackup
 from shared_components.testpads import SignalTestPad
 
 from src.components import Sc62015Interposer
@@ -31,9 +31,9 @@ SIGNAL_AREA = rectangle(39.0, 49.0, radius=0.0)
 
 
 class SharpSc62015InterposerSubstrate(Substrate):
-    # Python replacement for the Stanza flex setup used for the first rigid-board pass.
-    stackup = SampleStackup(4)
-    constraints = SampleFabConstraints()
+    # Python replacement for the archived Stanza `setup-design-flex(...)` call.
+    stackup = jlcpcb_flex_stackup(2)
+    constraints = jlcpcb_flex_fab_constraints(2)
 
 
 FFCConnector = RetroBus60FfcConnector

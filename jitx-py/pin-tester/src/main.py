@@ -10,11 +10,11 @@ from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
 from jitx.net import Net, Port
 from jitx.placement import Placement, Side
-from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
+from shared_components.fabrication import jlcpcb_fab_constraints, jlcpcb_stackup
 from shared_components.ffc import RetroBus60FfcConnector
 from shared_components.testpads import GndTestpads
 
@@ -46,8 +46,8 @@ DATA_HEADER_MARKER_OFFSET_Y = 5.08
 class PinTesterSubstrate(Substrate):
     # Python replacement for the shared design/default stackup setup that the
     # Stanza project gets via `setup-design(...)` and `helpers.stanza`.
-    stackup = SampleStackup(4)
-    constraints = SampleFabConstraints()
+    stackup = jlcpcb_stackup(4)
+    constraints = jlcpcb_fab_constraints(4)
 
     class StandardThroughVia(Via):
         start_layer = 0

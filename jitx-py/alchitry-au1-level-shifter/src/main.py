@@ -12,12 +12,13 @@ from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
 from jitx.net import Net, Port
 from jitx.placement import Placement, Side
-from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
+from shared_components.fabrication import jlcpcb_fab_constraints, jlcpcb_stackup
 from shared_components.ffc import RetroBus60FfcConnector
+from shared_components.level_shifter import Cap0402, PinHeader2x3, Txb0108Pwr
 from shared_components.saleae import SaleaeProbeHeader2x4
 from shared_components.testpads import GndTestpads
 
@@ -26,9 +27,6 @@ from src.components import (
     AlchitryB,
     AlchitryC,
     AlchitryD,
-    Cap0402,
-    PinHeader2x3,
-    Txb0108Pwr,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -80,8 +78,8 @@ def port_attr(obj: object, name: str) -> Port:
 
 class AlchitryAu1LevelShifterSubstrate(Substrate):
     # Python replacement for the Stanza `setup-design(...)` board defaults.
-    stackup = SampleStackup(4)
-    constraints = SampleFabConstraints()
+    stackup = jlcpcb_stackup(4)
+    constraints = jlcpcb_fab_constraints(4)
 
     class StandardVia(Via):
         start_layer = 0
@@ -446,22 +444,26 @@ class AlchitryAu1LevelShifterCircuit(Circuit):
                     )
                 )
 
-        self.place(self.fpga, Placement((0.0, 0.0), on=Side.Top))
-        self.place(self.shift[0], Placement((14.734, 9.468), 270, on=Side.Top))
-        self.place(self.shift[1], Placement((4.8113, 9.468), 270, on=Side.Top))
-        self.place(self.shift[2], Placement((0.3, -9.468), 90, on=Side.Top))
-        self.place(self.shift[3], Placement((-9.2, -9.468), 90, on=Side.Top))
-        self.place(self.shift[4], Placement((9.8165, -9.468), 90, on=Side.Top))
-        self.place(self.shift[5], Placement((-7.0, 9.468), 270, on=Side.Top))
+        # The Au1 and level-shifter assemblies mate underneath this element;
+        # the FFC and GPIO connectors remain accessible from its top surface.
+        # Changing the parent placement side lets JITX mirror each complete
+        # assembly, including its nested components and footprint artwork.
+        self.place(self.fpga, Placement((0.0, 0.0), on=Side.Bottom))
+        self.place(self.shift[0], Placement((-14.734, 9.468), 90, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.shift[1], Placement((-4.8113, 9.468), 90, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.shift[2], Placement((-0.3, -9.468), 270, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.shift[3], Placement((9.2, -9.468), 270, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.shift[4], Placement((-9.8165, -9.468), 270, on=Side.Bottom))  # ty: ignore[no-matching-overload]
+        self.place(self.shift[5], Placement((7.0, 9.468), 90, on=Side.Bottom))  # ty: ignore[no-matching-overload]
 
-        self.place(self.tp_gnd, Placement((0.0, 0.0), on=Side.Top))
-        self.place(self.ffc1, Placement((2.3960, FFC_OFFSET_Y - FFC_DISTANCE / 2.0), 180, on=Side.Bottom))
-        self.place(self.ffc2, Placement((2.3960, FFC_OFFSET_Y + FFC_DISTANCE / 2.0), 180, on=Side.Bottom))
-        self.place(self.saleae, Placement((BOARD_WIDTH / -2.0 + 10.0, 0.0), on=Side.Bottom))
-        self.place(self.vcc_select, Placement((BOARD_WIDTH / 2.0 - 7.0, 0.0), 180, on=Side.Bottom))
+        self.place(self.tp_gnd, Placement((0.0, 0.0), on=Side.Bottom))
+        self.place(self.ffc1, Placement((-2.3960, FFC_OFFSET_Y - FFC_DISTANCE / 2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.ffc2, Placement((-2.3960, FFC_OFFSET_Y + FFC_DISTANCE / 2.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
+        self.place(self.saleae, Placement((BOARD_WIDTH / 2.0 - 10.0, 0.0), on=Side.Top))
+        self.place(self.vcc_select, Placement((BOARD_WIDTH / -2.0 + 7.0, 0.0), 180, on=Side.Top))  # ty: ignore[no-matching-overload]
 
-        self += Silkscreen(Text("Level Shifter Element (Au1) v2", 1.5).at(0.0, 1.0), side=FeatureSide.Bottom)
-        self += Silkscreen(Text(f"(c) mblsha {BOARD_DATE}", 1.5).at(0.0, -1.0), side=FeatureSide.Bottom)
+        self += Silkscreen(Text("Level Shifter Element (Au1) v2", 1.5).at(0.0, 1.0), side=FeatureSide.Top)
+        self += Silkscreen(Text(f"(c) mblsha {BOARD_DATE}", 1.5).at(0.0, -1.0), side=FeatureSide.Top)
 
 
 class AlchitryAu1LevelShifterBoard(Board):

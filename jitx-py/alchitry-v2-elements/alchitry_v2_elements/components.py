@@ -22,6 +22,7 @@ from jitx.net import Port
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Circle, Polyline, Text
 from jitxlib.symbols.box import BoxConfig, BoxSymbol, PinGroup, Row
+from shared_components.alchitry_v2 import AlchitryV2UsageProfile, PinClaim, resolve_profile
 from shared_components.hirose_df40 import (
     DF40_50_BOTTOM_SPECS,
     DF40_50_TOP_SPECS,
@@ -31,7 +32,12 @@ from shared_components.hirose_df40 import (
     place_df40_pad_specs,
 )
 
-from src.generated_data import V2_BOTH_SIGNAL_MAP, V2_BOTTOM_SIGNAL_MAP, V2_TOP_SIGNAL_MAP
+from alchitry_v2_elements.generated_data import (
+    V2_BOTH_SIGNAL_MAP,
+    V2_BOTTOM_SIGNAL_MAP,
+    V2_TOP_SIGNAL_MAP,
+    SignalMap,
+)
 
 SPECIAL_SIGNAL_NAMES = {
     "3.3V": "V3V3",
@@ -170,7 +176,12 @@ def _rename_specs(
     return tuple(renamed)
 
 
-def _make_landpattern_class(class_name: str, footprint_name: str) -> type[Landpattern]:
+def _make_landpattern_class(
+    class_name: str,
+    footprint_name: str,
+    *,
+    include_holes: bool,
+) -> type[Landpattern]:
     layout = ELEMENT_LAYOUTS[footprint_name]
 
     class _Landpattern(Landpattern):
@@ -179,8 +190,9 @@ def _make_landpattern_class(class_name: str, footprint_name: str) -> type[Landpa
                 renamed_specs = _rename_specs(specs, signal_prefix=signal_prefix, mount_prefix=mount_prefix)
                 place_df40_pad_specs(self, renamed_specs, x_offset=center_x, y_offset=center_y)
 
-            for index, (x, y, diameter) in enumerate(ELEMENT_HOLES, start=1):
-                setattr(self, f"hole_{index}", Cutout(Circle(diameter=diameter).at(x, y)))
+            if include_holes:
+                for index, (x, y, diameter) in enumerate(ELEMENT_HOLES, start=1):
+                    setattr(self, f"hole_{index}", Cutout(Circle(diameter=diameter).at(x, y)))
 
             self.ref_text = Silkscreen(Text(">REF", 1.0).at(27.5, 2.5))
             self.outline = Silkscreen(Polyline(0.1524, ELEMENT_OUTLINE))
@@ -193,20 +205,42 @@ def _make_landpattern_class(class_name: str, footprint_name: str) -> type[Landpa
 def _make_component_class(
     class_name: str,
     footprint_name: str,
-    signal_map: tuple[tuple[str, tuple[str, ...]], ...],
+    signal_map: SignalMap,
     description: str,
+    *,
+    profile: str | AlchitryV2UsageProfile | None = None,
 ) -> type[Component]:
-    signal_attr_map = OrderedDict((signal_name, _signal_attr_name(signal_name)) for signal_name, _ in signal_map)
+    resolved_profile = resolve_profile(profile)
+    excluded_claims = {
+        f"{claim.connector}{claim.pin}": claim
+        for claim in (() if resolved_profile is None else resolved_profile.claims())
+        if claim.role == "reserved_signal"
+    }
+    filtered_signal_map = tuple(
+        (signal_name, pad_names) for signal_name, pad_names in signal_map if signal_name not in excluded_claims
+    )
+    signal_attr_map = OrderedDict(
+        (signal_name, _signal_attr_name(signal_name)) for signal_name, _ in filtered_signal_map
+    )
     attr_names = tuple(OrderedDict.fromkeys(signal_attr_map.values()))
-    landpattern_class = _make_landpattern_class(f"{class_name}Landpattern", footprint_name)
+    landpattern_class = _make_landpattern_class(
+        f"{class_name}Landpattern",
+        footprint_name,
+        include_holes=True,
+    )
+    holeless_landpattern_class = _make_landpattern_class(
+        f"{class_name}HolelessLandpattern",
+        footprint_name,
+        include_holes=False,
+    )
 
-    def __init__(self):
-        self.landpattern = landpattern_class()
+    def __init__(self, *, include_holes: bool = True):
+        self.landpattern = landpattern_class() if include_holes else holeless_landpattern_class()
         self.symbol = _build_symbol(self, attr_names)
         self.signal_to_attr = dict(signal_attr_map)
         self.attr_to_signal = {attr_name: signal_name for signal_name, attr_name in signal_attr_map.items()}
         mapping = {}
-        for signal_name, pad_names in signal_map:
+        for signal_name, pad_names in filtered_signal_map:
             attr_name = signal_attr_map[signal_name]
             port = cast(Port, getattr(self, attr_name))
             pads = tuple(getattr(self.landpattern, f"pad_{pad_name}") for pad_name in pad_names)
@@ -214,17 +248,30 @@ def _make_component_class(
         self.pad_mapping = PadMapping(mapping)
 
     def port(self, signal_name: str) -> Port:
+        if signal_name in excluded_claims:
+            claim = excluded_claims[signal_name]
+            profile_name = resolved_profile.display_name if resolved_profile else "the active profile"
+            raise ValueError(
+                f"Pin {signal_name} is reserved by {profile_name} for {claim.signal} ({claim.source_section})"
+            )
         return cast(Port, getattr(self, self.signal_to_attr[signal_name]))
+
+    def claim(self, signal_name: str) -> PinClaim | None:
+        return excluded_claims.get(signal_name)
 
     attrs: dict[str, object] = {
         "__init__": __init__,
         "port": port,
+        "claim": claim,
         "manufacturer": "Alchitry",
         "mpn": footprint_name,
         "description": description,
         "reference_designator_prefix": "J",
         "value": footprint_name,
-        "source_signal_names": tuple(signal_name for signal_name, _ in signal_map),
+        "profile_name": None if resolved_profile is None else resolved_profile.key,
+        "source_signal_names": tuple(signal_name for signal_name, _ in filtered_signal_map),
+        "excluded_signal_names": tuple(excluded_claims),
+        "excluded_pin_claims": excluded_claims,
     }
     for attr_name in attr_names:
         attrs[attr_name] = Port()
@@ -251,7 +298,35 @@ AlchitryV2BothElement = _make_component_class(
     "Alchitry V2 combined element footprint composed from shared Hirose DF40 connector models",
 )
 
+# Ft-safe Au2 templates. These retain the full mechanical footprint but omit
+# every Bank A signal occupied by the Ft V2 element, matching the Au1 template's
+# construction-time exclusion of Ft-owned connector pins.
+AlchitryFtV2TopElement = _make_component_class(
+    "AlchitryFtV2TopElement",
+    "V2_TOP",
+    V2_TOP_SIGNAL_MAP,
+    "Alchitry V2 top-side element footprint with Ft V2 signal pins excluded",
+    profile="ft",
+)
+AlchitryFtV2BottomElement = _make_component_class(
+    "AlchitryFtV2BottomElement",
+    "V2_BOTTOM",
+    V2_BOTTOM_SIGNAL_MAP,
+    "Alchitry V2 bottom-side element footprint with Ft V2 signal pins excluded",
+    profile="ft",
+)
+AlchitryFtV2BothElement = _make_component_class(
+    "AlchitryFtV2BothElement",
+    "V2_BOTH",
+    V2_BOTH_SIGNAL_MAP,
+    "Alchitry V2 combined element footprint with Ft V2 signal pins excluded",
+    profile="ft",
+)
+
 __all__ = [
+    "AlchitryFtV2TopElement",
+    "AlchitryFtV2BottomElement",
+    "AlchitryFtV2BothElement",
     "AlchitryV2TopElement",
     "AlchitryV2BottomElement",
     "AlchitryV2BothElement",

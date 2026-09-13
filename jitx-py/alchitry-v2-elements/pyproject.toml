@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["alchitry_v2_elements"]
 
 [project.optional-dependencies]
 dev = [
@@ -38,3 +38,6 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP"]
 ignore = ["E501"]
+
+[tool.ruff.format]
+exclude = ["alchitry_v2_elements/generated_data.py"]

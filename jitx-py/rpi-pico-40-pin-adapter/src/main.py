@@ -10,11 +10,11 @@ from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
 from jitx.net import Net, Port
 from jitx.placement import Placement, Side
-from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import rectangle
 from jitx.shapes.primitive import Text
 from jitx.substrate import Substrate
 from jitx.via import Via, ViaType
+from shared_components.fabrication import jlcpcb_fab_constraints, jlcpcb_stackup
 
 from src.components import PinHeader1x20, PinHeader2x20
 
@@ -39,8 +39,8 @@ SIGNAL_AREA = rectangle(BOARD_WIDTH - 1.0, BOARD_HEIGHT - 1.0, radius=BOARD_RADI
 
 class RpiPico40PinAdapterSubstrate(Substrate):
     # Python replacement for the Stanza `setup-design(...)` default stackup.
-    stackup = SampleStackup(4)
-    constraints = SampleFabConstraints()
+    stackup = jlcpcb_stackup(4)
+    constraints = jlcpcb_fab_constraints(4)
 
     class StandardThroughVia(Via):
         start_layer = 0

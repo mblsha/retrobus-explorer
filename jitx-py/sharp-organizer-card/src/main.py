@@ -10,13 +10,13 @@ from jitx.feature import Silkscreen
 from jitx.layerindex import Side as FeatureSide
 from jitx.net import Net, Port
 from jitx.placement import Placement, Side
-from jitx.sample import SampleFabConstraints, SampleStackup
 from jitx.shapes.composites import ShapelyGeometry, rectangle
 from jitx.shapes.primitive import Text
 from jitx.substrate import Substrate
 from shapely.geometry import box
 from shapely.ops import unary_union
 from shared_components.ffc import RetroBus60FfcConnector
+from shared_components.flex_fabrication import jlcpcb_flex_fab_constraints, jlcpcb_flex_stackup
 
 from src.components import SharpOrganizerBus
 
@@ -56,9 +56,9 @@ SIGNAL_AREA = make_board_geometry(shrink=SIGNAL_SHRINK)
 
 
 class SharpOrganizerCardSubstrate(Substrate):
-    # Python replacement for `setup-design-flex(...)` for this first pass port.
-    stackup = SampleStackup(2)
-    constraints = SampleFabConstraints()
+    # Python replacement for the archived Stanza `setup-design-flex(...)` call.
+    stackup = jlcpcb_flex_stackup(2)
+    constraints = jlcpcb_flex_fab_constraints(2)
 
 
 FFCConnector = RetroBus60FfcConnector

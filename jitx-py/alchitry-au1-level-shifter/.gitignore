@@ -6,3 +6,5 @@ __pycache__/
 designs/
 parts-db/
 .ruff_cache/
+.jitx/
+render/
