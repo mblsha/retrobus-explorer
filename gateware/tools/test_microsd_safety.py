@@ -12,9 +12,10 @@ from unittest.mock import patch
 
 import microsd_verify_linux_rw as rw
 import microsd_host as host_tools
+import microsd_prepare_linux as prepare
 
 
-class TargetSafetyTests(unittest.TestCase):
+class TargetFixture:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -69,6 +70,8 @@ class TargetSafetyTests(unittest.TestCase):
         self.path_patch.start()
         self.addCleanup(self.path_patch.stop)
 
+
+class TargetSafetyTests(TargetFixture, unittest.TestCase):
     def validate(self):
         return rw.validate_target(4, 256 << 20, 13_000_000, 12_913_043)
 
@@ -171,6 +174,83 @@ class TargetSafetyTests(unittest.TestCase):
         self.swap_stats[str(alias)] = FileNotFoundError("missing swap")
         with self.assertRaises(RuntimeError):
             self.validate()
+
+
+class PreparationTests(TargetFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        device = self.root / "devices/2a310000.mmc"
+        devices = self.root / "sys/bus/platform/devices"
+        devices.mkdir(parents=True)
+        (devices / device.name).symlink_to(device)
+        node = self.root / "firmware/devicetree/base/mmc@2a310000"
+        node.mkdir(parents=True)
+        (device / "of_node").symlink_to(node)
+        self.driver = self.root / "sys/bus/platform/drivers/dwmmc_rockchip"
+        self.driver.mkdir(parents=True)
+        (device / "driver").symlink_to(self.driver)
+        self.device = device
+        self.unbind = self.driver / "unbind"
+        self.unbind.write_text("")
+
+    def run_prepare(self):
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            prepare.main()
+        return output.getvalue().strip()
+
+    def test_entry_point_refuses_active_media_before_unbind(self):
+        mount = self.root / "proc/self/mountinfo"
+        swaps = self.root / "proc/swaps"
+        holder = self.partition / "holders/dm-0"
+        alias = "/dev/disk/by-label/SPADE"
+        self.swap_stats[str(self.root / alias.lstrip("/"))] = SimpleNamespace(
+            st_mode=stat.S_IFBLK, st_rdev=os.makedev(179, 9)
+        )
+        for usage in ("mount", "holder", "swap"):
+            with self.subTest(usage=usage):
+                if usage == "mount":
+                    mount.write_text(f"21 1 179:9 / /mnt rw - vfat {alias} rw\n")
+                elif usage == "holder":
+                    holder.touch()
+                else:
+                    swaps.write_text(f"Filename Type Size Used Priority\n{alias} partition 1 0 -2\n")
+                with self.assertRaises(RuntimeError):
+                    self.run_prepare()
+                self.assertEqual(self.unbind.read_text(), "")
+                mount.write_text("")
+                holder.unlink(missing_ok=True)
+                swaps.write_text("Filename Type Size Used Priority\n")
+
+    def test_unused_emulator_detaches(self):
+        self.assertEqual(self.run_prepare(), "unused-emulator")
+        self.assertEqual(self.unbind.read_text(), "2a310000.mmc")
+
+    def test_first_use_no_card_detaches(self):
+        import shutil
+        shutil.rmtree(self.card)
+        shutil.rmtree(self.disk)
+        self.assertEqual(self.run_prepare(), "no-card")
+        self.assertEqual(self.unbind.read_text(), "2a310000.mmc")
+
+    def test_unexpected_card_and_missing_identity_refuse(self):
+        (self.card / "cid").write_text("other")
+        with self.assertRaisesRegex(RuntimeError, "Wrong card CID"):
+            self.run_prepare()
+        self.assertEqual(self.unbind.read_text(), "")
+        (self.device / "of_node").unlink()
+        with self.assertRaisesRegex(RuntimeError, "device-tree identity"):
+            self.run_prepare()
+        self.assertEqual(self.unbind.read_text(), "")
+
+    def test_already_unbound_is_explicit_but_missing_controller_refuses(self):
+        (self.device / "driver").unlink()
+        (self.root / "sys/class/mmc_host/mmc1").unlink()
+        self.assertEqual(self.run_prepare(), "already-unbound")
+        self.assertEqual(self.unbind.read_text(), "")
+        (self.root / "sys/bus/platform/devices/2a310000.mmc").unlink()
+        with self.assertRaisesRegex(RuntimeError, "controller is missing"):
+            self.run_prepare()
+        self.assertEqual(self.unbind.read_text(), "")
 
 
 class DirectIOTests(unittest.TestCase):

@@ -111,9 +111,6 @@ SIGNAL_AREA = ArcPolygon(
     ]
 )
 
-PMOD_CONNECTED_GROUND_PINS: tuple[int, ...] = ()
-PMOD_CONNECTED_VCC_PINS: tuple[int, ...] = ()
-
 # Exhaustive zero-crossing rank-1 mappings over all 20,160 six-of-eight PMOD
 # assignments. Both variants rank direct bottom-copper paths because the PMOD
 # connector's plated through-hole pads are available from either board face.

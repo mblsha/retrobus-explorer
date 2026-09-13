@@ -50,6 +50,50 @@ def require_unused(disk):
         )
 
 
+def require_emulator(card, disk):
+    require((card / "name").read_text().strip() == "SPADE", "Wrong card name")
+    require((card / "cid").read_text().strip() == CID, "Wrong card CID")
+    require(
+        (disk / "device").resolve() == card.resolve(),
+        "Block device belongs to a different card",
+    )
+
+
+def prepare_for_programming():
+    """Detach only the verified external controller, with no active media."""
+    controller = "2a310000.mmc"
+    device = Path("/sys/bus/platform/devices") / controller
+    driver = Path("/sys/bus/platform/drivers/dwmmc_rockchip")
+    host = Path("/sys/class/mmc_host/mmc1")
+    require(device.is_dir(), "External MMC controller is missing")
+    require(
+        (device / "of_node").is_dir()
+        and (device / "of_node").resolve().name == "mmc@2a310000",
+        "Unexpected external controller device-tree identity",
+    )
+    if not (device / "driver").is_symlink() and not (device / "driver").exists():
+        require(not host.exists(), "Unbound controller still has an MMC host")
+        return "already-unbound"
+    require((device / "driver").resolve() == driver.resolve(), "Wrong MMC driver")
+    require(
+        host.is_dir() and host.resolve().parent.parent == device.resolve(),
+        "Wrong external MMC host",
+    )
+    cards = list(host.glob("mmc1:*"))
+    disk = Path("/sys/class/block/mmcblk1")
+    if cards:
+        require(len(cards) == 1 and cards[0].name == "mmc1:0001", "Unexpected card")
+        card = cards[0]
+        require_emulator(card, disk)
+        require_unused(disk)
+        state = "unused-emulator"
+    else:
+        require(not disk.exists(), "Block device exists without an enumerated card")
+        state = "no-card"
+    (driver / "unbind").write_text(controller)
+    return state
+
+
 def validate_target(
     bus_width,
     capacity=CAPACITY,
@@ -67,12 +111,7 @@ def validate_target(
     require("2a310000.mmc" in str(host.resolve()), "Wrong external MMC controller")
     card = host / "mmc1:0001"
     disk = Path("/sys/class/block/mmcblk1")
-    require((card / "name").read_text().strip() == "SPADE", "Wrong card name")
-    require((card / "cid").read_text().strip() == CID, "Wrong card CID")
-    require(
-        (disk / "device").resolve() == card.resolve(),
-        "Block device belongs to a different card",
-    )
+    require_emulator(card, disk)
     require(
         (disk / "ro").read_text().strip() == ("0" if writable else "1"),
         "Unexpected card write protection",

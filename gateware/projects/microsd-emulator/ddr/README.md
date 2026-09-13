@@ -39,12 +39,12 @@ build/litedram-py311/bin/python -m unittest discover \
 uv run python tools/test_microsd_suite.py --fast-sd
 python3 experiments/openxc7-macos/build_ddr.py \
   --toolchain build/openxc7-macos --output build/microsd-ddr-sd \
-  --route-seeds 8
+  --seed 8
 ```
 
 The default toolchain prefix is `build/openxc7-macos`, shared with the probe
 and BRAM builders. Every invocation reruns support tests and regenerates DDR
-HDL/firmware; multiple placement seeds share one synthesis within that run.
+HDL/firmware. One configurable placement seed is checked per build.
 
 The build checks support tests, clock timing, native Gray-pointer crossings,
 direct SD outputs and a configuration-frame round trip. The builder removes any old success manifest before preflight and publishes
@@ -74,21 +74,21 @@ Only **`mmc1` / `2a310000.mmc`** is the guarded external test controller.
 Internal eMMC is `mmc0`; Wi-Fi is `mmc2`.
 The helpers check controller, card CID, capacity, mounts, holders and swaps.
 
-Before reprogramming or uploading, unmount the test card if mounted. On the
-GKD, verify identity and detach only the external controller:
+Before first programming, reprogramming, or uploading, copy all
+`tools/microsd_*.py` helpers to one directory on the GKD. Unmount the test card
+and stop any swap or device-mapper use, then run there as root:
 
-```python
-from pathlib import Path
-host = Path('/sys/class/mmc_host/mmc1')
-if '2a310000.mmc' not in str(host.resolve()):
-    raise RuntimeError('Wrong controller')
-if (host / 'mmc1:0001/cid').read_text().strip() != \
-        '7f52425350414445101234567801916b':
-    raise RuntimeError('Wrong card')
-if '/dev/mmcblk1' in Path('/proc/mounts').read_text():
-    raise RuntimeError('Unmount the card first')
-Path('/sys/bus/platform/drivers/dwmmc_rockchip/unbind').write_text('2a310000.mmc')
+```sh
+python3 microsd_prepare_linux.py
 ```
+
+The command verifies the external platform device, device-tree node, driver,
+and MMC host. It detaches a controller with no enumerated card (`no-card`), or
+an expected SPADE emulator whose disk and partitions are unused
+(`unused-emulator`). An already detached, verified controller returns
+`already-unbound`. Unexpected cards, missing controller identity, mounts,
+holders, and swap cause refusal before any unbind write. This supports starting
+with the input-only probe as well as replacing an existing emulator.
 
 On the Mac, program volatile FPGA SRAM:
 
