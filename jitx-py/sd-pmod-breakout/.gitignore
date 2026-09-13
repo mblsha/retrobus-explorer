@@ -1,0 +1,13 @@
+.socket.jitx
+.venv/
+.venv_sync_last
+__pycache__/
+.pytest_cache/
+*.pyc
+designs/
+parts-db/
+.ruff_cache/
+.jitx/
+render/
+verification/*.kicad_prl
+verification/*.kicad_pro
