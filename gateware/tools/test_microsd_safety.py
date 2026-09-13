@@ -176,6 +176,32 @@ class TargetSafetyTests(TargetFixture, unittest.TestCase):
             self.validate()
 
 
+class PreparationCliTests(unittest.TestCase):
+    def test_help_and_invalid_arguments_never_prepare(self):
+        for argument, exit_code in (("--help", 0), ("-h", 0), ("--dry-run", 2), ("--typo", 2), ("unexpected", 2)):
+            with (
+                self.subTest(argument=argument),
+                patch("sys.argv", ["microsd_prepare_linux.py", argument]),
+                patch.object(prepare, "prepare_for_programming") as operation,
+                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    prepare.main()
+                self.assertEqual(error.exception.code, exit_code)
+                operation.assert_not_called()
+
+    def test_no_arguments_prepares_once(self):
+        with (
+            patch("sys.argv", ["microsd_prepare_linux.py"]),
+            patch.object(prepare, "prepare_for_programming", return_value="no-card") as operation,
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            prepare.main()
+        operation.assert_called_once_with()
+        self.assertEqual(output.getvalue(), "no-card\n")
+
+
 class PreparationTests(TargetFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -194,7 +220,10 @@ class PreparationTests(TargetFixture, unittest.TestCase):
         self.unbind.write_text("")
 
     def run_prepare(self):
-        with contextlib.redirect_stdout(io.StringIO()) as output:
+        with (
+            patch("sys.argv", ["microsd_prepare_linux.py"]),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
             prepare.main()
         return output.getvalue().strip()
 
