@@ -1,5 +1,7 @@
 """Identity guards and exact, aligned I/O for the external volatile FPGA card."""
 
+import argparse
+from contextlib import contextmanager
 import mmap
 import os
 import re
@@ -8,6 +10,30 @@ from pathlib import Path
 
 CAPACITY = 8 * 1024 * 1024
 CID = "7f52425350414445101234567801916b"
+
+
+def target_parser(description):
+    """Common target arguments for the small-image raw and filesystem checks."""
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--bus-width", type=int, choices=(1, 4), required=True)
+    parser.add_argument("--capacity-mib", type=int, choices=(8, 256), default=8)
+    parser.add_argument("--clock-hz", type=int, default=1_000_000)
+    parser.add_argument(
+        "--actual-clock-hz",
+        type=int,
+        help="Expected divider output; defaults to requested clock",
+    )
+    return parser
+
+
+@contextmanager
+def direct_device(flags):
+    """Close the external card on success or failure; callers choose access flags."""
+    fd = os.open("/dev/mmcblk1", flags | os.O_DIRECT)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
 
 
 def require(condition, message):

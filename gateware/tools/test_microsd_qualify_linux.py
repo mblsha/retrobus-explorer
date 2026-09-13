@@ -2,7 +2,7 @@ import copy
 import unittest
 import io
 import json
-from contextlib import redirect_stderr
+from contextlib import contextmanager, redirect_stderr
 from unittest.mock import patch
 from types import SimpleNamespace
 from microsd_qualify_linux import qualification
@@ -16,6 +16,17 @@ class QualificationEvidenceTest(unittest.TestCase):
             "errors": "# Data CRC Errors: 0\n",
             "dmesg": ["[1.0] baseline"],
         }
+
+    @contextmanager
+    def capture(self, after):
+        args = SimpleNamespace(actual_clock_hz=14850000, clock_hz=15000000, bus_width=4)
+        with (
+            patch(
+                "microsd_qualify_linux.snapshot", side_effect=[self.state, after]
+            ) as snapshots,
+            redirect_stderr(io.StringIO()) as output,
+        ):
+            yield args, snapshots, output
 
     def test_clean_actual_divider(self):
         self.assertEqual(validate(self.state, self.state, 14850000, 4), ([], []))
@@ -49,15 +60,7 @@ class QualificationEvidenceTest(unittest.TestCase):
         self.assertTrue(validate(self.state, after, 14850000, 4, True)[0])
 
     def test_disappearing_card_fails_and_preserves_evidence(self):
-        output = io.StringIO()
-        args = SimpleNamespace(actual_clock_hz=14850000, clock_hz=15000000, bus_width=4)
-        with (
-            patch(
-                "microsd_qualify_linux.snapshot",
-                side_effect=[self.state, FileNotFoundError("card removed")],
-            ),
-            redirect_stderr(output),
-        ):
+        with self.capture(FileNotFoundError("card removed")) as (args, _, output):
             with self.assertRaises(RuntimeError):
                 with qualification(args):
                     pass
@@ -66,14 +69,7 @@ class QualificationEvidenceTest(unittest.TestCase):
         self.assertIn("card removed", record["problems"][0])
 
     def test_transfer_failure_still_collects_evidence(self):
-        output = io.StringIO()
-        args = SimpleNamespace(actual_clock_hz=14850000, clock_hz=15000000, bus_width=4)
-        with (
-            patch(
-                "microsd_qualify_linux.snapshot", side_effect=[self.state, self.state]
-            ) as capture,
-            redirect_stderr(output),
-        ):
+        with self.capture(self.state) as (args, capture, output):
             with self.assertRaisesRegex(ValueError, "data mismatch"):
                 with qualification(args):
                     raise ValueError("data mismatch")
@@ -81,14 +77,9 @@ class QualificationEvidenceTest(unittest.TestCase):
         self.assertFalse(json.loads(output.getvalue())["qualification_passed"])
 
     def test_hidden_recovery_fails_normal_test(self):
-        output = io.StringIO()
         after = copy.deepcopy(self.state)
         after["dmesg"].append("[2.0] mmc1: new SD card")
-        args = SimpleNamespace(actual_clock_hz=14850000, clock_hz=15000000, bus_width=4)
-        with (
-            patch("microsd_qualify_linux.snapshot", side_effect=[self.state, after]),
-            redirect_stderr(output),
-        ):
+        with self.capture(after) as (args, _, output):
             with self.assertRaises(RuntimeError):
                 with qualification(args):
                     pass

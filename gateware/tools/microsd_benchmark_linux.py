@@ -12,7 +12,7 @@ import json
 import mmap
 import os
 import time
-from microsd_host import validate_target, read_into
+from microsd_host import direct_device, validate_target, read_into
 
 
 def main():
@@ -41,8 +41,7 @@ def main():
             expected.update(zero)
         expected = expected.hexdigest()
         results = []
-        fd = os.open("/dev/mmcblk1", os.O_RDONLY | os.O_DIRECT)
-        try:
+        with direct_device(os.O_RDONLY) as fd:
             with mmap.mmap(-1, request_bytes) as buf:
                 for repeat in range(a.repeats):
                     digest = hashlib.sha256()
@@ -66,8 +65,6 @@ def main():
                             sha256=digest.hexdigest(),
                         )
                     )
-        finally:
-            os.close(fd)
         print(
             json.dumps(
                 dict(passed=True, configuration=vars(a), results=results), indent=2
