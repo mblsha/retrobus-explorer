@@ -8,12 +8,11 @@ DDR controller, full-memory BIST, and board wiring.
 
 ## Integration status
 
-This revision passes simulation and host tests, but is not ready to program.
-The best checked local placement reaches 99.38 MHz against the required
-100 MHz fabric clock; the build correctly refuses to publish success. See
-[validation details](QUALIFICATION.md#current-integration-2026-09-13).
-Close timing and repeat hardware qualification before treating this as a
-replacement for the previously qualified image.
+The current integration was requalified on the Arty/GKD hardware on
+2026-09-14: full 256 MiB SD integrity, cross-interface read/write, filesystem
+checks, and about 90 Mbps Ethernet reads passed. Seed 4 meets all clock,
+CDC, and output timing checks. See [qualification provenance](QUALIFICATION.md#current-integration-2026-09-14)
+for exact bitstream identities, rates, and retry counts.
 
 ## Build and test
 
@@ -26,7 +25,7 @@ uv run python tools/project_inventory.py --check
 uv run python projects/ethernet-diagnostic/scripts/test_with_vcd.py
 uv run python -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
 uv run python -O -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
-python3 experiments/openxc7-macos/build_ddr.py --ethernet --seed 6
+python3 experiments/openxc7-macos/build_ddr.py --ethernet --seed 4
 ```
 
 The output is `build/microsd-ddr-ethernet/`. The builder regenerates DDR support,
