@@ -1,4 +1,4 @@
-"""The routed CDC guard must fail closed for missing paths and excessive delay."""
+"""Reject wrong clock ownership, broken synchronizers, and excessive routed delay."""
 
 import json
 import sys
@@ -22,25 +22,41 @@ class NativeCDCTimingTest(unittest.TestCase):
             "netnames": {"fclk": {"bits": [1]}, "dclk": {"bits": [2]}},
             "cells": {},
         }
-        lines = ["(TIMESCALE 1ps)"]
+        self.crossings = {}
+        self.sdf.write_text("(TIMESCALE 1ps)\n")
         for fifo in range(3):
-            for group in ("gwsync", "grsync"):
-                for lane in range(1):
-                    bit = 100 + len(self.module["cells"])
-                    name = f"sd_memory_crossing.async_fifo_{fifo}.async_fifo_v_0.{group}[{lane}]"
-                    self.module["netnames"][name] = {"bits": [bit]}
-                    self.module["cells"][f"src{bit}"] = {
-                        "type": "SLICE_FFX",
-                        "connections": {"CK": [1], "Q": [bit]},
-                    }
-                    self.module["cells"][f"dst{bit}"] = {
-                        "type": "SLICE_FFX",
-                        "connections": {"CK": [2], "D": [bit]},
-                    }
-                    lines.append(
-                        f"(INTERCONNECT src{bit}/Q dst{bit}/D (1000:1000:1000) (1000:1000:1000))"
-                    )
-        self.sdf.write_text("\n".join(lines))
+            write_clock, read_clock = (2, 1) if fifo == 2 else (1, 2)
+            for group, source, target in (
+                ("gwsync", write_clock, read_clock),
+                ("grsync", read_clock, write_clock),
+            ):
+                self.add_crossing(
+                    f"sd_memory_crossing.async_fifo_{fifo}.async_fifo_v_0.{group}[0]",
+                    source,
+                    target,
+                )
+
+    def add_crossing(
+        self, name, source, target, source_falling=False, target_falling=False
+    ):
+        bit = 100 + 3 * len(self.crossings)
+        source_name, first, second = f"src{bit}", f"dst{bit}", f"sync{bit}"
+        self.module["netnames"][name] = {"bits": [bit]}
+        for cell_name, clock, falling, ports in (
+            (source_name, source, source_falling, {"Q": [bit]}),
+            (first, target, target_falling, {"D": [bit], "Q": [bit + 1]}),
+            (second, target, target_falling, {"D": [bit + 1], "Q": [bit + 2]}),
+        ):
+            self.module["cells"][cell_name] = {
+                "type": "SLICE_FFX",
+                "parameters": {"IS_CLK_INVERTED": str(int(falling))},
+                "connections": {"CK": [clock], **ports},
+            }
+        self.crossings[name] = (source_name, first, second)
+        with self.sdf.open("a") as sdf:
+            sdf.write(
+                f"(INTERCONNECT {source_name}/Q {first}/D (1000:1000:1000) (1000:1000:1000))\n"
+            )
 
     def check(self, **options):
         self.routed.write_text(json.dumps({"modules": {"top": self.module}}))
@@ -57,9 +73,7 @@ class NativeCDCTimingTest(unittest.TestCase):
             self.check()
 
     def test_missing_pointer_is_rejected(self):
-        self.module["netnames"].pop(
-            next(n for n in self.module["netnames"] if "gwsync" in n)
-        )
+        self.module["netnames"].pop(next(iter(self.crossings)))
         with self.assertRaises(RuntimeError):
             self.check()
 
@@ -68,56 +82,112 @@ class NativeCDCTimingTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.check()
 
+    def test_missing_second_stage_is_rejected(self):
+        del self.module["cells"]["sync100"]
+        with self.assertRaisesRegex(RuntimeError, "fanout"):
+            self.check()
+
+    def test_first_stage_cannot_drive_functional_logic(self):
+        self.module["cells"]["unsafe"] = {
+            "type": "LUT1",
+            "connections": {"I": [101], "O": [999]},
+        }
+        with self.assertRaisesRegex(RuntimeError, "fanout"):
+            self.check()
+
+    def test_second_stage_must_use_same_clock(self):
+        self.module["cells"]["sync100"]["connections"]["CK"] = [1]
+        with self.assertRaisesRegex(RuntimeError, "second synchronizer"):
+            self.check()
+
 
 class EthernetCDCTimingTest(NativeCDCTimingTest):
     def setUp(self):
         super().setUp()
-        nets = self.module["netnames"]
-        nets.update(eth_rx_global={"bits": [3]}, eth_tx_global={"bits": [4]})
-        lines = []
-        for entity, width, clock in (("receiver", 4, 3), ("transmitter", 2, 4)):
-            for group in ("published", "consumed"):
-                for lane in range(width):
-                    bit = 200 + len(self.module["cells"])
-                    name = (
-                        f"sd.network_frontend_0.frame_{entity}_0.{group}_gray[{lane}]"
-                    )
-                    nets[name] = {"bits": [bit]}
-                    source_clock, target_clock = (
-                        (1, clock) if group == "consumed" else (clock, 1)
-                    )
-                    self.module["cells"][f"src{bit}"] = {
-                        "type": "SLICE_FFX",
-                        "connections": {"CK": [source_clock], "Q": [bit]},
-                    }
-                    self.module["cells"][f"dst{bit}"] = {
-                        "type": "SLICE_FFX",
-                        "connections": {"CK": [target_clock], "D": [bit]},
-                    }
-                    lines.append(
-                        f"(INTERCONNECT src{bit}/Q dst{bit}/D (1000:1000:1000) (1000:1000:1000))"
-                    )
-        self.sdf.write_text(self.sdf.read_text() + "\n" + "\n".join(lines))
+        self.module["netnames"].update(
+            eth_rx_global={"bits": [3]}, eth_tx_global={"bits": [4]}
+        )
+        # Independent fixture contract: TX producer is fabric, TX consumer is falling edge.
+        for queue, pointer, width, source, target, sf, tf in (
+            ("receiver", "published", 4, 3, 1, False, False),
+            ("receiver", "consumed", 4, 1, 3, False, False),
+            ("transmitter", "published", 2, 1, 4, False, True),
+            ("transmitter", "consumed", 2, 4, 1, True, False),
+        ):
+            for lane in range(width):
+                self.add_crossing(
+                    f"sd.network_frontend_0.frame_{queue}_0.{pointer}_gray[{lane}]",
+                    source,
+                    target,
+                    sf,
+                    tf,
+                )
 
     def check(self, **options):
         return super().check(ethernet=True)
+
+    def tx_published(self):
+        name = next(n for n in self.crossings if "transmitter_0.published" in n)
+        return self.crossings[name]
 
     def test_all_paths_are_checked(self):
         self.assertEqual(len(self.check()), 18)
 
     def test_missing_ethernet_pointer_is_rejected(self):
         self.module["netnames"].pop(
-            next(n for n in self.module["netnames"] if "published_gray" in n)
+            next(n for n in self.crossings if "published_gray" in n)
         )
-        with self.assertRaisesRegex(RuntimeError, "twelve"):
+        with self.assertRaisesRegex(RuntimeError, "pointer bits"):
             self.check()
 
     def test_excessive_ethernet_delay_is_rejected(self):
+        src, dst, _ = self.tx_published()
         self.sdf.write_text(
             self.sdf.read_text().replace(
-                "src212/Q dst212/D (1000:1000:1000)",
-                "src212/Q dst212/D (40000:40000:40000)",
+                f"{src}/Q {dst}/D (1000:1000:1000)",
+                f"{src}/Q {dst}/D (40000:40000:40000)",
             )
         )
         with self.assertRaises(RuntimeError):
+            self.check()
+
+    def test_reversed_transmitter_domains_are_rejected(self):
+        for name, (src, dst, second) in self.crossings.items():
+            if "transmitter" not in name:
+                continue
+            cells = self.module["cells"]
+            source_clock = cells[src]["connections"]["CK"]
+            target_clock = cells[dst]["connections"]["CK"]
+            cells[src]["connections"]["CK"] = target_clock
+            cells[dst]["connections"]["CK"] = source_clock
+            cells[second]["connections"]["CK"] = source_clock
+        with self.assertRaisesRegex(RuntimeError, "clock/edge"):
+            self.check()
+
+    def test_other_recognized_clocks_are_rejected(self):
+        for position in (0, 1):
+            with self.subTest(position=position):
+                cell = self.module["cells"][self.tx_published()[position]]
+                original = cell["connections"]["CK"]
+                cell["connections"]["CK"] = [3]
+                with self.assertRaisesRegex(RuntimeError, "clock/edge"):
+                    self.check()
+                cell["connections"]["CK"] = original
+
+    def test_transmitter_requires_falling_edge(self):
+        self.module["cells"][self.tx_published()[1]]["parameters"][
+            "IS_CLK_INVERTED"
+        ] = "0"
+        with self.assertRaisesRegex(RuntimeError, "clock/edge"):
+            self.check()
+
+    def test_aggregate_count_cannot_hide_wrong_group_width(self):
+        name = next(n for n in self.crossings if "receiver_0.published_gray[3]" in n)
+        net = self.module["netnames"].pop(name)
+        self.module["netnames"][
+            name.replace(
+                "receiver_0.published_gray[3]", "transmitter_0.published_gray[2]"
+            )
+        ] = net
+        with self.assertRaisesRegex(RuntimeError, "pointer bits"):
             self.check()
