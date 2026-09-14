@@ -49,9 +49,6 @@ pub entity network_native(
     reg(clk) two_sectors reset(rst: false) = if start { !write && count == 2 } else { two_sectors };
     reg(clk) writing reset(rst: false) = if start { write } else { writing };
     let write_complete = state == WRITE_HANDSHAKES && (command_sent || cmd_ready) && (data_sent || wdata_ready);
-    let last_byte = byte_index == 15;
-    let last_read_word = word_index == (if two_sectors { 63 } else { 31 });
-    let last_write_word = word_index == 31;
     reg(clk) state: uint<4> reset(rst: IDLE) = {
         // Capture the request before checking bounds. This keeps the wide
         // address comparison out of the ownership-enable path; no native DDR
@@ -63,22 +60,16 @@ pub entity network_native(
         }
         else if state == READ_COMMAND && cmd_ready { READ_DATA }
         else if state == READ_DATA && rdata_valid { SERIALIZE_READ }
-        else if state == SERIALIZE_READ && last_byte {
-            if last_read_word { COMPLETE } else { READ_COMMAND }
-        }
+        else if state == SERIALIZE_READ && byte_index == 15 { if word_index == (if two_sectors { 63 } else { 31 }) { COMPLETE } else { READ_COMMAND } }
         else if state == WRITE_BYTE_ADDRESS { GATHER_WRITE_BYTE }
-        else if state == GATHER_WRITE_BYTE {
-            if last_byte { WRITE_HANDSHAKES } else { WRITE_BYTE_ADDRESS }
-        }
-        else if write_complete {
-            if last_write_word { COMPLETE } else { WRITE_BYTE_ADDRESS }
-        }
+        else if state == GATHER_WRITE_BYTE { if byte_index == 15 { WRITE_HANDSHAKES } else { WRITE_BYTE_ADDRESS } }
+        else if write_complete { if word_index == 31 { COMPLETE } else { WRITE_BYTE_ADDRESS } }
         else if state == COMPLETE || state == BOUNDS_ERROR { WAIT_REQUEST_RELEASE }
         else if state == WAIT_REQUEST_RELEASE && !request { IDLE }
         else { state }
     };
     reg(clk) word_index: uint<6> reset(rst: 0) = if start { 0 }
-        else if (state == SERIALIZE_READ && last_byte) || write_complete { word_index +. 1 } else { word_index };
+        else if (state == SERIALIZE_READ && byte_index == 15) || write_complete { word_index +. 1 } else { word_index };
     reg(clk) byte_index: uint<4> reset(rst: 0) = if start || write_complete { 0 }
         else if state == SERIALIZE_READ || state == GATHER_WRITE_BYTE { byte_index +. 1 } else { byte_index };
     reg(clk) word: uint<128> reset(rst: 0) = if state == READ_DATA && rdata_valid { rdata }
