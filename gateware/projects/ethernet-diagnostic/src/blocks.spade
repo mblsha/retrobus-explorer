@@ -87,10 +87,23 @@ pub entity block_service(
     let sequence: uint<32> = trunc(header >> 96);
     let lba: uint<32> = trunc(header >> 128);
     let count: uint<32> = trunc(header >> 160);
-    let format_ok = trunc::<uint<192>, uint<32>>(header) == 0x31534252 &&
-        trunc::<uint<192>, uint<24>>(header >> 40) == 0 && opcode >= OP_BEGIN && opcode <= OP_BULK_READ && (!compact || opcode == OP_BULK_READ) && expected_crc == (crc ^ 0xffffffff);
+    let magic_ok = trunc::<uint<192>, uint<32>>(header) == 0x31534252;
+    let reserved_ok = trunc::<uint<192>, uint<24>>(header >> 40) == 0;
+    let opcode_ok = opcode >= OP_BEGIN && opcode <= OP_BULK_READ;
+    let compact_ok = !compact || opcode == OP_BULK_READ;
+    let request_crc_ok = expected_crc == (crc ^ 0xffffffff);
+    let format_ok = magic_ok && reserved_ok && opcode_ok && compact_ok && request_crc_ok;
     let bulk = opcode == OP_BULK_READ;
     let read_operation = opcode == OP_READ || bulk;
+    let accesses_memory = opcode == OP_WRITE || read_operation;
+    let valid_transfer_count = if bulk {
+        count >= 1 && count <= 2 && !(count == 2 && lba == LAST_SECTOR)
+    } else {
+        count == 1
+    };
+    let range_ok = lba < SECTOR_CAPACITY && valid_transfer_count;
+    let upload_order_ok = lba == written_sectors && written_sectors < declared_sectors;
+    let arm_ready = written_sectors == declared_sectors && declared_sectors != 0 && sd_quiescent;
     // Freeze reply size before DDR starts; avoid a count/status decode on every byte.
     reg(clk) long_reply reset(rst: false) = if state == DISPATCH { bulk && count == 2 && saved_status == STATUS_OK }
         else if state == DDR_TRANSFER && memory_done && memory_error { false } else { long_reply };
@@ -108,10 +121,10 @@ pub entity block_service(
         else if !initialized { STATUS_NOT_INITIALIZED }
         else if bulk && (requested_session != session || session == 0) { STATUS_BAD_SESSION }
         else if !admitted_ordered_request && !bulk { if requested_session != session { STATUS_BAD_SESSION } else { STATUS_BAD_SEQUENCE } }
-        else if (opcode == OP_WRITE || read_operation) && (arm || !sd_quiescent) { STATUS_IMAGE_BUSY }
-        else if (opcode == OP_WRITE || read_operation) && (lba >= SECTOR_CAPACITY || (if bulk { count < 1 || count > 2 || (count == 2 && lba == LAST_SECTOR) } else { count != 1 })) { STATUS_BAD_RANGE }
-        else if opcode == OP_WRITE && (lba != written_sectors || written_sectors >= declared_sectors) { STATUS_BAD_RANGE }
-        else if opcode == OP_ARM && (written_sectors != declared_sectors || declared_sectors == 0 || !sd_quiescent) { STATUS_INCOMPLETE_IMAGE }
+        else if accesses_memory && (arm || !sd_quiescent) { STATUS_IMAGE_BUSY }
+        else if accesses_memory && !range_ok { STATUS_BAD_RANGE }
+        else if opcode == OP_WRITE && !upload_order_ok { STATUS_BAD_RANGE }
+        else if opcode == OP_ARM && !arm_ready { STATUS_INCOMPLETE_IMAGE }
         else { STATUS_OK };
     reg(clk) replay reset(rst: false) = if state == VALIDATE_REQUEST { is_exact_retry } else { replay };
     reg(clk) cache_this_reply reset(rst: false) = if state == VALIDATE_REQUEST { format_ok && admitted_ordered_request && !same_key } else { cache_this_reply };
@@ -133,7 +146,10 @@ pub entity block_service(
         else if state == REQUEST_ADDRESS { REQUEST_CAPTURE }
         else if state == REQUEST_CAPTURE { if index == input_length -. 1 { VALIDATE_REQUEST } else { REQUEST_ADDRESS } }
         else if state == VALIDATE_REQUEST { DISPATCH }
-        else if state == DISPATCH { if !replay && saved_status == STATUS_OK && (opcode == OP_WRITE || read_operation) { DDR_TRANSFER } else { REPLY_ADDRESS } }
+        else if state == DISPATCH {
+            if !replay && saved_status == STATUS_OK && accesses_memory { DDR_TRANSFER }
+            else { REPLY_ADDRESS }
+        }
         else if state == DDR_TRANSFER && memory_done { REPLY_ADDRESS }
         else if state == REPLY_ADDRESS { REPLY_REGISTER }
         else if state == REPLY_REGISTER { REPLY_EMIT }

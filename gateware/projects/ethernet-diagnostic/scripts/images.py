@@ -13,6 +13,7 @@ from pathlib import Path
 import secrets
 import socket
 import struct
+import sys
 import time
 import zlib
 
@@ -105,6 +106,131 @@ def validate_download_range(blocks, start):
         raise ValueError("Download range exceeds physical DDR")
 
 
+def _uint32(value, name):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 0xFFFFFFFF
+    ):
+        raise ValueError(f"Invalid journal: {name} must be a 32-bit unsigned integer")
+    return value
+
+
+def validate_journal(saved, host):
+    """Validate all persisted state before it can cause recovery traffic."""
+    if not isinstance(saved, dict):
+        raise ValueError("Invalid journal: expected a JSON object")
+    if saved.get("host") != host:
+        raise ValueError("State belongs to another FPGA address")
+    session = _uint32(saved.get("session"), "session")
+    sequence = _uint32(saved.get("sequence"), "sequence")
+
+    pending_hex = saved.get("pending")
+    pending = None
+    if pending_hex is not None:
+        if not isinstance(pending_hex, str):
+            raise ValueError("Invalid journal: pending request must be hexadecimal")
+        try:
+            pending = bytes.fromhex(pending_hex)
+        except ValueError as error:
+            raise ValueError(
+                "Invalid journal: pending request is not hexadecimal"
+            ) from error
+        if len(pending) != HEADER_BYTES + SECTOR_BYTES + CRC_BYTES:
+            raise ValueError("Invalid journal: pending request has the wrong length")
+        if pending[:4] != b"RBS1" or pending[5:8] != bytes(3):
+            raise ValueError("Invalid journal: pending request header is malformed")
+        if zlib.crc32(pending[:-CRC_BYTES]) != int.from_bytes(
+            pending[-CRC_BYTES:], "little"
+        ):
+            raise ValueError("Invalid journal: pending request CRC is wrong")
+        if pending[4] not in ORDERED_OPCODES:
+            raise ValueError("Invalid journal: pending request is not ordered")
+        pending_session, pending_sequence = struct.unpack_from("<II", pending, 8)
+        if (pending_session, pending_sequence) != (session, sequence):
+            raise ValueError(
+                "Invalid journal: pending request does not match session state"
+            )
+
+    verification = saved.get("initial_upload")
+    if verification is not None:
+        if not isinstance(verification, dict):
+            raise ValueError(
+                "Invalid journal: initial_upload must be an object or null"
+            )
+        marker_session = _uint32(verification.get("session"), "initial_upload.session")
+        sectors = verification.get("sectors")
+        digest = verification.get("sha256")
+        verified = verification.get("verified")
+        if marker_session != session:
+            raise ValueError("Invalid journal: verification belongs to another session")
+        if (
+            isinstance(sectors, bool)
+            or not isinstance(sectors, int)
+            or not 1 <= sectors <= CAPACITY_SECTORS
+        ):
+            raise ValueError(
+                "Invalid journal: verification sector count is out of range"
+            )
+        if digest is not None and (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError("Invalid journal: verification SHA-256 is malformed")
+        if not isinstance(verified, bool) or (verified and digest is None):
+            raise ValueError("Invalid journal: verification state is inconsistent")
+    return session, sequence, pending, verification
+
+
+def load_journal(path, host):
+    try:
+        saved = json.loads(Path(path).read_text())
+    except json.JSONDecodeError as error:
+        raise ValueError("Invalid journal: malformed JSON") from error
+    return validate_journal(saved, host)
+
+
+def pending_summary(request):
+    if request is None:
+        return None
+    _, _, lba, count = struct.unpack_from("<IIII", request, 8)
+    return {"operation": Opcode(request[4]).name, "lba": lba, "count": count}
+
+
+def arm_guard_permits(session, verification):
+    return bool(
+        verification
+        and verification.get("verified") is True
+        and verification.get("session") == session
+        and verification.get("sha256")
+    )
+
+
+def inspect_journal(path, host):
+    """Return validated local state without creating a network socket."""
+    path = Path(path)
+    if not path.exists():
+        raise ValueError(f"Journal does not exist: {path}")
+    lock = path.with_suffix(path.suffix + ".lock").open("a")
+    try:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("Session is already in use by another client") from None
+        session, sequence, pending, verification = load_journal(path, host)
+        return {
+            "knowledge": "local journal only; FPGA state was not queried",
+            "session": session,
+            "next_sequence": sequence,
+            "pending": pending_summary(pending),
+            "initial_upload": verification,
+            "local_arm_guard_permits": arm_guard_permits(session, verification),
+        }
+    finally:
+        lock.close()
+
+
 @dataclass
 class PendingRead:
     """An immutable wire request with mutable retry bookkeeping."""
@@ -118,7 +244,12 @@ class PendingRead:
 
 class Images:
     def __init__(
-        self, host="192.168.10.2", source="192.168.10.1", state=None, timeout=0.5
+        self,
+        host="192.168.10.2",
+        source="192.168.10.1",
+        state=None,
+        timeout=0.5,
+        progress=None,
     ):
         self.state_path = Path(state) if state else None
         self._lock = None
@@ -140,17 +271,14 @@ class Images:
             self.initial_upload = None
             self.host = host
             self.retries = 0
+            self.progress = progress
             if self.state_path and self.state_path.exists():
-                saved = json.loads(self.state_path.read_text())
-                if saved["host"] != host:
-                    raise ValueError("State belongs to another FPGA address")
-                self.session, self.sequence = saved["session"], saved["sequence"]
-                self.pending = (
-                    bytes.fromhex(saved["pending"]) if saved.get("pending") else None
-                )
-                if self.pending is not None and self.pending[4] not in ORDERED_OPCODES:
-                    raise ValueError("Journal contains a non-ordered request")
-                self.initial_upload = saved.get("initial_upload")
+                (
+                    self.session,
+                    self.sequence,
+                    self.pending,
+                    self.initial_upload,
+                ) = load_journal(self.state_path, host)
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.bind((source, 0))
             self.socket.connect((host, 4000))
@@ -175,6 +303,10 @@ class Images:
                 + "\n"
             )
             temporary.replace(self.state_path)
+
+    def report(self, message):
+        if self.progress is not None:
+            self.progress(message)
 
     def exchange(self, request, retries=8):
         timeout = self.socket.gettimeout()
@@ -203,6 +335,7 @@ class Images:
         if not 1 <= blocks <= CAPACITY_SECTORS:
             raise ValueError("Image must contain 1..524288 sectors")
         self.recover()
+        self.report("Waiting for DDR and starting a new image session")
         new_session = secrets.randbelow(0xFFFFFFFF) + 1
         request = encode(Opcode.BEGIN, new_session, 0, count=blocks)
         deadline = time.monotonic() + wait
@@ -236,8 +369,11 @@ class Images:
                 Opcode.BULK_READ,
                 Opcode.STATUS,
             ):
+                pending = pending_summary(self.pending)
                 raise RuntimeError(
-                    "Pending mutating request: resume the original operation before reading"
+                    f"Cannot perform a read-only operation: this journal contains an "
+                    f"unresolved {pending['operation']} to LBA {pending['lba']}. "
+                    "No recovery request was sent."
                 )
             return self.finish(self.pending)
 
@@ -260,11 +396,8 @@ class Images:
         if not self.session:
             raise ValueError("Begin an image session first")
         request = encode(opcode, self.session, self.sequence, lba, count, data)
-        if opcode == Opcode.ARM and not (
-            self.initial_upload
-            and self.initial_upload.get("verified") is True
-            and self.initial_upload.get("session") == self.session
-            and self.initial_upload.get("sha256")
+        if opcode == Opcode.ARM and not arm_guard_permits(
+            self.session, self.initial_upload
         ):
             raise RuntimeError(
                 "Initial upload is not verified; complete a verified upload before ARM"
@@ -288,14 +421,20 @@ class Images:
         self.begin(len(image) // SECTOR_BYTES)
         self.initial_upload["sha256"] = hashlib.sha256(image).hexdigest()
         self.save()
-        for lba in range(len(image) // SECTOR_BYTES):
+        blocks = len(image) // SECTOR_BYTES
+        self.report(f"Uploading {blocks} sectors")
+        progress_interval = max(1, blocks // 100)
+        for lba in range(blocks):
             self.command(
                 Opcode.WRITE,
                 lba,
                 1,
                 image[lba * SECTOR_BYTES : (lba + 1) * SECTOR_BYTES],
             )
+            if (lba + 1) % progress_interval == 0 or lba + 1 == blocks:
+                self.report(f"Uploaded {lba + 1}/{blocks} sectors")
         # Verify the actual DDR contents before making the image eligible for use.
+        self.report(f"Verifying readback of {blocks} sectors")
         downloaded = (
             self.bulk_download(len(image) // SECTOR_BYTES, window=window)
             if window
@@ -308,6 +447,7 @@ class Images:
 
     def download(self, blocks, start=0):
         validate_download_range(blocks, start)
+        self.report(f"Downloading {blocks} sectors from LBA {start}")
         return b"".join(
             self.command(Opcode.READ, lba, 1) for lba in range(start, start + blocks)
         )
@@ -328,6 +468,9 @@ class Images:
         if not 1 <= window <= MAX_WINDOW or retry_seconds <= 0:
             raise ValueError("Require window 1..16 and a positive retry interval")
         self.recover(read_only=True)
+        self.report(
+            f"Downloading {blocks} sectors from LBA {start} with window {window}"
+        )
         output = bytearray(blocks * SECTOR_BYTES)
         pending: dict[int, PendingRead] = {}
         next_block = 0
@@ -434,6 +577,11 @@ def main():
     action.add_argument("--arm", action="store_true")
     action.add_argument("--disarm", action="store_true")
     action.add_argument("--status", action="store_true")
+    action.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Show validated local journal state without sending packets",
+    )
     parser.add_argument(
         "--bulk",
         action="store_true",
@@ -458,8 +606,26 @@ def main():
             validate_download_range(args.blocks, args.start)
         except ValueError as error:
             parser.error(str(error))
-    client = Images(args.host, args.source, args.state)
+    if args.inspect:
+        print(json.dumps(inspect_journal(args.state, args.host), indent=2))
+        return
+
+    def progress(message):
+        print(message, file=sys.stderr, flush=True)
+
+    client = Images(args.host, args.source, args.state, progress=progress)
     started = time.monotonic()
+    operation = (
+        "upload"
+        if args.upload
+        else "download"
+        if args.download
+        else "arm"
+        if args.arm
+        else "disarm"
+        if args.disarm
+        else "status"
+    )
     try:
         result = {}
         if args.upload:
@@ -497,6 +663,19 @@ def main():
             elapsed_seconds=time.monotonic() - started, retries=client.retries
         )
         print(json.dumps(result, indent=2))
+    except BaseException:
+        pending = pending_summary(client.pending)
+        detail = (
+            f"pending {pending['operation']} at LBA {pending['lba']} remains journaled"
+            if pending
+            else "no pending request is journaled"
+        )
+        print(
+            f"{operation} failed after {client.retries} network retries; {detail}",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise
     finally:
         client.close()
 

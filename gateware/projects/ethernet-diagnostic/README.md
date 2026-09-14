@@ -126,6 +126,17 @@ uv run python projects/ethernet-diagnostic/scripts/images.py \
 
 Keep that session file between commands: it journals sequence state and an
 outstanding ordered request so restarting the client can safely retry it.
+Inspect that local state without contacting the FPGA:
+
+```sh
+uv run python projects/ethernet-diagnostic/scripts/images.py \
+  --state /private/tmp/arty-network-session.json --inspect
+```
+
+Inspection reports local knowledge only; it does not claim that the FPGA is
+reachable or in the same state. The loader validates request length, header,
+CRC, opcode, session, sequence, and verification metadata before it creates a
+socket. Malformed recovery state is refused rather than discarded or replayed.
 Read/download/status operations refuse to replay an unfinished mutating request;
 resume its original operation explicitly first. Requesting the exact pending
 command (including its address, count, and payload) returns the recovered reply
@@ -138,6 +149,15 @@ SHA-256. Older journals without this record remain usable for reads, status,
 and disarm, but require a new verified upload before ARM. A new FPGA boot also
 requires a new upload session. Completed downloads replace their destination
 atomically, preserving an existing file if writing the replacement fails.
+Journal replacement protects against a torn process-level update, but journal
+writes are not explicitly synchronised to storage and are not promised to
+survive sudden host power loss. Transfer phases and progress go to stderr;
+stdout remains machine-readable JSON.
+
+Recovering one pending ordered request is not partial-upload resume. `--upload`
+always starts a new session at sector zero and performs a complete readback
+comparison. True upload resume would need to reconcile the image identity and
+FPGA-accepted sector count and is not implemented.
 
 On the GKD, bind the external controller and apply the 13 MHz, four-bit,
 keep-awake settings from the [DDR guide](../microsd-emulator/ddr/README.md).

@@ -44,6 +44,12 @@ Statuses: 0 success, 1 format/CRC, 2 session, 3 sequence, 4 armed/not quiescent,
 format, session, and sequence errors do not. STATUS currently acknowledges
 service availability; it does not yet expose detailed BIST counters over UDP.
 
+The host journal is executable recovery state. It is validated before network
+I/O, and `images.py --inspect` displays its session, next sequence, pending
+operation, and initial-upload verification marker without sending packets.
+Journal request recovery completes one ordered operation; it does not resume a
+partially uploaded image. A new `--upload` starts at sector zero.
+
 
 ## Windowed bulk reads
 
