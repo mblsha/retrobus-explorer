@@ -188,11 +188,16 @@ external MII setup/hold or signal-integrity qualification.
 
 ### PHY reset boundary
 
-The fabric holds MAC reset for 200 ms at startup. RX rising-edge and TX
-falling-edge logic each use the shared two-stage reset conditioner: assertion
-is immediate and release waits for two edges of that local clock. Each PHY
-clock must run while reset is held so its release chain is loaded. If a clock
-is absent throughout startup, hold BTN0 until both PHY clocks are running;
-this design does not detect a stopped PHY clock. Simulation covers delayed
-clock start, reassertion, and release near both sides of a clock edge. These
-checks do not model metastability or replace physical reset/CDC analysis.
+BTN0 holds the startup counter and reference-clock divider reset, and keeps
+the PHY in reset. Pressing and releasing BTN0 restarts startup; **it destroys
+the volatile card image**, so this is not a nondestructive network recovery.
+After release, the reference clock runs, PHY reset releases at 10 ms, and
+MAC-local reset remains asserted until 200 ms. The PHY clocks must start during
+that MAC-reset interval so their release chains are loaded.
+
+RX rising-edge and TX falling-edge logic each use the shared two-stage reset
+conditioner: assertion is immediate and release waits for two local edges.
+The fixed startup timer does not detect stopped clocks or guarantee recovery
+from arbitrarily late PHY-clock startup. Simulation covers delayed clock start,
+reassertion, and release near both sides of a clock edge; it does not model
+metastability or replace physical reset/CDC analysis.
