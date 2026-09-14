@@ -409,9 +409,18 @@ class ProtocolPeer(Socket):
             response = self.cached_reply
         else:
             if opcode == 1:
-                self.session, self.sequence = session, 1
-                self.declared, self.written = count, 0
-                self.armed = False
+                if self.armed:
+                    status = 4
+                elif not (
+                    session
+                    and session != self.session
+                    and sequence == 0
+                    and 1 <= count <= 524288
+                ):
+                    status = 2 if session != self.session else 3
+                else:
+                    self.session, self.sequence = session, 1
+                    self.declared, self.written = count, 0
             elif session != self.session:
                 status = 2
             elif sequence != self.sequence:
@@ -442,7 +451,7 @@ class ProtocolPeer(Socket):
                     self.armed = False
                 self.sequence = (self.sequence + 1) & 0xFFFFFFFF
             response = reply(request, status, payload)
-            if status not in (2, 3):
+            if status not in (2, 3) and not (opcode == 1 and status):
                 self.cached_request, self.cached_reply = request, response
         if not self.lose_replies and not (opcode == 3 and self.lose_reads):
             self.queue.append(response)
@@ -543,6 +552,80 @@ class RecoveryPolicyTests(unittest.TestCase):
         resumed.command(images.Opcode.ARM)
         self.assertTrue(self.peer.armed)
         self.assertEqual(resumed.initial_upload, identity)
+
+    def test_refused_begin_preserves_verified_image_across_restart(self):
+        client = self.client()
+        client.upload(b"x" * 512)
+        client.command(images.Opcode.ARM)
+        self.peer.memory[0] = b"SD changes".ljust(512, b"\0")
+        identity = dict(client.initial_upload)
+        journal = self.path.read_bytes()
+        state = (
+            self.peer.session,
+            self.peer.sequence,
+            self.peer.declared,
+            self.peer.written,
+            self.peer.cached_request,
+            self.peer.cached_reply,
+        )
+        memory = dict(self.peer.memory)
+        self.peer.sent.clear()
+        with self.assertRaises(images.RemoteError) as error:
+            client.upload(b"replacement".ljust(1024, b"\0"))
+        self.assertEqual(error.exception.status, 4)
+        self.assertEqual(self.path.read_bytes(), journal)
+        self.assertEqual(
+            (
+                self.peer.session,
+                self.peer.sequence,
+                self.peer.declared,
+                self.peer.written,
+                self.peer.cached_request,
+                self.peer.cached_reply,
+            ),
+            state,
+        )
+        self.assertTrue(self.peer.armed)
+        client.close()
+        resumed = self.client()
+        self.assertEqual(resumed.initial_upload, identity)
+        resumed.command(images.Opcode.DISARM)
+        resumed.command(images.Opcode.ARM)
+        self.assertTrue(self.peer.armed)
+        self.assertEqual(self.peer.memory, memory)
+        self.assertEqual([p[4] for p in self.peer.sent], [1, 5, 4])
+
+    def test_accepted_begin_replaces_verification_record(self):
+        client = self.client()
+        client.upload(b"x" * 512)
+        previous_session = client.session
+        client.begin(2)
+        self.assertNotEqual(client.session, previous_session)
+        expected = dict(session=client.session, sectors=2, sha256=None, verified=False)
+        self.assertEqual(client.initial_upload, expected)
+        client.close()
+        resumed = self.client()
+        self.assertEqual(resumed.initial_upload, expected)
+        with self.assertRaisesRegex(RuntimeError, "not verified"):
+            resumed.command(images.Opcode.ARM)
+
+    def test_lost_begin_ack_cannot_transfer_old_verification(self):
+        client = self.client()
+        client.upload(b"x" * 512)
+        previous_session = client.session
+        self.peer.lose_replies = True
+        with self.assertRaises(TimeoutError):
+            client.begin(2, wait=0)
+        self.assertNotEqual(self.peer.session, previous_session)
+        client.close()
+        self.peer.lose_replies = False
+        resumed = self.client()
+        self.assertEqual(resumed.session, previous_session)
+        with self.assertRaises(images.RemoteError) as error:
+            resumed.command(images.Opcode.ARM)
+        self.assertEqual(error.exception.status, 2)
+        self.assertFalse(self.peer.armed)
+        self.assertEqual(self.peer.written, 0)
 
     def test_invalid_begin_does_not_recover_mutation(self):
         client = self.client()

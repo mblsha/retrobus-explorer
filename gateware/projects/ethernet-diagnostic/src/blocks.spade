@@ -3,7 +3,7 @@ use shared_components::sd::crc32_byte;
 
 // RBS1 request / RBA1 reply: opcode, status, two reserved bytes, session,
 // sequence, LBA, count (all u32 LE), 512 data bytes, CRC32 over bytes 0..535.
-// Stop-and-wait: cache the last ordered reply, including read data. A is_exact_retry
+// Stop-and-wait: cache the last ordered reply, including read data. An exact retry
 // must match the request CRC; it never re-executes a memory/control operation.
 #[no_mangle(all)]
 pub entity block_service(

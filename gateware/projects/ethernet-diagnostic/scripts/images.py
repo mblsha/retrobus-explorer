@@ -203,8 +203,6 @@ class Images:
         if not 1 <= blocks <= CAPACITY_SECTORS:
             raise ValueError("Image must contain 1..524288 sectors")
         self.recover()
-        self.initial_upload = None
-        self.save()
         new_session = secrets.randbelow(0xFFFFFFFF) + 1
         request = encode(Opcode.BEGIN, new_session, 0, count=blocks)
         deadline = time.monotonic() + wait
