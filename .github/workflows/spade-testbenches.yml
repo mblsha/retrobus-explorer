@@ -111,7 +111,7 @@ jobs:
             -p 'test_ft_uart_hex_bridge_host.py'
           "${GATEWARE_PYTHON}" -m pytest projects/sharp-pc-e500-card/tests
 
-      - name: Test Ethernet host protocol (normal and optimized Python)
+      - name: Test Ethernet host protocol and CDC guards (normal and optimized Python)
         run: |
           "${GATEWARE_PYTHON}" -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
           "${GATEWARE_PYTHON}" -O -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py

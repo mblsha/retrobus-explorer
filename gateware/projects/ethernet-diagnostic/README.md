@@ -8,11 +8,13 @@ DDR controller, full-memory BIST, and board wiring.
 
 ## Integration status
 
-The current integration was requalified on the Arty/GKD hardware on
+The implementation at `805c5f7` was requalified on Arty/GKD hardware on
 2026-09-14: full 256 MiB SD integrity, cross-interface read/write, filesystem
-checks, and about 90 Mbps Ethernet reads passed. Seed 4 meets all clock,
-CDC, and output timing checks. See [qualification provenance](QUALIFICATION.md#current-integration-2026-09-14)
-for exact bitstream identities, rates, and retry counts.
+checks, and about 90 Mbps Ethernet reads passed. The subsequent client, CDC,
+and PHY-reset review changes have not been programmed or hardware-qualified.
+See [qualification provenance](QUALIFICATION.md) for the current build checks
+and the exact revisions, bitstream identities, rates, and retry counts behind
+the hardware results.
 
 ## Build and test
 
@@ -25,12 +27,13 @@ uv run python tools/project_inventory.py --check
 uv run python projects/ethernet-diagnostic/scripts/test_with_vcd.py
 uv run python -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
 uv run python -O -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
-python3 experiments/openxc7-macos/build_ddr.py --ethernet --seed 4
+python3 experiments/openxc7-macos/build_ddr.py --ethernet --seed 12
 ```
 
 The output is `build/microsd-ddr-ethernet/`. The builder regenerates DDR support,
 requires patched negative-edge timing, checks all clocks, native and Ethernet
-Gray-pointer crossing delays, direct SD outputs, and bitstream round-trip
+Gray-pointer domains, widths, two-stage topology and crossing delays, direct
+SD outputs, and bitstream round-trip
 verification before atomically publishing `result.json`. Require successful
 exit and a matching `bitstream_sha256` before programming. Intermediate files
 from a failed build are not programming approval. Omitting `--ethernet` builds
@@ -38,8 +41,9 @@ the existing UART-managed card.
 
 The simulations cover frame queues, ARP/ping, malformed IP/UDP packets, CRCs,
 ordered retries, bulk reads, native DDR backpressure, and the complete
-Ethernet → SD write → Ethernet readback path. They also stall an accepted SD
-write while disarming and verify that network reads wait for it to drain.
+Ethernet → SD write → Ethernet readback path. They also stall accepted SD
+reads and writes while disarming and verify that network access waits for
+them to drain, and vary PHY clock phase and reset release.
 `--waves` retains waveforms when diagnosing a failure.
 
 ## Ownership rules
