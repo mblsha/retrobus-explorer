@@ -2,6 +2,27 @@
 
 import struct
 import zlib
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ProtocolScenario:
+    name: str
+    opcode: int
+    status: int
+    sequence_advances: bool
+    caches_reply: bool
+    memory_effect: bool
+
+
+READ_WHILE_ARMED = ProtocolScenario(
+    name="read_while_armed",
+    opcode=3,
+    status=4,
+    sequence_advances=True,
+    caches_reply=True,
+    memory_effect=False,
+)
 
 
 def packet(op, seq, lba=0, count=0, data=b"", session=0x12345678):

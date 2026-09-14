@@ -2,7 +2,7 @@ import struct
 import zlib
 import cocotb
 from cocotb.triggers import Timer
-from packet_support import packet
+from packet_support import READ_WHILE_ARMED, packet
 from block_support import block_fixture
 
 
@@ -95,3 +95,26 @@ async def memory_error_is_cached_without_advancing_upload(dut):
     await exchange(packet(4, 2), 8)
     assert not int(dut.armed.value)
     assert len(requests) == 1
+
+
+@cocotb.test()
+async def protocol_conformance_read_while_armed(dut):
+    scenario = READ_WHILE_ARMED
+    _, writes, reads, requests, exchange = await block_fixture(dut)
+    await exchange(packet(1, 0, count=1))
+    await exchange(packet(2, 1, count=1, data=b"x" * 512))
+    await exchange(packet(4, 2))
+    sequence_before = int(dut.next_sequence.value)
+    memory_before = (list(writes), list(reads), list(requests))
+    request = packet(scenario.opcode, sequence_before, count=1)
+    first = await exchange(request, scenario.status)
+    second = await exchange(request, scenario.status)
+    assert first == second
+    assert int(dut.next_sequence.value) == sequence_before + int(
+        scenario.sequence_advances
+    )
+    assert (
+        int(dut.last_crc.value) == int.from_bytes(request[-4:], "little")
+    ) == scenario.caches_reply
+    assert (list(writes), list(reads), list(requests)) == memory_before
+    assert not scenario.memory_effect

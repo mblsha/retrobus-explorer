@@ -1,13 +1,17 @@
 import importlib.util
 import hashlib
 import io
+import json
 from pathlib import Path
 import socket
 import struct
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 import zlib
+
+from packet_support import READ_WHILE_ARMED
 
 spec = importlib.util.spec_from_file_location(
     "images_host", Path(__file__).resolve().parents[1] / "scripts/images.py"
@@ -140,6 +144,97 @@ class HostTests(unittest.TestCase):
         self.assertEqual([call[0] for call in calls], ["begin", 2, 2])
         with self.assertRaises(RuntimeError):
             client.upload(b"x" * 512)
+
+
+class JournalTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / "session.json"
+        self.pending = images.encode(images.Opcode.WRITE, 123, 7, 4, 1, b"data")
+
+    def saved(self):
+        return {
+            "host": "192.168.10.2",
+            "session": 123,
+            "sequence": 7,
+            "pending": self.pending.hex(),
+            "initial_upload": {
+                "session": 123,
+                "sectors": 8,
+                "sha256": "a" * 64,
+                "verified": True,
+            },
+        }
+
+    def test_malformed_journal_is_rejected_before_socket_creation(self):
+        cases = {
+            "bad JSON": "{",
+            "bad session type": {**self.saved(), "session": True},
+            "short pending request": {**self.saved(), "pending": "00"},
+            "bad pending CRC": {
+                **self.saved(),
+                "pending": (self.pending[:-1] + bytes([self.pending[-1] ^ 1])).hex(),
+            },
+            "bulk pending request": {
+                **self.saved(),
+                "pending": images.encode(images.Opcode.BULK_READ, 123, 7).hex(),
+            },
+            "mismatched pending sequence": {
+                **self.saved(),
+                "pending": images.encode(images.Opcode.WRITE, 123, 8).hex(),
+            },
+            "mismatched verification session": {
+                **self.saved(),
+                "initial_upload": {**self.saved()["initial_upload"], "session": 124},
+            },
+            "verified without digest": {
+                **self.saved(),
+                "initial_upload": {
+                    **self.saved()["initial_upload"],
+                    "sha256": None,
+                },
+            },
+        }
+        for name, saved in cases.items():
+            with self.subTest(name=name):
+                self.path.write_text(
+                    saved if isinstance(saved, str) else json.dumps(saved)
+                )
+                with (
+                    patch.object(images.socket, "socket") as socket_factory,
+                    self.assertRaisesRegex(ValueError, "Invalid journal"),
+                ):
+                    images.Images(state=self.path)
+                socket_factory.assert_not_called()
+
+    def test_old_journal_and_local_inspection_send_no_packets(self):
+        saved = self.saved()
+        saved["pending"] = None
+        saved.pop("initial_upload")
+        self.path.write_text(json.dumps(saved))
+        with patch.object(images.socket, "socket") as socket_factory:
+            inspected = images.inspect_journal(self.path, "192.168.10.2")
+        socket_factory.assert_not_called()
+        self.assertEqual(inspected["session"], 123)
+        self.assertIsNone(inspected["pending"])
+        self.assertIsNone(inspected["initial_upload"])
+        self.assertFalse(inspected["local_arm_guard_permits"])
+        self.assertIn("not queried", inspected["knowledge"])
+
+    def test_inspect_cli_does_not_construct_network_client(self):
+        self.path.write_text(json.dumps(self.saved()))
+        output = io.StringIO()
+        with (
+            patch.object(
+                sys, "argv", ["images", "--state", str(self.path), "--inspect"]
+            ),
+            patch.object(images, "Images") as client_factory,
+            patch("sys.stdout", output),
+        ):
+            images.main()
+        client_factory.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue())["session"], 123)
 
 
 class BulkHostTests(unittest.TestCase):
@@ -317,7 +412,9 @@ class ReadOnlyIntentTests(unittest.TestCase):
                     client.session = 123
                     client.pending = images.encode(pending_opcode, 123, 1)
                     pending = client.pending
-                    with self.assertRaisesRegex(RuntimeError, "Pending mutating"):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "No recovery request was sent"
+                    ):
                         operation(client)
                     self.assertEqual(sock.sent, [])
                     self.assertEqual(client.pending, pending)
@@ -398,6 +495,7 @@ class ProtocolPeer(Socket):
         self.memory = {}
         self.cached_request = self.cached_reply = None
         self.lose_replies = self.lose_reads = self.bad_readback = False
+        self.lose_reply_count = 0
         self.effects = []
 
     def send(self, request):
@@ -436,11 +534,14 @@ class ProtocolPeer(Socket):
                         self.written += 1
                         self.effects.append((opcode, lba))
                 elif opcode == 3:
-                    payload = (
-                        bytes([0xFF]) * 512
-                        if self.bad_readback
-                        else self.memory.get(lba, bytes(512))
-                    )
+                    if self.armed:
+                        status = 4
+                    else:
+                        payload = (
+                            bytes([0xFF]) * 512
+                            if self.bad_readback
+                            else self.memory.get(lba, bytes(512))
+                        )
                 elif opcode == 4:
                     if self.armed or self.written != self.declared:
                         status = 8
@@ -453,7 +554,9 @@ class ProtocolPeer(Socket):
             response = reply(request, status, payload)
             if status not in (2, 3) and not (opcode == 1 and status):
                 self.cached_request, self.cached_reply = request, response
-        if not self.lose_replies and not (opcode == 3 and self.lose_reads):
+        if self.lose_reply_count:
+            self.lose_reply_count -= 1
+        elif not self.lose_replies and not (opcode == 3 and self.lose_reads):
             self.queue.append(response)
 
 
@@ -485,7 +588,7 @@ class RecoveryPolicyTests(unittest.TestCase):
                 client.initial_upload = {
                     "session": 123,
                     "sectors": 1,
-                    "sha256": "known",
+                    "sha256": "a" * 64,
                     "verified": True,
                 }
                 if opcode == images.Opcode.ARM:
@@ -504,6 +607,46 @@ class RecoveryPolicyTests(unittest.TestCase):
                 self.assertEqual(resumed.sequence, self.peer.sequence)
                 self.assertIsNone(resumed.pending)
                 resumed.close()
+
+    def test_peer_conforms_for_read_while_armed_and_exact_retry(self):
+        scenario = READ_WHILE_ARMED
+        self.peer.written = self.peer.declared
+        self.peer.armed = True
+        request = images.encode(
+            scenario.opcode, self.peer.session, self.peer.sequence, 0, 1
+        )
+        sequence_before = self.peer.sequence
+        effects_before = list(self.peer.effects)
+        self.peer.send(request)
+        first = self.peer.recv(2048)
+        self.peer.send(request)
+        second = self.peer.recv(2048)
+        self.assertEqual(first, second)
+        self.assertEqual(first[5], scenario.status)
+        self.assertEqual(
+            self.peer.sequence,
+            sequence_before + int(scenario.sequence_advances),
+        )
+        self.assertEqual(self.peer.cached_request == request, scenario.caches_reply)
+        self.assertEqual(self.peer.effects != effects_before, scenario.memory_effect)
+
+    def test_begin_recovers_a_lost_acknowledgement_with_identical_request(self):
+        client = self.client()
+        self.peer.lose_reply_count = 1
+        client.begin(2)
+        begin_requests = [request for request in self.peer.sent if request[4] == 1]
+        self.assertEqual(len(begin_requests), 2)
+        self.assertEqual(begin_requests[0], begin_requests[1])
+        self.assertEqual(client.session, self.peer.session)
+        self.assertEqual(
+            client.initial_upload,
+            {
+                "session": client.session,
+                "sectors": 2,
+                "sha256": None,
+                "verified": False,
+            },
+        )
 
     def test_unsupported_ordered_opcodes_have_no_side_effects(self):
         client = self.client()
