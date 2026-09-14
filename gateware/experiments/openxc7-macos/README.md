@@ -108,6 +108,14 @@ router account for half-cycle paths. The build runs a timing probe to detect
 an unpatched binary. Passing nextpnr estimates is not vendor timing signoff;
 retain routed reports and repeat host integrity tests after programming.
 
+Release [0.9.5](https://github.com/openXC7/nextpnr-xilinx/releases/tag/0.9.5)
+adds constant-sink routing and BUFHCE enable fixes, including a RAM32M
+corruption fix. It has not been qualified for this design. Its
+[tagged timing implementation](https://github.com/openXC7/nextpnr-xilinx/blob/0.9.5/xilinx/arch.cc#L2641-L2650)
+still reports rising-edge registers unconditionally, so the local negative-edge
+patch and preflight remain necessary. Keep the FIFO/bank register-storage
+workarounds until a separate upgrade is built and tested on hardware.
+
 The locked simulation dependency Cocotb 1.9.2 can fail to compile with newer
 Apple linkers (`unsupported mach-o filetype`). The extraction was tested using
 the existing working local Cocotb installation; Linux CI installs from the

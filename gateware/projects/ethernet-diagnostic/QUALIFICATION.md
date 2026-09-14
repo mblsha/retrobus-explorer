@@ -1,6 +1,45 @@
 # Qualification provenance
 
-## Current integration, 2026-09-14
+## Review revision, 2026-09-14
+
+The functional source at `f3bbd19` adds client recovery/verification guards,
+intended-domain and two-stage CDC validation, named protocol states, and
+per-PHY-clock reset release. It has **not been programmed or requalified on
+hardware**. The measurements below remain attached to `805c5f7`; they are not
+measurements of this revision.
+
+Local validation includes 25 host tests and 20 CDC-fixture tests, each normally
+and under `python -O`. All six Ethernet Spade/Verilator configurations pass
+(12 test cases), including cached errors, sequence wrap, memory-error
+completion, clock-phase/reset cases, and accepted SD reads and writes draining
+across DISARM. Six manifest tests and five direct-output timing tests also pass
+under optimized Python. Packet builders and SD/DDR behavioral peers moved into
+test-support modules; their independent protocol construction is retained.
+
+The full fast-SD suite passed 45 cases across 27 configurations; the ordinary
+SD read/write/busy tests passed six cases across three configurations. All 43
+DDR support tests passed. Ruff and project inventory checks passed.
+
+The normal patched-nextpnr 0.9.4 builder passed with seed 12: fabric
+108.96/100 MHz, DDR 85.30/80 MHz, and both MII and IDELAY clocks passed.
+All 18 Gray-pointer checks, five direct SD output checks, FIFO register-storage
+checks, negative-edge preflight, and bitstream round-trip verification passed.
+A repeated synthesis produced the identical netlist. The earlier seed-4 attempt
+failed fabric timing at 86.10 MHz and correctly published no success manifest;
+the documented Ethernet command now uses seed 12.
+
+Unprogrammed build bitstream SHA-256:
+`9543d005769dc189a36954044be7003cee3da6a87ca2aaf7df3b140cca31a2ee`
+
+The round trip verified 675,769 configuration bits. Generated artifacts remain
+local, outside Git.
+
+The host verification marker certifies only the initial upload. It is not a
+hardware interlock and does not prevent subsequent legitimate SD writes.
+PHY clocks must run during the held reset interval; see the reset boundary in
+the README. Digital reset tests do not model metastability.
+
+## Hardware-qualified integration, 2026-09-14
 
 Hardware qualification used the implementation at `805c5f7` on an Arty A7-35T,
 JD bottom-header adapter with common ground, and the GKD external SD host at
