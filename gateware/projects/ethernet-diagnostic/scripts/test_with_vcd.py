@@ -21,6 +21,7 @@ def main():
         ("frame_transmitter", "test_mac"),
         ("network_engine", "test_network"),
         ("block_service", "test_blocks"),
+        ("sd_trace", "test_trace"),
         ("network_native", "test_network_native"),
         ("network_ddr", "test_network_sd"),
     ]:

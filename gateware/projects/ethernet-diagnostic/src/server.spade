@@ -26,6 +26,8 @@ pub entity network_frontend(
     memory_read_data: uint<8>,
     memory_done: bool,
     memory_error: bool,
+    sd_trace: uint<32>,
+    trace_word_index: inv &uint<4>,
     armed: inv &bool,
 ) {
     reg(clk) divider: uint<2> reset(rst: 0) = divider +. 1;
@@ -76,7 +78,7 @@ pub entity network_frontend(
         app_reply_write_w, app_reply_address_w, app_reply_data_w, app_reply_done_w, app_reply_length_w,
         memory_request, memory_write, memory_lba, memory_count,
         memory_write_index, memory_write_data,
-        memory_read_valid, memory_read_index, memory_read_data, memory_done, memory_error,
+        memory_read_valid, memory_read_index, memory_read_data, memory_done, memory_error, sd_trace, trace_word_index,
         armed,
     );
 }

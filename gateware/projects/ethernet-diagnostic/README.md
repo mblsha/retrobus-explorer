@@ -159,6 +159,30 @@ always starts a new session at sector zero and performs a complete readback
 comparison. True upload resume would need to reconcile the image identity and
 FPGA-accepted sector count and is not implemented.
 
+## Passive SD trace
+
+For targets without a serial console, read the SD frontend's passive activity
+counters over Ethernet:
+
+```sh
+uv run python projects/ethernet-diagnostic/scripts/images.py \
+  --state /private/tmp/arty-network-session.json --trace
+```
+
+TRACE uses an unsequenced, compact read request. It does not recover a pending
+operation, update the journal, access DDR, or change SD ownership. The counters
+report sampled SD clock edges, complete and CRC-valid command frames, invalid
+frames, the last valid command and argument, and block read/write activity.
+They are cumulative from FPGA reset and wrap at 32 bits, so take a baseline
+before powering the target and compare the deltas. An unpowered or floating SD
+clock can still produce sampled edges or invalid frames; only valid commands
+and backend requests establish useful protocol progress.
+
+The trace records observation points already present in the SD frontend rather
+than instantiating another command decoder. It deliberately keeps only the last
+command, not a command log, to preserve timing in the combined DDR/Ethernet
+build. See [the RG35XX Plus experiment](RG35XX-PLUS-DEBUG.md) for a real example.
+
 On the GKD, bind the external controller and apply the 13 MHz, four-bit,
 keep-awake settings from the [DDR guide](../microsd-emulator/ddr/README.md).
 Run its read-only prefix check before any SD writes:
@@ -198,6 +222,7 @@ with the same state file and an independently known `--expected-sha256`.
 - `src/native.spade`: one/two-sector transfers over the native DDR interface.
 - `src/server.spade`: packet-layer composition and PHY startup.
 - `src/integrated.spade`: exclusive SD/network DDR ownership and draining.
+- `src/trace.spade`: passive SD activity counters and registered word readout.
 - `scripts/images.py`: validated UDP client and persistent ordered-request state.
 
 See [wire protocol and bulk reads](PROTOCOL.md) and

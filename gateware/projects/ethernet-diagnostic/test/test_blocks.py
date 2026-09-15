@@ -58,6 +58,13 @@ async def ordered_transfer_and_retries(dut):
     await exchange(packet(3, 9, lba=524288, count=1), 5)
     await exchange(packet(6, 10, session=99), 2)
     await exchange(packet(6, 10))
+    dut.sd_trace.value = 0x31544453
+    compact_trace = packet(8, 0, lba=0, session=0)[:24]
+    compact_trace += struct.pack("<I", zlib.crc32(compact_trace))
+    trace_reply = await exchange(compact_trace)
+    assert trace_reply[24:28] == struct.pack("<I", 0x31544453)
+    assert dut.trace_word_index.value == 0
+    assert not int(dut.armed.value)
     await exchange(b"truncated")
     dut.rst.value = 1
     await Timer(30, units="ns")

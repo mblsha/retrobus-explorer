@@ -23,6 +23,7 @@ async def block_fixture(dut):
     dut.rst.value = 1
     dut.initialized.value = 1
     dut.sd_quiescent.value = 1
+    dut.sd_trace.value = 0
     await Timer(40, units="ns")
     dut.rst.value = 0
     memory = {}

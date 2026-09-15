@@ -5,3 +5,4 @@ pub mod blocks;
 pub mod native;
 pub mod server;
 pub mod integrated;
+pub mod trace;

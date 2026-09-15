@@ -99,6 +99,13 @@ pub entity sd_frontend(
     write_data: inv &uint<128>,
     write_mask: inv &uint<16>,
     write_busy: inv &bool,
+
+    // Passive command-observation taps for external diagnostics.
+    trace_clock_tick: inv &bool,
+    trace_frame: inv &bool,
+    trace_valid: inv &bool,
+    trace_command: inv &uint<6>,
+    trace_argument: inv &uint<32>,
 ) {
     let CMD_GO_IDLE: uint<6> = 0;
     let CMD_ALL_SEND_CID: uint<6> = 2;
@@ -208,11 +215,13 @@ pub entity sd_frontend(
             command_crc
         }
     };
-    let raw_valid = armed && sd_sample_tick && response_left == 0 && remaining == 1 && cmd_sync &&
+    let frame_complete = armed && sd_sample_tick && response_left == 0 && remaining == 1;
+    let raw_valid = frame_complete && cmd_sync &&
     trunc::<uint<48>, uint<7>>(command) == command_crc && command.to_bits()[45] && !command.to_bits()[46];
     // Complete CRC/framing validation before executing a command. SD edges
     // are about 40 ns apart at the fast target; validation adds one fabric cycle.
     reg(clk) valid reset(local_rst: false) = raw_valid;
+    reg(clk) observed_frame reset(local_rst: false) = frame_complete;
     reg(clk) command_index: uint<6> reset(local_rst: 0) = if raw_valid {
         trunc(command >> 39)
     } else {
@@ -369,6 +378,11 @@ pub entity sd_frontend(
         wdata_mask: write_mask,
     );
     set write_busy = committing;
+    set trace_clock_tick = &sd_sample_tick;
+    set trace_frame = &observed_frame;
+    set trace_valid = &valid;
+    set trace_command = &command_index;
+    set trace_argument = &command_argument;
     reg(clk) write_crc_error reset(local_rst: false) = if valid && (command_index == CMD_GO_IDLE || (command_index == CMD_SEND_STATUS && !app)) {
         false
     } else if *write_done && !*write_good {
@@ -896,6 +910,11 @@ entity bram_emulator(
     let (unused_wd, unused_wd_w): (&uint<128>, inv &uint<128>) = port;
     let (unused_wm, unused_wm_w): (&uint<16>, inv &uint<16>) = port;
     let (unused_wb, unused_wb_w): (&bool, inv &bool) = port;
+    let (_, unused_trace_clock): (&bool, inv &bool) = port;
+    let (_, unused_trace_frame): (&bool, inv &bool) = port;
+    let (_, unused_trace_valid): (&bool, inv &bool) = port;
+    let (_, unused_trace_command): (&uint<6>, inv &uint<6>) = port;
+    let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -937,6 +956,11 @@ entity bram_emulator(
         write_data: unused_wd_w,
         write_mask: unused_wm_w,
         write_busy: unused_wb_w,
+        trace_clock_tick: unused_trace_clock,
+        trace_frame: unused_trace_frame,
+        trace_valid: unused_trace_valid,
+        trace_command: unused_trace_command,
+        trace_argument: unused_trace_argument,
     );
     set armed_status = card_armed;
 }
@@ -1169,6 +1193,11 @@ entity ddr_emulator(
     set ddr_wdata_valid = &(if sd_owner { *sd_write_data_valid } else { *loader_data_valid });
     set ddr_wdata = &(if sd_owner { *sd_write_data } else { *loader_data });
     set ddr_wdata_mask = &(if sd_owner { *sd_write_mask } else { *loader_mask });
+    let (_, unused_trace_clock): (&bool, inv &bool) = port;
+    let (_, unused_trace_frame): (&bool, inv &bool) = port;
+    let (_, unused_trace_valid): (&bool, inv &bool) = port;
+    let (_, unused_trace_command): (&uint<6>, inv &uint<6>) = port;
+    let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1210,6 +1239,11 @@ entity ddr_emulator(
         write_data: sd_write_data_w,
         write_mask: sd_write_mask_w,
         write_busy: sd_commit_busy_w,
+        trace_clock_tick: unused_trace_clock,
+        trace_frame: unused_trace_frame,
+        trace_valid: unused_trace_valid,
+        trace_command: unused_trace_command,
+        trace_argument: unused_trace_argument,
     );
     set armed_status = &(*card_armed && initialized);
 }

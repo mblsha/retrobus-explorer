@@ -1,4 +1,4 @@
-use super::{server, native};
+use super::{server, native, trace};
 
 // Native DDR remains exclusively owned by SD until pending reads and accepted
 // SD commits finish. Network transactions can start only after that drain.
@@ -91,6 +91,13 @@ pub entity network_ddr(
     let (write_data, write_data_w): (&uint<128>, inv &uint<128>) = port;
     let (write_mask, write_mask_w): (&uint<16>, inv &uint<16>) = port;
     let (write_busy, write_busy_w): (&bool, inv &bool) = port;
+    let (trace_clock_tick, trace_clock_tick_w): (&bool, inv &bool) = port;
+    let (trace_frame, trace_frame_w): (&bool, inv &bool) = port;
+    let (trace_valid, trace_valid_w): (&bool, inv &bool) = port;
+    let (trace_command, trace_command_w): (&uint<6>, inv &uint<6>) = port;
+    let (trace_argument, trace_argument_w): (&uint<32>, inv &uint<32>) = port;
+    let (trace_word, trace_word_w): (&uint<32>, inv &uint<32>) = port;
+    let (trace_word_index, trace_word_index_w): (&uint<4>, inv &uint<4>) = port;
     // commit_busy includes a combinational final-CRC acceptance term. The
     // writer first gathers a complete native word, so registering arbitration
     // ownership cannot delay its first valid command/data handshake. Retain
@@ -119,7 +126,7 @@ pub entity network_ddr(
         eth_rxd, eth_rx_dv, eth_rxerr, eth_txd, eth_tx_en, eth_ref_clk, eth_rstn,
         network_request_w, network_write_w, network_lba_w, network_count_w, *network_write_index,
             network_write_byte_w, *network_read_valid, *network_read_index, *network_read_byte,
-            *network_done, *network_error, sd_armed_w);
+            *network_done, *network_error, *trace_word, trace_word_index_w, sd_armed_w);
     let _ = inst native::network_native(clk, rst, network_owner && initialized, *network_request,
         *network_write, *network_lba, *network_count,
         network_write_index_w, *network_write_byte, network_read_valid_w, network_read_index_w,
@@ -146,7 +153,11 @@ pub entity network_ddr(
             sector_offset_w, sector_release_w,
         true, writable, dat_in, write_cmd_valid_w, *client_cmd_ready && sd_commit_owner,
             write_cmd_address_w, write_data_valid_w, *client_wdata_ready && sd_commit_owner,
-            write_data_w, write_mask_w, write_busy_w);
+            write_data_w, write_mask_w, write_busy_w,
+            trace_clock_tick_w, trace_frame_w, trace_valid_w, trace_command_w, trace_argument_w);
+    let _ = inst trace::sd_trace(clk, rst, *sd_armed, initialized,
+        *trace_clock_tick, *trace_frame, *trace_valid, *trace_command, *trace_argument,
+        *sd_request, *sd_lba, *write_busy, *trace_word_index, trace_word_w);
     set client_cmd_valid_w = &(if sd_commit_owner { *write_cmd_valid } else if *sd_armed {
         *read_cmd_valid } else if network_owner { *network_cmd_valid } else { false });
     set client_cmd_address_w = &(if sd_commit_owner { *write_cmd_address } else if *sd_armed {

@@ -13,8 +13,9 @@ protocol and UDP destination port; a nonzero UDP checksum is verified with its
 pseudo-header. Transmitted IPv4 UDP packets use checksum zero, which is allowed
 for IPv4. Every block request and reply has a mandatory application CRC32.
 
-Legacy requests/replies are 540 bytes. Bulk-read requests can use the compact
-28-byte header-plus-CRC form (or the original 540-byte padded form). Successful
+Legacy requests/replies are 540 bytes. Bulk-read and TRACE requests can use the
+compact 28-byte header-plus-CRC form; bulk reads also accept the original
+540-byte padded form. Successful
 two-sector bulk-read replies are 1052 bytes (1024 data bytes at offset 24,
 followed by CRC32); one-sector and error replies remain 540 bytes:
 
@@ -24,7 +25,7 @@ followed by CRC32); one-sector and error replies remain 540 bytes:
 | 4 | Opcode |
 | 5 | Request zero / reply status |
 | 6–7 | Reserved zero |
-| 8–11 | Nonzero session ID, little endian |
+| 8–11 | Nonzero session ID, little endian; zero for TRACE |
 | 12–15 | Sequence ID, little endian |
 | 16–19 | LBA, little endian |
 | 20–23 | Count, little endian |
@@ -32,7 +33,7 @@ followed by CRC32); one-sector and error replies remain 540 bytes:
 | 536–539 | IEEE CRC32 of bytes 0–535, little endian |
 
 Opcodes: 1 BEGIN (sequence zero, count is upload sectors), 2 WRITE, 3 READ,
-4 ARM, 5 DISARM, 6 STATUS, 7 BULK_READ. Legacy READ/WRITE count must be one. After BEGIN, sequences
+4 ARM, 5 DISARM, 6 STATUS, 7 BULK_READ, 8 TRACE. Legacy READ/WRITE count must be one. After BEGIN, sequences
 start at one. Legacy operations have one request outstanding at a time. The FPGA caches the last
 ordered response, including read data, and replays it only when the session,
 sequence, and request CRC match. A repeated key with different contents is
@@ -49,6 +50,20 @@ I/O, and `images.py --inspect` displays its session, next sequence, pending
 operation, and initial-upload verification marker without sending packets.
 Journal request recovery completes one ordered operation; it does not resume a
 partially uploaded image. A new `--upload` starts at sector zero.
+
+## Passive SD trace
+
+Opcode 8 (`TRACE`) reads one 32-bit word of passive SD activity. It uses a
+compact request with session and sequence zero; LBA selects word 0 through 10.
+The reply uses the ordinary 540-byte size, places the selected little-endian
+word at payload bytes 24 through 27, and zero-fills the rest. Word 0 is magic
+`SDT1`; word 1 contains live flags; the remaining words are cumulative counters
+and last-observed command, argument, and read LBA values. `images.py --trace`
+validates the magic and returns named JSON fields.
+
+TRACE is admitted before DDR initialization and outside the ordered session. It
+does not advance a sequence, update the retry cache, issue a memory operation,
+change ARM state, or recover an outstanding journaled request.
 
 
 ## Windowed bulk reads

@@ -31,6 +31,8 @@ pub entity block_service(
     memory_read_data: uint<8>,
     memory_done: bool,
     memory_error: bool,
+    sd_trace: uint<32>,
+    trace_word_index: inv &uint<4>,
     armed: inv &bool,
 ) {
     // Keep these encodings and address/capture stages: they preserve RAM latency.
@@ -54,6 +56,7 @@ pub entity block_service(
     let OP_DISARM: uint<8> = 5;
     let OP_STATUS: uint<8> = 6;
     let OP_BULK_READ: uint<8> = 7;
+    let OP_TRACE: uint<8> = 8;
 
     let STATUS_OK: uint<8> = 0;
     let STATUS_BAD_FORMAT: uint<8> = 1;
@@ -88,8 +91,9 @@ pub entity block_service(
     let lba: uint<32> = trunc(header >> 128);
     let count: uint<32> = trunc(header >> 160);
     let format_ok = trunc::<uint<192>, uint<32>>(header) == 0x31534252 &&
-        trunc::<uint<192>, uint<24>>(header >> 40) == 0 && opcode >= OP_BEGIN && opcode <= OP_BULK_READ && (!compact || opcode == OP_BULK_READ) && expected_crc == (crc ^ 0xffffffff);
+        trunc::<uint<192>, uint<24>>(header >> 40) == 0 && opcode >= OP_BEGIN && opcode <= OP_TRACE && (!compact || opcode == OP_BULK_READ || opcode == OP_TRACE) && expected_crc == (crc ^ 0xffffffff);
     let bulk = opcode == OP_BULK_READ;
+    let trace = opcode == OP_TRACE;
     let read_operation = opcode == OP_READ || bulk;
     // Freeze reply size before DDR starts; avoid a count/status decode on every byte.
     reg(clk) long_reply reset(rst: false) = if state == DISPATCH { bulk && count == 2 && saved_status == STATUS_OK }
@@ -105,9 +109,9 @@ pub entity block_service(
     let status: uint<8> = if !format_ok { STATUS_BAD_FORMAT }
         else if same_key && !is_exact_retry { STATUS_CONFLICTING_RETRY }
         else if opcode == OP_BEGIN && arm { STATUS_IMAGE_BUSY }
-        else if !initialized { STATUS_NOT_INITIALIZED }
+        else if !initialized && !trace { STATUS_NOT_INITIALIZED }
         else if bulk && (requested_session != session || session == 0) { STATUS_BAD_SESSION }
-        else if !admitted_ordered_request && !bulk { if requested_session != session { STATUS_BAD_SESSION } else { STATUS_BAD_SEQUENCE } }
+        else if !admitted_ordered_request && !bulk && !trace { if requested_session != session { STATUS_BAD_SESSION } else { STATUS_BAD_SEQUENCE } }
         else if (opcode == OP_WRITE || read_operation) && (arm || !sd_quiescent) { STATUS_IMAGE_BUSY }
         else if (opcode == OP_WRITE || read_operation) && (lba >= SECTOR_CAPACITY || (if bulk { count < 1 || count > 2 || (count == 2 && lba == LAST_SECTOR) } else { count != 1 })) { STATUS_BAD_RANGE }
         else if opcode == OP_WRITE && (lba != written_sectors || written_sectors >= declared_sectors) { STATUS_BAD_RANGE }
@@ -146,6 +150,8 @@ pub entity block_service(
         else if state == REQUEST_CAPTURE || state == REPLY_EMIT { index +. 1 } else { index };
     let reply_header: uint<192> = (header & 0xffffffffffffffffffffffffffffffff0000000000000000) |
         zext::<32, 192>(0x31414252) | (zext(opcode) << 32) | (zext(saved_status) << 40);
+    let trace_byte_index: uint<2> = trunc(index -. 24);
+    let trace_byte: uint<8> = trunc(sd_trace >> (zext(trace_byte_index) << 3));
     decl out_byte;
     let cache: Memory<uint<8>, 2048> = inst clocked_memory(clk, [(state == REPLY_EMIT && cache_this_reply && !replay, index, out_byte)]);
     reg(clk) cached_byte = inst read_memory(cache, index);
@@ -153,7 +159,15 @@ pub entity block_service(
         else if state == REPLY_EMIT && index < response_length -. 4 { crc32_byte(reply_crc, out_byte) } else { reply_crc };
     let selected_byte: uint<8> = if replay { cached_byte }
         else if index < 24 { trunc(reply_header >> (zext::<11, 192>(index) << 3)) }
-        else if index < response_length -. 4 { if read_operation && saved_status == STATUS_OK { read_byte } else { 0 } }
+        else if index < response_length -. 4 {
+            if read_operation && saved_status == STATUS_OK {
+                read_byte
+            } else if trace && saved_status == STATUS_OK && index < 28 {
+                trace_byte
+            } else {
+                0
+            }
+        }
         else { trunc((reply_crc ^ 0xffffffff) >> (zext::<11, 32>(index -. (response_length -. 4)) << 3)) };
     // Separate variable header-byte selection from the CRC feedback path.
     reg(clk) out_byte: uint<8> reset(rst: 0) = if state == REPLY_REGISTER { selected_byte } else { out_byte };
@@ -168,5 +182,6 @@ pub entity block_service(
     set memory_lba = &lba;
     set memory_count = &(if long_reply { 2 } else { 1 });
     set memory_write_data = &write_byte;
+    set trace_word_index = &trunc(lba);
     set armed = &arm;
 }

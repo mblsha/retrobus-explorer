@@ -383,6 +383,51 @@ class BulkHostTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             images.encode(2, 123, 9, compact=True)
 
+    def test_trace_is_compact_and_does_not_change_ordered_state(self):
+        values = (
+            0x31544453,
+            0b101111,
+            12345,
+            12,
+            10,
+            2,
+            17,
+            32768,
+            4,
+            33,
+            1,
+            4,
+            0x4C000001,
+            0x0D08,
+        )
+
+        class TraceSocket(Socket):
+            def send(self, request):
+                self.sent.append(request)
+                index = struct.unpack_from("<I", request, 16)[0]
+                payload = struct.pack("<I", values[index]).ljust(512, b"\0")
+                self.queue.append(reply(request, payload=payload))
+
+        sock = TraceSocket()
+        with patch.object(images.socket, "socket", return_value=sock):
+            client = images.Images()
+            client.session, client.sequence = 123, 9
+            with patch.object(
+                client, "save", side_effect=AssertionError("trace wrote journal")
+            ):
+                trace = client.trace()
+        self.assertEqual(len(sock.sent), 11)
+        self.assertTrue(all(len(request) == 28 for request in sock.sent))
+        self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
+        self.assertEqual((client.session, client.sequence), (123, 9))
+        self.assertIsNone(client.pending)
+        self.assertEqual(trace["clock_edges"], 12345)
+        self.assertEqual(trace["last_command"], 17)
+        self.assertEqual(trace["last_argument"], 32768)
+        self.assertEqual(trace["last_read_lba"], 33)
+        self.assertTrue(trace["armed"])
+        self.assertTrue(trace["ddr_initialized"])
+
     def test_bulk_reply_length_and_crc(self):
         request = images.encode(7, 123, 9, 0, 2)
         data = bytes(1024)

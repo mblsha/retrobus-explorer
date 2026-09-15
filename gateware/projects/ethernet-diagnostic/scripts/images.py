@@ -36,6 +36,7 @@ class Opcode(IntEnum):
     DISARM = 5
     STATUS = 6
     BULK_READ = 7
+    TRACE = 8
 
 
 ORDERED_OPCODES = frozenset(
@@ -70,8 +71,8 @@ def encode(opcode, session, sequence, lba=0, count=0, data=b"", compact=False):
     """Encode a request without changing the legacy padded wire format."""
     if len(data) > SECTOR_BYTES:
         raise ValueError("A block is at most 512 bytes")
-    if compact and (opcode != Opcode.BULK_READ or data):
-        raise ValueError("Only bulk reads have compact requests")
+    if compact and (opcode not in (Opcode.BULK_READ, Opcode.TRACE) or data):
+        raise ValueError("Only bulk reads and SD trace requests are compact")
     body = (
         b"RBS1"
         + bytes([opcode, 0, 0, 0])
@@ -413,6 +414,36 @@ class Images:
         self.save()
         return self.finish(request)
 
+    def trace(self):
+        """Read passive SD activity without recovery or ordered-state changes."""
+        fields = []
+        for index in range(11):
+            request = encode(Opcode.TRACE, 0, 0, lba=index, compact=True)
+            status, payload = self.exchange(request)
+            if status:
+                raise RemoteError(status)
+            fields.append(struct.unpack_from("<I", payload)[0])
+        if fields[0] != 0x31544453:
+            raise ValueError("FPGA returned an invalid SD trace payload")
+        flags = fields[1]
+        return {
+            "armed": bool(flags & 1),
+            "ddr_initialized": bool(flags & 2),
+            "sd_clock_high": bool(flags & 4),
+            "cmd_high": bool(flags & 8),
+            "write_busy": bool(flags & 16),
+            "read_request_active": bool(flags & 32),
+            "clock_edges": fields[2],
+            "command_frames": fields[3],
+            "valid_commands": fields[4],
+            "invalid_frames": fields[5],
+            "last_command": fields[6],
+            "last_argument": fields[7],
+            "read_requests": fields[8],
+            "last_read_lba": fields[9],
+            "writes": fields[10],
+        }
+
     def upload(self, image, window=0):
         if not image or len(image) % SECTOR_BYTES:
             raise ValueError("Image must be nonempty and a multiple of 512 bytes")
@@ -578,6 +609,11 @@ def main():
     action.add_argument("--disarm", action="store_true")
     action.add_argument("--status", action="store_true")
     action.add_argument(
+        "--trace",
+        action="store_true",
+        help="Read passive SD activity without changing card or journal state",
+    )
+    action.add_argument(
         "--inspect",
         action="store_true",
         help="Show validated local journal state without sending packets",
@@ -624,6 +660,8 @@ def main():
         if args.arm
         else "disarm"
         if args.disarm
+        else "trace"
+        if args.trace
         else "status"
     )
     try:
@@ -647,6 +685,8 @@ def main():
                 "downloaded_bytes": len(image),
                 "sha256": hashlib.sha256(image).hexdigest(),
             }
+        elif args.trace:
+            result = {"sd_trace": client.trace()}
         else:
             if args.arm:
                 opcode = Opcode.ARM

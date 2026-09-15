@@ -1,0 +1,99 @@
+// Passive SD-bus observation for bring-up without a serial console. This does
+// not participate in card responses or DDR ownership, so it cannot change SD
+// protocol behavior. Counters intentionally wrap at 32 bits.
+#[no_mangle(all)]
+pub entity sd_trace(
+    clk: clock,
+    rst: bool,
+    armed: bool,
+    initialized: bool,
+    clock_tick: bool,
+    command_frame: bool,
+    command_valid: bool,
+    command_index: uint<6>,
+    command_argument: uint<32>,
+    read_request: bool,
+    read_lba: uint<32>,
+    write_busy: bool,
+    word_index: uint<4>,
+    word: inv &uint<32>,
+) {
+    reg(clk) clock_edges: uint<32> reset(rst: 0) = if armed && clock_tick {
+        clock_edges +. 1
+    } else {
+        clock_edges
+    };
+
+    // The SD frontend supplies its registered framing and CRC result, avoiding
+    // a second command decoder solely for diagnostics.
+    reg(clk) command_frames: uint<32> reset(rst: 0) = if command_frame {
+        command_frames +. 1
+    } else {
+        command_frames
+    };
+    reg(clk) valid_commands: uint<32> reset(rst: 0) = if command_valid {
+        valid_commands +. 1
+    } else {
+        valid_commands
+    };
+    reg(clk) invalid_frames: uint<32> reset(rst: 0) = if command_frame && !command_valid {
+        invalid_frames +. 1
+    } else {
+        invalid_frames
+    };
+    reg(clk) last_command: uint<6> reset(rst: 0) = if command_valid {
+        command_index
+    } else {
+        last_command
+    };
+    reg(clk) last_argument: uint<32> reset(rst: 0) = if command_valid {
+        command_argument
+    } else {
+        last_argument
+    };
+
+    reg(clk) read_previous reset(rst: false) = read_request;
+    let read_start = read_request && !read_previous;
+    reg(clk) read_requests: uint<32> reset(rst: 0) = if read_start {
+        read_requests +. 1
+    } else {
+        read_requests
+    };
+    reg(clk) last_read_lba: uint<32> reset(rst: 0) = if read_start {
+        read_lba
+    } else {
+        last_read_lba
+    };
+    reg(clk) write_previous reset(rst: false) = write_busy;
+    reg(clk) writes: uint<32> reset(rst: 0) = if write_busy && !write_previous {
+        writes +. 1
+    } else {
+        writes
+    };
+
+    let armed_flag: uint<32> = if armed { 1 } else { 0 };
+    let initialized_flag: uint<32> = if initialized { 2 } else { 0 };
+    let clock_flag: uint<32> = if clock_tick { 4 } else { 0 };
+    let command_flag: uint<32> = if command_frame { 8 } else { 0 };
+    let write_flag: uint<32> = if write_busy { 16 } else { 0 };
+    let read_flag: uint<32> = if read_request { 32 } else { 0 };
+    let flags: uint<32> = armed_flag | initialized_flag | clock_flag |
+        command_flag | write_flag | read_flag;
+    // Register one requested word so the diagnostic readout cannot add a wide
+    // combinational path to the timing-sensitive network reply datapath.
+    reg(clk) selected_word: uint<32> reset(rst: 0) = match word_index {
+        0 => 0x31544453,
+        1 => flags,
+        2 => clock_edges,
+        3 => command_frames,
+        4 => valid_commands,
+        5 => invalid_frames,
+        6 => zext(last_command),
+        7 => last_argument,
+        8 => read_requests,
+        9 => last_read_lba,
+        10 => writes,
+        _ => 0,
+    };
+    set word = &selected_word;
+}
