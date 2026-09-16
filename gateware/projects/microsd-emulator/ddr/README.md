@@ -55,7 +55,9 @@ python3 experiments/openxc7-macos/build_ddr.py \
 ```
 
 This profile suppresses the complete initial SD negotiation boundary so a host
-which permits MMC falls back to CMD1. See the
+which permits MMC falls back to CMD1. Its MMC CSD advertises 5 MHz; the tested
+GKD clock tree generates 4 MHz from that request. CMD23 bounds the next CMD18
+without requiring an on-wire CMD12 after the final requested block. See the
 [GKD validation record](../../ethernet-diagnostic/RG35XX-PLUS-DEBUG.md#gkd-350h-legacy-mmc-validation).
 
 The build checks support tests, clock timing, native Gray-pointer crossings,

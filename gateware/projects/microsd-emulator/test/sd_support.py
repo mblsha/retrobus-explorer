@@ -141,8 +141,35 @@ class Host:
         assert b"SPADE" in await self.command(2, length=136)
         status = await self.command(3, 0x10000)
         assert not int.from_bytes(status[1:5], "big") & (1 << 22)
-        assert (await self.command(9, 0x10000, length=136))[1:] == bytes.fromhex(
-            "d05e001a0f5903ffffffffe7924000fb"
+        csd = (await self.command(9, 0x10000, length=136))[1:]
+        assert csd == bytes.fromhex("d05e00590f5903ffffffffe7924000bd")
+        transfer_rate_values = (
+            0,
+            10,
+            12,
+            13,
+            15,
+            20,
+            25,
+            30,
+            35,
+            40,
+            45,
+            50,
+            55,
+            60,
+            70,
+            80,
+        )
+        transfer_speed = csd[3]
+        max_clock_hz = (
+            100_000
+            * 10 ** (transfer_speed & 7)
+            * transfer_rate_values[(transfer_speed >> 3) & 15]
+            // 10
+        )
+        assert max_clock_hz == 5_000_000, (
+            "MMC CSD must enforce the qualified rate"
         )
         assert await self.command(7, 0x10000) == bytes.fromhex("070000070075")
         assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 must release DAT0"

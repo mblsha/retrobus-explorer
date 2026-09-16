@@ -176,6 +176,36 @@ async def multiblock_progress_and_stop_during_data(d):
 
 
 @cocotb.test()
+async def mmc_predefined_multiblock_count_stops_without_cmd12(d):
+    h = await setup(d)
+    d.writable.value = 1
+    d.mmc_only.value = 1
+    await h.init_mmc()
+
+    response = await h.command(23, 3)
+    assert not int.from_bytes(response[1:5], "big") & (1 << 22)
+    await h.command(18, 40)
+    for lba in (40, 41, 42):
+        assert int(d.request_lba.value) == lba
+        await h.supply()
+        assert await h.data() == h.sector
+
+    for _ in range(20):
+        await h.cycle()
+    assert not int(d.request_valid.value), "CMD23 count started a fourth read"
+    assert not int(d.dat_oe.value), "CMD23 count left the data bus driven"
+
+    # Unsupported CMD23 flag bits are rejected without affecting a later
+    # ordinary single-block read.
+    response = await h.command(23, 0x80000001)
+    assert int.from_bytes(response[1:5], "big") & (1 << 22)
+    await h.command(17, 43)
+    assert int(d.request_lba.value) == 43
+    await h.supply()
+    assert await h.data() == h.sector
+
+
+@cocotb.test()
 async def sd_status_reports_current_bus_width(d):
     h = await setup(d)
     await h.init()

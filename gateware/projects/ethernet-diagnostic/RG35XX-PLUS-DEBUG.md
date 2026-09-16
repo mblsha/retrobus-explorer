@@ -57,10 +57,12 @@ and complete readback verification are required before ARM.
 ## 2026-09-16 MMC bring-up result
 
 The H700 profile now supports legacy MMC initialization, MMC CMD3/CMD6/CMD8,
-256-byte CMD16 reads backed by the two halves of each 512-byte DDR sector, and
-deterministic fallback from the first-stage SD loader to the payload's MMC
-probe. Both SD and MMC CSD limit the external clock to 13 MHz. CMD uses the
-qualified same-edge path; DAT uses opposite-edge final pad registers.
+CMD23-bounded multiblock reads, 256-byte CMD16 reads backed by the two halves
+of each 512-byte DDR sector, and deterministic fallback from the first-stage
+SD loader to the payload's MMC probe. The SD CSD retains its 13 MHz limit; the
+MMC CSD advertises 5 MHz after the GKD validation below showed that its 4 MHz
+generated clock was reliable and 12.913 MHz was not. CMD uses the qualified
+same-edge path; DAT uses opposite-edge final pad registers.
 
 The retained seed-5 route has FASM SHA-256
 `0baff8f1caf17e3b5e31c638644778490b75ea20230ae5836f0ef97a720fa92b`.
@@ -136,7 +138,9 @@ The 2026-09-16 v2 hardware candidate had bitstream SHA-256
 Seed 4 passed at 83.70 MHz DDR and 94.55 MHz frontend against 80 MHz targets.
 The GKD read back the exact CID and CSD, selected four-bit legacy MMC, read
 EXT_CSD capacity as 256 MiB, and issued CMD6, CMD23, CMD18, CMD12, CMD17, and
-CMD13 traffic. No writes were observed.
+CMD13 traffic. No writes were observed. The validated v2 image treated CMD23
+as illegal, which Linux tolerated; the current implementation stores its
+16-bit count and ends the following CMD18 after exactly that many blocks.
 
 A deterministic 16 MiB image with SHA-256
 `dce3a728a55021183499a78c32c859a65f7f96f346a3efb8abe8a1bb2cc6d8ea`
@@ -151,6 +155,29 @@ The five repeated low-speed qualification reads sustained about 0.90–0.93
 MB/s and produced no kernel I/O errors. This validates enumeration and payload
 reads at 4 MHz on the current wiring. It also shows that 13 MHz failures are not
 enough to declare the MMC command implementation broken.
+
+The current CMD23/low-speed revision was then built at seed 4. Its bitstream
+SHA-256 is
+`d846034070d3eb1fec0e46aff909042f24070993d22f9376da91948d11bdb3be`;
+DDR and frontend clocks passed at 84.93 and 94.79 MHz against 80 MHz. With the
+device-tree clock clamp removed, the GKD read the exact CSD
+`d05e00590f5903ffffffffe7924000bd`, requested 5 MHz, and generated 4 MHz.
+Three complete 16 MiB reads matched
+`dce3a728a55021183499a78c32c859a65f7f96f346a3efb8abe8a1bb2cc6d8ea`;
+controller error counters, FPGA invalid frames, and FPGA writes all remained
+zero. Linux exercised CMD23/CMD18 as well as CMD17/CMD13 traffic.
+
+As a deliberate no-clamp control, an intermediate CSD used `TRAN_SPEED=0x12`.
+That field means 12 MHz rather than 5 MHz; the GKD selected 12 MHz and recorded
+a block I/O error. The test now decodes the advertised rate numerically in
+addition to checking the complete CSD and its CRC7.
+
+The retained register set is intentionally a constrained compatibility
+profile rather than a claim of full eMMC 5.1 conformance. In particular,
+EXT_CSD revision 8 is paired with no high-speed device type, and the H700-only
+256-byte behavior remains a compatibility exception despite the CSD's normal
+512-byte block fields. The GKD independently confirmed the exact on-wire CSD;
+the next H700 run must establish whether that target still requests CMD16(256).
 
 The current MMC CID reuses the SD constant. Linux therefore renders MMC's
 six-byte product-name field as `SPADE` followed by byte `0x10`; the guarded

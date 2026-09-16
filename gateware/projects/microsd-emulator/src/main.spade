@@ -124,6 +124,7 @@ pub entity sd_frontend(
     let CMD_SEND_STATUS: uint<6> = 13;
     let CMD_READ_SINGLE: uint<6> = 17;
     let CMD_READ_MULTIPLE: uint<6> = 18;
+    let CMD_SET_BLOCK_COUNT: uint<6> = 23;
     let CMD_WRITE_SINGLE: uint<6> = 24;
     let CMD_WRITE_MULTIPLE: uint<6> = 25;
     let ACMD_SEND_OP_COND: uint<6> = 41;
@@ -544,6 +545,10 @@ pub entity sd_frontend(
         17 => transfer_idle,
         // CMD18: READ_MULTIPLE_BLOCK
         18 => transfer_idle,
+        // MMC CMD23: SET_BLOCK_COUNT. Reliable-write and packed-command
+        // flags are outside the supported read-only block-count contract.
+        23 => mmc_mode && !app && transfer_idle && command_argument != 0 &&
+            (command_argument & 0xffff0000) == 0,
         // CMD12: STOP_TRANSMISSION
         12 => state == CARD_TRANSFER,
         // ACMD51: SEND_SCR
@@ -648,10 +653,10 @@ pub entity sd_frontend(
         // transfer-speed contract.
         0x0026001a115903ffc002800002400023
     };
-    // MMC CSD from the Allwinner-compatible legacy-card layout, with
-    // TRAN_SPEED reduced to the adapter's qualified 13 MHz limit and CRC7
-    // recomputed for that byte.
-    let mmc_csd: uint<136> = 0xd05e001a0f5903ffffffffe7924000fb;
+    // MMC CSD from the Allwinner-compatible legacy-card layout. Advertise
+    // 5 MHz: the GKD host generated 4 MHz for this value and repeatedly read
+    // the complete validation image without errors. CRC7 is recomputed.
+    let mmc_csd: uint<136> = 0xd05e00590f5903ffffffffe7924000bd;
     let answer: uint<136> = if long_reply {
         long_header | (if saved_index == CMD_ALL_SEND_CID {
             cid
@@ -764,7 +769,30 @@ pub entity sd_frontend(
     // Read requests, sector ownership, and data serialization.
     let data_end = data_output_advance && data_state == READ_RELEASE;
     decl half;
+    // MMC CMD23 bounds the next CMD18. A zero active count means the existing
+    // open-ended transfer, terminated by CMD12 or the card boundary.
+    reg(clk) predefined_blocks: uint<16> reset(local_rst: 0) = {
+        if valid && legal && command_index == CMD_SET_BLOCK_COUNT {
+            trunc(command_argument)
+        } else if read && command_index == CMD_READ_MULTIPLE {
+            0
+        } else {
+            predefined_blocks
+        }
+    };
+    reg(clk) remaining_blocks: uint<16> reset(local_rst: 0) = {
+        if stop {
+            0
+        } else if read && command_index == CMD_READ_MULTIPLE {
+            predefined_blocks
+        } else if data_end && multi && remaining_blocks != 0 {
+            remaining_blocks -. 1
+        } else {
+            remaining_blocks
+        }
+    };
     let next_sector = data_end && multi &&
+        (remaining_blocks == 0 || remaining_blocks > 1) &&
         (lba < last_lba || (block_length_256 && !half));
     reg(clk) epoch: uint<32> reset(rst: 0) = if stop || !armed || read || next_sector {
         epoch +. 1
