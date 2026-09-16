@@ -26,13 +26,14 @@ BOARD = GATEWARE / "projects/microsd-emulator/ddr/board.v"
 
 
 def sd_properties():
-    speed = (SD_CSD >> 96) & 255
+    csd = SD_CSD
+    speed = (csd >> 96) & 255
     values = (0, 10, 12, 13, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80)
     return dict(
-        sd_csd=f"{SD_CSD:032x}",
-        sd_capacity_bytes=(((SD_CSD >> 62) & 4095) + 1)
-        * (1 << (((SD_CSD >> 47) & 7) + 2))
-        * (1 << ((SD_CSD >> 80) & 15)),
+        sd_csd=f"{csd:032x}",
+        sd_capacity_bytes=(((csd >> 62) & 4095) + 1)
+        * (1 << (((csd >> 47) & 7) + 2))
+        * (1 << ((csd >> 80) & 15)),
         sd_max_clock_hz=100_000 * 10 ** (speed & 7) * values[(speed >> 3) & 15] // 10,
     )
 
@@ -53,14 +54,35 @@ def main():
         action="store_true",
         help="Use UDP image management instead of the UART image loader",
     )
+    parser.add_argument(
+        "--slow-mmc",
+        action="store_true",
+        help="Use the qualified slow-command card frontend (Ethernet PHY stays at 25 MHz)",
+    )
+    parser.add_argument(
+        "--h700-mmc",
+        action="store_true",
+        help="Force the H700 payload's post-loader MMC fallback",
+    )
     args = parser.parse_args()
+    if args.h700_mmc and not args.slow_mmc:
+        parser.error("--h700-mmc requires --slow-mmc")
     project_name = "ethernet-diagnostic" if args.ethernet else "microsd-emulator"
-    default_output = "microsd-ddr-ethernet" if args.ethernet else "microsd-ddr-sd"
+    if args.ethernet:
+        default_output = (
+            "microsd-ddr-ethernet-slow-mmc"
+            if args.slow_mmc
+            else "microsd-ddr-ethernet"
+        )
+    else:
+        default_output = "microsd-ddr-sd-slow-mmc" if args.slow_mmc else "microsd-ddr-sd"
     out = (args.output or GATEWARE / "build" / default_output).resolve()
     tc = args.toolchain.resolve()
     env = dict(os.environ)
     env["PYTHONHASHSEED"] = "0"
     env["SOURCE_DATE_EPOCH"] = "0"
+    sd_io_clk_freq = 80_000_000 if args.slow_mmc else 100_000_000
+    env["MICROSD_IO_CLOCK_HZ"] = str(sd_io_clk_freq)
     env["PATH"] = (
         str(GATEWARE / "build/xpack-riscv-none-elf-gcc-15.2.0-1/bin")
         + os.pathsep
@@ -173,7 +195,10 @@ def main():
         "create_clock -period 10.000 -name sys_clk [get_ports {clk}]",
     ]
     for i, pin in enumerate("D4 D3 F4 F3 E2 D2 H2 G2".split()):
-        slew = " SLEW FAST"
+        # The slow MMC profile is capped at 13 MHz and benefits from gentler
+        # edges on the Pmod/card interconnect. The qualified SD profile keeps
+        # its existing fast-edge electrical contract.
+        slew = " SLEW SLOW" if args.slow_mmc else " SLEW FAST"
         xdc.append(
             f"set_property -dict {{ PACKAGE_PIN {pin} IOSTANDARD LVCMOS33{slew} }} [get_ports {{pmod[{i}]}}]"
         )
@@ -200,7 +225,15 @@ def main():
         raise RuntimeError(f"Expected eight bank command memories, found {memories}")
     selection = " ".join("arty_ddr_bios/" + name for name in memories)
     cache_mapping += f'select -assert-count 8 {selection}; setattr -set ram_style "registers" {selection}; '
-    defines = "-D ETHERNET_SD" if args.ethernet else ""
+    defines = " ".join(
+        flag
+        for enabled, flag in (
+            (args.ethernet, "-D ETHERNET_SD"),
+            (args.slow_mmc, "-D SLOW_MMC"),
+            (args.h700_mmc, "-D H700_MMC"),
+        )
+        if enabled
+    )
     # Include register timing in ABC9 mapping for the combined SD/Ethernet
     # control paths. Routed CDC and opposite-edge output checks still apply.
     register_mapping = " -dff" if args.ethernet else ""
@@ -272,8 +305,10 @@ def main():
             clocks[name] = (float(fmax), verdict, float(target))
         if not clocks:
             raise RuntimeError(f"No timing results for seed {seed}")
-        if "fclk" not in clocks or clocks["fclk"][2] != 100:
-            raise RuntimeError(f"Missing 100 MHz SD fabric timing constraint: {clocks}")
+        if "fclk" not in clocks or clocks["fclk"][2] != sd_io_clk_freq / 1_000_000:
+            raise RuntimeError(
+                f"Missing {sd_io_clk_freq / 1_000_000:g} MHz SD fabric timing constraint: {clocks}"
+            )
         if not any(
             abs(v[2] - sys_clk_freq / 1_000_000) < 0.02 for v in clocks.values()
         ):
@@ -303,12 +338,27 @@ def main():
         out / f"routed-seed-{selected_seed}.sdf",
         sys_clk_freq,
         ethernet=args.ethernet,
+        sd_io_clk_freq=sd_io_clk_freq,
     )
     (out / "cdc-timing.json").write_text(json.dumps(cdc_paths, indent=2) + "\n")
-    output_paths = verify_direct_sd_outputs(
-        out / f"routed-seed-{selected_seed}.json",
-        out / f"routed-seed-{selected_seed}.sdf",
-    )
+    routed = out / f"routed-seed-{selected_seed}.json"
+    routed_sdf = out / f"routed-seed-{selected_seed}.sdf"
+    if args.h700_mmc:
+        # H700 keeps the proven same-edge command path for identification,
+        # while data uses opposite-edge launch to maximize setup margin.
+        output_paths = verify_direct_sd_outputs(
+            routed, routed_sdf, pins=frozenset({2}), inverted=False
+        )
+        output_paths += verify_direct_sd_outputs(
+            routed, routed_sdf, pins=frozenset({0, 1, 3, 7}), inverted=True
+        )
+    else:
+        output_paths = verify_direct_sd_outputs(
+            routed,
+            routed_sdf,
+            pins=frozenset({2}) if args.slow_mmc else frozenset({0, 1, 2, 3, 7}),
+            inverted=not args.slow_mmc,
+        )
     (out / "output-timing.json").write_text(json.dumps(output_paths, indent=2) + "\n")
     if not all(v[1] == "PASS" for v in clocks.values()):
         raise RuntimeError(f"Selected placement failed clock timing: {clocks}")
@@ -331,11 +381,17 @@ def main():
                 "negative_edge_timing_checked": True,
                 "with_sd": True,
                 "ethernet_sd": args.ethernet,
-                "fast_sd": True,
+                "fast_sd": not args.slow_mmc,
+                "h700_mmc": args.h700_mmc,
                 "native_fifo_registers": True,
-                "sd_io_slew": "FAST",
-                "sd_output_fabric_edge": "falling",
-                "sd_io_clock_hz": 100_000_000,
+                "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",
+                "sd_command_output_fabric_edge": (
+                    "rising" if args.slow_mmc else "falling"
+                ),
+                "sd_data_output_fabric_edge": (
+                    "falling" if args.h700_mmc or not args.slow_mmc else "rising"
+                ),
+                "sd_io_clock_hz": sd_io_clk_freq,
                 "registered_bank": True,
                 "register_command_buffers": True,
                 "native_bist": True,

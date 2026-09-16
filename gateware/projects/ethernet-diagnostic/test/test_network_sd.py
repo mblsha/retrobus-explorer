@@ -20,6 +20,8 @@ async def ethernet_sd_ethernet_roundtrip(d):
     d.rst.value = 1
     d.initialized.value = 1
     d.writable.value = 1
+    d.fast_mode.value = int(os.environ.get("MICROSD_FAST_MODE", "1"))
+    d.h700_mode.value = 0
     d.dat_in.value = 15
     d.usb_rx.value = 1
     d.diagnostic_status.value = 0

@@ -70,12 +70,17 @@ class Host:
         if not length:
             return None
         bits = []
+        response_started = False
         for _ in range(length + 16):
             oe, value, _, _ = await self.cycle()
             if oe:
-                bits.append(value)
-                if len(bits) == length:
-                    break
+                response_started = True
+            if response_started:
+                # Open-drain responses release a one; the physical host pull-up
+                # supplies the sampled high level.
+                bits.append(value if oe else 1)
+            if len(bits) == length:
+                break
         assert len(bits) == length, (
             index,
             len(bits),
@@ -86,7 +91,11 @@ class Host:
             value = (value << 1) | bit
         raw = value.to_bytes(length // 8, "big")
         assert raw[-1] & 1
-        if index != 41:
+        if length == 136:
+            # R2 starts with the start/transmission bits followed by six ones.
+            # The 128-bit CID/CSD payload begins in the following byte.
+            assert raw[0] == 0x3F, raw.hex()
+        if index not in (1, 41):
             assert raw[-1] >> 1 == crc7(raw[1:-1] if length == 136 else raw[:-1]), (
                 raw.hex()
             )
@@ -99,9 +108,9 @@ class Host:
         await self.command(55)
         assert (await self.command(41, 0x00FF8000))[1:5] == bytes.fromhex("80ff8000")
         assert b"SPADE" in await self.command(2, length=136)
-        assert (await self.command(3))[1:3] == bytes.fromhex("0001")
+        assert (await self.command(3))[1:5] == bytes.fromhex("00010500")
         csd = int.from_bytes((await self.command(9, 0x10000, length=136))[1:], "big")
-        if writable and int(os.environ.get("MICROSD_FAST_MODE", "0")):
+        if writable:
             sys.path.insert(
                 0,
                 str(Path(__file__).resolve().parents[3] / "experiments/openxc7-macos"),
@@ -114,16 +123,42 @@ class Host:
             * (1 << (((csd >> 47) & 7) + 2))
             * (1 << ((csd >> 80) & 15))
         )
-        assert (csd >> 96) & 255 == (
-            (0x1A if int(os.environ.get("MICROSD_FAST_MODE", "0")) else 0x12)
-            if writable
-            else 0x09
-        )
+        assert (csd >> 96) & 255 == (0x1A if writable else 0x09)
         assert capacity == (268435456 if writable else 8388608)
         assert bool(csd & (1 << 13)) == (not writable)
         assert bool(csd & (0x10 << 84)) == writable
         await self.command(7, 0x10000)
         await self.command(16, 512)
+
+    async def init_mmc(self):
+        await self.command(0, length=0)
+        # Match the Allwinner H616/H700 fallback: probe the legacy MMC OCR,
+        # then request sector access and wait for power-up completion.
+        assert (await self.command(1, 0))[1:5] == bytes.fromhex("c0ff8080")
+        assert (await self.command(1, 0x40300000))[1:5] == bytes.fromhex(
+            "c0ff8080"
+        )
+        assert b"SPADE" in await self.command(2, length=136)
+        status = await self.command(3, 0x10000)
+        assert not int.from_bytes(status[1:5], "big") & (1 << 22)
+        assert (await self.command(9, 0x10000, length=136))[1:] == bytes.fromhex(
+            "d05e001a0f5903ffffffffe7924000fb"
+        )
+        await self.command(7, 0x10000)
+        assert int(self.d.dat_oe.value) & 1, "CMD7 did not assert DAT0 busy"
+        assert not int(self.d.dat_out.value) & 1
+        # R1b must complete even when the host gates SD_CLK while waiting.
+        self.d.sd_clk.value = 0
+        await tick(self.d.clk, 300)
+        assert int(self.d.dat_oe.value) & 1, "CMD7 ready level is not driven"
+        assert int(self.d.dat_out.value) & 1, "CMD7 busy did not release"
+        self.d.sd_clk.value = 1
+        await self.command(8, 0)
+        ext_csd = await self.data()
+        assert ext_csd[192] == 8
+        assert ext_csd[196] == 0
+        assert int.from_bytes(ext_csd[212:216], "little") == 524288
+        await self.command(6, 0x03AF0100)
 
     async def supply(self):
         d = self.d
@@ -181,6 +216,7 @@ async def setup(d):
     d.armed.value = 0
     d.writable.value = 0
     d.fast_mode.value = int(os.environ.get("MICROSD_FAST_MODE", "0"))
+    d.h700_mode.value = 0
     d.dat_in.value = 15
     d.write_cmd_ready.value = 0
     d.write_data_ready.value = 0
@@ -244,5 +280,3 @@ async def send_packet(
     assert token[:5] == ([0, 1, 0, 1, 1] if corrupt else [0, 0, 1, 0, 1])
     assert token[-1] == 1
     return data
-
-

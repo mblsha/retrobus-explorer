@@ -55,6 +55,21 @@ class SDOutputTimingTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.check()
 
+    def test_slow_profile_requires_registered_positive_edge_command(self):
+        self.module["cells"]["ff2"]["parameters"]["IS_CLK_INVERTED"] = "0"
+        self.routed.write_text(json.dumps({"modules": {"board": self.module}}))
+        self.assertEqual(
+            len(
+                verify_direct_sd_outputs(
+                    self.routed,
+                    self.sdf,
+                    pins=frozenset({2}),
+                    inverted=False,
+                )
+            ),
+            1,
+        )
+
     def test_missing_pin_fails(self):
         del self.module["cells"]["board.pmod[7]$OBUFT"]
         with self.assertRaises(RuntimeError):

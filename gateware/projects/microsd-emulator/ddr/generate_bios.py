@@ -6,6 +6,8 @@ the 27-bit ZQCS counter through refresh arbitration to bank command acceptance.
 Registering the predicted zero flag preserves every cycle of the original timer.
 """
 
+import os
+
 from migen import Module, Signal, If, ClockSignal, ClockDomain
 from litex.build.generic_platform import Pins
 from migen.fhdl.bitcontainer import bits_for
@@ -36,7 +38,10 @@ if __name__ == "__main__":
     def card_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
         self.crg.cd_sd_io = ClockDomain("sd_io", reset_less=True)
-        self.crg.pll.create_clkout(self.crg.cd_sd_io, 100_000_000)
+        sd_io_clock_hz = int(os.environ.get("MICROSD_IO_CLOCK_HZ", "100000000"))
+        if sd_io_clock_hz not in (80_000_000, 100_000_000):
+            raise ValueError("MICROSD_IO_CLOCK_HZ must be 80000000 or 100000000")
+        self.crg.pll.create_clkout(self.crg.cd_sd_io, sd_io_clock_hz)
         self.platform.add_extension([("sd_io_clk", 0, Pins(1))])
         self.comb += self.platform.request("sd_io_clk").eq(ClockSignal("sd_io"))
         # BIOS performs PHY training, then Spade qualifies and zeroes all DDR.

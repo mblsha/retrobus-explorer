@@ -9,7 +9,9 @@ import re
 from pathlib import Path
 
 
-def verify_direct_sd_outputs(routed: Path, sdf: Path):
+def verify_direct_sd_outputs(
+    routed: Path, sdf: Path, *, pins=frozenset({0, 1, 2, 3, 7}), inverted=True
+):
     modules = json.loads(routed.read_text())["modules"]
     if len(modules) != 1:
         raise RuntimeError("Check failed: len(modules) == 1")
@@ -19,9 +21,9 @@ def verify_direct_sd_outputs(routed: Path, sdf: Path):
     outputs = {}
     for name, cell in cells.items():
         match = re.search(r"\.pmod\[([01237])\].*OBUFT$", name)
-        if match:
+        if match and int(match[1]) in pins:
             outputs[int(match[1])] = (name, cell["connections"]["IN"][0])
-    if set(outputs) != {0, 1, 2, 3, 7}:
+    if set(outputs) != set(pins):
         raise RuntimeError(outputs)
     drivers = {}
     for name, cell in cells.items():
@@ -45,7 +47,7 @@ def verify_direct_sd_outputs(routed: Path, sdf: Path):
             raise RuntimeError((pin, source, cell["type"]))
         if cell["connections"]["CK"] != [clock]:
             raise RuntimeError(source)
-        if int(cell["parameters"].get("IS_CLK_INVERTED", "0"), 2) != 1:
+        if bool(int(cell["parameters"].get("IS_CLK_INVERTED", "0"), 2)) != inverted:
             raise RuntimeError(source)
         delay = delays[source + "/Q", target + "/IN"]
         if not (delay < 4000):

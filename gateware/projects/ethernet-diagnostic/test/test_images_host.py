@@ -398,7 +398,6 @@ class BulkHostTests(unittest.TestCase):
             1,
             4,
             0x4C000001,
-            0x0D08,
         )
 
         class TraceSocket(Socket):
@@ -416,7 +415,7 @@ class BulkHostTests(unittest.TestCase):
                 client, "save", side_effect=AssertionError("trace wrote journal")
             ):
                 trace = client.trace()
-        self.assertEqual(len(sock.sent), 11)
+        self.assertEqual(len(sock.sent), 13)
         self.assertTrue(all(len(request) == 28 for request in sock.sent))
         self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
         self.assertEqual((client.session, client.sequence), (123, 9))
@@ -425,6 +424,8 @@ class BulkHostTests(unittest.TestCase):
         self.assertEqual(trace["last_command"], 17)
         self.assertEqual(trace["last_argument"], 32768)
         self.assertEqual(trace["last_read_lba"], 33)
+        self.assertEqual(trace["responses"], 4)
+        self.assertEqual(trace["recent_commands"], [0, 0, 0, 1])
         self.assertTrue(trace["armed"])
         self.assertTrue(trace["ddr_initialized"])
 

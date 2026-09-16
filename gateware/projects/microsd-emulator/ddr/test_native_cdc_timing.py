@@ -72,6 +72,15 @@ class NativeCDCTimingTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.check()
 
+    def test_sd_clock_period_tracks_slow_mmc_profile(self):
+        self.sdf.write_text(
+            self.sdf.read_text().replace("1000:1000:1000", "9000:9000:9000", 1)
+        )
+        expected = 18 if type(self).__name__ == "EthernetCDCTimingTest" else 6
+        self.assertEqual(
+            len(self.check(sd_io_clk_freq=80_000_000)), expected
+        )
+
     def test_missing_pointer_is_rejected(self):
         self.module["netnames"].pop(next(iter(self.crossings)))
         with self.assertRaises(RuntimeError):
@@ -124,7 +133,7 @@ class EthernetCDCTimingTest(NativeCDCTimingTest):
                 )
 
     def check(self, **options):
-        return super().check(ethernet=True)
+        return super().check(ethernet=True, **options)
 
     def tx_published(self):
         name = next(n for n in self.crossings if "transmitter_0.published" in n)

@@ -40,13 +40,29 @@ wire co,ce,armed;
 wire [3:0] dout,doe;
 `ifdef ETHERNET_SD
 wire eth_rx_global, eth_tx_global;
+// The PHY reference comes directly from the board's 100 MHz oscillator so it
+// remains 25 MHz when the card/frontend fabric uses its 80 MHz bring-up clock.
+reg [1:0] eth_ref_divider = 0;
+always @(posedge clk) eth_ref_divider <= eth_ref_divider + 1'b1;
+assign eth_ref_clk = eth_ref_divider[1];
+wire unused_frontend_eth_ref;
 BUFG eth_rx_buffer(.I(eth_rx_clk), .O(eth_rx_global));
 BUFG eth_tx_buffer(.I(eth_tx_clk), .O(eth_tx_global));
 network_ddr sd(
 .rx_clk(eth_rx_global), .tx_clk(eth_tx_global),
+`ifdef SLOW_MMC
+.fast_mode(1'b0),
+`else
+.fast_mode(1'b1),
+`endif
+`ifdef H700_MMC
+.h700_mode(1'b1),
+`else
+.h700_mode(1'b0),
+`endif
 .eth_rxd(eth_rxd), .eth_rx_dv(eth_rx_dv), .eth_rxerr(eth_rxerr),
 .eth_txd(eth_txd), .eth_tx_en(eth_tx_en),
-.eth_ref_clk(eth_ref_clk), .eth_rstn(eth_rstn),
+.eth_ref_clk(unused_frontend_eth_ref), .eth_rstn(eth_rstn),
 `else
 ddr_uart_100 sd(
 `endif

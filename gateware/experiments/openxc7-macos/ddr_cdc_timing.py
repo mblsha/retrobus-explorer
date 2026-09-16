@@ -11,7 +11,12 @@ from pathlib import Path
 
 
 def verify_native_cdc(
-    routed: Path, sdf: Path, sys_clk_freq=80_000_000, *, ethernet=False
+    routed: Path,
+    sdf: Path,
+    sys_clk_freq=80_000_000,
+    *,
+    ethernet=False,
+    sd_io_clk_freq=100_000_000,
 ):
     modules = json.loads(routed.read_text())["modules"]
     if len(modules) != 1:
@@ -19,7 +24,7 @@ def verify_native_cdc(
     module = next(iter(modules.values()))
     nets = module["netnames"]
     clock_periods = {
-        nets["fclk"]["bits"][0]: 10_000,
+        nets["fclk"]["bits"][0]: 1e12 / sd_io_clk_freq,
         nets["dclk"]["bits"][0]: 1e12 / sys_clk_freq,
     }
     if ethernet:

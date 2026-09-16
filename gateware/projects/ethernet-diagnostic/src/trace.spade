@@ -12,6 +12,7 @@ pub entity sd_trace(
     command_valid: bool,
     command_index: uint<6>,
     command_argument: uint<32>,
+    response: bool,
     read_request: bool,
     read_lba: uint<32>,
     write_busy: bool,
@@ -50,6 +51,16 @@ pub entity sd_trace(
         command_argument
     } else {
         last_argument
+    };
+    reg(clk) recent_commands: uint<24> reset(rst: 0) = if command_valid {
+        (recent_commands << 6) | zext(command_index)
+    } else {
+        recent_commands
+    };
+    reg(clk) responses: uint<32> reset(rst: 0) = if response {
+        responses +. 1
+    } else {
+        responses
     };
 
     reg(clk) read_previous reset(rst: false) = read_request;
@@ -93,6 +104,8 @@ pub entity sd_trace(
         8 => read_requests,
         9 => last_read_lba,
         10 => writes,
+        11 => responses,
+        12 => zext(recent_commands),
         _ => 0,
     };
     set word = &selected_word;
