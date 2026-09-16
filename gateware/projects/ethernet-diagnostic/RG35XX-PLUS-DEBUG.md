@@ -14,7 +14,9 @@ verify the image, arm SD access, then take a trace baseline:
 
 ```sh
 uv run python experiments/openxc7-macos/build_ddr.py \
-  --ethernet --slow-mmc --h700-mmc --seed 5
+  --ethernet --slow-mmc --h700-mmc --seed 4
+uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
+  --verify-image build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img
 uv run python projects/ethernet-diagnostic/scripts/images.py \
   --state /private/tmp/rg35xx-boot-session.json \
   --upload build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img \
@@ -24,6 +26,11 @@ uv run python projects/ethernet-diagnostic/scripts/images.py \
 uv run python projects/ethernet-diagnostic/scripts/images.py \
   --state /private/tmp/rg35xx-boot-session.json --trace
 ```
+
+The image verifier checks the MBR layout, the H700 eGON SPL at byte 8192 and
+its checksum, the FAT16 `BOOT.SCR`, `BOOTMARK`, arm64 kernel, gzip initramfs and
+DTB, plus the pristine raw debug command and empty milestone sectors. Run it
+before upload; a matching whole-image hash alone does not prove those contracts.
 
 Power the RG35XX Plus, query `--trace` again, and compare counters. The image's
 raw debug partition reserves sector 0 for a host command and sectors 1 through
