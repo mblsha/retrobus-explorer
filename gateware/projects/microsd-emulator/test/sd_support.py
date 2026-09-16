@@ -144,14 +144,21 @@ class Host:
         assert (await self.command(9, 0x10000, length=136))[1:] == bytes.fromhex(
             "d05e001a0f5903ffffffffe7924000fb"
         )
-        await self.command(7, 0x10000)
-        assert int(self.d.dat_oe.value) & 1, "CMD7 did not assert DAT0 busy"
-        assert not int(self.d.dat_out.value) & 1
-        # R1b must complete even when the host gates SD_CLK while waiting.
+        assert await self.command(7, 0x10000) == bytes.fromhex("070000070075")
+        assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 must release DAT0"
+        # Fresh MMC selection uses R1, so gating SD_CLK after the response
+        # must not manufacture a later busy or actively driven ready level.
         self.d.sd_clk.value = 0
         await tick(self.d.clk, 300)
-        assert int(self.d.dat_oe.value) & 1, "CMD7 ready level is not driven"
-        assert int(self.d.dat_out.value) & 1, "CMD7 busy did not release"
+        assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 later asserted DAT0"
+        protocol = int(self.d.trace_protocol_status.value)
+        assert protocol & 0xFF == 0, "CMD7 response did not finish serialization"
+        assert (protocol >> 8) & 0xF == 4, "CMD7 did not enter transfer state"
+        assert protocol & (1 << 12), "MMC mode was lost after CMD7"
+        assert not protocol & (1 << 13), "CMD7 response remained open-drain"
+        assert not protocol & (1 << 14), "MMC CMD7 asserted busy"
+        assert not protocol & (1 << 15), "MMC CMD7 retained a driven ready level"
+        assert (protocol >> 16) & 0x3F == 7, "CMD7 was not the completed response"
         self.d.sd_clk.value = 1
         await self.command(8, 0)
         ext_csd = await self.data()
@@ -217,6 +224,7 @@ async def setup(d):
     d.writable.value = 0
     d.fast_mode.value = int(os.environ.get("MICROSD_FAST_MODE", "0"))
     d.h700_mode.value = 0
+    d.mmc_only.value = 0
     d.dat_in.value = 15
     d.write_cmd_ready.value = 0
     d.write_data_ready.value = 0

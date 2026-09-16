@@ -64,16 +64,26 @@ def main():
         action="store_true",
         help="Force the H700 payload's post-loader MMC fallback",
     )
+    parser.add_argument(
+        "--mmc-only",
+        action="store_true",
+        help="Suppress SD negotiation so a host deterministically probes legacy MMC",
+    )
     args = parser.parse_args()
     if args.h700_mmc and not args.slow_mmc:
         parser.error("--h700-mmc requires --slow-mmc")
+    if args.mmc_only and not (args.ethernet and args.slow_mmc):
+        parser.error("--mmc-only requires --ethernet and --slow-mmc")
+    if args.mmc_only and args.h700_mmc:
+        parser.error("--mmc-only and --h700-mmc are distinct diagnostic profiles")
     project_name = "ethernet-diagnostic" if args.ethernet else "microsd-emulator"
     if args.ethernet:
-        default_output = (
-            "microsd-ddr-ethernet-slow-mmc"
-            if args.slow_mmc
-            else "microsd-ddr-ethernet"
-        )
+        if args.mmc_only:
+            default_output = "microsd-ddr-ethernet-mmc-only"
+        elif args.slow_mmc:
+            default_output = "microsd-ddr-ethernet-slow-mmc"
+        else:
+            default_output = "microsd-ddr-ethernet"
     else:
         default_output = "microsd-ddr-sd-slow-mmc" if args.slow_mmc else "microsd-ddr-sd"
     out = (args.output or GATEWARE / "build" / default_output).resolve()
@@ -231,6 +241,7 @@ def main():
             (args.ethernet, "-D ETHERNET_SD"),
             (args.slow_mmc, "-D SLOW_MMC"),
             (args.h700_mmc, "-D H700_MMC"),
+            (args.mmc_only, "-D MMC_ONLY"),
         )
         if enabled
     )
@@ -343,9 +354,9 @@ def main():
     (out / "cdc-timing.json").write_text(json.dumps(cdc_paths, indent=2) + "\n")
     routed = out / f"routed-seed-{selected_seed}.json"
     routed_sdf = out / f"routed-seed-{selected_seed}.sdf"
-    if args.h700_mmc:
-        # H700 keeps the proven same-edge command path for identification,
-        # while data uses opposite-edge launch to maximize setup margin.
+    if args.h700_mmc or args.mmc_only:
+        # Legacy-MMC profiles keep the same-edge command path for
+        # identification while data uses opposite-edge launch.
         output_paths = verify_direct_sd_outputs(
             routed, routed_sdf, pins=frozenset({2}), inverted=False
         )
@@ -383,13 +394,16 @@ def main():
                 "ethernet_sd": args.ethernet,
                 "fast_sd": not args.slow_mmc,
                 "h700_mmc": args.h700_mmc,
+                "mmc_only": args.mmc_only,
                 "native_fifo_registers": True,
                 "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",
                 "sd_command_output_fabric_edge": (
                     "rising" if args.slow_mmc else "falling"
                 ),
                 "sd_data_output_fabric_edge": (
-                    "falling" if args.h700_mmc or not args.slow_mmc else "rising"
+                    "falling"
+                    if args.h700_mmc or args.mmc_only or not args.slow_mmc
+                    else "rising"
                 ),
                 "sd_io_clock_hz": sd_io_clk_freq,
                 "registered_bank": True,

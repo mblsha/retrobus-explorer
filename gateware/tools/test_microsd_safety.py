@@ -80,6 +80,12 @@ class TargetSafetyTests(TargetFixture, unittest.TestCase):
             self.validate()[1], self.root / "sys/class/mmc_host/mmc1/mmc1:0001"
         )
 
+    def test_known_mmc_product_name_rendering_passes(self):
+        (self.card / "name").write_text("SPADE\x10\n")
+        self.assertEqual(
+            self.validate()[1], self.root / "sys/class/mmc_host/mmc1/mmc1:0001"
+        )
+
     def test_wrong_identity_capacity_mount_swap_holder_or_clock_fails(self):
         changes = [
             (self.card / "cid", "wrong"),

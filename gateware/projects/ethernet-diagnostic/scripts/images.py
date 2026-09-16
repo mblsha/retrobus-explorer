@@ -417,7 +417,7 @@ class Images:
     def trace(self):
         """Read passive SD activity without recovery or ordered-state changes."""
         fields = []
-        for index in range(13):
+        for index in range(15):
             request = encode(Opcode.TRACE, 0, 0, lba=index, compact=True)
             status, payload = self.exchange(request)
             if status:
@@ -446,6 +446,23 @@ class Images:
             "recent_commands": [
                 (fields[12] >> shift) & 0x3F for shift in (18, 12, 6, 0)
             ],
+            "completed_responses": fields[13],
+            "protocol_status": {
+                "response_bits_left": fields[14] & 0xFF,
+                "card_state": (fields[14] >> 8) & 0xF,
+                "mmc_mode": bool(fields[14] & (1 << 12)),
+                "open_drain_reply": bool(fields[14] & (1 << 13)),
+                "select_busy": bool(fields[14] & (1 << 14)),
+                "select_ready": bool(fields[14] & (1 << 15)),
+                "last_response_command": (fields[14] >> 16) & 0x3F,
+                "command_drive": bool(fields[14] & (1 << 22)),
+                "command_level": bool(fields[14] & (1 << 23)),
+                "data_drive": bool(fields[14] & (1 << 24)),
+                "data_enable": (fields[14] >> 25) & 0xF,
+                "block_length_256": bool(fields[14] & (1 << 29)),
+                "wide_bus": bool(fields[14] & (1 << 30)),
+                "loader_read_seen": bool(fields[14] & (1 << 31)),
+            },
         }
 
     def upload(self, image, window=0):

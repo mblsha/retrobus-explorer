@@ -60,6 +60,11 @@ network_ddr sd(
 `else
 .h700_mode(1'b0),
 `endif
+`ifdef MMC_ONLY
+.mmc_only(1'b1),
+`else
+.mmc_only(1'b0),
+`endif
 .eth_rxd(eth_rxd), .eth_rx_dv(eth_rx_dv), .eth_rxerr(eth_rxerr),
 .eth_txd(eth_txd), .eth_tx_en(eth_tx_en),
 .eth_ref_clk(unused_frontend_eth_ref), .eth_rstn(eth_rstn),

@@ -398,6 +398,8 @@ class BulkHostTests(unittest.TestCase):
             1,
             4,
             0x4C000001,
+            3,
+            0xE2879425,
         )
 
         class TraceSocket(Socket):
@@ -415,7 +417,7 @@ class BulkHostTests(unittest.TestCase):
                 client, "save", side_effect=AssertionError("trace wrote journal")
             ):
                 trace = client.trace()
-        self.assertEqual(len(sock.sent), 13)
+        self.assertEqual(len(sock.sent), 15)
         self.assertTrue(all(len(request) == 28 for request in sock.sent))
         self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
         self.assertEqual((client.session, client.sequence), (123, 9))
@@ -425,7 +427,27 @@ class BulkHostTests(unittest.TestCase):
         self.assertEqual(trace["last_argument"], 32768)
         self.assertEqual(trace["last_read_lba"], 33)
         self.assertEqual(trace["responses"], 4)
+        self.assertEqual(trace["completed_responses"], 3)
         self.assertEqual(trace["recent_commands"], [0, 0, 0, 1])
+        self.assertEqual(
+            trace["protocol_status"],
+            {
+                "response_bits_left": 0x25,
+                "card_state": 4,
+                "mmc_mode": True,
+                "open_drain_reply": False,
+                "select_busy": False,
+                "select_ready": True,
+                "last_response_command": 7,
+                "command_drive": False,
+                "command_level": True,
+                "data_drive": False,
+                "data_enable": 1,
+                "block_length_256": True,
+                "wide_bus": True,
+                "loader_read_seen": True,
+            },
+        )
         self.assertTrue(trace["armed"])
         self.assertTrue(trace["ddr_initialized"])
 

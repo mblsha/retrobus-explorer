@@ -46,6 +46,18 @@ The default toolchain prefix is `build/openxc7-macos`, shared with the probe
 and BRAM builders. Every invocation reruns support tests and regenerates DDR
 HDL/firmware. One configurable placement seed is checked per build.
 
+For a deterministic Linux legacy-MMC probe over the Ethernet-managed DDR
+target, use the slow diagnostic profile:
+
+```sh
+python3 experiments/openxc7-macos/build_ddr.py \
+  --ethernet --slow-mmc --mmc-only --seed 4
+```
+
+This profile suppresses the complete initial SD negotiation boundary so a host
+which permits MMC falls back to CMD1. See the
+[GKD validation record](../../ethernet-diagnostic/RG35XX-PLUS-DEBUG.md#gkd-350h-legacy-mmc-validation).
+
 The build checks support tests, clock timing, native Gray-pointer crossings,
 direct SD outputs and a configuration-frame round trip. The builder removes any old success manifest before preflight and publishes
 `result.json` atomically only after all checks pass. Require a successful exit

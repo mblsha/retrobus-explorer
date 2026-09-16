@@ -73,10 +73,11 @@ The route also passed 18 bounded CDC checks and five direct SD-output checks.
 
 The 16 MiB diagnostic prefix had SHA-256
 `42cedc5a16d81c93001bde260988e5223d9bf3e44650d677f2bfd30e32c65176`.
-With the CMD7 busy-release correction, one clean cold start completed MMC
+With the earlier CMD7 busy-release experiment, one cold start completed MMC
 CMD2/3/9/7, selected 256-byte blocks with CMD16, issued CMD18, and produced
 2,548 backend reads through physical LBA 2,560 with zero invalid command
-frames. This proves that the implemented MMC path can sustain payload reads.
+frames. This established substantial protocol progress, but it did not prove
+that the H700 accepted every response or data CRC.
 
 Cold starts are not yet reliable. Other starts stopped at CMD7 or the first
 CMD17/18; some also recorded invalid command frames. A verified 64 MiB image
@@ -97,3 +98,66 @@ Raw sampled clock edges and invalid-frame counts can rise while the target is
 off because the line is then undriven. Treat those as signal-integrity evidence,
 not target progress. During these tests only Miniware P906 channel 02 was
 switched; it was confirmed off afterward. Channel 01 was not touched.
+
+## GKD-350H legacy-MMC validation
+
+The GKD external slot is `mmc1` / `2a310000.mmc`. Its shipped device tree has a
+`no-mmc` property, so Linux otherwise stops after the SD probe and never sends
+CMD1. For a dedicated lab host, preserve the original DTB, delete only that
+property, and optionally clamp this controller to 5 MHz before rebooting:
+
+```sh
+cp rk3576-gkd-atom.dtb rk3576-gkd-atom.mmc-test.dtb
+fdtput -d rk3576-gkd-atom.mmc-test.dtb /mmc@2a310000 no-mmc
+fdtput -t i rk3576-gkd-atom.mmc-test.dtb \
+  /mmc@2a310000 max-frequency 5000000
+```
+
+Validate the edited DTB with `fdtget`, retain an exact on-device backup, and
+use `microsd_prepare_linux.py` before replacing the active file. On the tested
+RK3576 clock tree, a 5 MHz request produces a 4 MHz external clock. Restore the
+backup to return the handheld to its original SD-only slot policy.
+
+Build the deterministic profile with:
+
+```sh
+python3 experiments/openxc7-macos/build_ddr.py \
+  --ethernet --slow-mmc --mmc-only --seed 4 \
+  --output build/microsd-ddr-ethernet-mmc-only
+```
+
+`--mmc-only` suppresses the initial SD CMD8, CMD55, and ACMD41 responses so a
+host which permits MMC proceeds to CMD1. It uses ordinary R1 for fresh MMC
+CMD7 selection and releases DAT0; it does not manufacture an R1b busy period or
+an actively driven idle-high level.
+
+The 2026-09-16 v2 hardware candidate had bitstream SHA-256
+`709b4d83630980ea02609613b8102bdd5873fc24d6cfc45c4f1475f34f6da03e`.
+Seed 4 passed at 83.70 MHz DDR and 94.55 MHz frontend against 80 MHz targets.
+The GKD read back the exact CID and CSD, selected four-bit legacy MMC, read
+EXT_CSD capacity as 256 MiB, and issued CMD6, CMD23, CMD18, CMD12, CMD17, and
+CMD13 traffic. No writes were observed.
+
+A deterministic 16 MiB image with SHA-256
+`dce3a728a55021183499a78c32c859a65f7f96f346a3efb8abe8a1bb2cc6d8ea`
+separated the clock-rate behavior:
+
+| Host limit | Actual clock | Result |
+| --- | ---: | --- |
+| 13 MHz from card CSD | 12.913 MHz | failed after 12,845,056 bytes; kernel reinitialized the card |
+| 5 MHz device-tree clamp | 4.000 MHz | six complete 16 MiB reads matched exactly |
+
+The five repeated low-speed qualification reads sustained about 0.90–0.93
+MB/s and produced no kernel I/O errors. This validates enumeration and payload
+reads at 4 MHz on the current wiring. It also shows that 13 MHz failures are not
+enough to declare the MMC command implementation broken.
+
+The current MMC CID reuses the SD constant. Linux therefore renders MMC's
+six-byte product-name field as `SPADE` followed by byte `0x10`; the guarded
+host helper accepts that rendering only together with the exact expected CID.
+A future register cleanup should give SD and MMC separate coherent CIDs.
+
+Passive invalid-frame counts are not yet a host-error metric: the observer can
+see card-driven traffic on the bidirectional CMD pin. Exact hashes and kernel
+I/O errors are the qualification evidence until pin-readback direction and CRC
+classification are separated.

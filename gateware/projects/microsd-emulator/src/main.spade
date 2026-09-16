@@ -86,6 +86,7 @@ pub entity sd_frontend(
     // Mode and write-side inputs
     fast_mode: bool,
     h700_mode: bool,
+    mmc_only: bool,
     writable: bool,
     dat_in: uint<4>,
 
@@ -108,6 +109,8 @@ pub entity sd_frontend(
     trace_command: inv &uint<6>,
     trace_argument: inv &uint<32>,
     trace_response: inv &bool,
+    trace_response_complete: inv &bool,
+    trace_protocol_status: inv &uint<32>,
 ) {
     let CMD_GO_IDLE: uint<6> = 0;
     let CMD_SEND_OP_COND: uint<6> = 1;
@@ -159,7 +162,7 @@ pub entity sd_frontend(
     let (write_response_enable, write_response_enable_w): (&uint<4>, inv &uint<4>) = port;
     let (commit_done, commit_done_w): (&bool, inv &bool) = port;
     decl write_mode, write_lba;
-    let prepared_data_mode = fast_mode || h700_mode;
+    let prepared_data_mode = fast_mode || h700_mode || mmc_only;
     // A packet spans hundreds of SD edges. Register its aggregate activity
     // in prepared-data modes to keep reset/CRC-response decode out of read arbitration.
     reg(clk) delayed_write_transaction_active reset(rst || !armed: false) = *write_transaction_active;
@@ -385,18 +388,21 @@ pub entity sd_frontend(
         (command_lba & 0xffffc000) != 0
     };
     let read = valid && transfer_idle && read_command && !address_misaligned && !address_out_of_range;
-    // The H700's first-stage loader reads the image as SD, then its payload
-    // resets and probes the same bus again. In the writable slow-MMC profile,
-    // make that second probe fall back deterministically to legacy MMC. This
-    // does not affect the initial loader or the normal/fast SD profiles.
+    // The diagnostic MMC-only profile suppresses SD negotiation from reset.
+    // The H700 profile does so only after its first-stage SD loader has read
+    // the image and the payload probes the same bus again.
     reg(clk) boot_read_seen reset(local_rst: false) = if read {
         true
     } else {
         boot_read_seen
     };
-    let suppress_second_sd_probe = h700_mode && boot_read_seen &&
-        !mmc_mode && state == CARD_IDLE &&
-        (command_index == CMD_SEND_IF_COND || command_index == ACMD_SEND_OP_COND);
+    let initial_sd_command = command_index == CMD_SEND_IF_COND ||
+        command_index == CMD_APP || command_index == ACMD_SEND_OP_COND;
+    let payload_sd_command = command_index == CMD_SEND_IF_COND ||
+        command_index == ACMD_SEND_OP_COND;
+    let suppress_sd_probe = !mmc_mode && state == CARD_IDLE &&
+        ((mmc_only && initial_sd_command) ||
+            (h700_mode && boot_read_seen && payload_sd_command));
     let scr = valid && transfer_idle && app && command_index == ACMD_SEND_SCR;
     let ssr = valid && transfer_idle && app && command_index == CMD_SEND_STATUS && command_argument_zero;
     let range_error = address_misaligned || address_out_of_range;
@@ -658,7 +664,7 @@ pub entity sd_frontend(
         zext(if r3_reply { saved_r3 } else { response48(saved_index, saved_payload) }) << 88
     };
     reg(clk) reply reset(local_rst: false) = valid && command_index != CMD_GO_IDLE &&
-        !deselect && !suppress_second_sd_probe;
+        !deselect && !suppress_sd_probe;
     set trace_response = &reply;
     reg(clk) response_delay reset(local_rst: false) = if reply {
         true
@@ -668,6 +674,8 @@ pub entity sd_frontend(
         response_delay
     };
     let response_bit_ready = response_left > 0 && !response_delay;
+    set trace_response_complete = &(command_output_advance &&
+        response_left == 1 && response_bit_ready);
     reg(clk) response: uint<136> reset(local_rst: 0) = {
         if reply {
             answer
@@ -692,12 +700,11 @@ pub entity sd_frontend(
             response_left
         }
     };
-    // CMD7 has an R1b response. Some controllers require an observable DAT0
-    // busy interval instead of treating an immediately-high line as a
-    // zero-length busy response. Count fabric cycles so busy still releases
-    // when the host stops SD_CLK while waiting for DAT0 to return high.
+    // SD selection uses R1b. Fresh legacy-MMC STANDBY-to-TRANSFER selection
+    // uses ordinary R1 and must leave DAT0 released. Count the SD busy interval
+    // in fabric cycles so it still releases if an SD host gates its clock.
     reg(clk) select_busy_cycles: uint<8> reset(local_rst: 0) = {
-        if !fast_mode && command_output_advance && response_left == 1 &&
+        if !fast_mode && !mmc_mode && command_output_advance && response_left == 1 &&
             saved_index == CMD_SELECT_CARD {
             255
         } else if select_busy_cycles != 0 {
@@ -1047,6 +1054,24 @@ pub entity sd_frontend(
         } else {
             0
         });
+    // A passive snapshot distinguishes a response still being serialized from
+    // a completed CMD7 whose host did not issue the following command. It has
+    // no control-path role and is read only through the Ethernet trace service.
+    let trace_mmc: uint<32> = if mmc_mode { 1 << 12 } else { 0 };
+    let trace_open_drain: uint<32> = if open_drain_reply { 1 << 13 } else { 0 };
+    let trace_select_busy: uint<32> = if select_busy { 1 << 14 } else { 0 };
+    let trace_select_ready: uint<32> = if select_ready { 1 << 15 } else { 0 };
+    let trace_command_drive: uint<32> = if command_pin_drive { 1 << 22 } else { 0 };
+    let trace_command_output: uint<32> = if command_output { 1 << 23 } else { 0 };
+    let trace_data_drive: uint<32> = if data_drive { 1 << 24 } else { 0 };
+    let trace_block_256: uint<32> = if block_length_256 { 1 << 29 } else { 0 };
+    let trace_wide: uint<32> = if wide { 1 << 30 } else { 0 };
+    let trace_loader_read: uint<32> = if boot_read_seen { 1 << 31 } else { 0 };
+    set trace_protocol_status = &(zext(response_left) | (zext(state) << 8) |
+        trace_mmc | trace_open_drain | trace_select_busy | trace_select_ready |
+        (zext(saved_index) << 16) | trace_command_drive | trace_command_output |
+        trace_data_drive | (zext(pad_data_enable) << 25) | trace_block_256 |
+        trace_wide | trace_loader_read);
     let backend_offset = if block_length_256 && half {
         offset | 256
     } else {
@@ -1139,6 +1164,8 @@ entity bram_emulator(
     let (_, unused_trace_command): (&uint<6>, inv &uint<6>) = port;
     let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_response): (&bool, inv &bool) = port;
+    let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
+    let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1167,6 +1194,7 @@ entity bram_emulator(
         // Mode and write-side inputs
         fast_mode: false,
         h700_mode: false,
+        mmc_only: false,
         writable: false,
         dat_in: 15,
 
@@ -1187,6 +1215,8 @@ entity bram_emulator(
         trace_command: unused_trace_command,
         trace_argument: unused_trace_argument,
         trace_response: unused_trace_response,
+        trace_response_complete: unused_trace_response_complete,
+        trace_protocol_status: unused_trace_protocol_status,
     );
     set armed_status = card_armed;
 }
@@ -1425,6 +1455,8 @@ entity ddr_emulator(
     let (_, unused_trace_command): (&uint<6>, inv &uint<6>) = port;
     let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_response): (&bool, inv &bool) = port;
+    let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
+    let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1453,6 +1485,7 @@ entity ddr_emulator(
         // Mode and write-side inputs
         fast_mode,
         h700_mode: false,
+        mmc_only: false,
         writable,
         dat_in,
 
@@ -1473,6 +1506,8 @@ entity ddr_emulator(
         trace_command: unused_trace_command,
         trace_argument: unused_trace_argument,
         trace_response: unused_trace_response,
+        trace_response_complete: unused_trace_response_complete,
+        trace_protocol_status: unused_trace_protocol_status,
     );
     set armed_status = &(*card_armed && initialized);
 }

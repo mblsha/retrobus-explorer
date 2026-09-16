@@ -70,6 +70,9 @@ def require_unused(disk):
             f"Unexpected swap object: {filename}",
         )
         number = info.st_rdev if stat.S_ISBLK(info.st_mode) else info.st_dev
+        # Darwin may expose dev_t through stat_result as a signed integer.
+        # os.major/minor require the equivalent unsigned representation.
+        number &= (1 << 64) - 1
         require(
             (os.major(number), os.minor(number)) not in numbers,
             "Card or partition contains active swap",
@@ -77,7 +80,11 @@ def require_unused(disk):
 
 
 def require_emulator(card, disk):
-    require((card / "name").read_text().strip() == "SPADE", "Wrong card name")
+    # The current bitstream reuses its SD CID in legacy MMC mode. Linux then
+    # decodes MMC's six-byte product-name field as ``SPADE\x10``; retain that
+    # exact known rendering until the emulator has separate coherent CIDs.
+    name = (card / "name").read_text().rstrip("\n")
+    require(name in {"SPADE", "SPADE\x10"}, "Wrong card name")
     require((card / "cid").read_text().strip() == CID, "Wrong card CID")
     require(
         (disk / "device").resolve() == card.resolve(),

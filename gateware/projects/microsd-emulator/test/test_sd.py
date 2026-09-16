@@ -70,8 +70,29 @@ async def slow_writable_profile_forces_post_loader_mmc_fallback(d):
     await h.command(0, length=0)
     assert (await h.command(1, 0))[1:5] == bytes.fromhex("c0ff8080")
 
-    # Exercise the complete H700 hybrid timing path. In particular, CMD7's
-    # DAT0 busy interval must release while the host gates SD_CLK.
+    # Exercise the complete H700 hybrid timing path, including the ordinary
+    # R1 MMC selection response with DAT0 released.
+    await h.init_mmc()
+
+
+@cocotb.test()
+async def mmc_only_profile_forces_initial_mmc_fallback(d):
+    h = await setup(d)
+    d.writable.value = 1
+    d.mmc_only.value = 1
+
+    await h.command(0, length=0)
+    await h.command(8, 0x1AA, length=0)
+    for _ in range(64):
+        assert not (await h.cycle())[0]
+    await h.command(55, length=0)
+    for _ in range(64):
+        assert not (await h.cycle())[0]
+    await h.command(41, 0x00FF8000, length=0)
+    for _ in range(64):
+        assert not (await h.cycle())[0]
+
+    await h.command(0, length=0)
     await h.init_mmc()
 
 
