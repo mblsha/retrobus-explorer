@@ -36,8 +36,11 @@ Power the RG35XX Plus, query `--trace` again, and compare counters. The image's
 raw debug partition reserves sector 0 for a host command and sectors 1 through
 31 for target milestones. `scripts/rg35xx_boot_debug.py` encodes and decodes
 those records; U-Boot or Linux must explicitly write them before they can
-appear. DISARM and ARM between target power cycles so the SD-loader-to-MMC
-fallback state also starts cleanly; this preserves the verified DDR image.
+appear. Power the target off before DISARM, then wait for the output-enable
+trace fields to clear before another cold start. ARM only after the source
+image has passed complete readback verification. This preserves the verified
+DDR image and prevents an independently powered FPGA from driving an unpowered
+target.
 
 The raw partition starts at image LBA 114688. Prepare a command before the full
 image upload, then retrieve the first 32 debug sectors after disarming:
@@ -97,16 +100,49 @@ did not produce the U-Boot or kernel debug-sector writes. Experiments with a
 identification either failed before the changed behavior applied or reduced
 reliability, so they were rejected and are absent from the retained source.
 
-The remaining failure occurs even during the low-speed identification phase
-and varies across otherwise identical power cycles. Further work should use a
-scope at the H700 and FPGA ends, add correctly sized external CMD/DAT pull-ups
-if measurements require them, and tune source/load impedance. A successful
-bare-kernel boot has not yet been demonstrated.
+### 2026-09-17 pin-readback qualification
+
+The trace now independently decodes card responses through the CMD IOBUF and
+checks DAT readback against the final pad serializer. On hardware, completed
+CMD3, CMD7, and CMD18 responses had the expected 48 bits, matching calculated
+and received CRC7, correct framing, and no serializer/readback mismatch. The
+clean CMD7 vector was `07 00 00 07 00 75`.
+
+The previous H700 compatibility path incorrectly retained an actively driven
+DAT0-high level after its short CMD7 pulse. A later PSU cycle produced clocks
+but no fresh commands, consistent with preventing a clean target reset or
+back-powering it through the I/O path. The retained implementation always
+releases DAT0 after the pulse. A regression gates SD_CLK for 300 fabric cycles
+and requires the line to remain high-impedance. Repeated hardware power cycles
+then produced fresh command sequences.
+
+The seed-3 H700 observer build has bitstream SHA-256
+`411071868ba7be661de4778ff37dea5be5a400b14e3f2510d70fa3a949b3313d`.
+Its DDR and frontend clocks passed at 81.08 and 89.02 MHz against 80 MHz, and
+its 729,290 decoded configuration bits passed round-trip verification. One
+cold start stopped at CMD3; another reached CMD16(512) and CMD18 at LBA 96.
+That transfer produced complete 4,114-edge, one-bit 512-byte bursts, but the
+DAT IOBUF observer recorded a serializer/readback mismatch and the H700 kept
+clocking sequential blocks without reaching a later command or debug write.
+
+An A/B image retained the exact routed design and changed only the Pmod I/O
+slew from SLOW to FAST. It passed the same clock, CDC, direct-output, and
+bitstream checks (SHA-256
+`4bda841b679df2aa84383602c291ea6ce211c60c29b16653b19ee138d202f32e`).
+Two clean starts still stopped at CMD7, so fast slew is not retained as a fix.
+
+The remaining failure occurs during low-speed identification or data return
+and varies across otherwise identical power cycles. The FPGA-side observer
+narrows it to the pad/return path but cannot see the H700 side of JD's 200-ohm
+resistors. Further work requires scope captures at both ends, verification of
+target-side CMD/DAT pull-ups and off-state voltages, and controlled impedance
+or connector experiments. A successful bare-kernel boot has not yet been
+demonstrated.
 
 Raw sampled clock edges and invalid-frame counts can rise while the target is
 off because the line is then undriven. Treat those as signal-integrity evidence,
 not target progress. During these tests only Miniware P906 channel 02 was
-switched; it was confirmed off afterward. Channel 01 was not touched.
+switched. Channel 01 was not touched.
 
 ## GKD-350H legacy-MMC validation
 

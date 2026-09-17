@@ -417,7 +417,7 @@ class Images:
     def trace(self):
         """Read passive SD activity without recovery or ordered-state changes."""
         fields = []
-        for index in range(15):
+        for index in range(17):
             request = encode(Opcode.TRACE, 0, 0, lba=index, compact=True)
             status, payload = self.exchange(request)
             if status:
@@ -462,6 +462,23 @@ class Images:
                 "block_length_256": bool(fields[14] & (1 << 29)),
                 "wide_bus": bool(fields[14] & (1 << 30)),
                 "loader_read_seen": bool(fields[14] & (1 << 31)),
+            },
+            "pin_response": {
+                "sampled_bits": fields[15] & 0xFF,
+                "calculated_crc7": (fields[15] >> 8) & 0x7F,
+                "received_crc7": (fields[15] >> 15) & 0x7F,
+                "command_index": (fields[15] >> 22) & 0x3F,
+                "end_bit": bool(fields[15] & (1 << 28)),
+                "start_bit": bool(fields[15] & (1 << 29)),
+                "transmission_bit": bool(fields[15] & (1 << 30)),
+                "serializer_mismatch": bool(fields[15] & (1 << 31)),
+            },
+            "pin_data": {
+                "sampled_edges": fields[16] & 0xFFFF,
+                "completed_blocks": (fields[16] >> 16) & 0xFF,
+                "serializer_mismatch": bool(fields[16] & (1 << 24)),
+                "active": bool(fields[16] & (1 << 25)),
+                "enabled_lanes": (fields[16] >> 26) & 0xF,
             },
         }
 

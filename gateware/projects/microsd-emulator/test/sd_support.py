@@ -49,6 +49,12 @@ class Host:
             round_mode="round",
         )
         sample = tuple(int(s.value) for s in (d.cmd_oe, d.cmd_out, d.dat_oe, d.dat_out))
+        # Model the IOBUF input readback: while the card drives CMD, its pin
+        # value is visible at cmd_in; otherwise the host supplies the line.
+        d.cmd_in.value = sample[1] if sample[0] else bit
+        if sample[2]:
+            current_data = int(d.dat_in.value)
+            d.dat_in.value = (current_data & ~sample[2]) | (sample[3] & sample[2])
         if self.sample_advance_ns:
             await Timer(self.sample_advance_ns, units="ns", round_mode="round")
         d.sd_clk.value = 1
@@ -172,9 +178,14 @@ class Host:
             "MMC CSD must enforce the qualified rate"
         )
         assert await self.command(7, 0x10000) == bytes.fromhex("070000070075")
-        assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 must release DAT0"
-        # Fresh MMC selection uses R1, so gating SD_CLK after the response
-        # must not manufacture a later busy or actively driven ready level.
+        h700_compatibility = bool(int(self.d.h700_mode.value))
+        if h700_compatibility:
+            assert int(self.d.dat_oe.value) & 1, "H700 CMD7 did not assert DAT0 busy"
+            assert not int(self.d.dat_out.value) & 1, "H700 CMD7 busy was not low"
+        else:
+            assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 must release DAT0"
+        # Gate SD_CLK and ensure even the H700 pulse releases. An independently
+        # powered FPGA must not retain a driven ready level across target power.
         self.d.sd_clk.value = 0
         await tick(self.d.clk, 300)
         assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 later asserted DAT0"
@@ -183,9 +194,17 @@ class Host:
         assert (protocol >> 8) & 0xF == 4, "CMD7 did not enter transfer state"
         assert protocol & (1 << 12), "MMC mode was lost after CMD7"
         assert not protocol & (1 << 13), "CMD7 response remained open-drain"
-        assert not protocol & (1 << 14), "MMC CMD7 asserted busy"
+        assert not protocol & (1 << 14), "MMC CMD7 busy did not finish"
         assert not protocol & (1 << 15), "MMC CMD7 retained a driven ready level"
         assert (protocol >> 16) & 0x3F == 7, "CMD7 was not the completed response"
+        observed = int(self.d.trace_pin_response.value)
+        assert observed & 0xFF == 48, "CMD7 pin observer missed response bits"
+        assert (observed >> 8) & 0x7F == 0x3A, "CMD7 observed CRC calculation changed"
+        assert (observed >> 15) & 0x7F == 0x3A, "CMD7 observed a different CRC"
+        assert (observed >> 22) & 0x3F == 7, "CMD7 pin header was misaligned"
+        assert observed & (1 << 28), "CMD7 observed a low end bit"
+        assert not observed & (3 << 29), "CMD7 start or transmission bit was high"
+        assert not observed & (1 << 31), "CMD7 pin readback differed from serializer"
         self.d.sd_clk.value = 1
         await self.command(8, 0)
         ext_csd = await self.data()

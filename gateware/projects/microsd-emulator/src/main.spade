@@ -111,6 +111,8 @@ pub entity sd_frontend(
     trace_response: inv &bool,
     trace_response_complete: inv &bool,
     trace_protocol_status: inv &uint<32>,
+    trace_pin_response: inv &uint<32>,
+    trace_pin_data: inv &uint<32>,
 ) {
     let CMD_GO_IDLE: uint<6> = 0;
     let CMD_SEND_OP_COND: uint<6> = 1;
@@ -705,11 +707,14 @@ pub entity sd_frontend(
             response_left
         }
     };
-    // SD selection uses R1b. Fresh legacy-MMC STANDBY-to-TRANSFER selection
-    // uses ordinary R1 and must leave DAT0 released. Count the SD busy interval
-    // in fabric cycles so it still releases if an SD host gates its clock.
+    // SD selection uses R1b. The H700 compatibility profile also provides a
+    // short post-response DAT0 pulse: it is deliberately isolated from the
+    // standards-oriented GKD MMC profile and always releases rather than
+    // retaining an actively driven ready level. Count the pulse in fabric
+    // cycles so it releases if the host gates SD_CLK while waiting.
     reg(clk) select_busy_cycles: uint<8> reset(local_rst: 0) = {
-        if !fast_mode && !mmc_mode && command_output_advance && response_left == 1 &&
+        if !fast_mode && (!mmc_mode || h700_mode) &&
+            command_output_advance && response_left == 1 &&
             saved_index == CMD_SELECT_CARD {
             255
         } else if select_busy_cycles != 0 {
@@ -719,18 +724,6 @@ pub entity sd_frontend(
         }
     };
     let select_busy = !fast_mode && select_busy_cycles != 0;
-    // The passive adapter has no external DAT0 pull-up. Hold the completed
-    // R1b level high until the host issues its next command, then release it
-    // before any command-triggered data phase begins.
-    reg(clk) select_ready reset(local_rst: false) = {
-        if valid {
-            false
-        } else if select_busy_cycles == 1 {
-            true
-        } else {
-            select_ready
-        }
-    };
     reg(clk) command_drive reset(local_rst: false) = if command_output_advance {
         response_bit_ready
     } else {
@@ -765,6 +758,82 @@ pub entity sd_frontend(
     set cmd_oe = &(command_pin_drive && armed &&
         (!open_drain_reply || !command_output));
     set cmd_out = &command_output;
+
+    // Observe the response through the CMD input buffer at host sampling edges.
+    // This is independent of the serializer state used to generate the reply:
+    // it can expose local contention, output-enable mistakes, and framing/CRC
+    // corruption without participating in protocol control.
+    reg(clk) observed_response_length: uint<8> reset(local_rst: 48) = if reply {
+        if long_reply { 136 } else { 48 }
+    } else {
+        observed_response_length
+    };
+    let response_pin_sample = armed && sd_sample_tick && command_pin_drive;
+    reg(clk) observed_response_bits: uint<8> reset(local_rst: 0) = {
+        if reply {
+            0
+        } else if response_pin_sample {
+            observed_response_bits +. 1
+        } else {
+            observed_response_bits
+        }
+    };
+    reg(clk) observed_response_header: uint<8> reset(local_rst: 0) = {
+        if reply {
+            0
+        } else if response_pin_sample && observed_response_bits < 8 {
+            (observed_response_header << 1) | (if cmd_sync { 1 } else { 0 })
+        } else {
+            observed_response_header
+        }
+    };
+    reg(clk) observed_response_crc: uint<7> reset(local_rst: 0) = {
+        if reply {
+            0
+        } else if response_pin_sample && observed_response_bits < observed_response_length -. 8 {
+            crc7_bit(observed_response_crc, cmd_sync)
+        } else {
+            observed_response_crc
+        }
+    };
+    reg(clk) observed_received_crc: uint<7> reset(local_rst: 0) = {
+        if reply {
+            0
+        } else if response_pin_sample &&
+            observed_response_bits >= observed_response_length -. 8 &&
+            observed_response_bits < observed_response_length -. 1 {
+            (observed_received_crc << 1) | (if cmd_sync { 1 } else { 0 })
+        } else {
+            observed_received_crc
+        }
+    };
+    reg(clk) observed_response_end reset(local_rst: false) = {
+        if reply {
+            false
+        } else if response_pin_sample && observed_response_bits == observed_response_length -. 1 {
+            cmd_sync
+        } else {
+            observed_response_end
+        }
+    };
+    reg(clk) observed_response_mismatch reset(local_rst: false) = {
+        if reply {
+            false
+        } else if response_pin_sample && cmd_sync != command_output {
+            true
+        } else {
+            observed_response_mismatch
+        }
+    };
+    let observed_end_flag: uint<32> = if observed_response_end { 1 << 28 } else { 0 };
+    let observed_start_flag: uint<32> = if observed_response_header.to_bits()[7] { 1 << 29 } else { 0 };
+    let observed_transmission_flag: uint<32> = if observed_response_header.to_bits()[6] { 1 << 30 } else { 0 };
+    let observed_mismatch_flag: uint<32> = if observed_response_mismatch { 1 << 31 } else { 0 };
+    set trace_pin_response = &(zext(observed_response_bits) |
+        (zext(observed_response_crc) << 8) | (zext(observed_received_crc) << 15) |
+        (zext(trunc::<uint<8>, uint<6>>(observed_response_header)) << 22) |
+        observed_end_flag | observed_start_flag | observed_transmission_flag |
+        observed_mismatch_flag);
 
     // Read requests, sector ownership, and data serialization.
     let data_end = data_output_advance && data_state == READ_RELEASE;
@@ -1010,8 +1079,6 @@ pub entity sd_frontend(
         // keep the busy override outside the SD-edge-qualified data path.
         if select_busy {
             14
-        } else if select_ready {
-            15
         } else if output_stop && !(prepared_data_mode && prepared_pad_write) {
             15
         } else if data_output_advance {
@@ -1067,7 +1134,7 @@ pub entity sd_frontend(
         });
     set dat_oe = &(if !armed {
             0
-        } else if select_busy || select_ready {
+        } else if select_busy {
             1
         } else if prepared_data_mode {
             pad_data_enable
@@ -1082,13 +1149,65 @@ pub entity sd_frontend(
         } else {
             0
         });
+    // Observe complete read-data bursts through the IOBUF input path. This
+    // checker is independent of the serializer state: it counts host sampling
+    // edges while an output lane is enabled and compares pin readback with the
+    // final pad register. It cannot prove the waveform beyond JD's resistor.
+    let observed_data_enable = pad_data_enable != 0;
+    reg(clk) observed_data_enable_previous: uint<4> reset(local_rst: 0) = pad_data_enable;
+    let observed_data_start = observed_data_enable && observed_data_enable_previous == 0;
+    let observed_data_finish = !observed_data_enable && observed_data_enable_previous != 0;
+    let observed_data_sample = armed && sd_sample_tick && observed_data_enable;
+    let observed_data_mismatch_now = ((dat_sync ^ data_output) & pad_data_enable) != 0;
+    reg(clk) observed_data_samples: uint<16> reset(local_rst: 0) = {
+        if observed_data_start {
+            if observed_data_sample { 1 } else { 0 }
+        } else if observed_data_sample {
+            observed_data_samples +. 1
+        } else {
+            observed_data_samples
+        }
+    };
+    reg(clk) observed_data_mismatch reset(local_rst: false) = {
+        if observed_data_start {
+            observed_data_sample && observed_data_mismatch_now
+        } else if observed_data_sample && observed_data_mismatch_now {
+            true
+        } else {
+            observed_data_mismatch
+        }
+    };
+    reg(clk) observed_data_lanes: uint<4> reset(local_rst: 0) = if observed_data_start {
+        pad_data_enable
+    } else {
+        observed_data_lanes
+    };
+    reg(clk) completed_data_samples: uint<16> reset(local_rst: 0) = if observed_data_finish {
+        observed_data_samples
+    } else {
+        completed_data_samples
+    };
+    reg(clk) completed_data_mismatch reset(local_rst: false) = if observed_data_finish {
+        observed_data_mismatch
+    } else {
+        completed_data_mismatch
+    };
+    reg(clk) completed_data_blocks: uint<8> reset(local_rst: 0) = if observed_data_finish {
+        completed_data_blocks +. 1
+    } else {
+        completed_data_blocks
+    };
+    let observed_data_mismatch_flag: uint<32> = if completed_data_mismatch { 1 << 24 } else { 0 };
+    let observed_data_active_flag: uint<32> = if observed_data_enable { 1 << 25 } else { 0 };
+    set trace_pin_data = &(zext(completed_data_samples) |
+        (zext(completed_data_blocks) << 16) | observed_data_mismatch_flag |
+        observed_data_active_flag | (zext(observed_data_lanes) << 26));
     // A passive snapshot distinguishes a response still being serialized from
     // a completed CMD7 whose host did not issue the following command. It has
     // no control-path role and is read only through the Ethernet trace service.
     let trace_mmc: uint<32> = if mmc_mode { 1 << 12 } else { 0 };
     let trace_open_drain: uint<32> = if open_drain_reply { 1 << 13 } else { 0 };
     let trace_select_busy: uint<32> = if select_busy { 1 << 14 } else { 0 };
-    let trace_select_ready: uint<32> = if select_ready { 1 << 15 } else { 0 };
     let trace_command_drive: uint<32> = if command_pin_drive { 1 << 22 } else { 0 };
     let trace_command_output: uint<32> = if command_output { 1 << 23 } else { 0 };
     let trace_data_drive: uint<32> = if data_drive { 1 << 24 } else { 0 };
@@ -1096,7 +1215,7 @@ pub entity sd_frontend(
     let trace_wide: uint<32> = if wide { 1 << 30 } else { 0 };
     let trace_loader_read: uint<32> = if boot_read_seen { 1 << 31 } else { 0 };
     set trace_protocol_status = &(zext(response_left) | (zext(state) << 8) |
-        trace_mmc | trace_open_drain | trace_select_busy | trace_select_ready |
+        trace_mmc | trace_open_drain | trace_select_busy |
         (zext(saved_index) << 16) | trace_command_drive | trace_command_output |
         trace_data_drive | (zext(pad_data_enable) << 25) | trace_block_256 |
         trace_wide | trace_loader_read);
@@ -1194,6 +1313,8 @@ entity bram_emulator(
     let (_, unused_trace_response): (&bool, inv &bool) = port;
     let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1245,6 +1366,8 @@ entity bram_emulator(
         trace_response: unused_trace_response,
         trace_response_complete: unused_trace_response_complete,
         trace_protocol_status: unused_trace_protocol_status,
+        trace_pin_response: unused_trace_pin_response,
+        trace_pin_data: unused_trace_pin_data,
     );
     set armed_status = card_armed;
 }
@@ -1485,6 +1608,8 @@ entity ddr_emulator(
     let (_, unused_trace_response): (&bool, inv &bool) = port;
     let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1536,6 +1661,8 @@ entity ddr_emulator(
         trace_response: unused_trace_response,
         trace_response_complete: unused_trace_response_complete,
         trace_protocol_status: unused_trace_protocol_status,
+        trace_pin_response: unused_trace_pin_response,
+        trace_pin_data: unused_trace_pin_data,
     );
     set armed_status = &(*card_armed && initialized);
 }

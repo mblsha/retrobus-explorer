@@ -400,6 +400,8 @@ class BulkHostTests(unittest.TestCase):
             0x4C000001,
             3,
             0xE2879425,
+            0x11DD3A30,
+            0x05123456,
         )
 
         class TraceSocket(Socket):
@@ -417,7 +419,7 @@ class BulkHostTests(unittest.TestCase):
                 client, "save", side_effect=AssertionError("trace wrote journal")
             ):
                 trace = client.trace()
-        self.assertEqual(len(sock.sent), 15)
+        self.assertEqual(len(sock.sent), 17)
         self.assertTrue(all(len(request) == 28 for request in sock.sent))
         self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
         self.assertEqual((client.session, client.sequence), (123, 9))
@@ -446,6 +448,29 @@ class BulkHostTests(unittest.TestCase):
                 "block_length_256": True,
                 "wide_bus": True,
                 "loader_read_seen": True,
+            },
+        )
+        self.assertEqual(
+            trace["pin_response"],
+            {
+                "sampled_bits": 48,
+                "calculated_crc7": 0x3A,
+                "received_crc7": 0x3A,
+                "command_index": 7,
+                "end_bit": True,
+                "start_bit": False,
+                "transmission_bit": False,
+                "serializer_mismatch": False,
+            },
+        )
+        self.assertEqual(
+            trace["pin_data"],
+            {
+                "sampled_edges": 0x3456,
+                "completed_blocks": 0x12,
+                "serializer_mismatch": True,
+                "active": False,
+                "enabled_lanes": 1,
             },
         )
         self.assertTrue(trace["armed"])

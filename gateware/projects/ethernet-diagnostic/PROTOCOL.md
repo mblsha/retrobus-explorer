@@ -54,12 +54,27 @@ partially uploaded image. A new `--upload` starts at sector zero.
 ## Passive SD trace
 
 Opcode 8 (`TRACE`) reads one 32-bit word of passive SD activity. It uses a
-compact request with session and sequence zero; LBA selects word 0 through 10.
+compact request with session and sequence zero; LBA selects word 0 through 16.
 The reply uses the ordinary 540-byte size, places the selected little-endian
-word at payload bytes 24 through 27, and zero-fills the rest. Word 0 is magic
-`SDT1`; word 1 contains live flags; the remaining words are cumulative counters
-and last-observed command, argument, and read LBA values. `images.py --trace`
-validates the magic and returns named JSON fields.
+word at payload bytes 24 through 27, and zero-fills the rest. `images.py
+--trace` validates word 0's `SDT1` magic and returns named JSON fields:
+
+| Word | Contents |
+| ---: | --- |
+| 0 | `SDT1` magic |
+| 1 | live ARM, DDR, clock, command, write, and read flags |
+| 2–5 | clock edges, command frames, valid commands, invalid frames |
+| 6–7 | last command and raw argument |
+| 8–10 | backend read count, last physical LBA, committed write count |
+| 11–13 | response starts, four recent commands, completed responses |
+| 14 | frontend protocol and output-enable snapshot |
+| 15 | independently decoded CMD IOBUF response length/header/CRC and mismatch |
+| 16 | DAT IOBUF sampled-edge count, completed burst count, lane mask, activity, and mismatch |
+
+The pin observers compare IOBUF readback with the final serializer registers.
+They can detect local contention or output-control errors, but they observe the
+FPGA side of the Arty JD series resistors and do not establish the waveform or
+setup/hold margin at the host socket.
 
 TRACE is admitted before DDR initialization and outside the ordered session. It
 does not advance a sequence, update the retry cache, issue a memory operation,

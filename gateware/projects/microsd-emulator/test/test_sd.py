@@ -33,6 +33,11 @@ async def mmc_fallback_enumerates_and_reads(d):
     assert int(d.request_lba.value) == 9
     await h.supply()
     assert await h.data() == h.sector
+    observed_data = int(d.trace_pin_data.value)
+    assert observed_data & 0xFFFF == 4114
+    assert (observed_data >> 16) & 0xFF >= 2
+    assert not observed_data & (1 << 24)
+    assert (observed_data >> 26) & 0xF == 1
 
     # The H700 then selects 256-byte legacy MMC blocks. Consecutive logical
     # blocks expose the two halves of one physical 512-byte DDR sector.
@@ -70,8 +75,8 @@ async def slow_writable_profile_forces_post_loader_mmc_fallback(d):
     await h.command(0, length=0)
     assert (await h.command(1, 0))[1:5] == bytes.fromhex("c0ff8080")
 
-    # Exercise the complete H700 hybrid timing path, including the ordinary
-    # R1 MMC selection response with DAT0 released.
+    # Exercise the complete H700 hybrid timing path, including its isolated
+    # CMD7 DAT0 compatibility handshake.
     await h.init_mmc()
 
 

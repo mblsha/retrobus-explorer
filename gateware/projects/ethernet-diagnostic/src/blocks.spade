@@ -32,7 +32,7 @@ pub entity block_service(
     memory_done: bool,
     memory_error: bool,
     sd_trace: uint<32>,
-    trace_word_index: inv &uint<4>,
+    trace_word_index: inv &uint<5>,
     armed: inv &bool,
 ) {
     // Keep these encodings and address/capture stages: they preserve RAM latency.

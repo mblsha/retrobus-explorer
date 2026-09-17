@@ -15,10 +15,12 @@ pub entity sd_trace(
     response: bool,
     response_complete: bool,
     protocol_status: uint<32>,
+    pin_response: uint<32>,
+    pin_data: uint<32>,
     read_request: bool,
     read_lba: uint<32>,
     write_busy: bool,
-    word_index: uint<4>,
+    word_index: uint<5>,
     word: inv &uint<32>,
 ) {
     reg(clk) clock_edges: uint<32> reset(rst: 0) = if armed && clock_tick {
@@ -115,6 +117,8 @@ pub entity sd_trace(
         12 => zext(recent_commands),
         13 => completed_responses,
         14 => protocol_status,
+        15 => pin_response,
+        16 => pin_data,
         _ => 0,
     };
     set word = &selected_word;

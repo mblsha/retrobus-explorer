@@ -102,8 +102,10 @@ pub entity network_ddr(
     let (trace_response, trace_response_w): (&bool, inv &bool) = port;
     let (trace_response_complete, trace_response_complete_w): (&bool, inv &bool) = port;
     let (trace_protocol_status, trace_protocol_status_w): (&uint<32>, inv &uint<32>) = port;
+    let (trace_pin_response, trace_pin_response_w): (&uint<32>, inv &uint<32>) = port;
+    let (trace_pin_data, trace_pin_data_w): (&uint<32>, inv &uint<32>) = port;
     let (trace_word, trace_word_w): (&uint<32>, inv &uint<32>) = port;
-    let (trace_word_index, trace_word_index_w): (&uint<4>, inv &uint<4>) = port;
+    let (trace_word_index, trace_word_index_w): (&uint<5>, inv &uint<5>) = port;
     // commit_busy includes a combinational final-CRC acceptance term. The
     // writer first gathers a complete native word, so registering arbitration
     // ownership cannot delay its first valid command/data handshake. Retain
@@ -161,11 +163,13 @@ pub entity network_ddr(
             write_cmd_address_w, write_data_valid_w, *client_wdata_ready && sd_commit_owner,
             write_data_w, write_mask_w, write_busy_w,
             trace_clock_tick_w, trace_frame_w, trace_valid_w, trace_command_w, trace_argument_w,
-            trace_response_w, trace_response_complete_w, trace_protocol_status_w);
+            trace_response_w, trace_response_complete_w, trace_protocol_status_w,
+            trace_pin_response_w, trace_pin_data_w);
     let _ = inst trace::sd_trace(clk, rst, *sd_armed, initialized,
         *trace_clock_tick, *trace_frame, *trace_valid, *trace_command, *trace_argument,
         *trace_response, *trace_response_complete, *trace_protocol_status,
-        *sd_request, *sd_lba, *write_busy, *trace_word_index, trace_word_w);
+        *trace_pin_response, *trace_pin_data, *sd_request, *sd_lba, *write_busy, *trace_word_index,
+        trace_word_w);
     set client_cmd_valid_w = &(if sd_commit_owner { *write_cmd_valid } else if *sd_armed {
         *read_cmd_valid } else if network_owner { *network_cmd_valid } else { false });
     set client_cmd_address_w = &(if sd_commit_owner { *write_cmd_address } else if *sd_armed {
