@@ -180,7 +180,11 @@ pub entity sd_frontend(
     } else {
         !clk_sync && clk_prev
     };
-    let data_output_advance = if prepared_data_mode {
+    // The H700 controller needs the conventional external-clock phase: retain
+    // each sampled bit through the rising edge and launch the next bit after
+    // the detected falling edge. Other prepared profiles retain their
+    // qualified full-cycle pipeline.
+    let data_output_advance = if prepared_data_mode && !h700_mode {
         sd_sample_tick
     } else {
         !clk_sync && clk_prev

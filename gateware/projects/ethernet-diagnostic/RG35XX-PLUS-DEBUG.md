@@ -272,3 +272,45 @@ The trace JSON names `clock_edge_event` and `command_frame_event` are one-cycle
 activity snapshots. Earlier names incorrectly implied that they were sampled
 electrical levels. The cumulative `clock_edges` and command counters remain the
 useful progress evidence.
+
+### External-falling-edge data launch experiment
+
+An expanded passive trace retains the eight most recent command arguments as
+well as their command indexes. This distinguished the repeated boot reads from
+an undifferentiated final LBA: the H700 issued CMD18/CMD12 pairs twice from LBA
+16 and then twice from LBA 512. Both attempts ended at LBA 2640 without a write.
+The first offset is the primary eGON SPL; the second is the H700 fallback boot
+offset. The verified image contains a checksum-valid `eGON.BT0` header at LBA
+16, so this pattern shows that the target rejected the bytes it received; it
+does not by itself identify which byte or electrical sample was wrong.
+
+The H700 data path previously changed its prepared output shortly after a
+synchronized rising SD clock edge. Its final fabric falling-edge register did
+not guarantee that this transition followed the external falling edge. The
+revised path holds each data bit through the external rising edge and advances
+only after observing the external falling edge. The GKD and other qualified
+profiles retain their existing launch rule. A phase-sensitive regression checks
+that H700 DAT remains unchanged after an external rising edge and changes only
+after the following falling edge.
+
+The selected seed-11 build has bitstream SHA-256
+`4eb3ac7337a7174f5fcd54a73e050ea94997299a71adc6bdecf9b6322b408978`.
+DDR and frontend clocks passed at 81.33 and 83.24 MHz against 80 MHz; Ethernet
+TX/RX passed at 98.85/145.26 MHz against 25 MHz, and the I/O-delay clock passed
+at 283.13 MHz against 200 MHz. It passed all 18 bounded CDC checks, all five
+direct SD-output checks, and a 756,773-bit configuration round trip. The 64 MiB
+image passed complete Ethernet readback with SHA-256
+`398035d789a742edd05022283465b8846630225ba4cad590cc2319c3defe5b97`
+before ARM.
+
+On the first target start, the H700 completed 85 blocks through LBA 96 with no
+serializer mismatch, then restarted initialization and stopped at CMD7. A cold
+cycle of Miniware channel 02 reproduced the complete boot pattern through LBA
+2640 and final CMD12. The cumulative trace after both starts contained 10,334
+backend requests, with recent commands
+`18,12,18,12,18,12,18,12` and arguments
+`16,0,16,0,512,0,512,0`. The completed final block contained all 4,114 x1
+sampled edges and recorded zero pad-readback mismatches. No FAT access or debug
+write occurred. This is a cleaner transfer and stronger localization of the
+failure, but it is not a successful boot and it does not prove what the H700
+sampled beyond the adapter and target-side interconnect.

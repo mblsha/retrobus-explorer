@@ -397,12 +397,21 @@ class BulkHostTests(unittest.TestCase):
             33,
             1,
             4,
-            0x4C000001,
+            0x001461C8,
             3,
             0xE2879425,
             0x11DD3A30,
             0x05123456,
             0x002A0003,
+            0x000420C4,
+            0x101,
+            0x102,
+            0x103,
+            0x104,
+            0x105,
+            0x106,
+            0x107,
+            0x108,
         )
 
         class TraceSocket(Socket):
@@ -420,7 +429,7 @@ class BulkHostTests(unittest.TestCase):
                 client, "save", side_effect=AssertionError("trace wrote journal")
             ):
                 trace = client.trace()
-        self.assertEqual(len(sock.sent), 18)
+        self.assertEqual(len(sock.sent), 27)
         self.assertTrue(all(len(request) == 28 for request in sock.sent))
         self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
         self.assertEqual((client.session, client.sequence), (123, 9))
@@ -431,7 +440,8 @@ class BulkHostTests(unittest.TestCase):
         self.assertEqual(trace["last_read_lba"], 33)
         self.assertEqual(trace["responses"], 4)
         self.assertEqual(trace["completed_responses"], 3)
-        self.assertEqual(trace["recent_commands"], [0, 0, 0, 1])
+        self.assertEqual(trace["recent_commands"], list(range(1, 9)))
+        self.assertEqual(trace["recent_arguments"], list(range(0x101, 0x109)))
         self.assertEqual(
             trace["protocol_status"],
             {

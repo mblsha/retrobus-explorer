@@ -57,10 +57,15 @@ pub entity sd_trace(
     } else {
         last_argument
     };
-    reg(clk) recent_commands: uint<24> reset(rst: 0) = if command_valid {
+    reg(clk) recent_commands: uint<48> reset(rst: 0) = if command_valid {
         (recent_commands << 6) | zext(command_index)
     } else {
         recent_commands
+    };
+    reg(clk) recent_arguments: uint<256> reset(rst: 0) = if command_valid {
+        (recent_arguments << 32) | zext(command_argument)
+    } else {
+        recent_arguments
     };
     reg(clk) responses: uint<32> reset(rst: 0) = if response {
         responses +. 1
@@ -115,12 +120,21 @@ pub entity sd_trace(
         9 => last_read_lba,
         10 => writes,
         11 => responses,
-        12 => zext(recent_commands),
+        12 => zext(trunc::<uint<48>, uint<24>>(recent_commands)),
         13 => completed_responses,
         14 => protocol_status,
         15 => pin_response,
         16 => pin_data,
         17 => pin_data_mismatch,
+        18 => zext(trunc::<uint<48>, uint<24>>(recent_commands >> 24)),
+        19 => trunc::<uint<256>, uint<32>>(recent_arguments >> 224),
+        20 => trunc::<uint<256>, uint<32>>(recent_arguments >> 192),
+        21 => trunc::<uint<256>, uint<32>>(recent_arguments >> 160),
+        22 => trunc::<uint<256>, uint<32>>(recent_arguments >> 128),
+        23 => trunc::<uint<256>, uint<32>>(recent_arguments >> 96),
+        24 => trunc::<uint<256>, uint<32>>(recent_arguments >> 64),
+        25 => trunc::<uint<256>, uint<32>>(recent_arguments >> 32),
+        26 => trunc::<uint<256>, uint<32>>(recent_arguments),
         _ => 0,
     };
     set word = &selected_word;

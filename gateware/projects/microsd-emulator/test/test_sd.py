@@ -6,6 +6,29 @@ from sd_support import setup
 
 
 @cocotb.test()
+async def h700_data_launch_follows_external_falling_edge(d):
+    await setup(d)
+    d.h700_mode.value = 1
+
+    d.sd_clk.value = 0
+    falling_launches = 0
+    for _ in range(8):
+        await tick(d.clk, 1)
+        falling_launches += int(d.data_output_advance.value)
+    assert falling_launches == 1
+
+    d.sd_clk.value = 1
+    rising_samples = 0
+    rising_launches = 0
+    for _ in range(8):
+        await tick(d.clk, 1)
+        rising_samples += int(d.sd_sample_tick.value)
+        rising_launches += int(d.data_output_advance.value)
+    assert rising_samples == 1
+    assert rising_launches == 0
+
+
+@cocotb.test()
 async def mmc_fallback_enumerates_and_reads(d):
     h = await setup(d)
     # Match the observed H700 fallback: the SD operation-condition response
