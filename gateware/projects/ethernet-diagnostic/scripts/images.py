@@ -417,7 +417,7 @@ class Images:
     def trace(self):
         """Read passive SD activity without recovery or ordered-state changes."""
         fields = []
-        for index in range(27):
+        for index in range(32):
             request = encode(Opcode.TRACE, 0, 0, lba=index, compact=True)
             status, payload = self.exchange(request)
             if status:
@@ -449,6 +449,10 @@ class Images:
                 for shift in (18, 12, 6, 0)
             ],
             "recent_arguments": fields[19:27],
+            "recent_multiblock_reads": [
+                {"lba": word >> 12, "blocks": word & 0xFFF}
+                for word in fields[27:31]
+            ],
             "completed_responses": fields[13],
             "protocol_status": {
                 "response_bits_left": fields[14] & 0xFF,
@@ -475,6 +479,11 @@ class Images:
                 "start_bit": bool(fields[15] & (1 << 29)),
                 "transmission_bit": bool(fields[15] & (1 << 30)),
                 "serializer_mismatch": bool(fields[15] & (1 << 31)),
+                "expected_high_observed_low": fields[31] & 0xFF,
+                "expected_low_observed_high": (fields[31] >> 8) & 0xFF,
+                "first_mismatch_bit": None
+                if ((fields[31] >> 16) & 0xFF) == 0xFF
+                else (fields[31] >> 16) & 0xFF,
             },
             "pin_data": {
                 "sampled_edges": fields[16] & 0xFFFF,

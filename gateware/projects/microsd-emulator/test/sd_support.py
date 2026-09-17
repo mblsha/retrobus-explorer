@@ -76,11 +76,14 @@ class Host:
         if not length:
             return None
         bits = []
+        self.last_response_drove_high = False
         response_started = False
         for _ in range(length + 16):
             oe, value, _, _ = await self.cycle()
             if oe:
                 response_started = True
+                if value:
+                    self.last_response_drove_high = True
             if response_started:
                 # Open-drain responses release a one; the physical host pull-up
                 # supplies the sampled high level.
@@ -147,14 +150,28 @@ class Host:
         assert b"SPADE" in await self.command(2, length=136)
         status = await self.command(3, 0x10000)
         assert not int.from_bytes(status[1:5], "big") & (1 << 22)
+        assert self.last_response_drove_high == bool(int(self.d.h700_mode.value)), (
+            "only the H700 compatibility profile may drive identification highs"
+        )
         csd = (await self.command(9, 0x10000, length=136))[1:]
         h700_compatibility = bool(int(self.d.h700_mode.value))
         expected_csd = (
-            "d05e00090f5903ffffffffe79240008d"
+            "d0260008135913ffffffffe79240002f"
             if h700_compatibility
             else "d05e00590f5903ffffffffe7924000bd"
         )
         assert csd == bytes.fromhex(expected_csd)
+        if h700_compatibility:
+            direct = int.from_bytes(csd, "big")
+            shifted = direct << 7 & ((1 << 128) - 1)
+            for decoded in (direct, shifted):
+                words = [decoded >> shift & 0xFFFFFFFF for shift in (96, 64)]
+                assert words[0] >> 26 & 0xF == 4
+                assert words[1] >> 16 & 0xF == 9
+            # U-Boot sees the shifted view and must retain the 1 MHz ceiling.
+            csd_for_speed = shifted.to_bytes(16, "big")
+        else:
+            csd_for_speed = csd
         transfer_rate_values = (
             0,
             10,
@@ -173,7 +190,7 @@ class Host:
             70,
             80,
         )
-        transfer_speed = csd[3]
+        transfer_speed = csd_for_speed[3]
         max_clock_hz = (
             100_000
             * 10 ** (transfer_speed & 7)

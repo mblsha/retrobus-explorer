@@ -54,7 +54,7 @@ partially uploaded image. A new `--upload` starts at sector zero.
 ## Passive SD trace
 
 Opcode 8 (`TRACE`) reads one 32-bit word of passive SD activity. It uses a
-compact request with session and sequence zero; LBA selects word 0 through 26.
+compact request with session and sequence zero; LBA selects word 0 through 30.
 The reply uses the ordinary 540-byte size, places the selected little-endian
 word at payload bytes 24 through 27, and zero-fills the rest. `images.py
 --trace` validates word 0's `SDT1` magic and returns named JSON fields:
@@ -73,6 +73,7 @@ word at payload bytes 24 through 27, and zero-fills the rest. `images.py
 | 17 | DAT mismatch count and first mismatching sampled-edge index |
 | 18 | older four entries of the eight-command history |
 | 19..26 | raw arguments paired with the eight-command history, oldest first |
+| 27..30 | four completed CMD18/CMD12 summaries: 20-bit start LBA and 12-bit block count, oldest first |
 
 The pin observers compare IOBUF readback with the final serializer registers.
 They can detect local contention or output-control errors, but they observe the

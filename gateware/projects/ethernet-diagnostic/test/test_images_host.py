@@ -412,6 +412,11 @@ class BulkHostTests(unittest.TestCase):
             0x106,
             0x107,
             0x108,
+            (16 << 12) | 80,
+            (16 << 12) | 1134,
+            (512 << 12) | 1,
+            (512 << 12) | 2129,
+            0x002A0302,
         )
 
         class TraceSocket(Socket):
@@ -429,7 +434,7 @@ class BulkHostTests(unittest.TestCase):
                 client, "save", side_effect=AssertionError("trace wrote journal")
             ):
                 trace = client.trace()
-        self.assertEqual(len(sock.sent), 27)
+        self.assertEqual(len(sock.sent), 32)
         self.assertTrue(all(len(request) == 28 for request in sock.sent))
         self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
         self.assertEqual((client.session, client.sequence), (123, 9))
@@ -442,6 +447,15 @@ class BulkHostTests(unittest.TestCase):
         self.assertEqual(trace["completed_responses"], 3)
         self.assertEqual(trace["recent_commands"], list(range(1, 9)))
         self.assertEqual(trace["recent_arguments"], list(range(0x101, 0x109)))
+        self.assertEqual(
+            trace["recent_multiblock_reads"],
+            [
+                {"lba": 16, "blocks": 80},
+                {"lba": 16, "blocks": 1134},
+                {"lba": 512, "blocks": 1},
+                {"lba": 512, "blocks": 2129},
+            ],
+        )
         self.assertEqual(
             trace["protocol_status"],
             {
@@ -472,6 +486,9 @@ class BulkHostTests(unittest.TestCase):
                 "start_bit": False,
                 "transmission_bit": False,
                 "serializer_mismatch": False,
+                "expected_high_observed_low": 2,
+                "expected_low_observed_high": 3,
+                "first_mismatch_bit": 42,
             },
         )
         self.assertEqual(

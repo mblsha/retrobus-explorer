@@ -12,7 +12,7 @@ async def pulse(dut, name):
 
 async def snapshot(dut):
     words = []
-    for index in range(27):
+    for index in range(32):
         dut.word_index.value = index
         await Timer(20, units="ns")
         words.append(int(dut.word.value))
@@ -34,6 +34,7 @@ async def records_clock_commands_and_backend_activity(dut):
     dut.response_complete.value = 0
     dut.protocol_status.value = 0
     dut.pin_response.value = 0
+    dut.pin_response_mismatch.value = 0
     dut.pin_data.value = 0
     dut.pin_data_mismatch.value = 0
     dut.read_request.value = 0
@@ -46,6 +47,15 @@ async def records_clock_commands_and_backend_activity(dut):
 
     for _ in range(100):
         await pulse(dut, "clock_tick")
+    dut.command_index.value = 18
+    dut.command_argument.value = 0x200
+    await pulse(dut, "command_valid")
+    for lba in range(0x200, 0x203):
+        dut.read_lba.value = lba
+        await pulse(dut, "read_request")
+    dut.command_index.value = 12
+    dut.command_argument.value = 0
+    await pulse(dut, "command_valid")
     for index in range(1, 9):
         dut.command_index.value = index
         dut.command_argument.value = 0x100 + index
@@ -59,6 +69,7 @@ async def records_clock_commands_and_backend_activity(dut):
     await pulse(dut, "response_complete")
     dut.protocol_status.value = 0xE2879425
     dut.pin_response.value = 0x90ABCDEF
+    dut.pin_response_mismatch.value = 0x00AA0302
     dut.pin_data.value = 0x05123456
     dut.pin_data_mismatch.value = 0x002A0003
     await pulse(dut, "command_frame")
@@ -75,12 +86,14 @@ async def records_clock_commands_and_backend_activity(dut):
     assert words[0] == 0x31544453
     assert words[1] & 3 == 3
     assert words[2] == 100
-    assert words[3:6] == [2, 8, 1]
+    assert words[3:6] == [2, 10, 1]
     assert words[6] == 8
     assert words[7] == 0x108
-    assert words[8:11] == [1, 33, 1]
+    assert words[8:11] == [4, 33, 1]
     assert words[11:16] == [1, 0x001461C8, 1, 0xE2879425, 0x90ABCDEF]
     assert words[16] == 0x05123456
     assert words[17] == 0x002A0003
     assert words[18] == 0x000420C4
     assert words[19:27] == list(range(0x101, 0x109))
+    assert words[27:31] == [0, 0, 0, (0x200 << 12) | 3]
+    assert words[31] == 0x00AA0302

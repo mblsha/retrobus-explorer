@@ -112,6 +112,7 @@ pub entity sd_frontend(
     trace_response_complete: inv &bool,
     trace_protocol_status: inv &uint<32>,
     trace_pin_response: inv &uint<32>,
+    trace_pin_response_mismatch: inv &uint<32>,
     trace_pin_data: inv &uint<32>,
     trace_pin_data_mismatch: inv &uint<32>,
 ) {
@@ -180,11 +181,10 @@ pub entity sd_frontend(
     } else {
         !clk_sync && clk_prev
     };
-    // The H700 controller needs the conventional external-clock phase: retain
-    // each sampled bit through the rising edge and launch the next bit after
-    // the detected falling edge. Other prepared profiles retain their
-    // qualified full-cycle pipeline.
-    let data_output_advance = if prepared_data_mode && !h700_mode {
+    // Prepared profiles advance immediately after the synchronized host
+    // sample. The opposite-edge pad register then holds the next value for a
+    // full external clock cycle before the host's following rising edge.
+    let data_output_advance = if prepared_data_mode {
         sd_sample_tick
     } else {
         !clk_sync && clk_prev
@@ -665,11 +665,16 @@ pub entity sd_frontend(
         0x0026001a115903ffc002800002400023
     };
     // MMC CSD from the Allwinner-compatible legacy-card layout. The GKD
-    // profile retains its qualified 5 MHz contract. Keep the H700 diagnostic
-    // profile at 1 MHz while its target-end signal integrity is unresolved.
+    // profile retains its qualified 5 MHz contract. The H700's sunxi host
+    // exposes the received R2 payload to U-Boot shifted left by seven bits:
+    // CMD16(2) and the skipped EXT_CSD read independently reveal the shifted
+    // READ_BL_LEN and SPEC_VERS fields. Mirror those fields, plus TRAN_SPEED,
+    // at both positions while preserving a valid on-wire CSD and CRC. This
+    // keeps a normally aligned decoder coherent and lets the H700 decode MMC
+    // v4, 512-byte blocks, and the 1 MHz diagnostic limit.
     // Both constants include a recomputed CRC7 and end bit.
     let mmc_csd: uint<136> = if h700_mode {
-        0xd05e00090f5903ffffffffe79240008d
+        0xd0260008135913ffffffffe79240002f
     } else {
         0xd05e00590f5903ffffffffe7924000bd
     };
@@ -768,8 +773,13 @@ pub entity sd_frontend(
     } else {
         command_pin_drive
     };
+    // The H700 adapter path has no effective pull-up during MMC
+    // identification: hardware readback has repeatedly observed released
+    // response ones as lows while every driven zero remained correct. Drive
+    // the complete response in that explicit compatibility profile. The
+    // qualified SD and GKD MMC profiles retain standards-compliant open drain.
     set cmd_oe = &(command_pin_drive && armed &&
-        (!open_drain_reply || !command_output));
+        (!open_drain_reply || !command_output || h700_mode));
     set cmd_out = &command_output;
 
     // Observe the response through the CMD input buffer at host sampling edges.
@@ -838,6 +848,34 @@ pub entity sd_frontend(
             observed_response_mismatch
         }
     };
+    reg(clk) observed_response_low_for_high: uint<8> reset(local_rst: 0) = {
+        if reply {
+            0
+        } else if response_pin_sample && command_output && !cmd_sync {
+            observed_response_low_for_high +. 1
+        } else {
+            observed_response_low_for_high
+        }
+    };
+    reg(clk) observed_response_high_for_low: uint<8> reset(local_rst: 0) = {
+        if reply {
+            0
+        } else if response_pin_sample && !command_output && cmd_sync {
+            observed_response_high_for_low +. 1
+        } else {
+            observed_response_high_for_low
+        }
+    };
+    reg(clk) observed_response_first_mismatch: uint<8> reset(local_rst: 0xff) = {
+        if reply {
+            0xff
+        } else if response_pin_sample && cmd_sync != command_output &&
+            observed_response_first_mismatch == 0xff {
+            observed_response_bits
+        } else {
+            observed_response_first_mismatch
+        }
+    };
     let observed_end_flag: uint<32> = if observed_response_end { 1 << 28 } else { 0 };
     let observed_start_flag: uint<32> = if observed_response_header.to_bits()[7] { 1 << 29 } else { 0 };
     let observed_transmission_flag: uint<32> = if observed_response_header.to_bits()[6] { 1 << 30 } else { 0 };
@@ -847,6 +885,9 @@ pub entity sd_frontend(
         (zext(trunc::<uint<8>, uint<6>>(observed_response_header)) << 22) |
         observed_end_flag | observed_start_flag | observed_transmission_flag |
         observed_mismatch_flag);
+    set trace_pin_response_mismatch = &(zext(observed_response_low_for_high) |
+        (zext(observed_response_high_for_low) << 8) |
+        (zext(observed_response_first_mismatch) << 16));
 
     // Read requests, sector ownership, and data serialization.
     let data_end = data_output_advance && data_state == READ_RELEASE;
@@ -1371,6 +1412,7 @@ entity bram_emulator(
     let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_response_mismatch): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_data_mismatch): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
@@ -1425,6 +1467,7 @@ entity bram_emulator(
         trace_response_complete: unused_trace_response_complete,
         trace_protocol_status: unused_trace_protocol_status,
         trace_pin_response: unused_trace_pin_response,
+        trace_pin_response_mismatch: unused_trace_pin_response_mismatch,
         trace_pin_data: unused_trace_pin_data,
         trace_pin_data_mismatch: unused_trace_pin_data_mismatch,
     );
@@ -1668,6 +1711,7 @@ entity ddr_emulator(
     let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_response_mismatch): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_data_mismatch): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
@@ -1722,6 +1766,7 @@ entity ddr_emulator(
         trace_response_complete: unused_trace_response_complete,
         trace_protocol_status: unused_trace_protocol_status,
         trace_pin_response: unused_trace_pin_response,
+        trace_pin_response_mismatch: unused_trace_pin_response_mismatch,
         trace_pin_data: unused_trace_pin_data,
         trace_pin_data_mismatch: unused_trace_pin_data_mismatch,
     );

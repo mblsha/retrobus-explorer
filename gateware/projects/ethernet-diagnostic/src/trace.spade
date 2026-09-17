@@ -16,6 +16,7 @@ pub entity sd_trace(
     response_complete: bool,
     protocol_status: uint<32>,
     pin_response: uint<32>,
+    pin_response_mismatch: uint<32>,
     pin_data: uint<32>,
     pin_data_mismatch: uint<32>,
     read_request: bool,
@@ -90,6 +91,42 @@ pub entity sd_trace(
     } else {
         last_read_lba
     };
+    // Summarize completed multiblock transfers without retaining payload data.
+    // Each word packs the 20-bit command argument and a saturating 12-bit
+    // backend-block count. Four entries cover both SPL header/full reads and
+    // the following payload header/full reads seen during H700 boot.
+    reg(clk) multi_read_active reset(rst: false) = if command_valid && command_index == 18 {
+        true
+    } else if command_valid && command_index == 12 {
+        false
+    } else {
+        multi_read_active
+    };
+    reg(clk) multi_read_lba: uint<20> reset(rst: 0) = if command_valid && command_index == 18 {
+        trunc(command_argument)
+    } else {
+        multi_read_lba
+    };
+    reg(clk) multi_read_blocks: uint<12> reset(rst: 0) = if command_valid && command_index == 18 {
+        0
+    } else if read_start && multi_read_active && multi_read_blocks != 0xfff {
+        multi_read_blocks +. 1
+    } else {
+        multi_read_blocks
+    };
+    let final_multi_read_blocks = if read_start && multi_read_blocks != 0xfff {
+        multi_read_blocks +. 1
+    } else {
+        multi_read_blocks
+    };
+    let completed_multi_read: uint<32> = (zext(multi_read_lba) << 12) |
+        zext(final_multi_read_blocks);
+    reg(clk) recent_multi_reads: uint<128> reset(rst: 0) =
+        if command_valid && command_index == 12 && multi_read_active {
+            (recent_multi_reads << 32) | zext(completed_multi_read)
+        } else {
+            recent_multi_reads
+        };
     reg(clk) write_previous reset(rst: false) = write_busy;
     reg(clk) writes: uint<32> reset(rst: 0) = if write_busy && !write_previous {
         writes +. 1
@@ -135,6 +172,11 @@ pub entity sd_trace(
         24 => trunc::<uint<256>, uint<32>>(recent_arguments >> 64),
         25 => trunc::<uint<256>, uint<32>>(recent_arguments >> 32),
         26 => trunc::<uint<256>, uint<32>>(recent_arguments),
+        27 => trunc::<uint<128>, uint<32>>(recent_multi_reads >> 96),
+        28 => trunc::<uint<128>, uint<32>>(recent_multi_reads >> 64),
+        29 => trunc::<uint<128>, uint<32>>(recent_multi_reads >> 32),
+        30 => trunc::<uint<128>, uint<32>>(recent_multi_reads),
+        31 => pin_response_mismatch,
         _ => 0,
     };
     set word = &selected_word;
