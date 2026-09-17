@@ -77,6 +77,31 @@ def boot_image_fixture(path: Path) -> None:
 
 
 class BootDebugTests(unittest.TestCase):
+    def test_spl_entry_loop_preserves_valid_egon_checksum(self):
+        image = bytearray(debug.SPL_OFFSET + 0xA000)
+        spl = memoryview(image)[debug.SPL_OFFSET :]
+        spl[0:4] = (0xEA000016).to_bytes(4, "little")
+        spl[4:12] = b"eGON.BT0"
+        spl[16:20] = (0xA000).to_bytes(4, "little")
+        spl[12:16] = debug.SPL_CHECKSUM_STAMP.to_bytes(4, "little")
+        checksum = sum(
+            word[0] for word in struct.iter_unpack("<I", spl)
+        ) & 0xFFFFFFFF
+        spl[12:16] = checksum.to_bytes(4, "little")
+
+        diagnostic = debug.make_spl_entry_loop(bytes(image))
+        patched = bytearray(diagnostic[debug.SPL_OFFSET :])
+        self.assertEqual(
+            int.from_bytes(patched[0x60:0x64], "little"),
+            debug.SPL_LOOP_INSTRUCTION,
+        )
+        stored = int.from_bytes(patched[12:16], "little")
+        patched[12:16] = debug.SPL_CHECKSUM_STAMP.to_bytes(4, "little")
+        calculated = sum(
+            word[0] for word in struct.iter_unpack("<I", patched)
+        ) & 0xFFFFFFFF
+        self.assertEqual(stored, calculated)
+
     def test_command_is_one_host_to_target_sector(self):
         encoded = debug.encode_command("continue")
         self.assertEqual(len(encoded), debug.SECTOR_SIZE)

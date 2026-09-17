@@ -67,9 +67,8 @@ and complete readback verification are required before ARM.
 ## 2026-09-16 MMC bring-up result
 
 The H700 profile now supports legacy MMC initialization, MMC CMD3/CMD6/CMD8,
-CMD23-bounded multiblock reads, 256-byte CMD16 reads backed by the two halves
-of each 512-byte DDR sector, and deterministic fallback from the first-stage
-SD loader to the payload's MMC probe. The SD CSD retains its 13 MHz limit; the
+CMD23-bounded multiblock reads, and 256-byte CMD16 reads backed by the two
+halves of each 512-byte DDR sector. The SD CSD retains its 13 MHz limit; the
 MMC CSD advertises 5 MHz after the GKD validation below showed that its 4 MHz
 generated clock was reliable and 12.913 MHz was not. CMD uses the qualified
 same-edge path; DAT uses opposite-edge final pad registers.
@@ -314,3 +313,108 @@ sampled edges and recorded zero pad-readback mismatches. No FAT access or debug
 write occurred. This is a cleaner transfer and stronger localization of the
 failure, but it is not a successful boot and it does not prove what the H700
 sampled beyond the adapter and target-side interconnect.
+
+## 2026-09-17 boot-stage and width-negotiation correction
+
+The repeated LBA 16/LBA 512 MMC reads are issued after the SPL starts, rather
+than by a BootROM retry. This was established without new gateware. The source
+image's eGON header declares a total SPL length of `0xa000`; its stored checksum
+`a629138d` exactly matches an independent recomputation. The first instruction
+`ea000016` branches to SPL offset `0x60`.
+
+`rg35xx_boot_debug.py --make-spl-loop` creates a disposable copy which replaces
+the instruction at SPL offset `0x60` with `eafffffe` and recomputes the eGON
+checksum:
+
+```sh
+uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
+  --make-spl-loop build/rg35xx-bare/rg35xx-plus-bare-4m-uboot-debug.img \
+  --output build/rg35xx-bare/rg35xx-plus-bare-4m-spl-loop.img
+```
+
+The tested loop image has SHA-256
+`0d645fa9eb849252abb02b00cadad5d203ba4cc79d3768d8e0a84e85049c64f3`
+and checksum `a729136c`. A complete Ethernet upload/readback matched that hash.
+Two cold starts, each separated by target power-off plus frontend DISARM/ARM,
+produced only the initial SD sequence: one-, two-, and 81-block CMD18/CMD12
+probes at raw argument 8192. The command, response, and backend-read counters
+then remained unchanged for at least 15 seconds. The unmodified image proceeds
+from the same sequence into a fresh SD probe and then an MMC fallback. This
+repeatable difference is evidence that execution reaches SPL offset `0x60`.
+
+Rejecting the H700's MMC four-bit CMD6 with only `ILLEGAL_COMMAND` did not prove
+that U-Boot kept its controller in one-bit mode. U-Boot polls CMD13 for
+`SWITCH_ERROR`; a ready TRANSFER status without that bit can make the switch
+appear successful. The H700 profile now leaves the FPGA width unchanged, sets
+`SWITCH_ERROR` after an unsupported BUS_WIDTH request, reports it in the next
+CMD13 response, and clears it after that status. The focused regression checks
+the set-and-clear sequence. The GKD profile continues to accept its qualified
+four-bit switch.
+
+The enhanced trace retains the complete CMD6 argument/status and following
+CMD13 status. It also independently finds the first low start bit after the
+first MMC CMD18, captures the first 32 bytes from raw DAT0, calculates CRC16
+over all 512 observed payload bytes, captures the transmitted CRC/end bit, and
+records transaction timestamps and measured rising-edge periods. A separate
+raw-CMD decoder captures all 136 bits of the MMC CMD9 response. Its expected
+diagnostic byte sequence is
+`3f d0 26 00 08 13 59 13 ff ff ff ff e7 92 40 00 2f`.
+These observers do not share the response or data serializer indexes.
+
+Arty SW0 selects the H700 DAT launch phase within one routed image. Off uses
+the full-cycle prepared launch; on uses detected external falling-edge launch.
+The input is synchronized and latched only while the card is disarmed. Use
+DISARM, set SW0, wait briefly, then ARM. The enhanced trace reports the
+latched choice as `falling_edge_data_launch`.
+
+The phase-selecting revision was routed at seed 19. Its bitstream SHA-256 is
+`b03dd2d611ec6766e739988c9e58ff14d0891fdfeb13797fcad2c3ae2fd3cc68`.
+All six clocks passed, all 18 CDC paths and five direct SD outputs passed, and
+821,000 decoded configuration bits matched the packed FASM. A full Ethernet
+upload/readback verified the 4 MiB image with SHA-256
+`038ff061e56a2bc4a364c66995a4446af8b6aa664766c66888588273c215be7a`.
+
+With SW0 off, one cold start reached the first MMC CMD18 at LBA 96. The raw
+CMD9 observer captured the exact expected 136 bits
+`3fd0260008135913ffffffffe79240002f`, proving that the card's R2 serializer is
+not shifted. The independent DAT0 observer captured all 4,096 payload bits,
+matching CRC16 values of `0xa667`, a valid end bit, and this 32-byte prefix:
+
+```text
+d00dfeed0008d9f9000000380008d59000000028000000110000000200000000
+```
+
+Those bytes exactly match the verified image at LBA 96, including the FIT
+header and its 580,089-byte size. The transfer later stopped at LBA 193, well
+before the complete FIT. Other cold starts stopped at CMD7 or CMD3. With SW0
+on, the trace confirmed falling-edge launch, but repeated starts stopped at
+CMD8 or CMD3 before a comparable MMC data transfer. The variation therefore
+cannot be attributed solely to the selected DAT launch phase.
+
+### Natural SD-to-MMC fallback control
+
+An ordinary-SD control build omitted both `H700_MMC` and `MMC_ONLY`. Its
+bitstream SHA-256 was
+`8893fb68ca942f1f04a596269e80392ee1d24e0014852bfc74fce1521ee78331`.
+After the initial SD load, the H700 reset the bus and chose MMC CMD1 itself,
+then reached CMD7. This establishes that suppressing post-loader SD responses
+is unnecessary and is not the cause of the fallback.
+
+The H700 compatibility profile now continues to answer SD CMD8/CMD55/ACMD41;
+only the explicit `MMC_ONLY` diagnostic suppresses SD negotiation. The updated
+seed-30 build has bitstream SHA-256
+`2beba6bf1bb3007fe0fca8acf76c0e2b9811d85d224e22cb70e6c362ef737e87`.
+DDR/frontend clocks passed at 80.48/86.88 MHz against 80 MHz; Ethernet passed
+at 91.75/134.23 MHz against 25 MHz; I/O delay passed at 378.93 MHz against
+200 MHz. It passed 18 CDC checks, five direct-output checks at 3.008--3.208 ns,
+and an 823,960-bit configuration round trip. The same 4 MiB image again passed
+complete Ethernet readback.
+
+Three standardized cold starts with SW0 on each completed the initial SD load,
+answered the payload's fresh SD CMD8/CMD55 probe, accepted MMC CMD1/2/3, and
+stopped at CMD3 with zero invalid command frames. The FPGA-side CMD3 observer
+recorded command index 3, CRC7 `0x7d`, a valid end bit, and zero mismatch; the
+expected complete R1 is `03 00 00 05 00 fb`. No MMC data phase had begun.
+The remaining decisive measurement is CLK/CMD at the H700 end of the adapter
+through CMD3. FPGA IOBUF readback cannot show settling or sampling after the
+Arty JD connector's series path. A successful H700 boot remains unproven.

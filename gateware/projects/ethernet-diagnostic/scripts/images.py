@@ -22,6 +22,8 @@ SECTOR_BYTES = 512
 CAPACITY_SECTORS = 524288
 HEADER_BYTES = 24
 CRC_BYTES = 4
+TRACE_WORDS = 64
+ENHANCED_TRACE_MAGIC = 0x32435453
 DEFAULT_WINDOW = 10
 MAX_WINDOW = 16
 BULK_RETRY_LIMIT = 12
@@ -417,7 +419,7 @@ class Images:
     def trace(self):
         """Read passive SD activity without recovery or ordered-state changes."""
         fields = []
-        for index in range(32):
+        for index in range(TRACE_WORDS):
             request = encode(Opcode.TRACE, 0, 0, lba=index, compact=True)
             status, payload = self.exchange(request)
             if status:
@@ -426,7 +428,7 @@ class Images:
         if fields[0] != 0x31544453:
             raise ValueError("FPGA returned an invalid SD trace payload")
         flags = fields[1]
-        return {
+        result = {
             "armed": bool(flags & 1),
             "ddr_initialized": bool(flags & 2),
             "clock_edge_event": bool(flags & 4),
@@ -497,6 +499,64 @@ class Images:
                 else fields[17] >> 16,
             },
         }
+        if fields[32] == ENHANCED_TRACE_MAGIC:
+            r2 = bytes([fields[38] & 0xFF]) + b"".join(
+                word.to_bytes(4, "big") for word in fields[39:43]
+            )
+            prefix = b"".join(word.to_bytes(4, "big") for word in fields[48:56])
+            r2_state = fields[37] >> 8 & 0x3
+            block_state = fields[43] & 0x7
+            result["enhanced"] = {
+                "negotiation": {
+                    "cmd6_count": fields[33] & 0xFF,
+                    "cmd13_count": fields[33] >> 8 & 0xFF,
+                    "switch_error_observed": bool(fields[33] & (1 << 16)),
+                    "falling_edge_data_launch": bool(fields[33] & (1 << 17)),
+                    "last_cmd6_argument": fields[34],
+                    "last_cmd6_response": fields[35],
+                    "last_cmd13_response": fields[36],
+                },
+                "r2": {
+                    "state": ("idle", "waiting", "capturing", "done")[r2_state],
+                    "sampled_bits": fields[37] & 0xFF,
+                    "bytes": r2.hex() if r2_state == 3 else None,
+                },
+                "first_mmc_block": {
+                    "state": (
+                        "idle",
+                        "waiting",
+                        "payload",
+                        "crc",
+                        "end",
+                        "done",
+                    )[block_state],
+                    "payload_bits": fields[43] >> 8 & 0x1FFF,
+                    "end_bit": bool(fields[43] & (1 << 3)),
+                    "crc_match": bool(fields[43] & (1 << 4))
+                    if block_state == 5
+                    else None,
+                    "raw_argument": fields[44],
+                    "calculated_crc16": fields[45] & 0xFFFF,
+                    "observed_crc16": fields[45] >> 16,
+                    "first_32_bytes": prefix.hex() if block_state == 5 else None,
+                    "sample_edge_span": fields[47],
+                },
+                "timing": {
+                    "minimum_rising_period_fabric_cycles": fields[46] & 0xFFFF,
+                    "maximum_rising_period_fabric_cycles": fields[46] >> 16,
+                    "cmd18": fields[56],
+                    "r1_end": fields[57],
+                    "data_start": fields[58],
+                    "first_block_end": fields[59],
+                    "cmd12": fields[60],
+                    "data_release": fields[61],
+                    "data_start_edge": fields[62],
+                    "first_block_end_edge": fields[63],
+                },
+            }
+        else:
+            result["enhanced"] = None
+        return result
 
     def upload(self, image, window=0):
         if not image or len(image) % SECTOR_BYTES:

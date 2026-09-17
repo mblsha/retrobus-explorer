@@ -86,6 +86,7 @@ pub entity sd_frontend(
     // Mode and write-side inputs
     fast_mode: bool,
     h700_mode: bool,
+    h700_falling_phase: bool,
     mmc_only: bool,
     writable: bool,
     dat_in: uint<4>,
@@ -110,6 +111,8 @@ pub entity sd_frontend(
     trace_argument: inv &uint<32>,
     trace_response: inv &bool,
     trace_response_complete: inv &bool,
+    trace_response_payload: inv &uint<32>,
+    trace_data_release: inv &bool,
     trace_protocol_status: inv &uint<32>,
     trace_pin_response: inv &uint<32>,
     trace_pin_response_mismatch: inv &uint<32>,
@@ -151,6 +154,8 @@ pub entity sd_frontend(
     let CARD_STANDBY: uint<4> = 3;
     let CARD_TRANSFER: uint<4> = 4;
 
+    let STATUS_SWITCH_ERROR: uint<32> = 1 << 7;
+
     // Input synchronization and SD sampling/output-advance events.
     reg(clk) clk_meta reset(rst: false) = sd_clk;
     reg(clk) clk_sync reset(rst: false) = clk_meta;
@@ -184,7 +189,9 @@ pub entity sd_frontend(
     // Prepared profiles advance immediately after the synchronized host
     // sample. The opposite-edge pad register then holds the next value for a
     // full external clock cycle before the host's following rising edge.
-    let data_output_advance = if prepared_data_mode {
+    let data_output_advance = if h700_mode && h700_falling_phase {
+        !clk_sync && clk_prev
+    } else if prepared_data_mode {
         sd_sample_tick
     } else {
         !clk_sync && clk_prev
@@ -399,9 +406,9 @@ pub entity sd_frontend(
         (command_lba & 0xffffc000) != 0
     };
     let read = valid && transfer_idle && read_command && !address_misaligned && !address_out_of_range;
-    // The diagnostic MMC-only profile suppresses SD negotiation from reset.
-    // The H700 profile does so only after its first-stage SD loader has read
-    // the image and the payload probes the same bus again.
+    // Keep this observation for diagnostics, but do not use it to alter the
+    // protocol. Hardware trials showed that the H700 payload chooses its MMC
+    // fallback even when the card continues to answer ordinary SD probes.
     reg(clk) boot_read_seen reset(local_rst: false) = if read {
         true
     } else {
@@ -409,11 +416,8 @@ pub entity sd_frontend(
     };
     let initial_sd_command = command_index == CMD_SEND_IF_COND ||
         command_index == CMD_APP || command_index == ACMD_SEND_OP_COND;
-    let payload_sd_command = command_index == CMD_SEND_IF_COND ||
-        command_index == ACMD_SEND_OP_COND;
     let suppress_sd_probe = !mmc_mode && state == CARD_IDLE &&
-        ((mmc_only && initial_sd_command) ||
-            (h700_mode && boot_read_seen && payload_sd_command));
+        mmc_only && initial_sd_command;
     let scr = valid && transfer_idle && app && command_index == ACMD_SEND_SCR;
     let ssr = valid && transfer_idle && app && command_index == CMD_SEND_STATUS && command_argument_zero;
     let range_error = address_misaligned || address_out_of_range;
@@ -513,14 +517,38 @@ pub entity sd_frontend(
         write_crc_error
     };
 
+    // U-Boot decides whether an MMC CMD6 switch succeeded from SWITCH_ERROR
+    // in its following CMD13 poll. ILLEGAL_COMMAND in the CMD6 response alone
+    // does not stop the host from changing its controller to the requested
+    // width. Retain this error through that status response, then clear it.
+    let mmc_width_switch = valid && mmc_mode && !app &&
+        command_index == ACMD_SET_BUS_WIDTH && transfer_idle &&
+        trunc::<uint<32>, uint<8>>(command_argument >> 24) == 3 &&
+        trunc::<uint<32>, uint<8>>(command_argument >> 16) == 183;
+    let requested_mmc_width = trunc::<uint<32>, uint<8>>(command_argument >> 8);
+    let unsupported_mmc_width = mmc_width_switch &&
+        (requested_mmc_width > 1 || (h700_mode && requested_mmc_width != 0));
+    reg(clk) switch_error reset(local_rst: false) = {
+        if valid && command_index == CMD_GO_IDLE {
+            false
+        } else if unsupported_mmc_width {
+            true
+        } else if valid && !app && command_index == CMD_SEND_STATUS {
+            false
+        } else {
+            switch_error
+        }
+    };
+
     // Command legality, status, and response payload selection.
-    let status: uint<32> = card_status_word$(
+    let base_status: uint<32> = card_status_word$(
         card_state: state,
         committing: *committing,
         write_active,
         reading: data_state != READ_IDLE || pending,
         write_crc_error,
     );
+    let status = base_status | (if switch_error { STATUS_SWITCH_ERROR } else { 0 });
     let addressed = trunc::<uint<32>, uint<16>>(command_argument >> 16) == rca;
     let legal = match command_index {
         // CMD0: GO_IDLE_STATE
@@ -604,6 +632,7 @@ pub entity sd_frontend(
     } else {
         status
     };
+    set trace_response_payload = &payload;
     // Report the fixed voltage window, READY, and sector addressing on the
     // first probe. Linux/U-Boot may still repeat CMD1 with its selected OCR.
     // Bit 7 is part of the legacy MMC window used by the H616/H700 family.
@@ -891,6 +920,7 @@ pub entity sd_frontend(
 
     // Read requests, sector ownership, and data serialization.
     let data_end = data_output_advance && data_state == READ_RELEASE;
+    set trace_data_release = &data_end;
     // CMD12 may arrive while the host is receiving the current block. Finish
     // that block, including its CRC and end bit, but do not start another one.
     // Reset/deselect still abort immediately, as does CMD12 before data starts.
@@ -1410,6 +1440,8 @@ entity bram_emulator(
     let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_response): (&bool, inv &bool) = port;
     let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
+    let (_, unused_trace_response_payload): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_data_release): (&bool, inv &bool) = port;
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response_mismatch): (&uint<32>, inv &uint<32>) = port;
@@ -1443,6 +1475,7 @@ entity bram_emulator(
         // Mode and write-side inputs
         fast_mode: false,
         h700_mode: false,
+        h700_falling_phase: false,
         mmc_only: false,
         writable: false,
         dat_in: 15,
@@ -1465,6 +1498,8 @@ entity bram_emulator(
         trace_argument: unused_trace_argument,
         trace_response: unused_trace_response,
         trace_response_complete: unused_trace_response_complete,
+        trace_response_payload: unused_trace_response_payload,
+        trace_data_release: unused_trace_data_release,
         trace_protocol_status: unused_trace_protocol_status,
         trace_pin_response: unused_trace_pin_response,
         trace_pin_response_mismatch: unused_trace_pin_response_mismatch,
@@ -1709,6 +1744,8 @@ entity ddr_emulator(
     let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_response): (&bool, inv &bool) = port;
     let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
+    let (_, unused_trace_response_payload): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_data_release): (&bool, inv &bool) = port;
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response_mismatch): (&uint<32>, inv &uint<32>) = port;
@@ -1742,6 +1779,7 @@ entity ddr_emulator(
         // Mode and write-side inputs
         fast_mode,
         h700_mode: false,
+        h700_falling_phase: false,
         mmc_only: false,
         writable,
         dat_in,
@@ -1764,6 +1802,8 @@ entity ddr_emulator(
         trace_argument: unused_trace_argument,
         trace_response: unused_trace_response,
         trace_response_complete: unused_trace_response_complete,
+        trace_response_payload: unused_trace_response_payload,
+        trace_data_release: unused_trace_data_release,
         trace_protocol_status: unused_trace_protocol_status,
         trace_pin_response: unused_trace_pin_response,
         trace_pin_response_mismatch: unused_trace_pin_response_mismatch,

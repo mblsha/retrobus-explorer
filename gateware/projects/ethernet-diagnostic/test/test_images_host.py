@@ -384,7 +384,7 @@ class BulkHostTests(unittest.TestCase):
             images.encode(2, 123, 9, compact=True)
 
     def test_trace_is_compact_and_does_not_change_ordered_state(self):
-        values = (
+        values = [
             0x31544453,
             0b101111,
             12345,
@@ -417,7 +417,33 @@ class BulkHostTests(unittest.TestCase):
             (512 << 12) | 1,
             (512 << 12) | 2129,
             0x002A0302,
-        )
+        ] + [
+            images.ENHANCED_TRACE_MAGIC,
+            0x00030201,
+            0x03B70100,
+            0x00400900,
+            0x00000980,
+            (3 << 8) | 136,
+            0x3F,
+            0xD0260008,
+            0x135913FF,
+            0xFFFFFFE7,
+            0x9240002F,
+            (4096 << 8) | (1 << 4) | (1 << 3) | 5,
+            16,
+            0x12341234,
+            (84 << 16) | 76,
+            4113,
+            *[int.from_bytes(bytes(range(i, i + 4)), "big") for i in range(0, 32, 4)],
+            1000,
+            1100,
+            1200,
+            5314,
+            6000,
+            5320,
+            20,
+            4133,
+        ]
 
         class TraceSocket(Socket):
             def send(self, request):
@@ -434,7 +460,7 @@ class BulkHostTests(unittest.TestCase):
                 client, "save", side_effect=AssertionError("trace wrote journal")
             ):
                 trace = client.trace()
-        self.assertEqual(len(sock.sent), 32)
+        self.assertEqual(len(sock.sent), images.TRACE_WORDS)
         self.assertTrue(all(len(request) == 28 for request in sock.sent))
         self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
         self.assertEqual((client.session, client.sequence), (123, 9))
@@ -455,6 +481,21 @@ class BulkHostTests(unittest.TestCase):
                 {"lba": 512, "blocks": 1},
                 {"lba": 512, "blocks": 2129},
             ],
+        )
+        self.assertEqual(
+            trace["enhanced"]["r2"]["bytes"],
+            "3fd0260008135913ffffffffe79240002f",
+        )
+        self.assertEqual(
+            trace["enhanced"]["first_mmc_block"]["first_32_bytes"],
+            bytes(range(32)).hex(),
+        )
+        self.assertTrue(trace["enhanced"]["first_mmc_block"]["crc_match"])
+        self.assertTrue(
+            trace["enhanced"]["negotiation"]["switch_error_observed"]
+        )
+        self.assertTrue(
+            trace["enhanced"]["negotiation"]["falling_edge_data_launch"]
         )
         self.assertEqual(
             trace["protocol_status"],

@@ -18,6 +18,7 @@ SECTOR_SIZE = 512
 MAGIC = "RG35DBG1"
 SPL_OFFSET = 8192
 SPL_CHECKSUM_STAMP = 0x5F0A6C39
+SPL_LOOP_INSTRUCTION = 0xEAFFFFFE
 REQUIRED_BOOT_FILES = ("BOOT.SCR", "BOOTMARK", "KERNEL", "INITRD", "DTB.IMG")
 
 
@@ -45,6 +46,37 @@ def decode_records(data: bytes) -> list[dict[str, str]]:
                 fields[key] = value
         records.append(fields)
     return records
+
+
+def make_spl_entry_loop(image: bytes) -> bytes:
+    """Return a checksum-valid diagnostic image that loops at the SPL entry."""
+    if len(image) < SPL_OFFSET + 32:
+        raise ValueError("boot image is truncated before the SPL")
+    result = bytearray(image)
+    if result[SPL_OFFSET + 4 : SPL_OFFSET + 12] != b"eGON.BT0":
+        raise ValueError("missing H700 eGON.BT0 SPL at byte 8192")
+    length = int.from_bytes(result[SPL_OFFSET + 16 : SPL_OFFSET + 20], "little")
+    if length < 0x64 or length % 4 or SPL_OFFSET + length > len(result):
+        raise ValueError("invalid H700 SPL length")
+    spl = memoryview(result)[SPL_OFFSET : SPL_OFFSET + length]
+    stored = int.from_bytes(spl[12:16], "little")
+    checksum_input = bytearray(spl)
+    checksum_input[12:16] = SPL_CHECKSUM_STAMP.to_bytes(4, "little")
+    calculated = (
+        sum(word[0] for word in struct.iter_unpack("<I", checksum_input))
+        & 0xFFFFFFFF
+    )
+    if stored != calculated:
+        raise ValueError("H700 SPL checksum mismatch")
+    first = int.from_bytes(spl[0:4], "little")
+    branch_target = 8 + ((first & 0xFFFFFF) << 2)
+    if first >> 24 != 0xEA or branch_target != 0x60:
+        raise ValueError("H700 SPL entry does not branch to offset 0x60")
+    spl[0x60:0x64] = SPL_LOOP_INSTRUCTION.to_bytes(4, "little")
+    spl[12:16] = SPL_CHECKSUM_STAMP.to_bytes(4, "little")
+    checksum = sum(word[0] for word in struct.iter_unpack("<I", spl)) & 0xFFFFFFFF
+    spl[12:16] = checksum.to_bytes(4, "little")
+    return bytes(result)
 
 
 def _partition(entry: bytes) -> dict[str, int]:
@@ -223,6 +255,7 @@ def main() -> None:
     group.add_argument("--make-command", metavar="COMMAND")
     group.add_argument("--decode", type=Path, metavar="IMAGE")
     group.add_argument("--verify-image", type=Path, metavar="IMAGE")
+    group.add_argument("--make-spl-loop", type=Path, metavar="IMAGE")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -234,6 +267,23 @@ def main() -> None:
 
     if args.verify_image is not None:
         print(json.dumps(verify_boot_image(args.verify_image), indent=2))
+        return
+
+
+    if args.make_spl_loop is not None:
+        if args.output is None:
+            parser.error("--make-spl-loop requires --output")
+        diagnostic = make_spl_entry_loop(args.make_spl_loop.read_bytes())
+        args.output.write_bytes(diagnostic)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "sha256": hashlib.sha256(diagnostic).hexdigest(),
+                },
+                indent=2,
+            )
+        )
         return
 
     for record in decode_records(args.decode.read_bytes()):

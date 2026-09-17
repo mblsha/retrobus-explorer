@@ -1,3 +1,5 @@
+use shared_components::sd::crc16_bit;
+
 // Passive SD-bus observation for bring-up without a serial console. This does
 // not participate in card responses or DDR ownership, so it cannot change SD
 // protocol behavior. Counters intentionally wrap at 32 bits.
@@ -15,6 +17,11 @@ pub entity sd_trace(
     response: bool,
     response_complete: bool,
     protocol_status: uint<32>,
+    response_payload: uint<32>,
+    data_release: bool,
+    h700_falling_phase: bool,
+    cmd_pin: bool,
+    data_pins: uint<4>,
     pin_response: uint<32>,
     pin_response_mismatch: uint<32>,
     pin_data: uint<32>,
@@ -22,7 +29,7 @@ pub entity sd_trace(
     read_request: bool,
     read_lba: uint<32>,
     write_busy: bool,
-    word_index: uint<5>,
+    word_index: uint<6>,
     word: inv &uint<32>,
 ) {
     reg(clk) clock_edges: uint<32> reset(rst: 0) = if armed && clock_tick {
@@ -134,6 +141,212 @@ pub entity sd_trace(
         writes
     };
 
+    // Capture the MMC width-switch transcript that determines whether U-Boot
+    // changes its host controller to four-bit mode. This records responses,
+    // rather than inferring host behavior from the card's local width state.
+    let mmc_mode = protocol_status.to_bits()[12];
+    let switch_error = response_payload.to_bits()[7];
+    reg(clk) cmd6_count: uint<8> reset(rst || !armed: 0) =
+        if command_valid && mmc_mode && command_index == 6 {
+            cmd6_count +. 1
+        } else { cmd6_count };
+    reg(clk) cmd13_count: uint<8> reset(rst || !armed: 0) =
+        if command_valid && mmc_mode && command_index == 13 {
+            cmd13_count +. 1
+        } else { cmd13_count };
+    reg(clk) last_cmd6_argument: uint<32> reset(rst || !armed: 0) =
+        if command_valid && mmc_mode && command_index == 6 {
+            command_argument
+        } else { last_cmd6_argument };
+    reg(clk) last_cmd6_response: uint<32> reset(rst || !armed: 0) =
+        if command_valid && mmc_mode && command_index == 6 {
+            response_payload
+        } else { last_cmd6_response };
+    reg(clk) last_cmd13_response: uint<32> reset(rst || !armed: 0) =
+        if command_valid && mmc_mode && command_index == 13 {
+            response_payload
+        } else { last_cmd13_response };
+    reg(clk) saw_switch_error reset(rst || !armed: false) =
+        if command_valid && mmc_mode && command_index == 13 && switch_error {
+            true
+        } else { saw_switch_error };
+
+    // Independently find and capture the complete CMD9 R2 response from the
+    // raw CMD input. This decoder does not use the response serializer's bit
+    // counter, so a common off-by-one cannot make both sides agree.
+    let R2_IDLE: uint<2> = 0;
+    let R2_WAIT_START: uint<2> = 1;
+    let R2_CAPTURE: uint<2> = 2;
+    let R2_DONE: uint<2> = 3;
+    decl r2_state;
+    decl r2_count;
+    let arm_r2 = command_valid && mmc_mode && command_index == 9 && r2_state == R2_IDLE;
+    reg(clk) r2_state: uint<2> reset(rst || !armed: R2_IDLE) = {
+        if arm_r2 {
+            R2_WAIT_START
+        } else if clock_tick && r2_state == R2_WAIT_START && !cmd_pin {
+            R2_CAPTURE
+        } else if clock_tick && r2_state == R2_CAPTURE && r2_count == 135 {
+            R2_DONE
+        } else {
+            r2_state
+        }
+    };
+    reg(clk) r2_count: uint<8> reset(rst || !armed: 0) = {
+        if arm_r2 {
+            0
+        } else if clock_tick && r2_state == R2_WAIT_START && !cmd_pin {
+            1
+        } else if clock_tick && r2_state == R2_CAPTURE {
+            r2_count +. 1
+        } else {
+            r2_count
+        }
+    };
+    reg(clk) r2_bits: uint<136> reset(rst || !armed: 0) = {
+        if arm_r2 {
+            0
+        } else if clock_tick && r2_state == R2_WAIT_START && !cmd_pin {
+            0
+        } else if clock_tick && r2_state == R2_CAPTURE {
+            (r2_bits << 1) | (if cmd_pin { 1 } else { 0 })
+        } else {
+            r2_bits
+        }
+    };
+
+    // Decode the first MMC CMD18 block directly from DAT0. Start detection,
+    // payload indexing, and CRC accumulation are separate from the card
+    // serializer. The first 32 bytes include the eGON length at offset 0x10.
+    let BLOCK_IDLE: uint<3> = 0;
+    let BLOCK_WAIT_START: uint<3> = 1;
+    let BLOCK_PAYLOAD: uint<3> = 2;
+    let BLOCK_CRC: uint<3> = 3;
+    let BLOCK_END: uint<3> = 4;
+    let BLOCK_DONE: uint<3> = 5;
+    decl block_state;
+    decl payload_bits;
+    decl crc_bits;
+    let data_pin = data_pins.to_bits()[0];
+    let arm_block = command_valid && mmc_mode && command_index == 18 &&
+        block_state == BLOCK_IDLE;
+    reg(clk) block_state: uint<3> reset(rst || !armed: BLOCK_IDLE) = {
+        if arm_block {
+            BLOCK_WAIT_START
+        } else if clock_tick && block_state == BLOCK_WAIT_START && !data_pin {
+            BLOCK_PAYLOAD
+        } else if clock_tick && block_state == BLOCK_PAYLOAD && payload_bits == 4095 {
+            BLOCK_CRC
+        } else if clock_tick && block_state == BLOCK_CRC && crc_bits == 15 {
+            BLOCK_END
+        } else if clock_tick && block_state == BLOCK_END {
+            BLOCK_DONE
+        } else {
+            block_state
+        }
+    };
+    reg(clk) block_argument: uint<32> reset(rst || !armed: 0) =
+        if arm_block { command_argument } else { block_argument };
+    reg(clk) payload_bits: uint<13> reset(rst || !armed: 0) = {
+        if arm_block {
+            0
+        } else if clock_tick && block_state == BLOCK_PAYLOAD {
+            payload_bits +. 1
+        } else {
+            payload_bits
+        }
+    };
+    reg(clk) crc_bits: uint<5> reset(rst || !armed: 0) = {
+        if arm_block {
+            0
+        } else if clock_tick && block_state == BLOCK_CRC {
+            crc_bits +. 1
+        } else {
+            crc_bits
+        }
+    };
+    reg(clk) payload_prefix: uint<256> reset(rst || !armed: 0) = {
+        if arm_block {
+            0
+        } else if clock_tick && block_state == BLOCK_PAYLOAD && payload_bits < 256 {
+            (payload_prefix << 1) | (if data_pin { 1 } else { 0 })
+        } else {
+            payload_prefix
+        }
+    };
+    reg(clk) calculated_crc: uint<16> reset(rst || !armed: 0) = {
+        if arm_block {
+            0
+        } else if clock_tick && block_state == BLOCK_PAYLOAD {
+            crc16_bit(calculated_crc, data_pin)
+        } else {
+            calculated_crc
+        }
+    };
+    reg(clk) received_crc: uint<16> reset(rst || !armed: 0) = {
+        if arm_block {
+            0
+        } else if clock_tick && block_state == BLOCK_CRC {
+            (received_crc << 1) | (if data_pin { 1 } else { 0 })
+        } else {
+            received_crc
+        }
+    };
+    reg(clk) observed_end_bit reset(rst || !armed: false) =
+        if arm_block { false }
+        else if clock_tick && block_state == BLOCK_END { data_pin }
+        else { observed_end_bit };
+
+    // Fabric timestamps and external-edge counts make a repeated stop
+    // boundary measurable without assuming the advertised card frequency.
+    reg(clk) timestamp: uint<32> reset(rst || !armed: 0) = timestamp +. 1;
+    reg(clk) selected_edges: uint<32> reset(rst || !armed: 0) =
+        if arm_block { 0 }
+        else if clock_tick && block_state != BLOCK_IDLE && block_state != BLOCK_DONE {
+            selected_edges +. 1
+        } else { selected_edges };
+    reg(clk) cmd18_timestamp: uint<32> reset(rst || !armed: 0) =
+        if arm_block { timestamp } else { cmd18_timestamp };
+    reg(clk) response_end_timestamp: uint<32> reset(rst || !armed: 0) =
+        if response_complete && block_state == BLOCK_WAIT_START { timestamp }
+        else { response_end_timestamp };
+    reg(clk) data_start_timestamp: uint<32> reset(rst || !armed: 0) =
+        if clock_tick && block_state == BLOCK_WAIT_START && !data_pin { timestamp }
+        else { data_start_timestamp };
+    reg(clk) data_start_edge: uint<32> reset(rst || !armed: 0) =
+        if clock_tick && block_state == BLOCK_WAIT_START && !data_pin { selected_edges }
+        else { data_start_edge };
+    reg(clk) block_end_timestamp: uint<32> reset(rst || !armed: 0) =
+        if clock_tick && block_state == BLOCK_END { timestamp }
+        else { block_end_timestamp };
+    reg(clk) block_end_edge: uint<32> reset(rst || !armed: 0) =
+        if clock_tick && block_state == BLOCK_END { selected_edges }
+        else { block_end_edge };
+    reg(clk) cmd12_timestamp: uint<32> reset(rst || !armed: 0) =
+        if command_valid && command_index == 12 && block_state != BLOCK_IDLE {
+            timestamp
+        } else { cmd12_timestamp };
+    reg(clk) data_release_timestamp: uint<32> reset(rst || !armed: 0) =
+        if data_release && block_state != BLOCK_IDLE {
+            timestamp
+        } else { data_release_timestamp };
+    reg(clk) previous_tick: uint<32> reset(rst || !armed: 0) =
+        if arm_block { 0 }
+        else if clock_tick && block_state != BLOCK_IDLE && block_state != BLOCK_DONE {
+            timestamp
+        } else { previous_tick };
+    let tick_period: uint<16> = trunc(timestamp - previous_tick);
+    reg(clk) minimum_tick_period: uint<16> reset(rst || !armed: 0xffff) =
+        if arm_block { 0xffff }
+        else if clock_tick && previous_tick != 0 && tick_period < minimum_tick_period {
+            tick_period
+        } else { minimum_tick_period };
+    reg(clk) maximum_tick_period: uint<16> reset(rst || !armed: 0) =
+        if arm_block { 0 }
+        else if clock_tick && previous_tick != 0 && tick_period > maximum_tick_period {
+            tick_period
+        } else { maximum_tick_period };
+
     let armed_flag: uint<32> = if armed { 1 } else { 0 };
     let initialized_flag: uint<32> = if initialized { 2 } else { 0 };
     let clock_flag: uint<32> = if clock_tick { 4 } else { 0 };
@@ -142,6 +355,20 @@ pub entity sd_trace(
     let read_flag: uint<32> = if read_request { 32 } else { 0 };
     let flags: uint<32> = armed_flag | initialized_flag | clock_flag |
         command_flag | write_flag | read_flag;
+    let enhanced_magic: uint<32> = 0x32435453;
+    let switch_summary: uint<32> = zext(cmd6_count) |
+        (zext(cmd13_count) << 8) |
+        (if saw_switch_error { 1 << 16 } else { 0 }) |
+        (if h700_falling_phase { 1 << 17 } else { 0 });
+    let r2_summary: uint<32> = zext(r2_count) | (zext(r2_state) << 8);
+    let block_summary: uint<32> = zext(block_state) |
+        (if observed_end_bit { 1 << 3 } else { 0 }) |
+        (if calculated_crc == received_crc { 1 << 4 } else { 0 }) |
+        (zext(payload_bits) << 8);
+    let crc_summary: uint<32> = zext(calculated_crc) | (zext(received_crc) << 16);
+    let period_summary: uint<32> = zext(minimum_tick_period) |
+        (zext(maximum_tick_period) << 16);
+    let captured_edge_span: uint<32> = block_end_edge -. data_start_edge;
     // Register one requested word so the diagnostic readout cannot add a wide
     // combinational path to the timing-sensitive network reply datapath.
     reg(clk) selected_word: uint<32> reset(rst: 0) = match word_index {
@@ -177,6 +404,38 @@ pub entity sd_trace(
         29 => trunc::<uint<128>, uint<32>>(recent_multi_reads >> 32),
         30 => trunc::<uint<128>, uint<32>>(recent_multi_reads),
         31 => pin_response_mismatch,
+        32 => enhanced_magic,
+        33 => switch_summary,
+        34 => last_cmd6_argument,
+        35 => last_cmd6_response,
+        36 => last_cmd13_response,
+        37 => r2_summary,
+        38 => zext(trunc::<uint<136>, uint<8>>(r2_bits >> 128)),
+        39 => trunc::<uint<136>, uint<32>>(r2_bits >> 96),
+        40 => trunc::<uint<136>, uint<32>>(r2_bits >> 64),
+        41 => trunc::<uint<136>, uint<32>>(r2_bits >> 32),
+        42 => trunc::<uint<136>, uint<32>>(r2_bits),
+        43 => block_summary,
+        44 => block_argument,
+        45 => crc_summary,
+        46 => period_summary,
+        47 => captured_edge_span,
+        48 => trunc::<uint<256>, uint<32>>(payload_prefix >> 224),
+        49 => trunc::<uint<256>, uint<32>>(payload_prefix >> 192),
+        50 => trunc::<uint<256>, uint<32>>(payload_prefix >> 160),
+        51 => trunc::<uint<256>, uint<32>>(payload_prefix >> 128),
+        52 => trunc::<uint<256>, uint<32>>(payload_prefix >> 96),
+        53 => trunc::<uint<256>, uint<32>>(payload_prefix >> 64),
+        54 => trunc::<uint<256>, uint<32>>(payload_prefix >> 32),
+        55 => trunc::<uint<256>, uint<32>>(payload_prefix),
+        56 => cmd18_timestamp,
+        57 => response_end_timestamp,
+        58 => data_start_timestamp,
+        59 => block_end_timestamp,
+        60 => cmd12_timestamp,
+        61 => data_release_timestamp,
+        62 => data_start_edge,
+        63 => block_end_edge,
         _ => 0,
     };
     set word = &selected_word;

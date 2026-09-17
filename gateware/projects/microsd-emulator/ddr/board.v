@@ -14,7 +14,7 @@ output wire          ddram_odt,
 output wire          ddram_ras_n,
 output wire          ddram_reset_n,
 output wire          ddram_we_n,
-input wire clk, reset_button, usb_rx,
+input wire clk, reset_button, usb_rx, h700_phase_select,
 output wire usb_tx,
 output wire [2:0] status,
 inout wire [7:0] pmod
@@ -46,6 +46,13 @@ reg [1:0] eth_ref_divider = 0;
 always @(posedge clk) eth_ref_divider <= eth_ref_divider + 1'b1;
 assign eth_ref_clk = eth_ref_divider[1];
 wire unused_frontend_eth_ref;
+(* ASYNC_REG = "TRUE" *) reg [1:0] phase_select_sync = 0;
+reg h700_falling_phase = 0;
+always @(posedge fclk) begin
+    phase_select_sync <= {phase_select_sync[0], h700_phase_select};
+    if (!armed)
+        h700_falling_phase <= phase_select_sync[1];
+end
 BUFG eth_rx_buffer(.I(eth_rx_clk), .O(eth_rx_global));
 BUFG eth_tx_buffer(.I(eth_tx_clk), .O(eth_tx_global));
 network_ddr sd(
@@ -60,6 +67,7 @@ network_ddr sd(
 `else
 .h700_mode(1'b0),
 `endif
+.h700_falling_phase(h700_falling_phase),
 `ifdef MMC_ONLY
 .mmc_only(1'b1),
 `else

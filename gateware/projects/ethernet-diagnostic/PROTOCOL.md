@@ -54,7 +54,7 @@ partially uploaded image. A new `--upload` starts at sector zero.
 ## Passive SD trace
 
 Opcode 8 (`TRACE`) reads one 32-bit word of passive SD activity. It uses a
-compact request with session and sequence zero; LBA selects word 0 through 30.
+compact request with session and sequence zero; LBA selects word 0 through 63.
 The reply uses the ordinary 540-byte size, places the selected little-endian
 word at payload bytes 24 through 27, and zero-fills the rest. `images.py
 --trace` validates word 0's `SDT1` magic and returns named JSON fields:
@@ -74,11 +74,19 @@ word at payload bytes 24 through 27, and zero-fills the rest. `images.py
 | 18 | older four entries of the eight-command history |
 | 19..26 | raw arguments paired with the eight-command history, oldest first |
 | 27..30 | four completed CMD18/CMD12 summaries: 20-bit start LBA and 12-bit block count, oldest first |
+| 31 | CMD response mismatch directions and first mismatching bit |
+| 32 | `STC2` enhanced-trace marker |
+| 33..36 | MMC CMD6/CMD13 counts, argument, response status, observed `SWITCH_ERROR`, and latched H700 launch phase |
+| 37..42 | independently sampled 136-bit CMD9 R2 response and capture state |
+| 43..47 | independently decoded first MMC CMD18 block state, argument, CRC16, clock period, and edge span |
+| 48..55 | first 32 payload bytes observed on raw DAT0 |
+| 56..63 | fabric timestamps and external-edge indexes for CMD18, R1 end, data start/end, CMD12, and DAT release |
 
-The pin observers compare IOBUF readback with the final serializer registers.
-They can detect local contention or output-control errors, but they observe the
-FPGA side of the Arty JD series resistors and do not establish the waveform or
-setup/hold margin at the host socket.
+The original pin observers compare IOBUF readback with the final serializer
+registers. The enhanced CMD9 and first-block decoders instead find framing and
+calculate CRC directly from raw pin samples without using serializer indexes.
+Both still observe the FPGA side of the Arty JD series resistors and cannot
+establish the waveform or setup/hold margin at the host socket.
 
 TRACE is admitted before DDR initialization and outside the ordered session. It
 does not advance a sequence, update the retry cache, issue a memory operation,

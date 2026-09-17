@@ -27,7 +27,7 @@ pub entity network_frontend(
     memory_done: bool,
     memory_error: bool,
     sd_trace: uint<32>,
-    trace_word_index: inv &uint<5>,
+    trace_word_index: inv &uint<6>,
     armed: inv &bool,
 ) {
     reg(clk) divider: uint<2> reset(rst: 0) = divider +. 1;

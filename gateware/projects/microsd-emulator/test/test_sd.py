@@ -27,6 +27,14 @@ async def h700_data_launch_uses_prepared_full_cycle_pipeline(d):
     assert rising_samples == 1
     assert rising_launches == 1
 
+    d.h700_falling_phase.value = 1
+    d.sd_clk.value = 0
+    falling_launches = 0
+    for _ in range(8):
+        await tick(d.clk, 1)
+        falling_launches += int(d.data_output_advance.value)
+    assert falling_launches == 1
+
 
 @cocotb.test()
 async def mmc_fallback_enumerates_and_reads(d):
@@ -79,7 +87,7 @@ async def mmc_fallback_enumerates_and_reads(d):
 
 
 @cocotb.test()
-async def slow_writable_profile_forces_post_loader_mmc_fallback(d):
+async def h700_profile_leaves_post_loader_sd_probe_available(d):
     h = await setup(d)
     d.writable.value = 1
     d.h700_mode.value = 1
@@ -89,15 +97,15 @@ async def slow_writable_profile_forces_post_loader_mmc_fallback(d):
     assert await h.data() == h.sector
 
     # A reset after successful loader reads starts the payload's fresh probe.
-    # Its SD CMD8 and ACMD41 receive no reply, steering it to CMD1/MMC.
+    # The H700 compatibility profile must keep answering SD negotiation; a
+    # hardware control trial showed that the payload chooses MMC without the
+    # emulator manufacturing that fallback.
     await h.command(0, length=0)
-    await h.command(8, 0x1AA, length=0)
-    for _ in range(64):
-        assert not (await h.cycle())[0]
+    assert (await h.command(8, 0x1AA))[1:5] == bytes.fromhex("000001aa")
     await h.command(55)
-    await h.command(41, 0x00FF8000, length=0)
-    for _ in range(64):
-        assert not (await h.cycle())[0]
+    assert (await h.command(41, 0x00FF8000))[1:5] == bytes.fromhex("c0ff8000")
+
+    # The host may still reset and choose the legacy MMC probe itself.
     await h.command(0, length=0)
     assert (await h.command(1, 0))[1:5] == bytes.fromhex("c0ff8080")
 
@@ -108,6 +116,10 @@ async def slow_writable_profile_forces_post_loader_mmc_fallback(d):
     assert not int(d.dat_oe.value)
     response = await h.command(6, 0x03B70100)
     assert int.from_bytes(response[1:5], "big") & (1 << 22)
+    status = await h.command(13, 0x10000)
+    assert int.from_bytes(status[1:5], "big") & (1 << 7)
+    cleared = await h.command(13, 0x10000)
+    assert not int.from_bytes(cleared[1:5], "big") & (1 << 7)
     await h.command(17, 9)
     await h.supply()
     assert await h.data() == h.sector

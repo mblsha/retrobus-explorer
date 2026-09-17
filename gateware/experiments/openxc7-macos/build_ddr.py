@@ -62,7 +62,7 @@ def main():
     parser.add_argument(
         "--h700-mmc",
         action="store_true",
-        help="Force the H700 payload's post-loader MMC fallback",
+        help="Enable the H700 legacy-MMC compatibility and diagnostics profile",
     )
     parser.add_argument(
         "--mmc-only",
@@ -193,6 +193,8 @@ def main():
         reset_port: "D9",
         "usb_rx": "A9",
         "usb_tx": "D10",
+        # Arty A7 SW0 selects the H700 data launch phase while disarmed.
+        "h700_phase_select": "A8",
         "status[0]": "H5",
         "status[1]": "J5",
         "status[2]": "T9",
