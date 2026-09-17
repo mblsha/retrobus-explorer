@@ -148,7 +148,13 @@ class Host:
         status = await self.command(3, 0x10000)
         assert not int.from_bytes(status[1:5], "big") & (1 << 22)
         csd = (await self.command(9, 0x10000, length=136))[1:]
-        assert csd == bytes.fromhex("d05e00590f5903ffffffffe7924000bd")
+        h700_compatibility = bool(int(self.d.h700_mode.value))
+        expected_csd = (
+            "d05e00090f5903ffffffffe79240008d"
+            if h700_compatibility
+            else "d05e00590f5903ffffffffe7924000bd"
+        )
+        assert csd == bytes.fromhex(expected_csd)
         transfer_rate_values = (
             0,
             10,
@@ -174,18 +180,13 @@ class Host:
             * transfer_rate_values[(transfer_speed >> 3) & 15]
             // 10
         )
-        assert max_clock_hz == 5_000_000, (
+        assert max_clock_hz == (1_000_000 if h700_compatibility else 5_000_000), (
             "MMC CSD must enforce the qualified rate"
         )
         assert await self.command(7, 0x10000) == bytes.fromhex("070000070075")
-        h700_compatibility = bool(int(self.d.h700_mode.value))
-        if h700_compatibility:
-            assert int(self.d.dat_oe.value) & 1, "H700 CMD7 did not assert DAT0 busy"
-            assert not int(self.d.dat_out.value) & 1, "H700 CMD7 busy was not low"
-        else:
-            assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 must release DAT0"
-        # Gate SD_CLK and ensure even the H700 pulse releases. An independently
-        # powered FPGA must not retain a driven ready level across target power.
+        assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 must release DAT0"
+        # Gate SD_CLK and ensure the line remains released. An independently
+        # powered FPGA must not drive an inactive target through DAT0.
         self.d.sd_clk.value = 0
         await tick(self.d.clk, 300)
         assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 later asserted DAT0"

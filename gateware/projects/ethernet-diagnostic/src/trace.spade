@@ -17,6 +17,7 @@ pub entity sd_trace(
     protocol_status: uint<32>,
     pin_response: uint<32>,
     pin_data: uint<32>,
+    pin_data_mismatch: uint<32>,
     read_request: bool,
     read_lba: uint<32>,
     write_busy: bool,
@@ -119,6 +120,7 @@ pub entity sd_trace(
         14 => protocol_status,
         15 => pin_response,
         16 => pin_data,
+        17 => pin_data_mismatch,
         _ => 0,
     };
     set word = &selected_word;

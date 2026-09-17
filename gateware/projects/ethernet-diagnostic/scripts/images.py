@@ -417,7 +417,7 @@ class Images:
     def trace(self):
         """Read passive SD activity without recovery or ordered-state changes."""
         fields = []
-        for index in range(17):
+        for index in range(18):
             request = encode(Opcode.TRACE, 0, 0, lba=index, compact=True)
             status, payload = self.exchange(request)
             if status:
@@ -429,8 +429,8 @@ class Images:
         return {
             "armed": bool(flags & 1),
             "ddr_initialized": bool(flags & 2),
-            "sd_clock_high": bool(flags & 4),
-            "cmd_high": bool(flags & 8),
+            "clock_edge_event": bool(flags & 4),
+            "command_frame_event": bool(flags & 8),
             "write_busy": bool(flags & 16),
             "read_request_active": bool(flags & 32),
             "clock_edges": fields[2],
@@ -479,6 +479,10 @@ class Images:
                 "serializer_mismatch": bool(fields[16] & (1 << 24)),
                 "active": bool(fields[16] & (1 << 25)),
                 "enabled_lanes": (fields[16] >> 26) & 0xF,
+                "mismatch_count": fields[17] & 0xFFFF,
+                "first_mismatch_edge": None
+                if (fields[17] >> 16) == 0xFFFF
+                else fields[17] >> 16,
             },
         }
 

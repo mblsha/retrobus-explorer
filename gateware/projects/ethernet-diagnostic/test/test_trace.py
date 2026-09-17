@@ -12,7 +12,7 @@ async def pulse(dut, name):
 
 async def snapshot(dut):
     words = []
-    for index in range(17):
+    for index in range(18):
         dut.word_index.value = index
         await Timer(20, units="ns")
         words.append(int(dut.word.value))
@@ -35,6 +35,7 @@ async def records_clock_commands_and_backend_activity(dut):
     dut.protocol_status.value = 0
     dut.pin_response.value = 0
     dut.pin_data.value = 0
+    dut.pin_data_mismatch.value = 0
     dut.read_request.value = 0
     dut.read_lba.value = 0
     dut.write_busy.value = 0
@@ -58,6 +59,7 @@ async def records_clock_commands_and_backend_activity(dut):
     dut.protocol_status.value = 0xE2879425
     dut.pin_response.value = 0x90ABCDEF
     dut.pin_data.value = 0x05123456
+    dut.pin_data_mismatch.value = 0x002A0003
     await pulse(dut, "command_frame")
     dut.read_lba.value = 33
     dut.read_request.value = 1
@@ -78,3 +80,4 @@ async def records_clock_commands_and_backend_activity(dut):
     assert words[8:11] == [1, 33, 1]
     assert words[11:16] == [1, 17, 1, 0xE2879425, 0x90ABCDEF]
     assert words[16] == 0x05123456
+    assert words[17] == 0x002A0003

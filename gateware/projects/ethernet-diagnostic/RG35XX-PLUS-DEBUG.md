@@ -231,3 +231,44 @@ Passive invalid-frame counts are not yet a host-error metric: the observer can
 see card-driven traffic on the bidirectional CMD pin. Exact hashes and kernel
 I/O errors are the qualification evidence until pin-readback direction and CRC
 classification are separated.
+
+## 2026-09-17 H700 x1 and CMD12 result
+
+Fresh MMC CMD7 selection now returns ordinary R1 and leaves DAT0 released; the
+H700 profile no longer generates the earlier compatibility busy pulse. It also
+rejects the MMC four-bit BUS_WIDTH switch so payload reads remain on DAT0. The
+GKD `--mmc-only` profile retains its independently qualified four-bit behavior.
+
+An initial x1 hardware trial repeatedly loaded from LBA 96 through LBA 2640.
+The last read-data burst stopped after 1,202 of the 4,114 edges required for a
+complete x1 512-byte frame because CMD12 immediately cleared the serializer.
+The frontend now remembers CMD12 received during a read block, completes that
+block's payload, CRC, and end bit, and suppresses the next block. CMD12 received
+before data starts, reset, and deselection still cancel immediately. The
+regression sends CMD12 during serialization and requires the active block to
+finish without another backend request.
+
+The retained 5 MHz seed-12 candidate had bitstream SHA-256
+`edb3895309988d7a12896fd177aa1fa39b5e978e71bb739a2e3e1d1fca78afdb`.
+Its DDR and frontend clocks passed at 81.47 and 96.38 MHz against 80 MHz, and
+729,130 decoded configuration bits passed round-trip verification. On the
+second cold start it completed the formerly truncated block at all 4,114 edges,
+then stopped after CMD12 with 10,333 backend reads through LBA 2640. This proves
+the stop-boundary fix on hardware, but U-Boot still did not access the FAT
+partition or write a debug milestone.
+
+As a low-speed control, only the H700 CSD was changed from 5 MHz to 1 MHz. The
+GKD CSD remains at its qualified 5 MHz value. The CRC-correct H700 CSD is
+`d05e00090f5903ffffffffe79240008d`. A reused seed-4 route passed DDR and
+frontend timing at 84.60 and 84.04 MHz against 80 MHz, all CDC and direct-output
+checks, and a 733,405-bit configuration round trip. Its packed bitstream
+SHA-256 is
+`55a15d8f994839116cf36d4a71f21e8f3f391ab04512ef0492038a72b868d3a8`.
+The H700 produced the same 10,333-read, LBA-2640, final-CMD12 result and no write.
+Thus the lower advertised transfer rate did not resolve the remaining boot
+failure.
+
+The trace JSON names `clock_edge_event` and `command_frame_event` are one-cycle
+activity snapshots. Earlier names incorrectly implied that they were sampled
+electrical levels. The cumulative `clock_edges` and command counters remain the
+useful progress evidence.

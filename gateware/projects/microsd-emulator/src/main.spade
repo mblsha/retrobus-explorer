@@ -113,6 +113,7 @@ pub entity sd_frontend(
     trace_protocol_status: inv &uint<32>,
     trace_pin_response: inv &uint<32>,
     trace_pin_data: inv &uint<32>,
+    trace_pin_data_mismatch: inv &uint<32>,
 ) {
     let CMD_GO_IDLE: uint<6> = 0;
     let CMD_SEND_OP_COND: uint<6> = 1;
@@ -338,13 +339,16 @@ pub entity sd_frontend(
         } else if valid && mmc_mode && command_index == ACMD_SET_BUS_WIDTH && transfer_idle &&
             trunc::<uint<32>, uint<8>>(command_argument >> 16) == 183 &&
             (trunc::<uint<32>, uint<8>>(command_argument >> 8) == 0 ||
-                trunc::<uint<32>, uint<8>>(command_argument >> 8) == 1) {
+                trunc::<uint<32>, uint<8>>(command_argument >> 8) == 1) &&
+            (!h700_mode || trunc::<uint<32>, uint<8>>(command_argument >> 8) == 0) {
             trunc::<uint<32>, uint<8>>(command_argument >> 8) == 1
         } else {
             wide
         }
     };
-    let stop = valid && (reset_command || command_index == CMD_STOP_TRANSMISSION);
+    let command_stop = valid && command_index == CMD_STOP_TRANSMISSION;
+    let reset_stop = valid && reset_command;
+    let stop = reset_stop || command_stop;
     let last_lba: uint<32> = if writable {
         524287
     } else {
@@ -561,7 +565,8 @@ pub entity sd_frontend(
             (mmc_mode && transfer_idle &&
                 trunc::<uint<32>, uint<8>>(command_argument >> 24) == 3 &&
                 (trunc::<uint<32>, uint<8>>(command_argument >> 16) != 183 ||
-                    trunc::<uint<32>, uint<8>>(command_argument >> 8) <= 1)),
+                    (trunc::<uint<32>, uint<8>>(command_argument >> 8) <= 1 &&
+                        (!h700_mode || trunc::<uint<32>, uint<8>>(command_argument >> 8) == 0)))),
         _ => false,
     };
     let STATUS_WRITE_PROTECT_VIOLATION: uint<32> = 1 << 26;
@@ -655,10 +660,15 @@ pub entity sd_frontend(
         // transfer-speed contract.
         0x0026001a115903ffc002800002400023
     };
-    // MMC CSD from the Allwinner-compatible legacy-card layout. Advertise
-    // 5 MHz: the GKD host generated 4 MHz for this value and repeatedly read
-    // the complete validation image without errors. CRC7 is recomputed.
-    let mmc_csd: uint<136> = 0xd05e00590f5903ffffffffe7924000bd;
+    // MMC CSD from the Allwinner-compatible legacy-card layout. The GKD
+    // profile retains its qualified 5 MHz contract. Keep the H700 diagnostic
+    // profile at 1 MHz while its target-end signal integrity is unresolved.
+    // Both constants include a recomputed CRC7 and end bit.
+    let mmc_csd: uint<136> = if h700_mode {
+        0xd05e00090f5903ffffffffe79240008d
+    } else {
+        0xd05e00590f5903ffffffffe7924000bd
+    };
     let answer: uint<136> = if long_reply {
         long_header | (if saved_index == CMD_ALL_SEND_CID {
             cid
@@ -707,13 +717,12 @@ pub entity sd_frontend(
             response_left
         }
     };
-    // SD selection uses R1b. The H700 compatibility profile also provides a
-    // short post-response DAT0 pulse: it is deliberately isolated from the
-    // standards-oriented GKD MMC profile and always releases rather than
-    // retaining an actively driven ready level. Count the pulse in fabric
-    // cycles so it releases if the host gates SD_CLK while waiting.
+    // Only SD selection uses R1b here. Fresh MMC STANDBY -> TRANSFER selection
+    // returns ordinary R1, so the H700 profile must not manufacture DAT0 busy.
+    // Count the SD pulse in fabric cycles so it releases if the host gates
+    // SD_CLK while waiting.
     reg(clk) select_busy_cycles: uint<8> reset(local_rst: 0) = {
-        if !fast_mode && (!mmc_mode || h700_mode) &&
+        if !fast_mode && !mmc_mode &&
             command_output_advance && response_left == 1 &&
             saved_index == CMD_SELECT_CARD {
             255
@@ -837,6 +846,19 @@ pub entity sd_frontend(
 
     // Read requests, sector ownership, and data serialization.
     let data_end = data_output_advance && data_state == READ_RELEASE;
+    // CMD12 may arrive while the host is receiving the current block. Finish
+    // that block, including its CRC and end bit, but do not start another one.
+    // Reset/deselect still abort immediately, as does CMD12 before data starts.
+    let read_stop_now = reset_stop || (command_stop && data_state == READ_IDLE);
+    reg(clk) read_stop_after_block reset(local_rst: false) = {
+        if read_stop_now || data_end {
+            false
+        } else if command_stop {
+            true
+        } else {
+            read_stop_after_block
+        }
+    };
     decl half;
     // MMC CMD23 bounds the next CMD18. A zero active count means the existing
     // open-ended transfer, terminated by CMD12 or the card boundary.
@@ -850,7 +872,7 @@ pub entity sd_frontend(
         }
     };
     reg(clk) remaining_blocks: uint<16> reset(local_rst: 0) = {
-        if stop {
+        if read_stop_now || (data_end && read_stop_after_block) {
             0
         } else if read && command_index == CMD_READ_MULTIPLE {
             predefined_blocks
@@ -860,10 +882,10 @@ pub entity sd_frontend(
             remaining_blocks
         }
     };
-    let next_sector = data_end && multi &&
+    let next_sector = data_end && multi && !read_stop_after_block && !command_stop &&
         (remaining_blocks == 0 || remaining_blocks > 1) &&
         (lba < last_lba || (block_length_256 && !half));
-    reg(clk) epoch: uint<32> reset(rst: 0) = if stop || !armed || read || next_sector {
+    reg(clk) epoch: uint<32> reset(rst: 0) = if read_stop_now || !armed || read || next_sector {
         epoch +. 1
     } else {
         epoch
@@ -882,7 +904,7 @@ pub entity sd_frontend(
     } else {
         half
     };
-    reg(clk) pending reset(local_rst: false) = if stop {
+    reg(clk) pending reset(local_rst: false) = if read_stop_now {
         false
     } else if read || next_sector {
         true
@@ -891,14 +913,14 @@ pub entity sd_frontend(
     } else {
         pending
     };
-    reg(clk) buffer_valid reset(local_rst: false) = if stop || data_end {
+    reg(clk) buffer_valid reset(local_rst: false) = if read_stop_now || data_end {
         false
     } else if pending && sector_ready && sector_generation == epoch {
         true
     } else {
         buffer_valid
     };
-    reg(clk) multi reset(local_rst: false) = if stop {
+    reg(clk) multi reset(local_rst: false) = if read_stop_now || (data_end && read_stop_after_block) {
         false
     } else if read {
         command_index == CMD_READ_MULTIPLE
@@ -929,7 +951,7 @@ pub entity sd_frontend(
     } else {
         sending_ext_csd
     };
-    reg(clk) register_read_pending reset(local_rst: false) = if stop || data_end {
+    reg(clk) register_read_pending reset(local_rst: false) = if read_stop_now || data_end {
         false
     } else if scr || ssr || ext_csd {
         true
@@ -955,7 +977,7 @@ pub entity sd_frontend(
         4095
     };
     reg(clk) data_state: uint<3> reset(local_rst: READ_IDLE) = {
-        if stop {
+        if read_stop_now {
             READ_IDLE
         } else if data_output_advance {
             if data_state == READ_IDLE && data_start {
@@ -976,7 +998,7 @@ pub entity sd_frontend(
         }
     };
     reg(clk) bit_index: uint<12> reset(local_rst: 0) = {
-        if stop || data_state == READ_IDLE {
+        if read_stop_now || data_state == READ_IDLE {
             if wide {
                 3
             } else {
@@ -1067,11 +1089,11 @@ pub entity sd_frontend(
     } else {
         read_data_bit
     };
-    reg(clk) registered_output_stop reset(local_rst: false) = stop;
+    reg(clk) registered_output_stop reset(local_rst: false) = read_stop_now;
     let output_stop = if prepared_data_mode {
         registered_output_stop
     } else {
-        stop
+        read_stop_now
     };
     reg(data_output_clk) data_output: uint<4> reset(data_output_reset: 15) = {
         // R1b must assert and release even when the host gates SD_CLK while
@@ -1177,6 +1199,25 @@ pub entity sd_frontend(
             observed_data_mismatch
         }
     };
+    reg(clk) observed_data_mismatch_count: uint<16> reset(local_rst: 0) = {
+        if observed_data_start {
+            if observed_data_sample && observed_data_mismatch_now { 1 } else { 0 }
+        } else if observed_data_sample && observed_data_mismatch_now {
+            observed_data_mismatch_count +. 1
+        } else {
+            observed_data_mismatch_count
+        }
+    };
+    reg(clk) observed_data_first_mismatch: uint<16> reset(local_rst: 0xffff) = {
+        if observed_data_start {
+            if observed_data_sample && observed_data_mismatch_now { 0 } else { 0xffff }
+        } else if observed_data_sample && observed_data_mismatch_now &&
+            observed_data_first_mismatch == 0xffff {
+            observed_data_samples
+        } else {
+            observed_data_first_mismatch
+        }
+    };
     reg(clk) observed_data_lanes: uint<4> reset(local_rst: 0) = if observed_data_start {
         pad_data_enable
     } else {
@@ -1192,6 +1233,16 @@ pub entity sd_frontend(
     } else {
         completed_data_mismatch
     };
+    reg(clk) completed_data_mismatch_count: uint<16> reset(local_rst: 0) = if observed_data_finish {
+        observed_data_mismatch_count
+    } else {
+        completed_data_mismatch_count
+    };
+    reg(clk) completed_data_first_mismatch: uint<16> reset(local_rst: 0xffff) = if observed_data_finish {
+        observed_data_first_mismatch
+    } else {
+        completed_data_first_mismatch
+    };
     reg(clk) completed_data_blocks: uint<8> reset(local_rst: 0) = if observed_data_finish {
         completed_data_blocks +. 1
     } else {
@@ -1202,6 +1253,8 @@ pub entity sd_frontend(
     set trace_pin_data = &(zext(completed_data_samples) |
         (zext(completed_data_blocks) << 16) | observed_data_mismatch_flag |
         observed_data_active_flag | (zext(observed_data_lanes) << 26));
+    set trace_pin_data_mismatch = &(zext(completed_data_mismatch_count) |
+        (zext(completed_data_first_mismatch) << 16));
     // A passive snapshot distinguishes a response still being serialized from
     // a completed CMD7 whose host did not issue the following command. It has
     // no control-path role and is read only through the Ethernet trace service.
@@ -1231,7 +1284,7 @@ pub entity sd_frontend(
     // Break command-decode fanout into backend control. Generation changes on
     // the original event, so a late backend response is already stale before
     // this registered release arrives one management cycle later.
-    reg(clk) release_event reset(rst: false) = stop || data_end;
+    reg(clk) release_event reset(rst: false) = read_stop_now || data_end;
     set sector_release = &release_event;
 }
 
@@ -1315,6 +1368,7 @@ entity bram_emulator(
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_data_mismatch): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1368,6 +1422,7 @@ entity bram_emulator(
         trace_protocol_status: unused_trace_protocol_status,
         trace_pin_response: unused_trace_pin_response,
         trace_pin_data: unused_trace_pin_data,
+        trace_pin_data_mismatch: unused_trace_pin_data_mismatch,
     );
     set armed_status = card_armed;
 }
@@ -1610,6 +1665,7 @@ entity ddr_emulator(
     let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
     let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
+    let (_, unused_trace_pin_data_mismatch): (&uint<32>, inv &uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1663,6 +1719,7 @@ entity ddr_emulator(
         trace_protocol_status: unused_trace_protocol_status,
         trace_pin_response: unused_trace_pin_response,
         trace_pin_data: unused_trace_pin_data,
+        trace_pin_data_mismatch: unused_trace_pin_data_mismatch,
     );
     set armed_status = &(*card_armed && initialized);
 }

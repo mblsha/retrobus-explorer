@@ -402,6 +402,7 @@ class BulkHostTests(unittest.TestCase):
             0xE2879425,
             0x11DD3A30,
             0x05123456,
+            0x002A0003,
         )
 
         class TraceSocket(Socket):
@@ -419,7 +420,7 @@ class BulkHostTests(unittest.TestCase):
                 client, "save", side_effect=AssertionError("trace wrote journal")
             ):
                 trace = client.trace()
-        self.assertEqual(len(sock.sent), 17)
+        self.assertEqual(len(sock.sent), 18)
         self.assertTrue(all(len(request) == 28 for request in sock.sent))
         self.assertTrue(all(request[4] == images.Opcode.TRACE for request in sock.sent))
         self.assertEqual((client.session, client.sequence), (123, 9))
@@ -471,6 +472,8 @@ class BulkHostTests(unittest.TestCase):
                 "serializer_mismatch": True,
                 "active": False,
                 "enabled_lanes": 1,
+                "mismatch_count": 3,
+                "first_mismatch_edge": 42,
             },
         )
         self.assertTrue(trace["armed"])

@@ -38,6 +38,9 @@ async def mmc_fallback_enumerates_and_reads(d):
     assert (observed_data >> 16) & 0xFF >= 2
     assert not observed_data & (1 << 24)
     assert (observed_data >> 26) & 0xF == 1
+    observed_mismatch = int(d.trace_pin_data_mismatch.value)
+    assert observed_mismatch & 0xFFFF == 0
+    assert observed_mismatch >> 16 == 0xFFFF
 
     # The H700 then selects 256-byte legacy MMC blocks. Consecutive logical
     # blocks expose the two halves of one physical 512-byte DDR sector.
@@ -75,9 +78,17 @@ async def slow_writable_profile_forces_post_loader_mmc_fallback(d):
     await h.command(0, length=0)
     assert (await h.command(1, 0))[1:5] == bytes.fromhex("c0ff8080")
 
-    # Exercise the complete H700 hybrid timing path, including its isolated
-    # CMD7 DAT0 compatibility handshake.
+    # Fresh MMC selection uses ordinary R1 and leaves DAT0 released. Reject a
+    # four-bit switch in this diagnostic profile so H700 transfer testing stays
+    # on the one data line already used during identification.
     await h.init_mmc()
+    assert not int(d.dat_oe.value)
+    response = await h.command(6, 0x03B70100)
+    assert int.from_bytes(response[1:5], "big") & (1 << 22)
+    await h.command(17, 9)
+    await h.supply()
+    assert await h.data() == h.sector
+    assert (int(d.trace_pin_data.value) >> 26) & 0xF == 1
 
 
 @cocotb.test()
@@ -170,11 +181,17 @@ async def multiblock_progress_and_stop_during_data(d):
         await h.cycle()
     assert int(d.request_lba.value) == 128
     await h.supply()
-    # Let a third block begin, then interrupt it with native CMD12 on CMD.
+    # Let a third block begin, then request stop with native CMD12 on CMD. The
+    # card must finish this block rather than truncating its payload or CRC.
     for _ in range(20):
         await h.cycle()
     assert int(d.dat_oe.value) == 15
     await h.command(12)
+    assert int(d.dat_oe.value) == 15
+    for _ in range(1100):
+        await h.cycle()
+        if not int(d.dat_oe.value):
+            break
     assert not int(d.dat_oe.value) and not int(d.request_valid.value)
     await h.command(0, length=0)
     await h.init()
