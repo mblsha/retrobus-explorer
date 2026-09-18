@@ -23,6 +23,9 @@ async def ethernet_sd_ethernet_roundtrip(d):
     d.fast_mode.value = int(os.environ.get("MICROSD_FAST_MODE", "1"))
     d.h700_mode.value = 0
     d.mmc_only.value = 0
+    # The writable card's CSD now comes from the build, so the
+    # testbench has to supply the qualified default.
+    d.sd_csd.value = 0x0026001A115903FFC002800002400023
     d.dat_in.value = 15
     d.usb_rx.value = 1
     d.diagnostic_status.value = 0

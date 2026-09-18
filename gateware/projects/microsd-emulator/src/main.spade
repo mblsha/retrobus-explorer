@@ -88,6 +88,7 @@ pub entity sd_frontend(
     h700_mode: bool,
     h700_falling_phase: bool,
     h700_early_command: bool,
+    sd_csd: uint<128>,
     mmc_only: bool,
     writable: bool,
     dat_in: uint<4>,
@@ -713,12 +714,15 @@ pub entity sd_frontend(
     };
     let long_header: uint<136> = 0x3f00000000000000000000000000000000;
     let cid: uint<136> = 0x7f52425350414445101234567801916b;
+    // The writable card's CSD arrives from the build rather than living here.
+    // Its TRAN_SPEED field decides the clock the host selects, and changing
+    // that field invalidates the CRC7 stored in the same register, so the two
+    // are computed together in one place instead of being edited by hand in
+    // two. The read-only BRAM card keeps its own qualified constant.
     let csd: uint<136> = if !writable {
         0x260009105903ffc000000002402033
     } else {
-        // Output launch implementation is independent of the card's 13 MHz
-        // transfer-speed contract.
-        0x0026001a115903ffc002800002400023
+        zext(sd_csd)
     };
     // MMC CSD from the Allwinner-compatible legacy-card layout. The GKD
     // profile retains its qualified 5 MHz contract. The H700's sunxi host
@@ -1544,6 +1548,7 @@ entity bram_emulator(
         h700_mode: false,
         h700_falling_phase: false,
         h700_early_command: false,
+        sd_csd: 0x0026001a115903ffc002800002400023,
         mmc_only: false,
         writable: false,
         dat_in: 15,
@@ -1849,6 +1854,7 @@ entity ddr_emulator(
         h700_mode: false,
         h700_falling_phase: false,
         h700_early_command: false,
+        sd_csd: 0x0026001a115903ffc002800002400023,
         mmc_only: false,
         writable,
         dat_in,

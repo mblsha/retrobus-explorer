@@ -21,12 +21,39 @@ from build_common import (
 # The supported card contract is checked against actual CMD9 responses by
 # the Spade testbench, rather than inferred from the source's formatting.
 SD_CSD = 0x0026001A115903FFC002800002400023
+# TRAN_SPEED decides which clock the host selects, and it sits in the same
+# register as the CRC7 that protects it, so the two are computed together here
+# rather than edited by hand in the Spade source.
+SD_TRAN_SPEED_CODES = {
+    13_000_000: 0x1A,
+    15_000_000: 0x22,
+    20_000_000: 0x2A,
+    25_000_000: 0x32,
+}
+
+
+def csd_crc7(data: bytes) -> int:
+    crc = 0
+    for byte in data:
+        for bit in range(8):
+            crc <<= 1
+            if ((byte << bit) & 0x80) ^ (crc & 0x80):
+                crc ^= 0x09
+            crc &= 0x7F
+    return crc
+
+
+def sd_csd_with_speed(code: int) -> int:
+    body = bytearray(SD_CSD.to_bytes(16, "big"))
+    body[3] = code
+    body[15] = (csd_crc7(bytes(body[:15])) << 1) | 1
+    return int.from_bytes(bytes(body), "big")
 CONFIG = GATEWARE / "projects/microsd-emulator/ddr/arty-bios-80-depth2.yml"
 BOARD = GATEWARE / "projects/microsd-emulator/ddr/board.v"
 
 
-def sd_properties():
-    csd = SD_CSD
+def sd_properties(sd_csd=SD_CSD):
+    csd = sd_csd
     speed = (csd >> 96) & 255
     values = (0, 10, 12, 13, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80)
     return dict(
@@ -70,6 +97,14 @@ def main():
         help="Launch H700 command responses from the early diagnostic phase",
     )
     parser.add_argument(
+        "--sd-tran-speed",
+        type=int,
+        choices=sorted(SD_TRAN_SPEED_CODES),
+        default=13_000_000,
+        help="Transfer speed the writable card advertises in its CSD; the host "
+        "picks a divisor at or below it",
+    )
+    parser.add_argument(
         "--trace-capture-lba",
         type=int,
         help="Sector whose block the independent decoder captures and "
@@ -96,6 +131,7 @@ def main():
         parser.error("--mmc-only requires --ethernet and --slow-mmc")
     if args.mmc_only and args.h700_mmc:
         parser.error("--mmc-only and --h700-mmc are distinct diagnostic profiles")
+    sd_csd = sd_csd_with_speed(SD_TRAN_SPEED_CODES[args.sd_tran_speed])
     project_name = "ethernet-diagnostic" if args.ethernet else "microsd-emulator"
     if args.ethernet:
         if args.mmc_only:
@@ -268,6 +304,7 @@ def main():
             (args.slow_mmc, "-D SLOW_MMC"),
             (args.h700_mmc, "-D H700_MMC"),
             (args.h700_early_command, "-D H700_EARLY_COMMAND"),
+            (True, f"-D SD_CSD=128'h{sd_csd:032x}"),
             (
                 args.trace_capture_lba is not None,
                 f"-D TRACE_CAPTURE_LBA=32'd{args.trace_capture_lba}",
@@ -409,7 +446,7 @@ def main():
         out,
         json.dumps(
             {
-                **sd_properties(),
+                **sd_properties(sd_csd),
                 "verified_configuration_bits": verified_bits,
                 "bitstream_sha256": hashlib.sha256(
                     (out / "design.bit").read_bytes()

@@ -73,6 +73,11 @@ network_ddr sd(
 `else
 .h700_early_command(1'b0),
 `endif
+`ifdef SD_CSD
+.sd_csd(`SD_CSD),
+`else
+.sd_csd(128'h0026001a115903ffc002800002400023),
+`endif
 `ifdef TRACE_CAPTURE_LBA
 .capture_lba(`TRACE_CAPTURE_LBA),
 `else

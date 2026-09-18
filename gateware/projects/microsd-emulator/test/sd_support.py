@@ -124,15 +124,30 @@ class Host:
                 0,
                 str(Path(__file__).resolve().parents[3] / "experiments/openxc7-macos"),
             )
-            from build_ddr import SD_CSD
+            from build_ddr import SD_CSD, csd_crc7
 
-            assert csd == SD_CSD, "CMD9 response differs from supported build metadata"
+            # The card returns whatever CSD the build supplied. Check it
+            # against that rather than a fixed constant, and check the build's
+            # own default still matches the supported metadata, so neither the
+            # advertised speed nor its CRC7 can drift unnoticed.
+            advertised = int(self.d.sd_csd.value)
+            assert csd == advertised, "CMD9 response differs from the supplied CSD"
+            body = advertised.to_bytes(16, "big")
+            assert body[15] == (csd_crc7(body[:15]) << 1) | 1, "CSD CRC7 is stale"
+            if body[3] == (SD_CSD >> 96) & 0xFF:
+                assert csd == SD_CSD, (
+                    "CMD9 response differs from supported build metadata"
+                )
         capacity = (
             (((csd >> 62) & 4095) + 1)
             * (1 << (((csd >> 47) & 7) + 2))
             * (1 << ((csd >> 80) & 15))
         )
-        assert (csd >> 96) & 255 == (0x1A if writable else 0x09)
+        # The writable card's CSD comes from the build, so the expected
+        # TRAN_SPEED is whatever this testbench advertised rather than a
+        # constant that would have to be edited alongside it.
+        advertised = (int(self.d.sd_csd.value) >> 96) & 0xFF
+        assert (csd >> 96) & 255 == (advertised if writable else 0x09)
         assert capacity == (268435456 if writable else 8388608)
         assert bool(csd & (1 << 13)) == (not writable)
         assert bool(csd & (0x10 << 84)) == writable
@@ -301,6 +316,9 @@ async def setup(d):
     d.h700_mode.value = 0
     d.h700_falling_phase.value = 0
     d.h700_early_command.value = 0
+    # The qualified writable-card contract; the build can advertise a
+    # different TRAN_SPEED, but the CSD checked here is the default one.
+    d.sd_csd.value = 0x0026001A115903FFC002800002400023
     d.mmc_only.value = 0
     d.dat_in.value = 15
     d.write_cmd_ready.value = 0
