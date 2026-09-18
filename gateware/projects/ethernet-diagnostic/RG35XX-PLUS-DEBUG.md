@@ -640,3 +640,50 @@ kernel drives the emulated card itself. Without serial access the last
 observable stage is the kernel's own MMC enumeration and its reads of
 mmcblk0p2; userspace progress beyond that is not visible from the card side and
 would need the initramfs to write further milestones.
+
+## 2026-09-18 A userspace that runs
+
+The shipped initramfs could not start. Its 3 KiB cpio held three entries — `.`,
+`./init` and the trailer — and `./init` is a `#!/bin/sh` script that calls
+`/usr/bin/busybox` for every operation. Neither a shell nor BusyBox was in it,
+so `rdinit=/init` had nothing to execute. That is why the kernel enumerated the
+card, read the partition table and `mmcblk0p2`, and then wrote nothing: the
+milestones the script is built around could never be reached.
+
+`rg35xx/build_initramfs.sh` builds a real one. BusyBox is compiled from an
+unpatched release tarball with `defconfig` plus `CONFIG_STATIC`, the same shape
+`tools/zaurus-sd-boot/busybox/build_busybox.sh` uses for the Zaurus, in an
+arm64 container that runs natively on Apple Silicon, so no cross prefix is
+needed. The tarball hash is pinned. `rg35xx/init` is the script recovered from
+the shipped image, now kept in the repository rather than only inside a build
+artifact.
+
+The result is 1.5 MiB, which no longer fits the single cluster the old stub
+occupied, so `rg35xx_boot_debug.py --replace-file` reallocates it. It prefers
+one contiguous run, rewrites every FAT copy together, and leaves the other
+files untouched.
+
+### Baseline to userspace
+
+Image `c8214cae1199c422100ce9013d417f9547dec09fc5aba86d4ae0cd9ee5986dbb` on
+bitstream `5dd60bc0…`, measured with `rg35xx_trial.py`:
+
+```text
+ 1.10 s  KERNEL stream begins
+13.14 s  KERNEL stream ends, 12.0 s for 31,873,032 bytes
+13.22 s  INITRD, then dtb.img and the boot-script milestones
+16.82 s  Linux re-enumerates the card and reads the partition table
+17.48 s  userspace writes into mmcblk0p2
+```
+
+The record it wrote decodes as `stage=1 detail=init-entered uptime=3.35`, so
+the kernel reached userspace 3.35 s after it started, and the whole boot takes
+about 17.5 s from target power-on. Roughly twelve of those seconds are the
+kernel read alone.
+
+Two runs on the same image instead served about 127,000 sectors, twice the
+kernel's size, with one CMD18 streaming for 24 s before the load completed.
+Both the fragmented and the contiguous initramfs showed it, so file layout is
+not the cause and it is not yet explained; it is the same startup variability
+seen throughout this log, and a boot-time benchmark has to report it rather
+than average it away.

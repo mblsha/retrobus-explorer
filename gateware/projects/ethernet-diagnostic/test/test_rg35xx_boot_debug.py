@@ -277,6 +277,53 @@ class BootDebugTests(unittest.TestCase):
             self.assertEqual(debug.describe_lba(image, 134), "KERNEL+0")
             self.assertEqual(debug.describe_lba(image, 139), "KERNEL+512")
 
+    def test_replace_file_reallocates_and_updates_both_fat_copies(self):
+        """The initramfs grows from a stub into a real userspace, so it no
+        longer fits the chain its directory entry points at."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            payload = bytes(range(256)) * 6  # 1536 bytes, three 512B clusters
+            patched = debug.replace_file(image.read_bytes(), "INITRD", payload)
+            image.write_bytes(patched)
+
+            stream = io.BytesIO(patched)
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            part = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, part["start_lba"], part["sectors"])
+            self.assertEqual(fat.read("INITRD"), payload)
+            chain = [cluster for cluster, _ in fat.clusters("INITRD")]
+            self.assertEqual(len(chain), 3)
+            # U-Boot re-reads the FAT per cluster, so a scattered file costs
+            # far more than its size; take a contiguous run when one exists.
+            self.assertEqual(chain, list(range(chain[0], chain[0] + 3)))
+            # Every other file must survive the reallocation untouched.
+            self.assertEqual(fat.read("KERNEL")[56:60], b"ARM\x64")
+            self.assertTrue(fat.read("BOOT.SCR").startswith(b"\x27\x05\x19\x56"))
+
+            boot = debug._read_at(stream, fat.start, debug.SECTOR_SIZE)
+            table_bytes = int.from_bytes(boot[22:24], "little") * debug.SECTOR_SIZE
+            copies = boot[16]
+            tables = {
+                debug._read_at(stream, fat.fat_offset + index * table_bytes, table_bytes)
+                for index in range(copies)
+            }
+            self.assertEqual(len(tables), 1, "FAT copies disagree")
+
+    def test_replace_file_refuses_a_payload_that_does_not_fit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            with self.assertRaisesRegex(ValueError, "clusters"):
+                debug.replace_file(image.read_bytes(), "INITRD", b"\0" * (1 << 20))
+
+    def test_replace_file_rejects_an_unknown_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            with self.assertRaises(ValueError):
+                debug.replace_file(image.read_bytes(), "ABSENT", b"x")
+
     def test_verifier_rejects_corrupt_spl_checksum(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "boot.img"

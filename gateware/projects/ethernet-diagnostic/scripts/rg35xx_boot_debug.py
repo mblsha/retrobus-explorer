@@ -285,6 +285,88 @@ def _script_body(boot_script: bytes) -> bytes:
     return payload[8:]
 
 
+def replace_file(image: bytes, name: str, payload: bytes) -> bytes:
+    """Replace a file in the FAT boot volume, reallocating its clusters.
+
+    The initramfs grows from a stub into a real BusyBox userspace, so the
+    payload no longer fits the chain the directory entry points at. Both FAT
+    copies are rewritten together; a volume whose copies disagree is what
+    fsck repairs by guessing.
+    """
+    stream = io.BytesIO(image)
+    mbr = _read_at(stream, 0, SECTOR_SIZE)
+    partition = _partition(mbr[446:462])
+    fat = _Fat16(stream, partition["start_lba"], partition["sectors"])
+    if name not in fat.files:
+        raise ValueError(f"FAT boot volume lacks {name}")
+
+    boot = _read_at(stream, fat.start, SECTOR_SIZE)
+    fat_sectors = int.from_bytes(boot[22:24], "little")
+    copies = boot[16]
+    table_bytes = fat_sectors * SECTOR_SIZE
+    table = bytearray(_read_at(stream, fat.fat_offset, table_bytes))
+    total = min(
+        table_bytes // 2,
+        2 + (fat.start + fat.length - fat.data_offset) // fat.cluster_size,
+    )
+
+    def entry(index: int) -> int:
+        return int.from_bytes(table[index * 2 : index * 2 + 2], "little")
+
+    def set_entry(index: int, value: int) -> None:
+        table[index * 2 : index * 2 + 2] = value.to_bytes(2, "little")
+
+    for cluster, _ in fat.clusters(name):
+        set_entry(cluster, 0)
+    needed = (len(payload) + fat.cluster_size - 1) // fat.cluster_size
+    available = [index for index in range(2, total) if entry(index) == 0]
+    if len(available) < needed:
+        raise ValueError(
+            f"{name} needs {needed} clusters and the volume has {len(available)} free"
+        )
+    # Prefer one contiguous run. U-Boot walks the chain a cluster at a time and
+    # re-reads the FAT as it goes, so a scattered file costs far more than its
+    # own size: a fragmented 1.5 MiB initramfs added about 63,000 sector reads
+    # and twelve seconds to the measured boot.
+    free = available[:needed]
+    run_start = None
+    run = 0
+    for index in available:
+        run = run + 1 if run_start is not None and index == run_start + run else 1
+        if run == 1:
+            run_start = index
+        if run == needed:
+            free = list(range(run_start, run_start + needed))
+            break
+
+    patched = bytearray(image)
+    for position, cluster in enumerate(free):
+        set_entry(cluster, 0xFFFF if position + 1 == needed else free[position + 1])
+        offset = fat.data_offset + (cluster - 2) * fat.cluster_size
+        chunk = payload[position * fat.cluster_size :][: fat.cluster_size]
+        patched[offset : offset + fat.cluster_size] = chunk.ljust(
+            fat.cluster_size, b"\0"
+        )
+    for copy in range(copies):
+        start = fat.fat_offset + copy * table_bytes
+        patched[start : start + table_bytes] = bytes(table)
+
+    root = bytearray(_read_at(stream, fat.root_offset, fat.data_offset - fat.root_offset))
+    base, _, extension = name.partition(".")
+    target = base.ljust(8).encode() + extension.ljust(3).encode()
+    for offset in range(0, len(root), 32):
+        if root[offset : offset + 11] == target:
+            root[offset + 26 : offset + 28] = (free[0] if needed else 0).to_bytes(
+                2, "little"
+            )
+            root[offset + 28 : offset + 32] = len(payload).to_bytes(4, "little")
+            break
+    else:
+        raise ValueError(f"{name} has no root directory entry")
+    patched[fat.root_offset : fat.root_offset + len(root)] = root
+    return bytes(patched)
+
+
 def describe_lba(path: Path, lba: int) -> str:
     """Name what an absolute image LBA holds.
 
@@ -414,6 +496,9 @@ def main() -> None:
     group.add_argument("--make-spl-loop", type=Path, metavar="IMAGE")
     group.add_argument("--repair-boot-script", type=Path, metavar="IMAGE")
     group.add_argument("--describe", type=Path, metavar="IMAGE")
+    group.add_argument("--replace-file", type=Path, metavar="IMAGE")
+    parser.add_argument("--name")
+    parser.add_argument("--payload", type=Path)
     parser.add_argument("--lba", type=int, action="append", default=[])
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -428,6 +513,26 @@ def main() -> None:
         print(json.dumps(verify_boot_image(args.verify_image), indent=2))
         return
 
+
+    if args.replace_file is not None:
+        if args.output is None or args.name is None or args.payload is None:
+            parser.error("--replace-file requires --name, --payload and --output")
+        patched = replace_file(
+            args.replace_file.read_bytes(), args.name, args.payload.read_bytes()
+        )
+        args.output.write_bytes(patched)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "replaced": args.name,
+                    "bytes": args.payload.stat().st_size,
+                    "sha256": hashlib.sha256(patched).hexdigest(),
+                },
+                indent=2,
+            )
+        )
+        return
 
     if args.describe is not None:
         if not args.lba:
