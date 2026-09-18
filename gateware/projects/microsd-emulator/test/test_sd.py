@@ -91,10 +91,77 @@ async def h700_idle_data_lines_hold_the_pull_up_level(d):
     await tick(d.clk, 33000)
     assert int(d.dat_oe.value) == 0, "an idle host clock must release the lines"
 
+    # Sparse transitions are noise, not a host. With the target unpowered the
+    # floating SD_CLK input still produced a few hundred edges per second, so
+    # an edge-rate gate must ignore them and keep the lines released.
+    for _ in range(8):
+        d.sd_clk.value = 1
+        await tick(d.clk, 3000)
+        d.sd_clk.value = 0
+        await tick(d.clk, 3000)
+        assert int(d.dat_oe.value) == 0, "noise engaged the compatibility drive"
+
     # Clocking again re-engages the compatibility level.
     for _ in range(120):
         oe, value = (await h.cycle())[2:]
     assert oe == 15 and value & oe == oe
+
+
+@cocotb.test()
+async def sd_selection_busy_never_leaves_the_data_line_low(d):
+    """SD CMD7 answers R1b: the card pulses DAT0 low, and the host then polls
+    that line for the end of busy. The H700 adapter has no pull-up, so a
+    released line still reads low and the poll never completes."""
+    h = await setup(d)
+    d.h700_mode.value = 1
+    await h.init()
+    await h.command(7, 0x10000)
+
+    busy_seen = False
+    busy_cycles = 0
+    for _ in range(4000):
+        await tick(d.clk, 1)
+        oe, value = int(d.dat_oe.value), int(d.dat_out.value)
+        if oe & 1 and not value & 1:
+            busy_seen = True
+            busy_cycles += 1
+        elif busy_seen:
+            break
+    assert busy_seen, "CMD7 never asserted DAT0 busy"
+    # The pulse must end on its own even though the host has gated SD_CLK.
+    assert busy_cycles < 4000, "DAT0 busy never released"
+    # The pulse leaves the stale low in the final data register, which the next
+    # SD edge refreshes. The card must therefore present the idle level as soon
+    # as the host clocks again, which is what its busy poll needs to complete.
+    for _ in range(4):
+        oe, value = (await h.cycle())[2:]
+    assert oe == 15, "the profile released the data lines"
+    assert value == 15, "CMD7 left DAT0 low, which reads as a card still busy"
+
+
+@cocotb.test()
+async def sd_selection_busy_releases_in_the_qualified_profile(d):
+    """The compatibility drive is H700-only; the qualified SD profile keeps
+    standards-compliant released data lines after the same busy pulse."""
+    h = await setup(d)
+    await h.init()
+    await h.command(7, 0x10000)
+    for _ in range(400):
+        await tick(d.clk, 1)
+    assert int(d.dat_oe.value) == 0
+
+
+@cocotb.test()
+async def h700_profile_declares_a_card_without_the_switch_function(d):
+    """U-Boot issues the SD CMD6 switch, which this emulator does not
+    implement, only for SD 1.10 and later. Declaring SD 1.01 makes
+    sd_change_freq() return early instead of waiting for a status block."""
+    h = await setup(d)
+    d.h700_mode.value = 1
+    await h.init()
+    await h.command(55, 0x10000)
+    await h.command(51)
+    assert await h.data(8) == bytes.fromhex("0005000000000000")
 
 
 @cocotb.test()

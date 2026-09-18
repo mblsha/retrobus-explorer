@@ -1229,6 +1229,9 @@ pub entity sd_frontend(
                 read_data_bit
             }
         } else {
+            // The last transmitted bit is held here until the next SD edge,
+            // because the host samples it after the transfer's enable drops.
+            // Nothing may overwrite it early, not even the idle level.
             data_output
         }
     };
@@ -1298,10 +1301,13 @@ pub entity sd_frontend(
     // fabric cycle of lag is irrelevant to a level held for microseconds.
     reg(clk) h700_idle_data_armed reset(local_rst: false) = h700_mode && armed &&
         host_clock_active && !select_busy && !write_active;
+    // The held value is refreshed by the next SD edge. The liveness gate below
+    // only engages while the host is clocking, so the level this presents is
+    // never stale for more than one host clock period.
     let h700_idle_data_high = h700_idle_data_armed && data_output_enable == 0;
     set dat_oe = &(if data_output_enable != 0 {
             data_output_enable
-        } else if h700_idle_data_armed {
+        } else if h700_idle_data_high {
             15
         } else {
             0

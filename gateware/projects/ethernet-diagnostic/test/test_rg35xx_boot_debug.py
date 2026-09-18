@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import struct
 import zlib
 import tempfile
@@ -48,8 +49,10 @@ def boot_image_fixture(path: Path) -> None:
     boot[512:516] = b"\xf8\xff\xff\xff"
 
     files = {
-        b"BOOT    SCR": b"\x27\x05\x19\x56" + bytes(60)
-        + b"mmc write x 0x1c001 1\0baredebug=/dev/mmcblk0p2\0booti x y z\0",
+        b"BOOT    SCR": debug.build_boot_script(
+            b"\x27\x05\x19\x56" + bytes(60),
+            "mmc write x 0x1c001 1\nbaredebug=/dev/mmcblk0p2\nbooti x y z\n",
+        ),
         b"BOOTMARK   ": (
             b"RG35DBG1\ndirection=target-to-host\nstage=0\ndetail=uboot-loaded-fat\n"
         ).ljust(512, b"\0"),
@@ -180,11 +183,15 @@ class BootDebugTests(unittest.TestCase):
             self.assertNotEqual(repaired, image.read_bytes())
             image.write_bytes(repaired)
             report = debug.verify_boot_image(image)
-            self.assertNotEqual(
-                report["boot_files"]["BOOT.SCR"], original["boot_files"]["BOOT.SCR"]
-            )
             self.assertEqual(report["boot_files"]["BOOT.SCR"], 64 + 8 + len(script))
             self.assertEqual(report["debug_command"], original["debug_command"])
+            # The executable body must be exactly the requested script.
+            stream = io.BytesIO(image.read_bytes())
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            partition = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, partition["start_lba"], partition["sectors"])
+            body = debug._script_body(fat.read("BOOT.SCR"))
+            self.assertEqual(body.decode(), script)
 
     def test_repair_rejects_a_script_that_outgrows_its_cluster(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -192,6 +199,46 @@ class BootDebugTests(unittest.TestCase):
             boot_image_fixture(image)
             with self.assertRaises(ValueError):
                 debug.repair_boot_script(image.read_bytes(), "booti\n" * 200)
+
+    def test_verifier_rejects_a_script_without_the_length_table(self):
+        """The shipped image framed BOOT.SCR this way and could never run it."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            data = bytearray(image.read_bytes())
+            script = debug.build_boot_script(
+                b"\x27\x05\x19\x56" + bytes(60), "booti a b c\n"
+            )
+            text = script[72:]
+            unframed = bytearray(script[:64])
+            unframed[12:16] = struct.pack(">I", len(text))
+            unframed[24:28] = struct.pack(">I", zlib.crc32(text) & 0xFFFFFFFF)
+            unframed[4:8] = bytes(4)
+            unframed[4:8] = struct.pack(
+                ">I", zlib.crc32(bytes(unframed)) & 0xFFFFFFFF
+            )
+            offset = (128 + 4) * debug.SECTOR_SIZE
+            data[offset : offset + 512] = bytes(unframed) + text.ljust(
+                512 - len(unframed), b"\0"
+            )
+            root = (128 + 2) * debug.SECTOR_SIZE
+            data[root + 28 : root + 32] = struct.pack(
+                "<I", len(unframed) + len(text)
+            )
+            image.write_bytes(bytes(data))
+            with self.assertRaisesRegex(ValueError, "length table"):
+                debug.verify_boot_image(image)
+
+    def test_verifier_rejects_a_script_with_a_stale_payload_crc(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            data = bytearray(image.read_bytes())
+            offset = (128 + 4) * debug.SECTOR_SIZE
+            data[offset + 80] ^= 0xFF
+            image.write_bytes(bytes(data))
+            with self.assertRaisesRegex(ValueError, "uImage CRC"):
+                debug.verify_boot_image(image)
 
     def test_verifier_rejects_corrupt_spl_checksum(self):
         with tempfile.TemporaryDirectory() as directory:

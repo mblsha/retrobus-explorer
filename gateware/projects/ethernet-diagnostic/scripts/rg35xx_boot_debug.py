@@ -247,6 +247,29 @@ def repair_boot_script(image: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
     return bytes(patched)
 
 
+def _script_body(boot_script: bytes) -> bytes:
+    """Return the text U-Boot would actually execute from a legacy script image.
+
+    A script image is only usable if its header describes its payload and the
+    payload opens with the eight-byte length table that U-Boot's source command
+    reads and skips. A script whose payload begins directly with its text still
+    looks like a uImage, but execution starts eight bytes into the first
+    command and the script aborts.
+    """
+    header, payload = boot_script[:64], boot_script[64:]
+    if int.from_bytes(header[12:16], "big") != len(payload):
+        raise ValueError("BOOT.SCR header size does not match its payload")
+    if int.from_bytes(header[24:28], "big") != zlib.crc32(payload) & 0xFFFFFFFF:
+        raise ValueError("BOOT.SCR payload does not match its uImage CRC")
+    checked = bytearray(header)
+    checked[4:8] = bytes(4)
+    if int.from_bytes(header[4:8], "big") != zlib.crc32(bytes(checked)) & 0xFFFFFFFF:
+        raise ValueError("BOOT.SCR header does not match its uImage CRC")
+    if len(payload) < 8 or int.from_bytes(payload[0:4], "big") != len(payload) - 8:
+        raise ValueError("BOOT.SCR lacks the legacy script length table")
+    return payload[8:]
+
+
 def verify_boot_image(path: Path) -> dict[str, object]:
     with path.open("rb") as stream:
         size = path.stat().st_size
@@ -278,8 +301,9 @@ def verify_boot_image(path: Path) -> dict[str, object]:
         boot_script = payloads["BOOT.SCR"]
         if not boot_script.startswith(b"\x27\x05\x19\x56"):
             raise ValueError("BOOT.SCR is not a U-Boot legacy script image")
+        script_text = _script_body(boot_script)
         required_script_text = (b"mmc write", b"baredebug=/dev/mmcblk0p2", b"booti ")
-        if any(text not in boot_script for text in required_script_text):
+        if any(text not in script_text for text in required_script_text):
             raise ValueError("BOOT.SCR lacks raw milestone write or bare Linux boot")
         bootmark = decode_records(payloads["BOOTMARK"])
         if not bootmark or bootmark[0].get("stage") != "0":
