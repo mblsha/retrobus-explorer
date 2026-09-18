@@ -415,6 +415,23 @@ class BootDebugTests(unittest.TestCase):
             self.assertIn(f"setenv initrd_size {fat.files['INITRD'][1]:#x}", body)
             debug.verify_boot_image(image)
 
+    def test_raw_kernel_script_carries_the_requested_bootargs(self):
+        """Kernel init is a named lever, and the console the kernel drives is
+        set here; the debug partition must survive either choice."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            for bootargs in (debug.DEFAULT_BOOTARGS, debug.QUIET_BOOTARGS):
+                patched = debug.raw_kernel_script(image.read_bytes(), bootargs)
+                stream = io.BytesIO(patched)
+                mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+                part = debug._partition(mbr[446:462])
+                fat = debug._Fat16(stream, part["start_lba"], part["sectors"])
+                body = debug._script_body(fat.read("BOOT.SCR")).decode()
+                self.assertIn(f"setenv bootargs '{bootargs}'", body)
+                self.assertIn("baredebug=/dev/mmcblk0p2", bootargs)
+        self.assertNotIn("ttyS0", debug.QUIET_BOOTARGS)
+
     def test_raw_kernel_script_refuses_a_fragmented_payload(self):
         """A raw read assumes contiguity; a fragmented file would silently read
         the wrong sectors."""

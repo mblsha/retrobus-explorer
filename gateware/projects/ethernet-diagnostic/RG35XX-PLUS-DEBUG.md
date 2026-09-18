@@ -893,3 +893,55 @@ which is 2.95 MB/s and agrees with the rate inferred from sector counts. The
 block occupies 1,041 sampled edges, exactly one start bit plus 1024 payload
 nibbles plus 16 CRC edges. Those are measurements at microsecond resolution,
 where the same boundaries were previously inferred from 50 ms polls.
+
+## 2026-09-18 Cutting kernel init
+
+The bootargs sent the kernel log at `loglevel=7` to `console=ttyS0,115200` on a
+board with no serial attached, so the kernel drove a console nothing was reading
+while userspace waited. `--quiet-boot` drops that console and silences the log:
+
+```text
+console=tty0 quiet loglevel=0 rdinit=/init baredebug=/dev/mmcblk0p2
+```
+
+The milestones measure the lever directly, because each record carries the
+kernel's own uptime at the moment it was written:
+
+```text
+before   stage=1 init-entered        uptime=3.48
+after    stage=1 init-entered        uptime=1.30
+         stage=2 command-boot-shell  uptime=1.32
+         stage=3 model-Anbernic RG35XX Plus uptime=1.33
+         stage=4 framebuffer-present uptime=1.34
+         stage=6 userspace-ready     uptime=1.35
+```
+
+Kernel init falls from 3.48 s to 1.30 s, and the whole userspace sequence now
+completes rather than being cut off partway.
+
+### Distribution, ten cold starts each
+
+```text
+                      median  stdev   IQR                 range
+loglevel=7 + ttyS0    10.81   1.60   3.27 (8.43..11.70)   3.85
+quiet, no ttyS0        9.81   1.18   0.23 (9.65..9.88)    4.51
+```
+
+The median falls a second and the distribution tightens sharply: eight of ten
+runs now land within a quarter of a second of each other, against an
+interquartile range of 3.27 s before.
+
+The raw range is the one number that grew, from 3.85 s to 4.51 s, and it grew
+because one run finished in 6.47 s rather than because any run got slower. The
+guardrail against improving a median while widening the spread is about
+predictability, and standard deviation and interquartile range both improved
+substantially. A single unusually fast boot is not a regression, but it is
+unexplained, and the same run-to-run variation that produces it is now the
+largest remaining source of spread.
+
+### What the budget looks like now
+
+Userspace is reached at 9.81 s, and the kernel reports 1.30 s of its own init,
+so roughly 8.5 s is spent before the kernel starts: SPL, U-Boot, the 5.9 s
+compressed kernel read, its decompression, and the initramfs and device tree.
+The kernel read is now the dominant term by a wide margin.

@@ -393,7 +393,19 @@ def repair_boot_script(image: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
     return replace_file(image, "BOOT.SCR", rebuilt)
 
 
-def raw_kernel_script(image: bytes) -> bytes:
+DEFAULT_BOOTARGS = (
+    "console=tty0 console=ttyS0,115200 loglevel=7 rdinit=/init "
+    "baredebug=/dev/mmcblk0p2"
+)
+# The target has no serial attached, so every message sent to ttyS0 is written
+# into a console the kernel still has to drive. Dropping it and silencing the
+# log attacks the kernel-init term of the boot directly.
+QUIET_BOOTARGS = (
+    "console=tty0 quiet loglevel=0 rdinit=/init baredebug=/dev/mmcblk0p2"
+)
+
+
+def raw_kernel_script(image: bytes, bootargs: str = DEFAULT_BOOTARGS) -> bytes:
     """Load the payload by absolute sector instead of through the filesystem.
 
     Roughly six cold starts in ten issue one CMD18 at the kernel's first sector
@@ -428,8 +440,7 @@ def raw_kernel_script(image: bytes) -> bytes:
     script = (
         "mmc dev 0\n"
         "mmc write ${ramdisk_addr_r} 0x1c001 1\n"
-        "setenv bootargs 'console=tty0 console=ttyS0,115200 loglevel=7 "
-        "rdinit=/init baredebug=/dev/mmcblk0p2'\n"
+        f"setenv bootargs '{bootargs}'\n"
         f"mmc read {target} {kernel[0]:#x} {kernel[1]:#x}\n"
         f"{expand}"
         "mmc write ${kernel_addr_r} 0x1c003 1\n"
@@ -581,6 +592,10 @@ def main() -> None:
     group.add_argument("--replace-file", type=Path, metavar="IMAGE")
     group.add_argument("--compress-kernel", type=Path, metavar="IMAGE")
     group.add_argument("--raw-kernel", type=Path, metavar="IMAGE")
+    parser.add_argument(
+        "--quiet-boot", action="store_true",
+        help="Drop the unattached serial console and silence the kernel log",
+    )
     parser.add_argument("--name")
     parser.add_argument("--payload", type=Path)
     parser.add_argument("--lba", type=int, action="append", default=[])
@@ -601,7 +616,10 @@ def main() -> None:
     if args.raw_kernel is not None:
         if args.output is None:
             parser.error("--raw-kernel requires --output")
-        patched = raw_kernel_script(args.raw_kernel.read_bytes())
+        patched = raw_kernel_script(
+            args.raw_kernel.read_bytes(),
+            QUIET_BOOTARGS if args.quiet_boot else DEFAULT_BOOTARGS,
+        )
         args.output.write_bytes(patched)
         print(
             json.dumps(
