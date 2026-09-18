@@ -163,6 +163,29 @@ def main() -> None:
             f"writes={entry['writes']:>2d} lba={entry['read_lba']:>7d} "
             f"{'stream' if entry['streaming'] else '      '}{where}"
         )
+    # Every capture register resets when the card is disarmed, so the block
+    # capture and its fabric timestamps have to be reported from the last
+    # in-run sample rather than queried afterwards.
+    enhanced = samples[-1][1].get("enhanced", {})
+    block = enhanced.get("first_mmc_block", {})
+    if block.get("state") not in (None, "idle"):
+        timing = enhanced.get("timing", {})
+        print(
+            f"\ncaptured sector {block['capture_lba']}: {block['state']}, "
+            f"{block['payload_bits']} payload bits, "
+            f"crc {'match' if block['crc_match'] else 'MISMATCH'}, "
+            f"end bit {'set' if block['end_bit'] else 'missing'}"
+        )
+        if block.get("first_32_bytes"):
+            print(f"  first bytes {block['first_32_bytes']}")
+        span = timing.get("first_block_end", 0) - timing.get("data_start", 0)
+        print(
+            f"  fabric ticks: r1_end {timing.get('r1_end')}, "
+            f"data_start {timing.get('data_start')}, "
+            f"block_end {timing.get('first_block_end')} (span {span}), "
+            f"edges {timing.get('data_start_edge')}..{timing.get('first_block_end_edge')}"
+        )
+
     final = summarize(samples[-1][1])
     print(
         f"\nlast read LBA {final['read_lba']}, "

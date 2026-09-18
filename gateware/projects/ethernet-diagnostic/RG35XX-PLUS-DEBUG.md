@@ -861,3 +861,35 @@ The metric itself is worth stating precisely, because the earlier figures used
 a weaker proxy. The raw boot script writes exactly four milestones, so the
 fifth write of a run is the first one userspace made, and that is the instant
 the benchmark measures to.
+
+## 2026-09-18 Stage boundaries in the FPGA clock domain
+
+The independent block decoder armed on an MMC CMD18 and decoded one lane, so on
+this SD four-bit boot it never fired and every timestamp beside it stayed zero.
+It now arms on a backend read of a chosen sector, follows the bus width from the
+trace's own status word, and records the sector that armed it.
+`--trace-capture-lba` selects that sector and defaults to the kernel's first.
+
+Captures reset when the card is disarmed, so `rg35xx_trial.py` reports them from
+the last in-run sample rather than querying afterwards. On bitstream
+`cf5fb75dadfd8dcb65a89f4df8772986cdfd26b2dee3bbfab50979eeb28a30c3`, seed 19,
+847,723 configuration bits:
+
+```text
+captured sector 32985: done, 1024 payload bits, crc match, end bit set
+  first bytes 1f8b0800000000000213ecbd0b7854d5d537bece39334908b790842424486602
+  fabric ticks: r1_end 846847485, data_start 846848301,
+                block_end 846859404 (span 11103), edges 124..1165
+```
+
+Everything there is independent of the serializer that produced it. Sector
+32,985 is the kernel's first sector, the payload counted 1024 nibble ticks
+rather than 4096 bit ticks, the lane-zero CRC matches, the end bit is present,
+and the first bytes are the gzip magic that starts the compressed kernel.
+
+The timestamps are the point. At 64 MHz, the response end to the first data bit
+is 816 ticks, 12.75 us, and one 512-byte block spans 11,103 ticks, 173.5 us,
+which is 2.95 MB/s and agrees with the rate inferred from sector counts. The
+block occupies 1,041 sampled edges, exactly one start bit plus 1024 payload
+nibbles plus 16 CRC edges. Those are measurements at microsecond resolution,
+where the same boundaries were previously inferred from 50 ms polls.
