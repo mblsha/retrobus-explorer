@@ -432,3 +432,73 @@ expected complete R1 is `03 00 00 05 00 fb`. No MMC data phase had begun.
 The remaining decisive measurement is CLK/CMD at the H700 end of the adapter
 through CMD3. FPGA IOBUF readback cannot show settling or sampling after the
 Arty JD connector's series path. A successful H700 boot remains unproven.
+
+## 2026-09-18 R1b busy and the missing data-line pull-up
+
+The reproducible stop is a host-side wait, not a rejected response. Sampling
+the trace once per second through a cold start showed the SD clock running
+continuously at about 246,000 edges per second for 25 seconds after the last
+command, with the command, response, and backend counters all frozen. A host
+that had rejected a response would retry it; this one issues nothing and keeps
+clocking.
+
+The last command in that trial was SD CMD7. Selection answers R1b, so the card
+pulses DAT0 low for 255 fabric cycles and then releases it, and the sunxi
+controller polls DAT0 for the end of that busy signal. This adapter has no
+effective pull-up: released response ones were already observed as lows on CMD,
+which is why this profile drives command responses. A released DAT0 therefore
+reads low forever, the busy check never completes, and the controller clocks
+without issuing another command. Every earlier stop at CMD7, and the MMC stops
+around CMD6 and CMD8, fit the same explanation, because those are the other
+R1b and wait-for-DAT0 points in the U-Boot flow.
+
+The H700 profile now holds the idle data lines at their pull-up level. The
+value already sits high in the final data registers, so only the output enable
+changes and the qualified register-to-pad data path is untouched. Active
+transfers, the deliberate busy pulse, and host write data keep the released
+behavior, and the qualified SD and GKD MMC profiles are unaffected. The trace
+reports the state as `idle_data_high`.
+
+Holding a level while armed must never back-power an unpowered target. A
+single-edge watchdog is not enough: with the RG35XX off, the floating SD_CLK
+input still produced about 320 transitions per second. The drive is therefore
+gated on an edge *rate*, at least four transitions inside a 4096-cycle window,
+which the slowest observed host clock exceeds by roughly a thousand times and
+floating-input noise never approaches. The decision is registered and releases
+within two windows, about 128 us.
+
+### Result
+
+With the idle level held, the H700 SPL passed the boundary that had stopped
+three consecutive cold starts. Its command history became:
+
+```text
+ACMD41, CMD2, CMD3, CMD9, CMD7, CMD55, ACMD51, CMD6
+arguments 0x40300000, 0, 0, 0x10000, 0x10000, 0x10000, 0, 0x01000031
+```
+
+`select_ready` is now true, the initial BootROM load still completes, and the
+new stop is SD CMD6. That command is the SD switch function, which returns a
+64-byte status block on the data lines. This emulator does not implement it, so
+the host waits for data that never arrives.
+
+U-Boot's `sd_change_freq()` only issues CMD6 when the card declares SD 1.10 or
+later. The H700 profile's SCR now declares SD 1.01, which is what a card
+without the switch function should report, so the host skips it. The qualified
+SD and GKD profiles keep the previously validated SCR.
+
+### SD fabric clock
+
+Every placement of the enhanced-telemetry design failed the 80 MHz `fclk`
+constraint once the compatibility logic was added, across fifteen seeds on one
+netlist and ten on another. The constraint is not physical: the host clock
+measured here is three orders of magnitude lower, and the profile's own CSD
+advertises 13 MHz. `build_ddr.py --sd-io-clock-hz` now selects the SD fabric
+clock, and this profile builds at 64 MHz, which divides the same 1600 MHz VCO
+as the DDR outputs. The initial BootROM 4-bit load still completed normally at
+that rate.
+
+Note for rebuilds: `nextpnr-xilinx` here is linked against Boost 1.90, so it
+needs `DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib`. macOS strips
+that variable when launching through `uv run`, so invoke the build with
+`./.venv/bin/python` directly.

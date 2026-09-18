@@ -39,8 +39,16 @@ if __name__ == "__main__":
         original_init(self, *args, **kwargs)
         self.crg.cd_sd_io = ClockDomain("sd_io", reset_less=True)
         sd_io_clock_hz = int(os.environ.get("MICROSD_IO_CLOCK_HZ", "100000000"))
-        if sd_io_clock_hz not in (80_000_000, 100_000_000):
-            raise ValueError("MICROSD_IO_CLOCK_HZ must be 80000000 or 100000000")
+        # The lower rates exist so a congested diagnostic build can trade SD
+        # bandwidth for routability. The host clock observed on the RG35XX is
+        # three orders of magnitude below any of them.
+        # 64 and 50 MHz divide the same 1600 MHz VCO as the DDR outputs, so a
+        # congested diagnostic build can trade SD bandwidth for routability.
+        # The host clock observed on the RG35XX is far below all of them.
+        if sd_io_clock_hz not in (50_000_000, 64_000_000, 80_000_000, 100_000_000):
+            raise ValueError(
+                "MICROSD_IO_CLOCK_HZ must be 50, 64, 80 or 100 MHz"
+            )
         self.crg.pll.create_clkout(self.crg.cd_sd_io, sd_io_clock_hz)
         self.platform.add_extension([("sd_io_clk", 0, Pins(1))])
         self.comb += self.platform.request("sd_io_clk").eq(ClockSignal("sd_io"))

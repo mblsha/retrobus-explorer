@@ -201,12 +201,17 @@ class Host:
             "MMC CSD must enforce the qualified rate"
         )
         assert await self.command(7, 0x10000) == bytes.fromhex("070000070075")
-        assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 must release DAT0"
-        # Gate SD_CLK and ensure the line remains released. An independently
-        # powered FPGA must not drive an inactive target through DAT0.
+        assert not int(self.d.dat_oe.value) & 1 or int(self.d.dat_out.value) & 1, (
+            "MMC CMD7 must not hold DAT0 busy"
+        )
+        # Gate SD_CLK for longer than the host-activity watchdog and ensure
+        # every line is released. An independently powered FPGA must not drive
+        # an inactive target, whether low or high.
         self.d.sd_clk.value = 0
-        await tick(self.d.clk, 300)
-        assert not int(self.d.dat_oe.value) & 1, "MMC CMD7 later asserted DAT0"
+        await tick(self.d.clk, 33000)
+        assert not int(self.d.dat_oe.value), (
+            "a gated host clock must release the data lines"
+        )
         protocol = int(self.d.trace_protocol_status.value)
         assert protocol & 0xFF == 0, "CMD7 response did not finish serialization"
         assert (protocol >> 8) & 0xF == 4, "CMD7 did not enter transfer state"
@@ -241,12 +246,15 @@ class Host:
 
     async def data(self, size=512, wide=False):
         lanes = 4 if wide else 1
+        mask = 15 if wide else 1
+        # Find the start bit on the lines themselves rather than through the
+        # output enable: the H700 compatibility profile holds the idle lines
+        # high, exactly as a host with working pull-ups would see them.
         # Backend latency is measured in memory cycles, independent of SD clock.
         for _ in range(1000):
             _, _, oe, value = await self.cycle()
-            if oe:
-                assert oe == (15 if wide else 1)
-                assert value & oe == 0
+            if oe and value & mask == 0:
+                assert oe & mask == mask
                 break
         else:
             assert False, "missing data start"
@@ -277,7 +285,10 @@ class Host:
             assert crcs[lane] == binascii.crc_hqx(packed, 0), (lane, crcs[lane])
         _, _, oe, value = await self.cycle()
         assert value & oe == oe
-        assert not (await self.cycle())[2]
+        _, _, oe, value = await self.cycle()
+        assert oe == 0 or value & oe == oe, (
+            "the card must release the data lines or hold them high after a read"
+        )
         return received
 
 

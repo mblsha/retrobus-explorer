@@ -68,6 +68,36 @@ async def h700_command_launch_phase_follows_early_command_option(d):
 
 
 @cocotb.test()
+async def h700_idle_data_lines_hold_the_pull_up_level(d):
+    """The H700 adapter has no effective pull-up, so a released DAT0 reads low
+    and the host's R1b busy check never completes. This profile holds the idle
+    high level while the host is clocking, and releases everything once the
+    host clock stops so an armed FPGA cannot drive an unpowered target."""
+    h = await setup(d)
+
+    # The qualified profiles keep standards-compliant released data lines.
+    for _ in range(4):
+        assert (await h.cycle())[2] == 0
+
+    d.h700_mode.value = 1
+    # The liveness gate measures an edge rate, so give it a full window.
+    for _ in range(120):
+        oe, value = (await h.cycle())[2:]
+    assert oe == 15, "the H700 profile must hold the idle data lines"
+    assert value & oe == oe, "the idle level must be high, not busy"
+
+    # The watchdog releases the lines shortly after the host clock stops.
+    d.sd_clk.value = 0
+    await tick(d.clk, 33000)
+    assert int(d.dat_oe.value) == 0, "an idle host clock must release the lines"
+
+    # Clocking again re-engages the compatibility level.
+    for _ in range(120):
+        oe, value = (await h.cycle())[2:]
+    assert oe == 15 and value & oe == oe
+
+
+@cocotb.test()
 async def mmc_fallback_enumerates_and_reads(d):
     h = await setup(d)
     # Match the observed H700 fallback: the SD operation-condition response
@@ -140,11 +170,14 @@ async def h700_profile_leaves_post_loader_sd_probe_available(d):
     await h.command(0, length=0)
     assert (await h.command(1, 0))[1:5] == bytes.fromhex("c0ff8080")
 
-    # Fresh MMC selection uses ordinary R1 and leaves DAT0 released. Reject a
+    # Fresh MMC selection uses ordinary R1 and never holds DAT0 busy. Reject a
     # four-bit switch in this diagnostic profile so H700 transfer testing stays
     # on the one data line already used during identification.
     await h.init_mmc()
-    assert not int(d.dat_oe.value)
+    oe = int(d.dat_oe.value)
+    assert oe == 0 or int(d.dat_out.value) & oe == oe, (
+        "fresh MMC selection must not hold the data lines low"
+    )
     response = await h.command(6, 0x03B70100)
     assert int.from_bytes(response[1:5], "big") & (1 << 22)
     status = await h.command(13, 0x10000)

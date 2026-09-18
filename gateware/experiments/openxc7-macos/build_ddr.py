@@ -70,6 +70,13 @@ def main():
         help="Launch H700 command responses from the early diagnostic phase",
     )
     parser.add_argument(
+        "--sd-io-clock-hz",
+        type=int,
+        choices=(50_000_000, 64_000_000, 80_000_000, 100_000_000),
+        help="Override the SD fabric clock; lower rates trade card bandwidth "
+        "for routability in congested diagnostic builds",
+    )
+    parser.add_argument(
         "--mmc-only",
         action="store_true",
         help="Suppress SD negotiation so a host deterministically probes legacy MMC",
@@ -98,7 +105,9 @@ def main():
     env = dict(os.environ)
     env["PYTHONHASHSEED"] = "0"
     env["SOURCE_DATE_EPOCH"] = "0"
-    sd_io_clk_freq = 80_000_000 if args.slow_mmc else 100_000_000
+    sd_io_clk_freq = args.sd_io_clock_hz or (
+        80_000_000 if args.slow_mmc else 100_000_000
+    )
     env["MICROSD_IO_CLOCK_HZ"] = str(sd_io_clk_freq)
     env["PATH"] = (
         str(GATEWARE / "build/xpack-riscv-none-elf-gcc-15.2.0-1/bin")

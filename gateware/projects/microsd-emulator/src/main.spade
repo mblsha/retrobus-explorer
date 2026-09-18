@@ -179,6 +179,32 @@ pub entity sd_frontend(
     reg(clk) delayed_write_transaction_active reset(rst || !armed: false) = *write_transaction_active;
     let write_active = write_mode != WRITE_IDLE || (if prepared_data_mode { delayed_write_transaction_active } else { *write_transaction_active });
     let sd_sample_tick = clk_sync && !clk_prev;
+    // A live host clocks SD_CLK continuously; an unpowered one leaves the line
+    // floating, where measured noise still produces a few hundred transitions
+    // per second. Any compatibility drive is therefore gated on an edge *rate*
+    // rather than on a single recent edge: at least four transitions inside a
+    // 4096-cycle window, about 64 us. The slowest host clock observed on the
+    // RG35XX puts roughly thirty transitions in that window while the measured
+    // floating-input noise puts a thousandth of one. The decision is
+    // registered, so an armed FPGA stops driving an unpowered target within
+    // two windows, about 128 us.
+    reg(clk) host_clock_window: uint<12> reset(rst || !armed: 0) =
+        host_clock_window +. 1;
+    let host_clock_window_end = host_clock_window == 0;
+    reg(clk) host_clock_edges: uint<3> reset(rst || !armed: 0) =
+        if host_clock_window_end {
+            0
+        } else if clk_sync != clk_prev && host_clock_edges != 7 {
+            host_clock_edges +. 1
+        } else {
+            host_clock_edges
+        };
+    reg(clk) host_clock_active reset(rst || !armed: false) =
+        if host_clock_window_end {
+            host_clock_edges >= 4
+        } else {
+            host_clock_active
+        };
     // Prepared outputs launch after the synchronized rising edge. Their
     // opposite-edge pad registers provide setup time before the next host
     // rising edge; command responses can retain the proven slow path.
@@ -1087,7 +1113,16 @@ pub entity sd_frontend(
         }
     };
     let offset: uint<9> = trunc(bit_index >> 3);
-    let scr_value: uint<64> = 0x0105000000000000;
+    // A card that does not implement the SD switch function must declare SD
+    // 1.01. U-Boot's sd_change_freq() returns early for that version; with
+    // 1.10 it issues CMD6 and waits for a 64-byte function-status block this
+    // emulator never sends, which hangs the H700 SPL with the clock running.
+    // The qualified SD and GKD profiles keep the previously validated value.
+    let scr_value: uint<64> = if h700_mode {
+        0x0005000000000000
+    } else {
+        0x0105000000000000
+    };
     let selected_byte: uint<8> = if sending_scr {
         trunc(scr_value >> (56 -. (zext(offset) << 3)))
     } else if sending_sd_status {
@@ -1230,7 +1265,7 @@ pub entity sd_frontend(
         } else {
             data_output
         });
-    set dat_oe = &(if !armed {
+    let data_output_enable: uint<4> = if !armed {
             0
         } else if select_busy {
             1
@@ -1244,6 +1279,30 @@ pub entity sd_frontend(
             } else {
                 1
             }
+        } else {
+            0
+        };
+    // The H700 adapter path has no effective pull-up. Released response ones
+    // were already observed as lows on CMD, and the same defect leaves DAT0
+    // low once the R1b select pulse releases it. The host reads that as a card
+    // that never leaves busy, so it keeps clocking without issuing another
+    // command. Hold the idle high level explicitly while this profile drives
+    // nothing: the value already sits high in the final data registers, so
+    // only the output enable changes and the qualified register-to-pad data
+    // path is untouched. Active transfers, the deliberate busy pulse, and host
+    // write data keep the standards-compliant released behavior, and the
+    // qualified SD and GKD MMC profiles are unaffected.
+    // Register everything except the live transfer mask. Those terms come from
+    // registers spread across the die, and combining them on the way to the
+    // output buffer put a long multi-level path on the SD fabric clock. One
+    // fabric cycle of lag is irrelevant to a level held for microseconds.
+    reg(clk) h700_idle_data_armed reset(local_rst: false) = h700_mode && armed &&
+        host_clock_active && !select_busy && !write_active;
+    let h700_idle_data_high = h700_idle_data_armed && data_output_enable == 0;
+    set dat_oe = &(if data_output_enable != 0 {
+            data_output_enable
+        } else if h700_idle_data_armed {
+            15
         } else {
             0
         });
@@ -1337,6 +1396,7 @@ pub entity sd_frontend(
     let trace_mmc: uint<32> = if mmc_mode { 1 << 12 } else { 0 };
     let trace_open_drain: uint<32> = if open_drain_reply { 1 << 13 } else { 0 };
     let trace_select_busy: uint<32> = if select_busy { 1 << 14 } else { 0 };
+    let trace_idle_data_high: uint<32> = if h700_idle_data_high { 1 << 15 } else { 0 };
     let trace_command_drive: uint<32> = if command_pin_drive { 1 << 22 } else { 0 };
     let trace_command_output: uint<32> = if command_output { 1 << 23 } else { 0 };
     let trace_data_drive: uint<32> = if data_drive { 1 << 24 } else { 0 };
@@ -1344,7 +1404,7 @@ pub entity sd_frontend(
     let trace_wide: uint<32> = if wide { 1 << 30 } else { 0 };
     let trace_loader_read: uint<32> = if boot_read_seen { 1 << 31 } else { 0 };
     set trace_protocol_status = &(zext(response_left) | (zext(state) << 8) |
-        trace_mmc | trace_open_drain | trace_select_busy |
+        trace_mmc | trace_open_drain | trace_select_busy | trace_idle_data_high |
         (zext(saved_index) << 16) | trace_command_drive | trace_command_output |
         trace_data_drive | (zext(pad_data_enable) << 25) | trace_block_256 |
         trace_wide | trace_loader_read);
