@@ -1175,3 +1175,62 @@ one for the configuration, and the build refuses to run against a tree that
 does not match. Missing, extra and altered files are all refused, because all
 three change the kernel. Moving to a newer ROCKNIX tree is done deliberately
 with `--allow-unpinned` and re-recording the manifest.
+
+## 2026-09-19 The three stages, measured
+
+### The protocol
+
+A standardized cold start is one run of `rg35xx_trial.py`: the target's channel
+is switched off synchronously, held off six seconds, then switched on without
+waiting for the power CLI while polling is already running. The clock is zeroed
+on the first command the card saw, not on the power command, and a run counts
+only if some poll saw the card quiet before it. The end is the first
+multi-block write in the debug partition: U-Boot writes one sector per
+milestone, and every write from Linux goes through the page cache and is at
+least a page, so the command itself or a jump of a page in the sector counter
+both mark userspace. The image is checked with `--verify-image` before upload
+and the upload verifies its own SHA-256 against the file.
+
+### Stage 1, the card interface: blocked, and the rate
+
+The rate is derived from the FPGA's own timestamps: it counts the clock edges
+across one 512-byte block and the fabric ticks between the first and the last,
+so the figure depends on nothing the host reports and nothing the CSD claims.
+Over ten cold starts of the delivered build:
+
+```text
+card clock   6.001 MHz   stdev 0.0000
+throughput   2.951 MB/s  stdev 0.0000
+```
+
+Bit-identical every run. At that rate the 7,363,461-byte kernel takes 2.50 s,
+which is 46% of the boot.
+
+The interface could not be raised. The card's advertised `TRAN_SPEED` was made
+a build option and swept: at 12, 13 and 20 MHz the host clocks 6.00 MHz, and at
+25 MHz it clocks 25.00 MHz. There is no divisor between them to ask for, so
+12 MHz is not reachable by advertising it. 25 MHz is reachable and unusable: it
+leaves 2.56 fabric cycles per SD period against the 64 MHz SD fabric clock, and
+serving it needs roughly 100 MHz, which is the timing work that build exists to
+avoid. The step is blocked, and every later stage is measured against the rate
+above rather than a hoped-for one.
+
+### Every stage against the same clock
+
+```text
+                                  n   median   min    max   stdev   IQR
+stage 1  baseline, shipped kernel  10   9.93   9.88  11.07   0.36   0.06
+stage 2  trimmed kernel, initramfs 10   5.75   5.72   5.83   0.03   0.05
+stage 3  trimmed kernel, EROFS     20   5.44   5.41   6.72   0.29   0.02
+```
+
+Each stage improves the median and none widens the interquartile range, so
+none is a regression by the standard set for this work. The standard deviations
+are carried by a single slow boot in each of stage 1 and stage 3, at 11.07 s
+and 6.72 s; both runs have a sound zero, so they are real boots and not
+measurement noise. Nineteen of the twenty stage-3 runs fall within 80 ms of
+each other.
+
+The target was under four seconds and the result is 5.44. The two payload
+stages delivered 4.49 s of the 5.9 s that would have needed; the rest was in
+the interface, and the measurement above shows why it could not be taken.

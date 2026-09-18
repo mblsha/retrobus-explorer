@@ -149,3 +149,48 @@ class TrialZeroTests(unittest.TestCase):
         baseline = trace(frames=2)
         samples = [(0.0, baseline), (0.05, trace(frames=3, reads=40))]
         self.assertEqual(trial.first_command_index(samples, baseline), 1)
+
+
+class InterfaceRateTests(unittest.TestCase):
+    """The card rate decides the kernel read, which is half the boot, so it is
+    derived from the FPGA's own timestamps rather than from the CSD or from
+    anything the host reports."""
+
+    def test_the_rate_follows_from_edges_and_fabric_ticks(self):
+        # 1041 edges across a 512-byte block in 11103 ticks of a 64 MHz clock
+        # is the measurement this bench has been reporting as 6 MHz.
+        rate = trial.interface_rate(
+            {
+                "data_start": 1000,
+                "first_block_end": 1000 + 11103,
+                "data_start_edge": 125,
+                "first_block_end_edge": 1166,
+            },
+            64e6,
+        )
+        self.assertAlmostEqual(rate["card_clock_hz"] / 1e6, 6.00, places=2)
+        self.assertAlmostEqual(
+            rate["throughput_bytes_per_second"] / 1e6, 2.95, places=2
+        )
+
+    def test_the_rate_scales_with_the_fabric_clock_it_is_counted_in(self):
+        """The timestamps are counted in the bitstream's SD fabric clock, so a
+        build at a different clock must be told, or every rate is wrong by the
+        ratio between them."""
+        timing = {
+            "data_start": 0, "first_block_end": 11103,
+            "data_start_edge": 125, "first_block_end_edge": 1166,
+        }
+        slow = trial.interface_rate(timing, 64e6)["card_clock_hz"]
+        fast = trial.interface_rate(timing, 128e6)["card_clock_hz"]
+        self.assertAlmostEqual(fast / slow, 2.0, places=6)
+
+    def test_a_capture_that_never_completed_has_no_rate(self):
+        self.assertIsNone(trial.interface_rate({}, 64e6))
+        self.assertIsNone(
+            trial.interface_rate(
+                {"data_start": 10, "first_block_end": 10,
+                 "data_start_edge": 0, "first_block_end_edge": 5},
+                64e6,
+            )
+        )

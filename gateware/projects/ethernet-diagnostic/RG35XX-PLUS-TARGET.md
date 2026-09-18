@@ -29,11 +29,15 @@ Measured over ten sound cold starts per stage, from the host's first command to
 the first multi-block write in the debug partition:
 
 ```text
-                              median   min    max   stdev   IQR
-quiet console, shipped kernel   9.93   9.88  11.07   0.36   0.06
-trimmed kernel, initramfs       5.75   5.72   5.83   0.03   0.05
-trimmed kernel, EROFS root      5.44   5.42   5.49   0.02   0.02
+                                  n   median   min    max   stdev   IQR
+baseline, shipped kernel          10   9.93   9.88  11.07   0.36   0.06
+trimmed kernel, initramfs         10   5.75   5.72   5.83   0.03   0.05
+trimmed kernel, EROFS root        20   5.44   5.41   6.72   0.29   0.02
 ```
+
+Each stage improves the median and none widens the interquartile range. The
+standard deviations are carried by a single slow boot in each of the first and
+last rows; both have a sound zero and are real boots.
 
 The boot is repeatable to about thirty milliseconds. The spread these figures
 once showed was the measurement: the clock started when the power-supply CLI

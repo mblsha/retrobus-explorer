@@ -93,6 +93,29 @@ def transitions(samples: list[tuple[float, dict]], progress: int = 8192) -> list
     return entries
 
 
+def interface_rate(timing: dict, fabric_clock_hz: float) -> dict | None:
+    """Derive the card's clock and throughput from one captured block.
+
+    The FPGA timestamps the first and last clock edge of a 512-byte block in
+    its own clock domain and counts the edges between them, so the rate follows
+    without trusting anything the host reports or the CSD advertises. This is
+    the figure that decides the kernel read, which is half the boot, so it is
+    reported on every run rather than measured once.
+    """
+    span = timing.get("first_block_end", 0) - timing.get("data_start", 0)
+    edges = timing.get("first_block_end_edge", 0) - timing.get("data_start_edge", 0)
+    if span <= 0 or edges <= 0:
+        return None
+    seconds = span / fabric_clock_hz
+    return {
+        "card_clock_hz": edges / seconds,
+        # Four lanes, one 512-byte block between those two edges.
+        "throughput_bytes_per_second": 512 / seconds,
+        "fabric_ticks": span,
+        "clock_edges": edges,
+    }
+
+
 def power(cli: Path, channel: str, state: str, wait: bool = True):
     """Switch the target's channel, optionally without waiting for the CLI.
 
@@ -168,6 +191,11 @@ def main() -> None:
         "--image", type=Path,
         help="Boot image used to name the LBAs each stage touched",
     )
+    parser.add_argument(
+        "--fabric-clock-hz", type=float, default=64e6,
+        help="SD fabric clock the bitstream was built with; the block "
+        "timestamps are counted in it",
+    )
     parser.add_argument("--output", type=Path, help="Write the timeline as JSON")
     arguments = parser.parse_args()
     if arguments.psu_cli is None:
@@ -237,6 +265,12 @@ def main() -> None:
             f"block_end {timing.get('first_block_end')} (span {span}), "
             f"edges {timing.get('data_start_edge')}..{timing.get('first_block_end_edge')}"
         )
+        rate = interface_rate(timing, arguments.fabric_clock_hz)
+        if rate is not None:
+            print(
+                f"  card interface: {rate['card_clock_hz'] / 1e6:.2f} MHz, "
+                f"{rate['throughput_bytes_per_second'] / 1e6:.2f} MB/s"
+            )
 
     print(
         f"\nfirst host command {zero:.2f}s after the power command was issued; "
@@ -256,10 +290,18 @@ def main() -> None:
         f"{final['invalid'] - baseline['invalid_frames']} invalid"
     )
     if arguments.output is not None:
+        enhanced = samples[-1][1].get("enhanced", {})
         arguments.output.write_text(
             json.dumps(
-                {"zero_is_sound": sound, "power_to_first_edge": round(zero, 3),
-                 "timeline": timeline},
+                {
+                    "zero_is_sound": sound,
+                    "power_to_first_edge": round(zero, 3),
+                    "interface_rate": interface_rate(
+                        enhanced.get("timing", {}), arguments.fabric_clock_hz
+                    ),
+                    "block_capture": enhanced.get("first_mmc_block", {}),
+                    "timeline": timeline,
+                },
                 indent=2,
             )
             + "\n"
