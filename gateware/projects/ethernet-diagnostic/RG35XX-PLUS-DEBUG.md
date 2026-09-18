@@ -990,3 +990,62 @@ would take the compressed kernel read from 5.3 s to about 1.3 s.
 
 Until that is attempted, every remaining boot-time saving has to come from
 reading fewer bytes rather than reading them faster.
+
+## 2026-09-19 The trimmed kernel
+
+`rg35xx/build_kernel.py` builds the kernel the device actually needs. ROCKNIX
+pins mainline 7.2 for the H700 with 27 patches, and its own configuration is
+published as `linux.aarch64.conf`, so the build takes that source and that
+configuration and removes what this device cannot use. The tarball is verified
+against the SHA-256 ROCKNIX pins and the patches are fetched at a pinned commit.
+
+Two of ROCKNIX's settings are incompatible with the target and are cleared:
+`INITRAMFS_SOURCE`, which holds a build-system placeholder and is not wanted
+because the rootfs will be mounted from the card, and `EXTRA_FIRMWARE`, which
+builds the RTL8821CS blobs into the image rather than loading them from
+`/lib/firmware`. The rootfs carries them instead, which keeps them out of the
+bytes the card must read before anything can run.
+
+```text
+                      shipped     trimmed
+built-in options         1929        1663
+uncompressed         30.4 MiB    17.8 MiB
+gzip -9              15.0 MiB     7.02 MiB
+zstd -19                    -     5.90 MiB
+```
+
+Every intended change survived `olddefconfig`: Panfrost, Sun4i, RTW88 with the
+8821CS, mac80211, SoC audio and MMC are still built in, Bluetooth is still a
+module, USB, BTRFS, NTFS3, NFS, SQUASHFS, EXT4, netfilter, `KALLSYMS_ALL`,
+`DEBUG_FS` and KASLR are gone, and EROFS with compression, `EXT2`,
+`CC_OPTIMIZE_FOR_SIZE` and `TRIM_UNUSED_KSYMS` are in.
+
+### zstd is not available through this U-Boot
+
+The plan called for storing the kernel zstd, which is 5.90 MiB against gzip's
+7.02 and decompresses far faster on an A53. The card serves it correctly: the
+block capture at the kernel's first sector shows `28b52ffd`, the zstd magic,
+with a matching CRC. U-Boot reads it and writes all four of its milestones, and
+then `booti` never starts a kernel. There is no `unzstd` command to use
+instead, so the kernel is stored gzip. The difference is 0.4 s of reading.
+
+### Distribution, ten cold starts
+
+Measured to the first multi-block write in the raw debug partition, which is
+the initramfs writing through `dd`; U-Boot's own milestones are single-block
+writes and are excluded.
+
+```text
+                            median   min    max   stdev   IQR
+quiet console, old kernel     9.82   6.47  10.98   1.24   0.28
+trimmed kernel                5.38   2.23   5.75   1.28   1.65
+```
+
+The median falls 4.44 s and the slowest trimmed boot is faster than all but one
+of the previous ten. Standard deviation is unchanged, so predictability did not
+degrade, but the interquartile range grew because of two unusually fast runs.
+One of them, 2.23 s, is below the physical floor: the kernel read alone is
+2.50 s at the measured card rate. That points at the measurement rather than
+the boot, because the trial's zero is when the power-supply command returns
+rather than when the target's rail actually rises. The medians are unaffected;
+the fast tail is not yet trustworthy.

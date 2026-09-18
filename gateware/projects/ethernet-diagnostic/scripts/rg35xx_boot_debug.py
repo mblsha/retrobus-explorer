@@ -14,6 +14,7 @@ import gzip
 import io
 import hashlib
 import json
+import subprocess
 import struct
 from pathlib import Path
 
@@ -358,7 +359,11 @@ def replace_file(image: bytes, name: str, payload: bytes) -> bytes:
     return bytes(patched)
 
 
-def compress_kernel(image: bytes) -> bytes:
+ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+GZIP_MAGIC = b"\x1f\x8b"
+
+
+def compress_kernel(image: bytes, method: str = "gzip") -> bytes:
     """Store KERNEL gzip-compressed and boot it through U-Boot's unzip.
 
     The card reads about 2.6 MB/s, so the 31.9 MB Image costs twelve seconds of
@@ -372,11 +377,20 @@ def compress_kernel(image: bytes) -> bytes:
     partition = _partition(mbr[446:462])
     fat = _Fat16(stream, partition["start_lba"], partition["sectors"])
     kernel = fat.read("KERNEL")
-    if kernel[:2] == b"\x1f\x8b":
+    if kernel[:2] == GZIP_MAGIC or kernel[:4] == ZSTD_MAGIC:
         raise ValueError("KERNEL is already compressed")
     if kernel[56:60] != b"ARM\x64":
         raise ValueError("KERNEL is not an arm64 Image")
-    compressed = gzip.compress(kernel, 9, mtime=0)
+    if method == "zstd":
+        # zstd is both smaller and far cheaper to expand on an A53 than gzip,
+        # and U-Boot's booti handles it through kernel_comp_addr_r. There is no
+        # unzstd command, so the two-step unzip form cannot be used.
+        compressed = subprocess.run(
+            ["zstd", "-19", "-q", "-c"], input=kernel,
+            stdout=subprocess.PIPE, check=True,
+        ).stdout
+    else:
+        compressed = gzip.compress(kernel, 9, mtime=0)
     patched = replace_file(image, "KERNEL", compressed)
     return repair_boot_script(patched, COMPRESSED_KERNEL_SCRIPT)
 
@@ -432,11 +446,18 @@ def raw_kernel_script(image: bytes, bootargs: str = DEFAULT_BOOTARGS) -> bytes:
             size,
         )
     kernel, initrd, dtb = (placement[n] for n in ("KERNEL", "INITRD", "DTB.IMG"))
-    compressed = fat.read("KERNEL")[:2] == b"\x1f\x8b"
+    stored = fat.read("KERNEL")
+    # gzip is expanded by the unzip command, which needs the compressed image
+    # somewhere other than its destination. zstd has no such command, so booti
+    # expands it itself into kernel_comp_addr_r and the compressed image is
+    # loaded at kernel_addr_r, well clear of that window.
     expand = (
-        "unzip ${kernel_comp_addr_r} ${kernel_addr_r}\n" if compressed else ""
+        "unzip ${kernel_comp_addr_r} ${kernel_addr_r}\n"
+        if stored[:2] == GZIP_MAGIC else ""
     )
-    target = "${kernel_comp_addr_r}" if compressed else "${kernel_addr_r}"
+    target = (
+        "${kernel_comp_addr_r}" if stored[:2] == GZIP_MAGIC else "${kernel_addr_r}"
+    )
     script = (
         "mmc dev 0\n"
         "mmc write ${ramdisk_addr_r} 0x1c001 1\n"
@@ -540,8 +561,9 @@ def verify_boot_image(path: Path) -> dict[str, object]:
             raise ValueError("BOOT.SCR is not a U-Boot legacy script image")
         script_text = _script_body(boot_script)
         required_script_text = [b"mmc write", b"baredebug=/dev/mmcblk0p2", b"booti "]
-        if payloads["KERNEL"][:2] == b"\x1f\x8b":
-            # A compressed kernel is useless unless the script expands it.
+        if payloads["KERNEL"][:2] == GZIP_MAGIC:
+            # A gzip kernel is useless unless the script expands it; a zstd one
+            # is expanded by booti itself.
             required_script_text.append(b"unzip ")
         if any(text not in script_text for text in required_script_text):
             raise ValueError("BOOT.SCR lacks raw milestone write or bare Linux boot")
@@ -549,8 +571,13 @@ def verify_boot_image(path: Path) -> dict[str, object]:
         if not bootmark or bootmark[0].get("stage") != "0":
             raise ValueError("BOOTMARK is not the U-Boot stage-0 milestone")
         kernel = payloads["KERNEL"]
-        if kernel[:2] == b"\x1f\x8b":
+        if kernel[:2] == GZIP_MAGIC:
             kernel = gzip.decompress(kernel)
+        elif kernel[:4] == ZSTD_MAGIC:
+            kernel = subprocess.run(
+                ["zstd", "-d", "-q", "-c"], input=kernel,
+                stdout=subprocess.PIPE, check=True,
+            ).stdout
         if kernel[56:60] != b"ARM\x64":
             raise ValueError("KERNEL is not an arm64 Image")
         if not payloads["INITRD"].startswith(b"\x1f\x8b"):
@@ -592,6 +619,9 @@ def main() -> None:
     group.add_argument("--replace-file", type=Path, metavar="IMAGE")
     group.add_argument("--compress-kernel", type=Path, metavar="IMAGE")
     group.add_argument("--raw-kernel", type=Path, metavar="IMAGE")
+    parser.add_argument(
+        "--kernel-compression", choices=("gzip", "zstd"), default="gzip",
+    )
     parser.add_argument(
         "--quiet-boot", action="store_true",
         help="Drop the unattached serial console and silence the kernel log",
@@ -636,7 +666,7 @@ def main() -> None:
         if args.output is None:
             parser.error("--compress-kernel requires --output")
         source = args.compress_kernel.read_bytes()
-        patched = compress_kernel(source)
+        patched = compress_kernel(source, args.kernel_compression)
         args.output.write_bytes(patched)
         print(
             json.dumps(
