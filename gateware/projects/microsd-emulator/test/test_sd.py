@@ -364,6 +364,52 @@ async def multiblock_progress_and_stop_during_data(d):
 
 
 @cocotb.test()
+async def multiblock_stop_is_accepted_anywhere_in_a_block(d):
+    """A CMD12 that lands mid-block must still stop the stream.
+
+    On hardware roughly half the RG35XX boots show one CMD18 streaming far past
+    the file, which is what a missed stop looks like from the card side: the
+    host waits for a transfer that never ends while the card keeps sending. The
+    existing coverage injects CMD12 at one fixed offset, so any offset-dependent
+    miss would go unseen. A four-bit block is 1 start + 1024 payload + 16 CRC +
+    1 end sampled edges, so these offsets cover the start bit, early and mid
+    payload, the CRC window, the end bit and the gap that follows.
+    """
+    h = await setup(d)
+    for offset in (0, 1, 7, 512, 1020, 1024, 1035, 1041, 1043):
+        await h.init()
+        await h.command(55, 0x10000)
+        await h.command(6, 2)
+        await h.command(18, 126 * 512)
+        await h.supply()
+        assert await h.data(wide=True) == h.sector
+        await h.cycle()
+        await h.supply()
+
+        for _ in range(offset):
+            await h.cycle()
+        await h.command(12)
+
+        stopped = False
+        for _ in range(2200):
+            if int(d.request_valid.value):
+                await h.supply()
+            await h.cycle()
+            if not int(d.dat_oe.value):
+                stopped = True
+                break
+        assert stopped, f"CMD12 at offset {offset} did not stop the stream"
+
+        # It must stay stopped: no further block may start, and no further
+        # sector may be requested from the backend.
+        for _ in range(64):
+            await h.cycle()
+            assert not int(d.dat_oe.value), f"offset {offset} restarted a block"
+            assert not int(d.request_valid.value), f"offset {offset} kept reading"
+        await h.command(0, length=0)
+
+
+@cocotb.test()
 async def mmc_predefined_multiblock_count_stops_without_cmd12(d):
     h = await setup(d)
     d.writable.value = 1

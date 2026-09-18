@@ -729,3 +729,60 @@ streaming for around 24 s, the same shape seen with both the fragmented and the
 contiguous initramfs and with the uncompressed kernel. It is independent of the
 payload, so a benchmark has to report the distribution, and finding its cause
 is worth more than the next few seconds of payload tuning.
+
+## 2026-09-18 Characterizing the oversized read
+
+The intermittent failure is now measured rather than described. With the trial
+tool emitting a row every 8192 sectors, a failing run reads like this:
+
+```text
+t=  9.77s CMD18 arg=16888320 lba=  84292 stream boot partition free cluster
+t= 16.39s CMD18 arg=16888320 lba= 118301 stream partition 2 sector 3613
+t= 19.59s CMD18 arg=16888320 lba= 134708 stream beyond the image
+t= 22.78s CMD18 arg=16888320 lba= 151131 stream beyond the image
+t= 39.93s CMD18 arg=16888320 lba= 158773        beyond the image
+```
+
+One CMD18 at the kernel's first sector streams monotonically through the end of
+the boot partition, through the raw debug partition, past the end of the image
+and on into untouched DDR. It stops near LBA 158,773; earlier failures stopped
+at 158,775, 158,776, 158,777 and 158,779, so the extent is reproducible: about
+125,788 sectors, 64.4 MiB, from a file of 15.7 MiB.
+
+Three things follow from the numbers:
+
+- The card serves it at about 5,100 sectors per second, the same rate as a
+  healthy run, so nothing is retrying or stalling. The host consumes every
+  block and asks for more.
+- It is not a missed stop. `multiblock_stop_is_accepted_anywhere_in_a_block`
+  injects CMD12 at nine offsets across a four-bit block, covering the start
+  bit, early and mid payload, the CRC window, the end bit and the following
+  gap, and the card stops at every one.
+- The extent does not scale with the payload. The uncompressed 31.9 MiB kernel
+  and the compressed 15.7 MiB kernel both produce the same roughly 125,800
+  sectors, so the host is not reading some multiple of the file. It is reading
+  a length it computed, and that length is wrong.
+
+That points at the metadata rather than the data: U-Boot reads the directory
+and FAT immediately before this transfer, and a single bad block there would
+give it a bogus length while leaving the card's own counters clean. The card's
+serializer and pin-readback comparators report no mismatch, so if a block is
+being corrupted it happens past the FPGA's pin.
+
+The independent block decoder cannot answer that yet. It arms only on an MMC
+CMD18 and decodes one lane, while this boot runs in SD mode at four bits, which
+is why every trial so far reported it idle.
+
+### A second failure mode
+
+Roughly one cold start in four produced no card activity at all: zero commands,
+zero sectors, only a couple of invalid frames from the floating bus. It appears
+when trials run back to back, so `rg35xx_trial.py` now holds the target powered
+off for a settle interval, six seconds by default, before starting.
+
+### Spread so far
+
+Healthy compressed-kernel boots reached userspace at 9.4 s, 11.6 s and 11.8 s.
+The median is the number the benchmark will report, and with a failure mode
+this large in perhaps half the runs, the distribution is the result rather than
+a footnote.

@@ -68,6 +68,33 @@ class TrialTimelineTests(unittest.TestCase):
         self.assertEqual([entry["elapsed"] for entry in timeline], [0.0, 0.2, 0.3])
         self.assertEqual([entry["writes"] for entry in timeline], [0, 1, 1])
 
+    def test_a_long_stream_still_reports_progress_and_its_end(self):
+        """A single transfer can run for tens of seconds without a new command,
+        which is the failure worth studying, so the collapse must not hide it."""
+        samples = [
+            (0.0, trace(frames=1, command=18, reads=0, lba=100)),
+            (1.0, trace(frames=1, command=18, reads=5000, lba=5100)),
+            (2.0, trace(frames=1, command=18, reads=10000, lba=10100)),
+            (3.0, trace(frames=1, command=18, reads=12000, lba=12100)),
+        ]
+        timeline = trial.transitions(samples, progress=8192)
+        self.assertEqual([entry["elapsed"] for entry in timeline], [0.0, 2.0, 3.0])
+        self.assertEqual(
+            [entry["streaming"] for entry in timeline], [False, True, False]
+        )
+        # The final sample is always kept, so an unbounded stream still reports
+        # the position it reached.
+        self.assertEqual(timeline[-1]["read_lba"], 12100)
+
+    def test_progress_rows_can_be_disabled(self):
+        samples = [
+            (0.0, trace(frames=1, command=18, reads=0)),
+            (1.0, trace(frames=1, command=18, reads=100000)),
+        ]
+        timeline = trial.transitions(samples, progress=0)
+        self.assertEqual(len(timeline), 2)  # first and the always-kept last
+        self.assertFalse(timeline[-1]["streaming"])
+
     def test_repeated_identical_commands_are_distinguished_by_frame_count(self):
         """Two reads of the same sector are separate stages, not one."""
         samples = [

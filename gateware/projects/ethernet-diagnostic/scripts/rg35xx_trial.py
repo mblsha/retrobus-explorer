@@ -47,18 +47,24 @@ def summarize(trace: dict) -> dict:
     }
 
 
-def transitions(samples: list[tuple[float, dict]]) -> list[dict]:
+def transitions(samples: list[tuple[float, dict]], progress: int = 8192) -> list[dict]:
     """Collapse a poll series to the moments card activity changed.
 
     Read counters advance continuously while a transfer streams, so they do not
     mark a transition by themselves; a new command, a write, or a completed
     multiblock read does. Each entry carries the sectors served since the
     previous one, which is what a stage costs.
+
+    A single transfer can also run for tens of seconds without any of that
+    changing, which is exactly the failure worth studying, so a row is also
+    emitted every `progress` sectors to keep a long stream legible. The last
+    sample is always kept, so a stream that never ends still reports where it
+    reached.
     """
     entries: list[dict] = []
     previous_key = None
     previous_reads = None
-    for elapsed, trace in samples:
+    for index, (elapsed, trace) in enumerate(samples):
         summary = summarize(trace)
         key = (
             summary["frames"],
@@ -67,13 +73,20 @@ def transitions(samples: list[tuple[float, dict]]) -> list[dict]:
             summary["writes"],
             tuple(summary["multiblock"]),
         )
-        if key == previous_key:
+        streamed = (
+            progress
+            and previous_reads is not None
+            and summary["reads"] - previous_reads >= progress
+        )
+        last = index + 1 == len(samples)
+        if key == previous_key and not streamed and not last:
             continue
         entry = dict(summary)
         entry["elapsed"] = round(elapsed, 3)
         entry["sectors_since"] = (
             None if previous_reads is None else summary["reads"] - previous_reads
         )
+        entry["streaming"] = bool(streamed)
         entries.append(entry)
         previous_key = key
         previous_reads = summary["reads"]
@@ -92,6 +105,16 @@ def main() -> None:
     parser.add_argument("--state", required=True, help="images.py session file")
     parser.add_argument("--observe", type=float, default=45.0)
     parser.add_argument("--interval", type=float, default=0.05)
+    parser.add_argument(
+        "--settle", type=float, default=6.0,
+        help="Seconds to hold the target powered off before starting. Trials "
+        "run back to back have repeatedly produced a cold start with no card "
+        "activity at all, which a longer off interval avoids.",
+    )
+    parser.add_argument(
+        "--progress", type=int, default=8192,
+        help="Also emit a row every N sectors so a long transfer stays legible",
+    )
     parser.add_argument(
         "--psu-cli", type=Path, default=os.environ.get("MDP_CLI"),
         help="Miniware MDP CLI checkout (default: $MDP_CLI)",
@@ -117,6 +140,8 @@ def main() -> None:
 
     samples: list[tuple[float, dict]] = [(0.0, baseline)]
     try:
+        power(arguments.psu_cli, arguments.channel, "off")
+        time.sleep(arguments.settle)
         power(arguments.psu_cli, arguments.channel, "on")
         start = time.monotonic()
         while time.monotonic() - start < arguments.observe:
@@ -127,7 +152,7 @@ def main() -> None:
         time.sleep(2)
         client.command(images.Opcode.DISARM)
 
-    timeline = transitions(samples)
+    timeline = transitions(samples, arguments.progress)
     for entry in timeline:
         where = ""
         if arguments.image is not None and entry["reads"] != baseline["read_requests"]:
@@ -135,12 +160,13 @@ def main() -> None:
         print(
             f"t={entry['elapsed']:7.2f}s CMD{entry['last_command']:<2d} "
             f"arg={entry['argument']:<11d} frames={entry['frames']:>4d} "
-            f"writes={entry['writes']:>2d} lba={entry['read_lba']:>7d}"
-            f"{where}"
+            f"writes={entry['writes']:>2d} lba={entry['read_lba']:>7d} "
+            f"{'stream' if entry['streaming'] else '      '}{where}"
         )
     final = summarize(samples[-1][1])
     print(
-        f"\nserved {final['reads'] - baseline['read_requests']} sectors, "
+        f"\nlast read LBA {final['read_lba']}, "
+        f"served {final['reads'] - baseline['read_requests']} sectors, "
         f"{final['writes'] - baseline['writes']} writes, "
         f"{final['valid'] - baseline['valid_commands']} valid command frames, "
         f"{final['invalid'] - baseline['invalid_frames']} invalid"
