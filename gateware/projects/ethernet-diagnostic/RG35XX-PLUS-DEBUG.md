@@ -650,7 +650,7 @@ so `rdinit=/init` had nothing to execute. That is why the kernel enumerated the
 card, read the partition table and `mmcblk0p2`, and then wrote nothing: the
 milestones the script is built around could never be reached.
 
-`rg35xx/build_initramfs.sh` builds a real one. BusyBox is compiled from an
+`rg35xx/build_initramfs.py` builds a real one. BusyBox is compiled from an
 unpatched release tarball with `defconfig` plus `CONFIG_STATIC`, the same shape
 `tools/zaurus-sd-boot/busybox/build_busybox.sh` uses for the Zaurus, in an
 arm64 container that runs natively on Apple Silicon, so no cross prefix is
