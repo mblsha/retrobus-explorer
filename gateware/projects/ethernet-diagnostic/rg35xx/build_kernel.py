@@ -50,6 +50,37 @@ DISABLE = [
     "RANDOMIZE_BASE",
     "MEDIA_SUPPORT",
 ]
+# The unused network surface. This board has no wired port, and the only radio
+# is the Realtek SDIO part, so every other vendor's drivers and the protocol
+# menus nothing here speaks are all dead weight in a kernel read off a 2.95
+# MB/s card. mac80211 and cfg80211 stay; so does the Realtek vendor menu.
+DISABLE_NETWORK = [
+    "ETHERNET",
+    "WLAN_VENDOR_ADMTEK", "WLAN_VENDOR_ATH", "WLAN_VENDOR_ATMEL",
+    "WLAN_VENDOR_BROADCOM", "WLAN_VENDOR_CISCO", "WLAN_VENDOR_INTEL",
+    "WLAN_VENDOR_INTERSIL", "WLAN_VENDOR_MARVELL", "WLAN_VENDOR_MEDIATEK",
+    "WLAN_VENDOR_MICROCHIP", "WLAN_VENDOR_PURELIFI", "WLAN_VENDOR_QUANTENNA",
+    "WLAN_VENDOR_RALINK", "WLAN_VENDOR_RSI", "WLAN_VENDOR_SILABS",
+    "WLAN_VENDOR_ST", "WLAN_VENDOR_TI", "WLAN_VENDOR_ZYDAS",
+    "NET_SCHED", "BRIDGE", "VLAN_8021Q", "L2TP", "PPP", "SLIP", "ATM",
+    "CAN", "NFC", "HAMRADIO", "INET_DIAG", "TCP_CONG_ADVANCED",
+    "NET_IPIP", "NET_IPGRE_DEMUX", "IPV6_SIT", "IPV6_MULTIPLE_TABLES",
+    "XFRM_USER", "INET_ESP", "INET_AH", "IP_MULTICAST",
+]
+# The crypto menu, less what WPA needs. AES, CCM, CMAC, SHA and Michael MIC
+# are pulled back in by the selects mac80211 and RTW88 carry, which is why
+# these can be turned off wholesale and then reconciled by olddefconfig.
+DISABLE_CRYPTO = [
+    "CRYPTO_USER", "CRYPTO_USER_API_HASH", "CRYPTO_USER_API_SKCIPHER",
+    "CRYPTO_USER_API_RNG", "CRYPTO_USER_API_AEAD", "CRYPTO_TEST",
+    "CRYPTO_CAMELLIA", "CRYPTO_CAST5", "CRYPTO_CAST6", "CRYPTO_BLOWFISH",
+    "CRYPTO_TWOFISH", "CRYPTO_SERPENT", "CRYPTO_ARIA", "CRYPTO_SM3_GENERIC",
+    "CRYPTO_SM4_GENERIC", "CRYPTO_DES", "CRYPTO_ANUBIS", "CRYPTO_KHAZAD",
+    "CRYPTO_SEED", "CRYPTO_WP512", "CRYPTO_RMD160", "CRYPTO_MD4",
+    "CRYPTO_TGR192", "CRYPTO_VMAC", "CRYPTO_LRW", "CRYPTO_OFB",
+    "CRYPTO_PCBC", "CRYPTO_KEYWRAP", "CRYPTO_ADIANTUM", "CRYPTO_NHPOLY1305",
+    "CRYPTO_ESSIV", "CRYPTO_CHACHA20POLY1305", "CRYPTO_XCBC",
+]
 
 # EROFS is absent from the ROCKNIX configuration and the rootfs depends on it.
 ENABLE = [
@@ -67,6 +98,15 @@ set -eu
 apk add --no-cache build-base perl bc bison flex openssl-dev elfutils-dev \
     xz curl patch python3 zstd linux-headers bash rsync diffutils \
     findutils >/dev/null
+# ThinLTO needs the LLVM toolchain: clang to emit the bitcode, lld to link it,
+# and llvm's ar and nm to handle archives full of bitcode rather than objects.
+if [ "$TOOLCHAIN" = "clang" ]; then
+  apk add --no-cache clang lld llvm >/dev/null
+  MAKE_TOOLCHAIN="LLVM=1"
+  clang --version | head -n 1
+else
+  MAKE_TOOLCHAIN=""
+fi
 if [ ! -f "/work/linux-$VERSION.tar.xz" ]; then
   curl -sSL -o "/work/linux-$VERSION.tar.xz" \
     "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-$VERSION.tar.xz"
@@ -98,8 +138,18 @@ scripts/config --set-str INITRAMFS_SOURCE ""
 scripts/config --set-str EXTRA_FIRMWARE ""
 for opt in $DISABLE_LIST; do scripts/config --disable "$opt"; done
 for opt in $ENABLE_LIST; do scripts/config --enable "$opt"; done
-make ARCH=arm64 olddefconfig >/dev/null
-make ARCH=arm64 -j"$(nproc)" Image
+if [ "$TOOLCHAIN" = "clang" ]; then
+  # Full LTO needs far more memory than this container has; ThinLTO gets most
+  # of the cross-module trimming for a fraction of it.
+  scripts/config --disable LTO_NONE
+  scripts/config --enable LTO_CLANG_THIN
+fi
+make ARCH=arm64 $MAKE_TOOLCHAIN olddefconfig >/dev/null
+if [ "$TOOLCHAIN" = "clang" ] && ! grep -q '^CONFIG_LTO_CLANG_THIN=y' .config; then
+  echo "ThinLTO was requested but olddefconfig did not keep it" >&2
+  exit 1
+fi
+make ARCH=arm64 $MAKE_TOOLCHAIN -j"$(nproc)" Image
 cp arch/arm64/boot/Image /out/Image
 cp .config /out/trimmed.config
 ls -l /out/Image
@@ -150,7 +200,10 @@ def verify_sources(work: Path, sources: Path = SOURCES) -> dict:
     return manifest
 
 
-def container_command(runner, work, patches, config, out, image):
+def container_command(runner, work, patches, config, out, image,
+                      disable=None, enable=None, toolchain="gcc"):
+    disable = DISABLE if disable is None else disable
+    enable = ENABLE if enable is None else enable
     return [
         *runner, "run", "--rm", "--platform", "linux/arm64",
         "-v", f"{work}:/work",
@@ -159,8 +212,9 @@ def container_command(runner, work, patches, config, out, image):
         "-v", f"{out}:/out",
         "-e", f"VERSION={KERNEL_VERSION}",
         "-e", f"EXPECTED={KERNEL_SHA256}",
-        "-e", f"DISABLE_LIST={' '.join(DISABLE)}",
-        "-e", f"ENABLE_LIST={' '.join(ENABLE)}",
+        "-e", f"DISABLE_LIST={' '.join(disable)}",
+        "-e", f"ENABLE_LIST={' '.join(enable)}",
+        "-e", f"TOOLCHAIN={toolchain}",
         image, "sh", "-c", BUILD,
     ]
 
@@ -171,6 +225,14 @@ def main():
                         default=GATEWARE / "build/rg35xx-kernel")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--runner")
+    parser.add_argument(
+        "--toolchain", choices=("gcc", "clang"), default="gcc",
+        help="clang additionally builds with ThinLTO",
+    )
+    parser.add_argument(
+        "--trim-network-and-crypto", action="store_true",
+        help="Also drop the network and crypto surface this device never uses",
+    )
     parser.add_argument(
         "--allow-unpinned", action="store_true",
         help="Build from patches that do not match the recorded manifest. Use "
@@ -188,9 +250,12 @@ def main():
             parser.error(str(failure))
     out = work / "out"
     out.mkdir(parents=True, exist_ok=True)
+    disable = list(DISABLE)
+    if arguments.trim_network_and_crypto:
+        disable += DISABLE_NETWORK + DISABLE_CRYPTO
     command = container_command(
         find_runner(arguments.runner), work, work / "patches", work,
-        out, arguments.image,
+        out, arguments.image, disable=disable, toolchain=arguments.toolchain,
     )
     sys.exit(subprocess.run(command, check=False).returncode)
 

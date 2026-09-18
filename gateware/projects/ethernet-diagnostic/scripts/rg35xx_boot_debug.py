@@ -504,7 +504,14 @@ def _partition_entry(kind: int, start_lba: int, sectors: int) -> bytes:
     ) + start_lba.to_bytes(4, "little") + sectors.to_bytes(4, "little")
 
 
-def erofs_slot_script(image: bytes, root_partition: int) -> str:
+# Sectors 1..7 of the debug partition carry U-Boot's milestones and 16..31 the
+# userspace ones, so an environment dump goes between them.
+ENV_EXPORT_LBA = 0x1C008
+ENV_EXPORT_SECTORS = 8
+
+
+def erofs_slot_script(image: bytes, root_partition: int,
+                      export_env: bool = False) -> str:
     """Return the boot script for a card whose root is an EROFS partition.
 
     The initramfs is gone from the boot path entirely. U-Boot no longer reads
@@ -536,19 +543,56 @@ def erofs_slot_script(image: bytes, root_partition: int) -> str:
         )
     kernel, dtb = placement["KERNEL"], placement["DTB.IMG"]
     stored = fat.read("KERNEL")
-    if stored[:2] != GZIP_MAGIC:
-        raise ValueError("the EROFS boot script expects a gzip kernel")
+    if stored[:2] != GZIP_MAGIC and stored[:4] != ZSTD_MAGIC:
+        raise ValueError("the EROFS boot script expects a gzip or zstd kernel")
     bootargs = EROFS_BOOTARGS.format(root=root_partition)
+    # The board has no serial header populated, so a variable U-Boot resolves
+    # at run time cannot be read any other way. `env export` renders the whole
+    # environment as text into memory, and the debug partition carries it back.
+    # Guessing at kernel_comp_addr_r instead would risk writing the compressed
+    # image over the device tree.
+    export = (
+        f"env export -t ${{ramdisk_addr_r}} {ENV_EXPORT_SECTORS * SECTOR_SIZE:#x}\n"
+        f"mmc write ${{ramdisk_addr_r}} {ENV_EXPORT_LBA:#x} "
+        f"{ENV_EXPORT_SECTORS:#x}\n"
+        if export_env else ""
+    )
     return (
         "mmc dev 0\n"
+        f"{export}"
         "mmc write ${ramdisk_addr_r} 0x1c001 1\n"
         f"setenv bootargs '{bootargs}'\n"
-        f"mmc read ${{kernel_comp_addr_r}} {kernel[0]:#x} {kernel[1]:#x}\n"
-        "unzip ${kernel_comp_addr_r} ${kernel_addr_r}\n"
+        f"{_kernel_load(stored, kernel)}"
         "mmc write ${kernel_addr_r} 0x1c003 1\n"
         f"mmc read ${{fdt_addr_r}} {dtb[0]:#x} {dtb[1]:#x}\n"
         "mmc write ${fdt_addr_r} 0x1c005 1\n"
         "booti ${kernel_addr_r} - ${fdt_addr_r}\n"
+    )
+
+
+# booti decompresses into kernel_comp_addr_r and refuses to start unless
+# kernel_comp_size is also set, which is what the first attempt at a zstd
+# kernel was missing: it read the image, wrote every milestone and then stopped
+# without a console to say why.
+KERNEL_COMP_SIZE = 0x2000000
+
+
+def _kernel_load(stored: bytes, kernel: tuple[int, int]) -> str:
+    """Return the commands that put a runnable kernel at kernel_addr_r.
+
+    gzip is expanded by U-Boot's own unzip, which needs the compressed image
+    somewhere other than its destination, so it is read into the scratch area
+    and expanded out of it. zstd has no such command and is handed to booti
+    compressed, which expands it through its own path.
+    """
+    if stored[:2] == GZIP_MAGIC:
+        return (
+            f"mmc read ${{kernel_comp_addr_r}} {kernel[0]:#x} {kernel[1]:#x}\n"
+            "unzip ${kernel_comp_addr_r} ${kernel_addr_r}\n"
+        )
+    return (
+        f"mmc read ${{kernel_addr_r}} {kernel[0]:#x} {kernel[1]:#x}\n"
+        f"setenv kernel_comp_size {KERNEL_COMP_SIZE:#x}\n"
     )
 
 
@@ -589,7 +633,8 @@ MINIMUM_SLOT_SECTORS = 32768
 
 def make_erofs_image(image: bytes, system: bytes, data: bytes,
                      root_partition: int = 5,
-                     minimum_slot_sectors: int = MINIMUM_SLOT_SECTORS) -> bytes:
+                     minimum_slot_sectors: int = MINIMUM_SLOT_SECTORS,
+                     export_env: bool = False) -> bytes:
     """Return a card image carrying EROFS system slots and an ext2 data volume.
 
     Both slots are written with the same image and are exactly the same size,
@@ -652,7 +697,9 @@ def make_erofs_image(image: bytes, system: bytes, data: bytes,
         start = region["start_lba"] * SECTOR_SIZE
         grown[start:start + len(payload)] = payload
 
-    return repair_boot_script(bytes(grown), erofs_slot_script(bytes(grown), root_partition))
+    return repair_boot_script(
+        bytes(grown), erofs_slot_script(bytes(grown), root_partition, export_env)
+    )
 
 
 def logical_partitions(stream, mbr: bytes) -> list[dict[str, int]]:
@@ -909,6 +956,10 @@ def main() -> None:
     parser.add_argument("--system", type=Path, help="EROFS system image")
     parser.add_argument("--data", type=Path, help="ext2 data image")
     parser.add_argument(
+        "--export-env", action="store_true",
+        help="Also dump U-Boot's environment into the debug partition",
+    )
+    parser.add_argument(
         "--slot", choices=("a", "b"), default="a",
         help="Which system slot the boot script roots from",
     )
@@ -937,6 +988,7 @@ def main() -> None:
             args.system.read_bytes(),
             args.data.read_bytes(),
             root_partition=5 if args.slot == "a" else 6,
+            export_env=args.export_env,
         )
         args.output.write_bytes(built)
         with io.BytesIO(built) as stream:

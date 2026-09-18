@@ -1234,3 +1234,44 @@ each other.
 The target was under four seconds and the result is 5.44. The two payload
 stages delivered 4.49 s of the 5.9 s that would have needed; the rest was in
 the interface, and the measurement above shows why it could not be taken.
+
+## 2026-09-19 Reading U-Boot's environment, and what zstd really needs
+
+The board has no serial header populated, so a variable U-Boot resolves at run
+time could not be read at all. `--export-env` adds two lines to the boot
+script: `env export -t` renders the whole environment into memory as text and
+`mmc write` carries it back through the debug partition, into sectors 8..15,
+between U-Boot's milestones and userspace's.
+
+It came back empty, and that is itself the result. Sector 8 holds exactly what
+sector 1 holds, the uninitialized contents of `ramdisk_addr_r`, so the write
+happened and the export before it produced nothing. **The boot then continued
+and reached userspace anyway.** This U-Boot does not abandon a script when a
+command in it fails.
+
+That correction matters twice. It retires the reason given earlier for
+compiling the active A/B slot into `BOOT.SCR` rather than reading it at run
+time: a missing `setexpr` would not cost the boot, it would fall through to
+whatever the script set before it. And it means the zstd failure was never an
+aborted script; `booti` was reached, and declined.
+
+### zstd, with both of booti's prerequisites met
+
+`booti` takes a compressed image at `kernel_addr_r`, expands it into
+`kernel_comp_addr_r`, and refuses unless `kernel_comp_size` is also set. The
+first attempt set neither the load address convention nor that size, which is
+enough on its own to explain a silent stop, so it was retried properly: the
+6,190,080-byte zstd kernel read into `kernel_addr_r`, `kernel_comp_size` set to
+32 MiB, `booti` given the image.
+
+It read all 12,090 sectors, wrote all three of its milestones, and then went
+back to rescanning the boot partition's root directory and stopped. No
+userspace milestone was written. With both documented prerequisites satisfied
+and the image served correctly, what remains is that this U-Boot has no zstd
+decompressor built in: its magic sniffing does not recognize the image, so it
+is treated as a raw arm64 Image, whose magic check then fails.
+
+The kernel therefore stays gzip, expanded by `unzip`. The cost of that decision
+is 1.17 MB of extra reading, 0.40 s at this card's rate. Changing it means
+replacing U-Boot, which is a larger change than the saving justifies while the
+card interface is the binding constraint.

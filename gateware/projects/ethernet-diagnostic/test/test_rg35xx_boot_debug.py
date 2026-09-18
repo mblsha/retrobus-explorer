@@ -663,3 +663,32 @@ class ErofsLayoutTests(unittest.TestCase):
             debug.make_erofs_image(source, bytes(4096), ext2_fixture())
         with self.assertRaisesRegex(ValueError, "not ext2"):
             debug.make_erofs_image(source, erofs_fixture(), bytes(4096))
+
+
+class KernelLoadTests(unittest.TestCase):
+    """How the kernel reaches kernel_addr_r depends on its compression, and
+    getting it wrong produces a boot that writes every milestone and then
+    stops, with no console to say why."""
+
+    def test_gzip_is_expanded_out_of_the_scratch_area(self):
+        """unzip cannot expand in place, so the stored image is read into
+        kernel_comp_addr_r and expanded out of it."""
+        load = debug._kernel_load(debug.GZIP_MAGIC + bytes(8), (0x1000, 0x20))
+        self.assertIn("mmc read ${kernel_comp_addr_r} 0x1000 0x20", load)
+        self.assertIn("unzip ${kernel_comp_addr_r} ${kernel_addr_r}", load)
+
+    def test_zstd_is_handed_to_booti_with_the_size_it_demands(self):
+        """booti decompresses into kernel_comp_addr_r and refuses to start
+        unless kernel_comp_size is set too. Omitting it is what made the first
+        attempt look like booti ignoring the image."""
+        load = debug._kernel_load(debug.ZSTD_MAGIC + bytes(8), (0x1000, 0x20))
+        self.assertIn("mmc read ${kernel_addr_r} 0x1000 0x20", load)
+        self.assertIn("setenv kernel_comp_size", load)
+        self.assertNotIn("unzip", load)
+
+    def test_an_uncompressed_kernel_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "boot.img"
+            boot_image_fixture(path)
+            with self.assertRaisesRegex(ValueError, "gzip or zstd"):
+                debug.erofs_slot_script(path.read_bytes(), 5)
