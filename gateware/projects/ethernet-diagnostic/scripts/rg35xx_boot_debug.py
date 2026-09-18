@@ -160,6 +160,21 @@ class _Fat16:
                 int.from_bytes(entry[28:32], "little"),
             )
 
+    def clusters(self, name: str):
+        """Yield (cluster, file offset) along a file's real FAT chain."""
+        cluster, size = self.files[name]
+        offset = 0
+        visited = set()
+        while cluster < 0xFFF8 and offset < size:
+            if cluster < 2 or cluster in visited:
+                raise ValueError(f"invalid FAT chain for {name}")
+            visited.add(cluster)
+            yield cluster, offset
+            offset += self.cluster_size
+            cluster = int.from_bytes(
+                _read_at(self.stream, self.fat_offset + cluster * 2, 2), "little"
+            )
+
     def read(self, name: str) -> bytes:
         try:
             cluster, size = self.files[name]
@@ -270,6 +285,59 @@ def _script_body(boot_script: bytes) -> bytes:
     return payload[8:]
 
 
+def describe_lba(path: Path, lba: int) -> str:
+    """Name what an absolute image LBA holds.
+
+    Card access traces report backend LBAs, and a boot is only legible once
+    those map onto the SPL, the FIT, filesystem metadata or a named boot file.
+    File positions follow the real FAT chain rather than assuming contiguity.
+    """
+    size = path.stat().st_size
+    if lba < 0 or (lba + 1) * SECTOR_SIZE > size:
+        return "beyond the image"
+    with path.open("rb") as stream:
+        if lba == 0:
+            return "partition table"
+        sector = _read_at(stream, lba * SECTOR_SIZE, SECTOR_SIZE)
+        if sector[:4] == b"\xd0\x0d\xfe\xed":
+            return "FIT image"
+        spl_lba = SPL_OFFSET // SECTOR_SIZE
+        header = _read_at(stream, SPL_OFFSET, SECTOR_SIZE)
+        if header[4:12] == b"eGON.BT0":
+            declared = int.from_bytes(header[16:20], "little")
+            span = (declared + SECTOR_SIZE - 1) // SECTOR_SIZE
+            if spl_lba <= lba < spl_lba + span:
+                return f"SPL+{(lba - spl_lba) * SECTOR_SIZE}"
+        mbr = _read_at(stream, 0, SECTOR_SIZE)
+        partitions = [
+            _partition(mbr[446 + index * 16 : 462 + index * 16]) for index in range(4)
+        ]
+        for index, partition in enumerate(partitions, start=1):
+            start, count = partition["start_lba"], partition["sectors"]
+            if not count or not start <= lba < start + count:
+                continue
+            if partition["type"] != 0x0E:
+                return f"partition {index} sector {lba - start}"
+            fat = _Fat16(stream, start, count)
+            fat_lba = fat.fat_offset // SECTOR_SIZE
+            root_lba = fat.root_offset // SECTOR_SIZE
+            data_lba = fat.data_offset // SECTOR_SIZE
+            if lba < fat_lba:
+                return "boot partition reserved sectors"
+            if lba < root_lba:
+                return "boot partition FAT table"
+            if lba < data_lba:
+                return "boot partition root directory"
+            sectors_per_cluster = fat.cluster_size // SECTOR_SIZE
+            for name in fat.files:
+                for cluster, offset in fat.clusters(name):
+                    first = data_lba + (cluster - 2) * sectors_per_cluster
+                    if first <= lba < first + sectors_per_cluster:
+                        return f"{name}+{offset + (lba - first) * SECTOR_SIZE}"
+            return "boot partition free cluster"
+    return "unallocated area"
+
+
 def verify_boot_image(path: Path) -> dict[str, object]:
     with path.open("rb") as stream:
         size = path.stat().st_size
@@ -345,6 +413,8 @@ def main() -> None:
     group.add_argument("--verify-image", type=Path, metavar="IMAGE")
     group.add_argument("--make-spl-loop", type=Path, metavar="IMAGE")
     group.add_argument("--repair-boot-script", type=Path, metavar="IMAGE")
+    group.add_argument("--describe", type=Path, metavar="IMAGE")
+    parser.add_argument("--lba", type=int, action="append", default=[])
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -358,6 +428,13 @@ def main() -> None:
         print(json.dumps(verify_boot_image(args.verify_image), indent=2))
         return
 
+
+    if args.describe is not None:
+        if not args.lba:
+            parser.error("--describe requires at least one --lba")
+        for lba in args.lba:
+            print(f"{lba} {describe_lba(args.describe, lba)}")
+        return
 
     if args.repair_boot_script is not None:
         if args.output is None:

@@ -70,6 +70,19 @@ profile builds at 64 MHz because the telemetry-rich design does not place
 within 80 MHz, and the card interface it serves runs three orders of magnitude
 slower. See [the boot record](../../ethernet-diagnostic/RG35XX-PLUS-DEBUG.md).
 
+`build_ddr.py` routes exactly one seed and rejects the build if that placement
+misses a constraint, and this design is close enough to its bounds that a seed
+often does. Re-synthesizing to try another costs about ten minutes, while
+routing the finished netlist costs about ninety seconds, so search first and
+feed the winner back to `--seed`:
+
+```sh
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
+  ./.venv/bin/python tools/search_placement_seeds.py \
+  --output build/microsd-ddr-ethernet-h700 --h700-mmc \
+  --seeds 8 9 10 11 12 19 21 30
+```
+
 The `--mmc-only` profile above suppresses the complete initial SD negotiation
 boundary so a host which permits MMC falls back to CMD1. Its MMC CSD advertises 5 MHz; the tested
 GKD clock tree generates 4 MHz from that request. CMD23 bounds the next CMD18

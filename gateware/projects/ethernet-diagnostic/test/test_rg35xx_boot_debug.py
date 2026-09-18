@@ -240,6 +240,43 @@ class BootDebugTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "uImage CRC"):
                 debug.verify_boot_image(image)
 
+    def test_describe_lba_names_each_region_of_the_image(self):
+        """Card traces report backend LBAs; a boot is only legible once those
+        map onto the SPL, filesystem metadata and named boot files."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            self.assertEqual(debug.describe_lba(image, 0), "partition table")
+            self.assertEqual(debug.describe_lba(image, 16), "SPL+0")
+            self.assertEqual(
+                debug.describe_lba(image, 129), "boot partition FAT table"
+            )
+            self.assertEqual(
+                debug.describe_lba(image, 130), "boot partition root directory"
+            )
+            self.assertEqual(debug.describe_lba(image, 134), "KERNEL+0")
+            self.assertEqual(debug.describe_lba(image, 192), "partition 2 sector 0")
+            self.assertEqual(debug.describe_lba(image, 9999), "beyond the image")
+
+    def test_describe_lba_follows_the_fat_chain(self):
+        """A fragmented file must report its real offset, not a contiguous
+        guess from its first cluster."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            data = bytearray(image.read_bytes())
+            boot = 128 * debug.SECTOR_SIZE
+            # Chain KERNEL's cluster 4 onward to cluster 9 instead of ending.
+            data[boot + 512 + 4 * 2 : boot + 512 + 4 * 2 + 2] = (9).to_bytes(2, "little")
+            data[boot + 512 + 9 * 2 : boot + 512 + 9 * 2 + 2] = b"\xff\xff"
+            entry = boot + 2 * 512
+            while data[entry : entry + 11] != b"KERNEL     ":
+                entry += 32
+            data[entry + 28 : entry + 32] = (1024).to_bytes(4, "little")
+            image.write_bytes(bytes(data))
+            self.assertEqual(debug.describe_lba(image, 134), "KERNEL+0")
+            self.assertEqual(debug.describe_lba(image, 139), "KERNEL+512")
+
     def test_verifier_rejects_corrupt_spl_checksum(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "boot.img"

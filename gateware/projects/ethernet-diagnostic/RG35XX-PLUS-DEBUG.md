@@ -50,6 +50,32 @@ Power the target only after the readback has verified the image and the card is
 armed. Counters are cumulative from FPGA configuration, so take the baseline
 trace first and compare deltas. Power the target off and disarm between trials.
 
+`rg35xx_trial.py` performs one standardized cold start: it takes that baseline,
+powers the target's PSU channel, polls the trace, and always powers off and
+disarms afterwards. It collapses the poll series to the moments card activity
+changed and names the sectors each stage touched, which is how a boot is read
+without serial output:
+
+```sh
+MDP_CLI=/path/to/miniware-mdp-m01/cli \
+  ./.venv/bin/python projects/ethernet-diagnostic/scripts/rg35xx_trial.py \
+  --state /private/tmp/rg35xx-boot-session.json --observe 25 \
+  --image build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img
+```
+
+```text
+t=   0.30s CMD18 arg=16890368 frames= 411 writes= 7 lba=  33138 KERNEL+76288
+t=  12.41s CMD18 arg=16808448 frames= 434 writes= 9 lba=  32833 boot partition FAT table
+t=  12.49s CMD13 arg=65536    frames= 453 writes=10 lba=  95377 DTB.IMG+49152
+t=  15.44s CMD6  arg=2        frames= 474 writes=10 lba=  95377 DTB.IMG+49152
+t=  16.15s CMD12 arg=65535    frames= 478 writes=10 lba= 114720 partition 2 sector 32
+```
+
+`rg35xx_boot_debug.py --describe <image> --lba N` names a single sector the
+same way, following the real FAT chain rather than assuming a file is
+contiguous. Its channel default is `psu2`; `psu1` carries the Zaurus on this
+bench and must never be switched by a card trial.
+
 The image verifier checks the MBR layout, the H700 eGON SPL at byte 8192 and
 its checksum, the FAT16 `BOOT.SCR`, `BOOTMARK`, arm64 kernel, gzip initramfs and
 DTB, plus the pristine raw debug command and empty milestone sectors. Run it
