@@ -39,6 +39,34 @@ Each stage improves the median and none widens the interquartile range. The
 standard deviations are carried by a single slow boot in each of the first and
 last rows; both have a sound zero and are real boots.
 
+### Why four seconds needs the interface, in numbers
+
+The card moves 2.63 MB/s end to end, measured identically during U-Boot's
+kernel read and during Linux's demand paging, so one rate describes the whole
+boot. Split the 5.44 s by it:
+
+```text
+kernel read, 7.36 MB at 2.63 MB/s        2.80 s
+everything else                          2.64 s
+```
+
+Four seconds leaves 1.36 s for the read, which at this rate is a compressed
+kernel of 3.58 MB. The trimmed kernel is 7.36 MB compressed from 17.8 MB, a
+2.42x ratio, so 3.58 MB means an 8.7 MB kernel: half of what is already a
+trimmed kernel, while keeping Panfrost, the Sun4i display, RTW88 and SoC audio,
+which the plan requires. No payload change reaches it.
+
+Double the clock and the same payload arrives:
+
+```text
+ 6.0 MHz, 2.63 MB/s    kernel read 2.80 s    total 5.44 s
+12.0 MHz, 5.26 MB/s    kernel read 1.40 s    total 4.04 s
+```
+
+The 12 MHz target in this plan was the four-second target. The host will not
+take 12 MHz, and the measurement above is why the aim is missed rather than
+the payload work.
+
 The boot is repeatable to about thirty milliseconds. The spread these figures
 once showed was the measurement: the clock started when the power-supply CLI
 returned, and that took anywhere from 1.03 to 4.29 seconds. See
