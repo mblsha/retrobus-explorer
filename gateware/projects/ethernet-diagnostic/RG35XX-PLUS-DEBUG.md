@@ -786,3 +786,29 @@ Healthy compressed-kernel boots reached userspace at 9.4 s, 11.6 s and 11.8 s.
 The median is the number the benchmark will report, and with a failure mode
 this large in perhaps half the runs, the distribution is the result rather than
 a footnote.
+
+### Ten standardized cold starts
+
+Ten consecutive trials on the compressed-kernel image, each with the target
+held off for the settle interval first. Every one produced card activity, so
+the settle interval removed the second failure mode entirely.
+
+```text
+healthy    4/10   35,198  35,198  35,240  35,276 sectors
+oversized  6/10  124,337 124,339 127,070 127,282 127,283 127,283 sectors
+```
+
+Healthy runs are almost identical, 0.2% apart, and reached userspace at 8.37 s
+and 11.92 s twice; the fourth did not re-enumerate inside the 25 s window, so
+the benchmark needs a longer one. Median of the three is 11.92 s.
+
+The oversized runs fall into two tight clusters rather than scattering: about
+124,338 sectors ending near LBA 155,82x, and about 127,28x ending near LBA
+158,77x. Both start at the same sector and differ by roughly 2,945, close to
+the initramfs's 2,990. Two discrete wrong lengths, each reproducible to a
+handful of sectors, is not what random corruption of a metadata block would
+produce. Something deterministic is computing them.
+
+That also rules the FPGA's own data path further out: the card serves both
+outcomes at the same rate with no serializer or pin-readback mismatch, and the
+healthy runs show the same card serving exactly the right sectors.
