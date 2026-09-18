@@ -502,3 +502,73 @@ Note for rebuilds: `nextpnr-xilinx` here is linked against Boost 1.90, so it
 needs `DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib`. macOS strips
 that variable when launching through `uv run`, so invoke the build with
 `./.venv/bin/python` directly.
+
+## 2026-09-18 The RG35XX Plus boots from the emulator
+
+With the idle data level held and the SCR corrected, U-Boot proper started,
+switched to four bits, and reached the FAT boot partition, where it stopped
+again. The cause was in the image rather than the gateware: `BOOT.SCR` was a
+legacy uImage whose payload began directly with its script text. U-Boot's
+`source` reads a length word from the payload and then skips eight bytes, so it
+began executing in the middle of the first command and aborted the script.
+
+`rg35xx_boot_debug.py --repair-boot-script` rebuilds that file with the
+required length table and with a milestone write after each load, so the raw
+debug partition records how far the boot reached. It reproduces the tested
+image byte for byte:
+
+```sh
+uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
+  --repair-boot-script build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img \
+  --output build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img
+```
+
+Image SHA-256 `ea5e4c33632fe55b2e22a1c560d8af866c8eeb076bc18eb4e9e82b3e6f4c676c`,
+uploaded and read back complete over Ethernet before every trial.
+
+### Result
+
+Bitstream `c8851292793596c71b22d837f3eabeb7e90824d6a83b9ace39ea7cda6b2e777c`,
+placement seed 8, 64 MHz SD fabric clock. All six clocks, 18 CDC paths and five
+direct SD outputs passed, and 825,835 configuration bits round-tripped.
+
+Two consecutive cold starts produced the same sequence. Times are from target
+power-on:
+
+```text
+0.1 s   BootROM loads the SPL, 81 blocks at LBA 16
+0.1 s   SPL reads the complete FIT, 1134 blocks at LBA 96
+0.9 s   U-Boot proper selects the card, switches to four bits, reads the MBR,
+        the FAT boot sector and the root directory
+0.9 s   BOOT.SCR runs: milestone 1, BOOTMARK loaded, milestone 2
+0.9 s   KERNEL streams from LBA 32989
+13.0 s  the kernel read ends exactly at LBA 95241, KERNEL's last sector
+13.1 s  INITRD and dtb.img load, milestones 3, 4 and 5 are written
+16.0 s  CMD5 appears, then CMD55/ACMD41 and ACMD6 with a four-bit argument
+16.2 s  reads at LBA 0 and 8, the partition table
+16.7 s  reads at LBA 114720, inside mmcblk0p2
+```
+
+U-Boot never issues CMD5, so the probe at 16 s is the Linux MMC stack
+re-enumerating the emulated card after `booti`. It then reads the partition
+table and the raw debug partition named by `baredebug=/dev/mmcblk0p2` in the
+kernel command line. Across the whole boot the card served 258,574 sector reads
+and accepted seven writes, with 960 valid command frames.
+
+The milestones the target wrote back to the card confirm each stage
+independently of the counters:
+
+```text
+sector 2  decodes as target-to-host stage=0 detail=uboot-loaded-fat
+sector 3  byte-for-byte identical to KERNEL's first sector, arm64 image header
+          1f2003d5 19446214
+sector 4  1f8b0808 ... "INITRD", the gzip initramfs
+sector 5  d00dfeed, the flattened device tree
+```
+
+This is a boot from the emulator: the H700 loads its SPL, U-Boot, kernel,
+initramfs and device tree from FPGA DDR over the Pmod adapter, and the booted
+kernel drives the emulated card itself. Without serial access the last
+observable stage is the kernel's own MMC enumeration and its reads of
+mmcblk0p2; userspace progress beyond that is not visible from the card side and
+would need the initramfs to write further milestones.

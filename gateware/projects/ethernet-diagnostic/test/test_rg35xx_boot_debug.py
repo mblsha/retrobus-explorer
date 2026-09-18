@@ -1,5 +1,6 @@
 import importlib.util
 import struct
+import zlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -145,6 +146,52 @@ class BootDebugTests(unittest.TestCase):
             self.assertEqual(report["spl"]["offset"], 8192)
             self.assertEqual(report["partitions"][1]["start_lba"], 192)
             self.assertEqual(set(report["boot_files"]), set(debug.REQUIRED_BOOT_FILES))
+
+    def test_boot_script_carries_the_legacy_length_table(self):
+        header = b"\x27\x05\x19\x56" + bytes(60)
+        text = "echo hello\n"
+        built = debug.build_boot_script(header, text)
+        payload = built[64:]
+        # U-Boot reads a length word and then skips eight bytes before running.
+        self.assertEqual(int.from_bytes(payload[0:4], "big"), len(text))
+        self.assertEqual(payload[4:8], bytes(4))
+        self.assertEqual(payload[8:].decode(), text)
+        self.assertEqual(int.from_bytes(built[12:16], "big"), len(payload))
+        self.assertEqual(
+            int.from_bytes(built[24:28], "big"), zlib.crc32(payload) & 0xFFFFFFFF
+        )
+        checked = bytearray(built[:64])
+        checked[4:8] = bytes(4)
+        self.assertEqual(
+            int.from_bytes(built[4:8], "big"), zlib.crc32(bytes(checked)) & 0xFFFFFFFF
+        )
+
+    def test_boot_script_rejects_a_foreign_header(self):
+        with self.assertRaises(ValueError):
+            debug.build_boot_script(bytes(64))
+
+    def test_repair_rewrites_boot_script_and_keeps_the_image_verifiable(self):
+        script = "mmc write a 0x1c001 1\nbaredebug=/dev/mmcblk0p2\nbooti a b c\n"
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            original = debug.verify_boot_image(image)
+            repaired = debug.repair_boot_script(image.read_bytes(), script)
+            self.assertNotEqual(repaired, image.read_bytes())
+            image.write_bytes(repaired)
+            report = debug.verify_boot_image(image)
+            self.assertNotEqual(
+                report["boot_files"]["BOOT.SCR"], original["boot_files"]["BOOT.SCR"]
+            )
+            self.assertEqual(report["boot_files"]["BOOT.SCR"], 64 + 8 + len(script))
+            self.assertEqual(report["debug_command"], original["debug_command"])
+
+    def test_repair_rejects_a_script_that_outgrows_its_cluster(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            with self.assertRaises(ValueError):
+                debug.repair_boot_script(image.read_bytes(), "booti\n" * 200)
 
     def test_verifier_rejects_corrupt_spl_checksum(self):
         with tempfile.TemporaryDirectory() as directory:

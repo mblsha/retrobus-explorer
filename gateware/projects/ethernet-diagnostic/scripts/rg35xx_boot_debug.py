@@ -9,6 +9,8 @@ damage the boot files.
 from __future__ import annotations
 
 import argparse
+import zlib
+import io
 import hashlib
 import json
 import struct
@@ -183,6 +185,68 @@ class _Fat16:
         return bytes(output[:size])
 
 
+UIMAGE_MAGIC = 0x27051956
+MILESTONE_SCRIPT = """mmc write ${ramdisk_addr_r} 0x1c001 1
+fatload mmc 0:1 ${ramdisk_addr_r} BOOTMARK
+mmc write ${ramdisk_addr_r} 0x1c002 1
+setenv bootargs 'console=tty0 console=ttyS0,115200 loglevel=7 rdinit=/init baredebug=/dev/mmcblk0p2'
+fatload mmc 0:1 ${kernel_addr_r} KERNEL
+mmc write ${kernel_addr_r} 0x1c003 1
+fatload mmc 0:1 ${ramdisk_addr_r} INITRD
+setenv initrd_size ${filesize}
+mmc write ${ramdisk_addr_r} 0x1c004 1
+fatload mmc 0:1 ${fdt_addr_r} dtb.img
+mmc write ${fdt_addr_r} 0x1c005 1
+booti ${kernel_addr_r} ${ramdisk_addr_r}:${initrd_size} ${fdt_addr_r}
+"""
+
+
+def build_boot_script(header: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
+    """Wrap script text in a legacy U-Boot script image, reusing header fields.
+
+    U-Boot's source command reads a length word from the payload and then skips
+    eight bytes before executing. A script image whose payload starts directly
+    with its text therefore begins execution in the middle of the first command
+    and aborts, which is how the RG35XX image shipped.
+    """
+    if len(header) != 64 or int.from_bytes(header[0:4], "big") != UIMAGE_MAGIC:
+        raise ValueError("BOOT.SCR does not start with a legacy uImage header")
+    text = script.encode()
+    payload = struct.pack(">II", len(text), 0) + text
+    rebuilt = bytearray(header)
+    rebuilt[12:16] = struct.pack(">I", len(payload))
+    rebuilt[24:28] = struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
+    rebuilt[4:8] = b"\0\0\0\0"
+    rebuilt[4:8] = struct.pack(">I", zlib.crc32(bytes(rebuilt)) & 0xFFFFFFFF)
+    return bytes(rebuilt) + payload
+
+
+def repair_boot_script(image: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
+    """Replace BOOT.SCR in a boot image with a correctly framed script image."""
+    stream = io.BytesIO(image)
+    mbr = _read_at(stream, 0, SECTOR_SIZE)
+    boot_partition = _partition(mbr[446:462])
+    fat = _Fat16(stream, boot_partition["start_lba"], boot_partition["sectors"])
+    if "BOOT.SCR" not in fat.files:
+        raise ValueError("boot image has no BOOT.SCR")
+    cluster, size = fat.files["BOOT.SCR"]
+    rebuilt = build_boot_script(fat.read("BOOT.SCR")[:64], script)
+    if len(rebuilt) > fat.cluster_size:
+        raise ValueError("rebuilt BOOT.SCR does not fit its existing cluster")
+    patched = bytearray(image)
+    offset = fat.data_offset + (cluster - 2) * fat.cluster_size
+    patched[offset : offset + fat.cluster_size] = rebuilt.ljust(fat.cluster_size, b"\0")
+    root = bytearray(_read_at(stream, fat.root_offset, fat.data_offset - fat.root_offset))
+    for entry in range(0, len(root), 32):
+        if root[entry : entry + 11] == b"BOOT    SCR":
+            root[entry + 28 : entry + 32] = struct.pack("<I", len(rebuilt))
+            break
+    else:
+        raise ValueError("BOOT.SCR has no root directory entry")
+    patched[fat.root_offset : fat.root_offset + len(root)] = root
+    return bytes(patched)
+
+
 def verify_boot_image(path: Path) -> dict[str, object]:
     with path.open("rb") as stream:
         size = path.stat().st_size
@@ -256,6 +320,7 @@ def main() -> None:
     group.add_argument("--decode", type=Path, metavar="IMAGE")
     group.add_argument("--verify-image", type=Path, metavar="IMAGE")
     group.add_argument("--make-spl-loop", type=Path, metavar="IMAGE")
+    group.add_argument("--repair-boot-script", type=Path, metavar="IMAGE")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -269,6 +334,22 @@ def main() -> None:
         print(json.dumps(verify_boot_image(args.verify_image), indent=2))
         return
 
+
+    if args.repair_boot_script is not None:
+        if args.output is None:
+            parser.error("--repair-boot-script requires --output")
+        repaired = repair_boot_script(args.repair_boot_script.read_bytes())
+        args.output.write_bytes(repaired)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "sha256": hashlib.sha256(repaired).hexdigest(),
+                },
+                indent=2,
+            )
+        )
+        return
 
     if args.make_spl_loop is not None:
         if args.output is None:
