@@ -1,0 +1,94 @@
+#!/bin/sh
+# PID 1 on the EROFS system partition. There is no initramfs: the kernel mounts
+# this filesystem directly from the card, so this script is what booti's kernel
+# reaches without any intermediate root.
+
+BB=/usr/bin/busybox
+PATH=/usr/bin:/usr/sbin
+export PATH
+
+$BB mkdir -p /proc /sys /tmp /data
+# DEVTMPFS_MOUNT gives us /dev before init runs, which is why the debug
+# partition can be opened immediately rather than waited for.
+$BB mount -t proc proc /proc 2>/dev/null || true
+$BB mount -t sysfs sysfs /sys 2>/dev/null || true
+$BB mount -t tmpfs tmpfs /tmp 2>/dev/null || true
+exec </dev/console >/dev/console 2>&1
+
+DEBUG_DEVICE=/dev/mmcblk0p2
+DATA_DEVICE=/dev/mmcblk0p7
+MAGIC=RG35DBG1
+
+# U-Boot owns sectors 1..15; these start at 16 so both records survive a boot
+# and can be read back together.
+write_stage() {
+    stage="$1"
+    detail="$2"
+    record=/tmp/boot-stage
+    {
+        $BB printf '%s\n' "$MAGIC"
+        $BB printf 'direction=target-to-host\n'
+        $BB printf 'stage=%s\n' "$stage"
+        $BB printf 'detail=%s\n' "$detail"
+        $BB printf 'uptime=%s\n' "$($BB cut -d' ' -f1 /proc/uptime 2>/dev/null)"
+    } > "$record"
+    $BB dd if="$record" of="$DEBUG_DEVICE" bs=512 seek=$((16 + stage)) \
+        count=1 conv=sync,notrunc 2>/dev/null
+    $BB sync
+}
+
+# The very first thing, so the timestamp measures reaching userspace and
+# nothing else. Every Linux write is at least a page, so this lands as a
+# multi-block command and is distinguishable from U-Boot's single-block ones.
+write_stage 0 rootfs-init-entered
+
+$BB printf '\033[2J\033[H'
+echo 'RG35XX Plus bare Linux: EROFS system partition, no initramfs'
+
+root_device="$($BB sed -n 's/.*[ ]root=\([^ ]*\).*/\1/p' /proc/cmdline)"
+echo "Root: ${root_device:-unknown} $($BB grep -o ' / .*erofs[^ ]*' /proc/mounts | $BB head -n 1)"
+write_stage 1 "root-${root_device:-unknown}"
+
+command="$($BB dd if="$DEBUG_DEVICE" bs=512 count=1 2>/dev/null | $BB tr '\000' '\n' | $BB sed -n 's/^command=//p' | $BB head -n 1)"
+[ -n "$command" ] || command=boot-shell
+write_stage 2 "command-$command"
+
+model="$($BB tr -d '\000' </proc/device-tree/model 2>/dev/null)"
+echo "Model: ${model:-unknown}"
+write_stage 3 "model-${model:-unknown}"
+
+if $BB mount -t ext2 -o rw,noatime "$DATA_DEVICE" /data 2>/dev/null; then
+    echo "Data: $DATA_DEVICE mounted read-write on /data"
+    write_stage 4 data-mounted
+else
+    echo "Data: $DATA_DEVICE did not mount"
+    write_stage 4 data-absent
+fi
+
+if [ -c /dev/fb0 ]; then
+    write_stage 5 framebuffer-present
+else
+    write_stage 5 framebuffer-absent
+fi
+
+case "$command" in
+    poweroff) write_stage 6 command-poweroff; exec $BB poweroff -f ;;
+    reboot)   write_stage 6 command-reboot;   exec $BB reboot -f ;;
+    boot-shell|shell) ;;
+    *) echo "Unknown debug command: $command"; write_stage 6 unknown-command ;;
+esac
+
+write_stage 7 userspace-ready
+cat <<'BANNER'
+
+Userspace is ready on a read-only EROFS root.
+U-Boot milestones are in raw partition 2, sectors 1..15.
+Userspace milestones are in the same partition, sectors 16..31.
+The host command is in sector 0.
+BANNER
+
+while true; do
+    setsid $BB cttyhack $BB sh
+    echo 'Shell exited; restarting in one second.'
+    $BB sleep 1
+done

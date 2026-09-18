@@ -475,6 +475,234 @@ def raw_kernel_script(image: bytes, bootargs: str = DEFAULT_BOOTARGS) -> bytes:
     return repair_boot_script(image, script)
 
 
+EROFS_MAGIC = b"\xe2\xe1\xf5\xe0"
+EXT2_MAGIC = b"\x53\xef"
+EROFS_SUPERBLOCK_OFFSET = 1024
+EXT2_MAGIC_OFFSET = 1024 + 56
+# Logical partitions are preceded by their own boot record, and the payload is
+# aligned rather than laid directly behind it so every slot starts on the same
+# boundary as the primaries do.
+LOGICAL_ALIGNMENT = 2048
+EXTENDED_TYPE = 0x0F
+LINUX_TYPE = 0x83
+
+EROFS_BOOTARGS = (
+    "console=tty0 quiet loglevel=0 root=/dev/mmcblk0p{root} rootfstype=erofs "
+    "ro rootwait init=/sbin/init baredebug=/dev/mmcblk0p2"
+)
+
+
+def _partition_entry(kind: int, start_lba: int, sectors: int) -> bytes:
+    """Return a 16-byte MBR entry with the CHS fields left at their maximum.
+
+    Nothing in this boot path reads CHS: the BootROM loads by absolute sector,
+    U-Boot reads by LBA and Linux uses the LBA fields. The saturated values are
+    what every LBA-only tool writes for partitions past the CHS limit.
+    """
+    return bytes(
+        [0, 0xFE, 0xFF, 0xFF, kind, 0xFE, 0xFF, 0xFF]
+    ) + start_lba.to_bytes(4, "little") + sectors.to_bytes(4, "little")
+
+
+def erofs_slot_script(image: bytes, root_partition: int) -> str:
+    """Return the boot script for a card whose root is an EROFS partition.
+
+    The initramfs is gone from the boot path entirely. U-Boot no longer reads
+    it, the kernel no longer unpacks it, and the root filesystem is mounted
+    straight off the card, where EROFS pages in only the blocks that are
+    touched. The file stays in the boot volume as a fallback but nothing loads
+    it.
+
+    The active slot is compiled into this script rather than read from the
+    debug sector at run time. Reading it would need `setexpr`, which this
+    U-Boot has not been shown to have, and a script that aborts on an unknown
+    command produces no boot and no milestone to diagnose it with. Switching
+    slots rewrites this one file, which is what an update would do anyway.
+    """
+    stream = io.BytesIO(image)
+    mbr = _read_at(stream, 0, SECTOR_SIZE)
+    partition = _partition(mbr[446:462])
+    fat = _Fat16(stream, partition["start_lba"], partition["sectors"])
+    placement = {}
+    for name in ("KERNEL", "DTB.IMG"):
+        chain = [cluster for cluster, _ in fat.clusters(name)]
+        if chain != list(range(chain[0], chain[0] + len(chain))):
+            raise ValueError(f"{name} is fragmented and cannot be read raw")
+        sectors_per_cluster = fat.cluster_size // SECTOR_SIZE
+        size = fat.files[name][1]
+        placement[name] = (
+            fat.data_offset // SECTOR_SIZE + (chain[0] - 2) * sectors_per_cluster,
+            (size + SECTOR_SIZE - 1) // SECTOR_SIZE,
+        )
+    kernel, dtb = placement["KERNEL"], placement["DTB.IMG"]
+    stored = fat.read("KERNEL")
+    if stored[:2] != GZIP_MAGIC:
+        raise ValueError("the EROFS boot script expects a gzip kernel")
+    bootargs = EROFS_BOOTARGS.format(root=root_partition)
+    return (
+        "mmc dev 0\n"
+        "mmc write ${ramdisk_addr_r} 0x1c001 1\n"
+        f"setenv bootargs '{bootargs}'\n"
+        f"mmc read ${{kernel_comp_addr_r}} {kernel[0]:#x} {kernel[1]:#x}\n"
+        "unzip ${kernel_comp_addr_r} ${kernel_addr_r}\n"
+        "mmc write ${kernel_addr_r} 0x1c003 1\n"
+        f"mmc read ${{fdt_addr_r}} {dtb[0]:#x} {dtb[1]:#x}\n"
+        "mmc write ${fdt_addr_r} 0x1c005 1\n"
+        "booti ${kernel_addr_r} - ${fdt_addr_r}\n"
+    )
+
+
+def erofs_layout(debug_end: int, slot_sectors: int, data_sectors: int) -> dict:
+    """Return the sector map for the system, spare and data regions.
+
+    They sit behind the debug partition rather than in front of it, so the
+    boot volume, the raw sectors the kernel is read from and the debug
+    partition all keep the addresses they were qualified at. That leaves one
+    primary slot for three regions, so they are logical partitions inside an
+    extended one; Linux numbers those from five, which is the numbering the
+    root argument uses.
+    """
+    slices = []
+    cursor = debug_end
+    for sectors in (slot_sectors, slot_sectors, data_sectors):
+        slices.append(
+            {
+                "ebr_lba": cursor,
+                "start_lba": cursor + LOGICAL_ALIGNMENT,
+                "sectors": sectors,
+                "slice_sectors": LOGICAL_ALIGNMENT + sectors,
+            }
+        )
+        cursor += LOGICAL_ALIGNMENT + sectors
+    return {
+        "extended_lba": debug_end,
+        "extended_sectors": cursor - debug_end,
+        "image_sectors": cursor,
+        "system_a": slices[0],
+        "system_b": slices[1],
+        "data": slices[2],
+    }
+
+
+MINIMUM_SLOT_SECTORS = 32768
+
+
+def make_erofs_image(image: bytes, system: bytes, data: bytes,
+                     root_partition: int = 5,
+                     minimum_slot_sectors: int = MINIMUM_SLOT_SECTORS) -> bytes:
+    """Return a card image carrying EROFS system slots and an ext2 data volume.
+
+    Both slots are written with the same image and are exactly the same size,
+    so either is bootable and an update can be staged into the inactive one
+    without moving anything.
+    """
+    if system[EROFS_SUPERBLOCK_OFFSET:EROFS_SUPERBLOCK_OFFSET + 4] != EROFS_MAGIC:
+        raise ValueError("system image is not EROFS")
+    if data[EXT2_MAGIC_OFFSET:EXT2_MAGIC_OFFSET + 2] != EXT2_MAGIC:
+        raise ValueError("data image is not ext2")
+    if root_partition not in (5, 6):
+        raise ValueError("root must be the first or second system slot")
+    stream = io.BytesIO(image)
+    mbr = bytearray(_read_at(stream, 0, SECTOR_SIZE))
+    debug = _partition(mbr[462:478])
+    if debug["type"] != LINUX_TYPE:
+        raise ValueError("partition 2 is not the raw debug volume")
+    if any(mbr[478 + index * 16 + 4] for index in range(2)):
+        raise ValueError("partitions 3 and 4 are already in use")
+
+    slot_sectors = max(
+        LOGICAL_ALIGNMENT,
+        -(-len(system) // SECTOR_SIZE // LOGICAL_ALIGNMENT) * LOGICAL_ALIGNMENT,
+    )
+    # A slot with no room to grow would have to be repartitioned by the first
+    # update that adds a file, so it is rounded well past what fits today.
+    slot_sectors = max(slot_sectors, minimum_slot_sectors)
+    data_sectors = -(-len(data) // SECTOR_SIZE)
+    layout = erofs_layout(
+        debug["start_lba"] + debug["sectors"], slot_sectors, data_sectors
+    )
+
+    grown = bytearray(image)
+    grown.extend(bytes(layout["image_sectors"] * SECTOR_SIZE - len(grown)))
+    mbr[478:494] = _partition_entry(
+        EXTENDED_TYPE, layout["extended_lba"], layout["extended_sectors"]
+    )
+    grown[0:SECTOR_SIZE] = bytes(mbr)
+
+    regions = (layout["system_a"], layout["system_b"], layout["data"])
+    payloads = (system, system, data)
+    for index, (region, payload) in enumerate(zip(regions, payloads)):
+        record = bytearray(SECTOR_SIZE)
+        record[446:462] = _partition_entry(
+            LINUX_TYPE, LOGICAL_ALIGNMENT, region["sectors"]
+        )
+        if index + 1 < len(regions):
+            following = regions[index + 1]
+            # The link entry is relative to the extended partition, while the
+            # data entry above is relative to this record. Mixing the two bases
+            # is the classic way to produce a chain Linux silently truncates.
+            record[462:478] = _partition_entry(
+                EXTENDED_TYPE,
+                following["ebr_lba"] - layout["extended_lba"],
+                following["slice_sectors"],
+            )
+        record[510:512] = b"\x55\xaa"
+        offset = region["ebr_lba"] * SECTOR_SIZE
+        grown[offset:offset + SECTOR_SIZE] = bytes(record)
+        start = region["start_lba"] * SECTOR_SIZE
+        grown[start:start + len(payload)] = payload
+
+    return repair_boot_script(bytes(grown), erofs_slot_script(bytes(grown), root_partition))
+
+
+def logical_partitions(stream, mbr: bytes) -> list[dict[str, int]]:
+    """Return the logical partitions behind an extended entry, in chain order.
+
+    Each boot record holds at most two entries: the payload, addressed relative
+    to that record, and a link to the next record, addressed relative to the
+    extended partition. The walk is bounded by the number of records that could
+    fit, so a chain that points back at itself ends rather than hanging.
+    """
+    extended = next(
+        (
+            entry
+            for entry in (
+                _partition(mbr[446 + index * 16 : 462 + index * 16])
+                for index in range(4)
+            )
+            if entry["type"] in (0x05, 0x0F) and entry["sectors"]
+        ),
+        None,
+    )
+    if extended is None:
+        return []
+    found = []
+    cursor = extended["start_lba"]
+    seen = set()
+    while cursor not in seen and len(found) < extended["sectors"]:
+        seen.add(cursor)
+        record = _read_at(stream, cursor * SECTOR_SIZE, SECTOR_SIZE)
+        if record[510:512] != b"\x55\xaa":
+            raise ValueError(f"extended boot record at {cursor} lacks a signature")
+        payload = _partition(record[446:462])
+        if not payload["sectors"]:
+            break
+        found.append(
+            {
+                "index": 5 + len(found),
+                "ebr_lba": cursor,
+                "type": payload["type"],
+                "start_lba": cursor + payload["start_lba"],
+                "sectors": payload["sectors"],
+            }
+        )
+        link = _partition(record[462:478])
+        if not link["sectors"]:
+            break
+        cursor = extended["start_lba"] + link["start_lba"]
+    return found
+
+
 def describe_lba(path: Path, lba: int) -> str:
     """Name what an absolute image LBA holds.
 
@@ -502,10 +730,20 @@ def describe_lba(path: Path, lba: int) -> str:
         partitions = [
             _partition(mbr[446 + index * 16 : 462 + index * 16]) for index in range(4)
         ]
+        names = {5: "system A", 6: "system B", 7: "data"}
+        for logical in logical_partitions(stream, mbr):
+            if lba == logical["ebr_lba"]:
+                return f"extended boot record for partition {logical['index']}"
+            start, count = logical["start_lba"], logical["sectors"]
+            if start <= lba < start + count:
+                name = names.get(logical["index"], f"partition {logical['index']}")
+                return f"{name}+{(lba - start) * SECTOR_SIZE}"
         for index, partition in enumerate(partitions, start=1):
             start, count = partition["start_lba"], partition["sectors"]
             if not count or not start <= lba < start + count:
                 continue
+            if partition["type"] in (0x05, 0x0F):
+                return f"extended partition {index} gap sector {lba - start}"
             if partition["type"] != 0x0E:
                 return f"partition {index} sector {lba - start}"
             fat = _Fat16(stream, start, count)
@@ -585,6 +823,46 @@ def verify_boot_image(path: Path) -> dict[str, object]:
         if not payloads["DTB.IMG"].startswith(b"\xd0\x0d\xfe\xed"):
             raise ValueError("dtb.img lacks an FDT header")
 
+        logicals = logical_partitions(stream, mbr)
+        system_slots = []
+        if logicals:
+            if len(logicals) != 3:
+                raise ValueError("expected exactly system A, system B and data")
+            system_a, system_b, data_partition = logicals
+            if system_a["sectors"] != system_b["sectors"]:
+                raise ValueError("the system slots are not the same size")
+            if system_a["start_lba"] < debug_partition["start_lba"]:
+                raise ValueError("the system slots overlap the qualified regions")
+            for slot in (system_a, system_b):
+                magic = _read_at(
+                    stream,
+                    slot["start_lba"] * SECTOR_SIZE + EROFS_SUPERBLOCK_OFFSET,
+                    4,
+                )
+                if magic != EROFS_MAGIC:
+                    raise ValueError(f"partition {slot['index']} is not EROFS")
+                system_slots.append(slot)
+            data_magic = _read_at(
+                stream,
+                data_partition["start_lba"] * SECTOR_SIZE + EXT2_MAGIC_OFFSET,
+                2,
+            )
+            if data_magic != EXT2_MAGIC:
+                raise ValueError("the data partition is not ext2")
+            if (
+                data_partition["start_lba"] + data_partition["sectors"]
+            ) * SECTOR_SIZE > size:
+                raise ValueError("the extended chain runs past the image")
+            # A root argument naming a slot that holds no filesystem is the one
+            # failure this layout can produce that still looks bootable.
+            roots = [
+                f"root=/dev/mmcblk0p{slot['index']}".encode()
+                for slot in system_slots
+                if f"root=/dev/mmcblk0p{slot['index']}".encode() in script_text
+            ]
+            if len(roots) != 1:
+                raise ValueError("BOOT.SCR does not name exactly one system slot")
+
         debug_offset = debug_partition["start_lba"] * SECTOR_SIZE
         debug_data = _read_at(stream, debug_offset, 32 * SECTOR_SIZE)
         records = decode_records(debug_data)
@@ -602,6 +880,7 @@ def verify_boot_image(path: Path) -> dict[str, object]:
         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "spl": spl,
         "partitions": partitions,
+        "logical_partitions": logicals,
         "boot_files": {name: len(payloads[name]) for name in REQUIRED_BOOT_FILES},
         "debug_command": records[0]["command"],
     }
@@ -619,12 +898,19 @@ def main() -> None:
     group.add_argument("--replace-file", type=Path, metavar="IMAGE")
     group.add_argument("--compress-kernel", type=Path, metavar="IMAGE")
     group.add_argument("--raw-kernel", type=Path, metavar="IMAGE")
+    group.add_argument("--make-erofs-image", type=Path, metavar="IMAGE")
     parser.add_argument(
         "--kernel-compression", choices=("gzip", "zstd"), default="gzip",
     )
     parser.add_argument(
         "--quiet-boot", action="store_true",
         help="Drop the unattached serial console and silence the kernel log",
+    )
+    parser.add_argument("--system", type=Path, help="EROFS system image")
+    parser.add_argument("--data", type=Path, help="ext2 data image")
+    parser.add_argument(
+        "--slot", choices=("a", "b"), default="a",
+        help="Which system slot the boot script roots from",
     )
     parser.add_argument("--name")
     parser.add_argument("--payload", type=Path)
@@ -642,6 +928,33 @@ def main() -> None:
         print(json.dumps(verify_boot_image(args.verify_image), indent=2))
         return
 
+
+    if args.make_erofs_image is not None:
+        if args.output is None or args.system is None or args.data is None:
+            parser.error("--make-erofs-image requires --system, --data and --output")
+        built = make_erofs_image(
+            args.make_erofs_image.read_bytes(),
+            args.system.read_bytes(),
+            args.data.read_bytes(),
+            root_partition=5 if args.slot == "a" else 6,
+        )
+        args.output.write_bytes(built)
+        with io.BytesIO(built) as stream:
+            mbr = _read_at(stream, 0, SECTOR_SIZE)
+            chain = logical_partitions(stream, mbr)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "bytes": len(built),
+                    "sha256": hashlib.sha256(built).hexdigest(),
+                    "root": f"/dev/mmcblk0p{5 if args.slot == 'a' else 6}",
+                    "logical_partitions": chain,
+                },
+                indent=2,
+            )
+        )
+        return
 
     if args.raw_kernel is not None:
         if args.output is None:

@@ -93,10 +93,50 @@ def transitions(samples: list[tuple[float, dict]], progress: int = 8192) -> list
     return entries
 
 
-def power(cli: Path, channel: str, state: str) -> None:
+def power(cli: Path, channel: str, state: str, wait: bool = True):
+    """Switch the target's channel, optionally without waiting for the CLI.
+
+    Waiting for the power-on to return is what made this measurement wrong.
+    The CLI has to start a Node process and open a serial port before it can
+    switch anything, and how long that takes varies by seconds, so a clock
+    started when it returns has already lost an unknown amount of the boot. A
+    run that lost two seconds looked two seconds faster. Power-on is therefore
+    launched and left running while polling begins immediately, and the clock
+    is re-zeroed on the first card clock edge the FPGA actually sees.
+
+    Power-off stays synchronous: an armed card facing a target whose state is
+    unknown is the one condition this bench must never leave behind.
+    """
+    command = ["npm", "run", "start", "--silent", "--", channel, state]
+    if not wait:
+        return subprocess.Popen(
+            command, cwd=cli, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     subprocess.run(
-        ["npm", "run", "start", "--silent", "--", channel, state],
-        cwd=cli, capture_output=True, timeout=120, check=False,
+        command, cwd=cli, capture_output=True, timeout=120, check=False,
+    )
+    return None
+
+
+def first_command_index(samples: list[tuple[float, dict]], baseline: dict) -> int | None:
+    """Return the first sample in which the host issued a command.
+
+    The obvious anchor, the first clock edge, does not work: with the target
+    unpowered the card's clock pin floats and the edge counter still advances,
+    measured here at about fifty edges a second, so every sample after the
+    baseline shows more edges than it and the zero lands immediately. The
+    command counters do not move at all while the target is off, because a
+    floating line does not produce a frame that passes CRC7. The host's first
+    command follows its first clock edge by microseconds, which is far below
+    the resolution of this poll, so it is the same instant for this purpose.
+    """
+    return next(
+        (
+            index
+            for index, (_, trace) in enumerate(samples)
+            if index and trace["command_frames"] > baseline["command_frames"]
+        ),
+        None,
     )
 
 
@@ -142,16 +182,28 @@ def main() -> None:
     try:
         power(arguments.psu_cli, arguments.channel, "off")
         time.sleep(arguments.settle)
-        power(arguments.psu_cli, arguments.channel, "on")
+        launch = power(arguments.psu_cli, arguments.channel, "on", wait=False)
         start = time.monotonic()
         while time.monotonic() - start < arguments.observe:
             samples.append((time.monotonic() - start, client.trace()))
             time.sleep(arguments.interval)
+        launch.wait(timeout=120)
     finally:
         power(arguments.psu_cli, arguments.channel, "off")
         time.sleep(2)
         client.command(images.Opcode.DISARM)
 
+    # Everything is reported from the host's first command rather than from the
+    # power-on, so the figures do not carry the power CLI's start-up time.
+    edge = first_command_index(samples, baseline)
+    if edge is None:
+        raise SystemExit("the card saw no command; the target did not start")
+    zero = samples[edge][0]
+    # The first command is only known to be the first if a poll saw the card
+    # quiet before it. Reads start within a poll of it either way, so their
+    # counter says nothing about whether polling began in time.
+    sound = edge > 1
+    samples = [(elapsed - zero, trace) for elapsed, trace in samples]
     timeline = transitions(samples, arguments.progress)
     for entry in timeline:
         where = ""
@@ -186,6 +238,15 @@ def main() -> None:
             f"edges {timing.get('data_start_edge')}..{timing.get('first_block_end_edge')}"
         )
 
+    print(
+        f"\nfirst host command {zero:.2f}s after the power command was issued; "
+        + (
+            "the clock starts there"
+            if sound
+            else "NO POLL SAW THE CARD QUIET FIRST, so this run's zero is "
+            "unknown and its total must be discarded"
+        )
+    )
     final = summarize(samples[-1][1])
     print(
         f"\nlast read LBA {final['read_lba']}, "
@@ -195,7 +256,14 @@ def main() -> None:
         f"{final['invalid'] - baseline['invalid_frames']} invalid"
     )
     if arguments.output is not None:
-        arguments.output.write_text(json.dumps(timeline, indent=2) + "\n")
+        arguments.output.write_text(
+            json.dumps(
+                {"zero_is_sound": sound, "power_to_first_edge": round(zero, 3),
+                 "timeline": timeline},
+                indent=2,
+            )
+            + "\n"
+        )
 
 
 if __name__ == "__main__":

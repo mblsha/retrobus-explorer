@@ -1049,3 +1049,113 @@ One of them, 2.23 s, is below the physical floor: the kernel read alone is
 the boot, because the trial's zero is when the power-supply command returns
 rather than when the target's rail actually rises. The medians are unaffected;
 the fast tail is not yet trustworthy.
+
+## 2026-09-19 The spread was the measurement
+
+Every boot-time figure before this entry is wrong, in a way that flattered the
+fastest runs. `rg35xx_trial.py` started its clock when the power-supply CLI
+returned, and that CLI has to start a Node process and open a serial port
+before it switches anything. Measured across twenty runs, it took between 1.03
+and 4.29 seconds to do so. A run where it took three seconds had three seconds
+of boot already behind it before the first poll, and was reported as three
+seconds faster. That is the entire origin of the run-to-run spread this page
+has been chasing, and of the outliers that sat below the physical floor set by
+the kernel read.
+
+The fix is to launch the power-on without waiting for it, poll immediately, and
+re-zero on what the card itself saw. The obvious anchor does not work: with the
+target unpowered the card's clock pin floats and the edge counter still
+advances, measured here at about fifty edges a second, so anchoring on the
+first clock edge puts the zero at the first poll of every run and changes
+nothing. The command counters do not move at all while the target is off,
+because a floating line does not produce a frame that passes CRC7. The host's
+first command follows its first clock edge by microseconds, far below this
+poll's resolution, so it is the same instant for this purpose and it is
+unambiguous.
+
+A run is only sound if some poll saw the card quiet before that first command.
+Runs that fail that test are reported and discarded rather than averaged in.
+
+Re-measured on that basis, with ten sound cold starts each:
+
+```text
+                              median   min    max   stdev   IQR
+quiet console, shipped kernel   9.93   9.88  11.07   0.36   0.06
+trimmed kernel, initramfs       5.75   5.72   5.83   0.03   0.05
+trimmed kernel, EROFS root      5.44   5.42   5.49   0.02   0.02
+```
+
+The boot is repeatable to within about thirty milliseconds. There was never a
+spread to explain.
+
+## 2026-09-19 EROFS root, A/B slots and a data volume
+
+`rg35xx/build_rootfs.py` builds the system image: the same static BusyBox the
+initramfs used, so userspace is a known quantity and the only thing under test
+is where it is read from, compressed LZ4HC at level 12. LZ4HC is chosen because
+its output is ordinary LZ4, so the kernel needs only `CONFIG_EROFS_FS_ZIP` and
+its LZ4 decompressor, and the compression effort is spent at build time. The
+result is 1,835,008 bytes: 448 blocks of 4 KiB holding 417 inodes.
+
+### Where the new regions go
+
+They sit behind the debug partition, not in front of it:
+
+```text
+LBA 16        eGON SPL                  unchanged
+LBA 96        FIT                        unchanged
+partition 1   FAT16 boot   32768 +81920  unchanged
+partition 2   raw debug   114688 +16384  unchanged
+partition 3   extended    131072+137216  new
+  partition 5 EROFS A     133120 +32768  new
+  partition 6 EROFS B     167936 +32768  new
+  partition 7 ext2 data   202752 +65536  new
+```
+
+The plan put the system slots between the boot and debug partitions, which
+would have moved the debug partition and the raw sectors the kernel is read
+from, and every one of those addresses is qualified and compiled into a boot
+script, a trace capture and the target's own init. Appending instead leaves all
+of them byte for byte identical, which is checked by a test. It costs one
+primary slot, so the three new regions are logical partitions inside an
+extended one; Linux numbers those from five, and that is the numbering the root
+argument uses.
+
+The two system slots are exactly the same size, so either is bootable and an
+update can be staged into the inactive one without moving anything. The active
+slot is compiled into `BOOT.SCR` rather than read from the debug sector at run
+time: reading it would need `setexpr`, which this U-Boot has not been shown to
+have, and a script that aborts on an unknown command produces neither a boot
+nor a milestone to diagnose it with. Switching slots rewrites one file, which
+is what an update would do anyway.
+
+### There is no initramfs any more
+
+U-Boot reads the kernel and the device tree and nothing else. `booti` is given
+a dash where the ramdisk went, and the kernel mounts the system partition
+straight off the card. The 1.53 MB initramfs is neither read nor unpacked.
+
+### What the cluster size actually costs
+
+The physical cluster is the unit the kernel reads and decompresses, so it was
+built as an option and measured rather than assumed. With a 64 KiB cluster the
+card sees 4 KiB reads for metadata, 64 KiB reads for single clusters, and
+128 KiB and 192 KiB reads where readahead merged adjacent ones. The whole mount
+and start of init reads about 1.1 MB, against the 1.53 MB the initramfs cost,
+and the phase takes 0.5 s of the boot. Since BusyBox is a single 1.1 MB static
+binary and starting it faults in most of its text, a smaller cluster has little
+left to save here; it would matter for a rootfs whose access pattern is sparse.
+
+### Where the remaining 5.44 seconds go
+
+```text
+0.00 - 1.05   SPL, FIT and U-Boot proper
+1.10 - 3.89   kernel read, 7.36 MB
+3.89 - 4.27   gunzip and device tree
+4.27 - 4.93   kernel init to partition scan
+4.93 - 5.44   EROFS mount, paging and init to its first milestone
+```
+
+Half the boot is one transfer. The payload work is close to done: the kernel is
+already trimmed and the rootfs is already demand paged. What is left is the
+interface, and that is the step the ladder measurement blocked.

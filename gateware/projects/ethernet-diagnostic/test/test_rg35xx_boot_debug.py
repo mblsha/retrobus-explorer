@@ -478,3 +478,188 @@ class BootDebugTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def erofs_fixture(blocks: int = 8) -> bytes:
+    """A blob that is EROFS only as far as this tooling inspects it."""
+    image = bytearray(blocks * debug.SECTOR_SIZE)
+    image[debug.EROFS_SUPERBLOCK_OFFSET : debug.EROFS_SUPERBLOCK_OFFSET + 4] = (
+        debug.EROFS_MAGIC
+    )
+    return bytes(image)
+
+
+def ext2_fixture(blocks: int = 16) -> bytes:
+    image = bytearray(blocks * debug.SECTOR_SIZE)
+    image[debug.EXT2_MAGIC_OFFSET : debug.EXT2_MAGIC_OFFSET + 2] = debug.EXT2_MAGIC
+    return bytes(image)
+
+
+class ErofsLayoutTests(unittest.TestCase):
+    def build(self, slot=8, **kwargs):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "boot.img"
+            boot_image_fixture(path)
+            gzipped = debug.compress_kernel(path.read_bytes(), "gzip")
+            return debug.make_erofs_image(
+                gzipped, erofs_fixture(), ext2_fixture(),
+                minimum_slot_sectors=slot, **kwargs,
+            )
+
+    def test_layout_gives_the_slots_the_same_size(self):
+        """An update stages into the inactive slot, so a slot that cannot hold
+        what its partner holds makes the pair useless."""
+        layout = debug.erofs_layout(224, 64, 100)
+        self.assertEqual(layout["system_a"]["sectors"], layout["system_b"]["sectors"])
+        self.assertEqual(
+            layout["extended_sectors"],
+            sum(
+                layout[name]["slice_sectors"]
+                for name in ("system_a", "system_b", "data")
+            ),
+        )
+        self.assertEqual(layout["image_sectors"], 224 + layout["extended_sectors"])
+
+    def test_layout_leaves_the_qualified_regions_untouched(self):
+        """Everything new sits behind the debug partition. The boot volume, the
+        sectors the kernel is read from and the debug partition all keep the
+        addresses they were qualified at."""
+        layout = debug.erofs_layout(224, 64, 100)
+        self.assertEqual(layout["extended_lba"], 224)
+        self.assertGreater(layout["system_a"]["start_lba"], 224)
+
+    def test_built_image_preserves_the_original_regions_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "boot.img"
+            boot_image_fixture(path)
+            source = debug.compress_kernel(path.read_bytes(), "gzip")
+        built = debug.make_erofs_image(
+            source, erofs_fixture(), ext2_fixture(), minimum_slot_sectors=8
+        )
+        # The boot script is deliberately rewritten; the SPL, the kernel bytes
+        # and the whole debug partition are not.
+        spl = slice(debug.SPL_OFFSET, debug.SPL_OFFSET + debug.SECTOR_SIZE)
+        self.assertEqual(built[spl], source[spl])
+        volume = slice(192 * debug.SECTOR_SIZE, 224 * debug.SECTOR_SIZE)
+        self.assertEqual(built[volume], source[volume])
+        self.assertGreater(len(built), len(source))
+
+    def test_chain_is_walkable_and_names_three_partitions(self):
+        built = self.build()
+        with io.BytesIO(built) as stream:
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            chain = debug.logical_partitions(stream, mbr)
+        self.assertEqual([entry["index"] for entry in chain], [5, 6, 7])
+        self.assertEqual(chain[0]["sectors"], chain[1]["sectors"])
+        for entry in chain[:2]:
+            start = entry["start_lba"] * debug.SECTOR_SIZE
+            magic = start + debug.EROFS_SUPERBLOCK_OFFSET
+            self.assertEqual(built[magic : magic + 4], debug.EROFS_MAGIC)
+
+    def test_link_entries_are_relative_to_the_extended_partition(self):
+        """The payload entry is addressed from its own record and the link from
+        the extended partition. Writing the link from the record instead leaves
+        a chain that still parses and silently loses the partitions after the
+        first, which is the failure this checks for."""
+        built = self.build()
+        with io.BytesIO(built) as stream:
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            chain = debug.logical_partitions(stream, mbr)
+            extended = debug._partition(mbr[478:494])
+            record = debug._read_at(
+                stream, chain[0]["ebr_lba"] * debug.SECTOR_SIZE, debug.SECTOR_SIZE
+            )
+        link = debug._partition(record[462:478])
+        self.assertEqual(
+            extended["start_lba"] + link["start_lba"], chain[1]["ebr_lba"]
+        )
+
+    def test_the_built_image_still_verifies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "erofs.img"
+            path.write_bytes(self.build())
+            report = debug.verify_boot_image(path)
+        self.assertEqual(len(report["logical_partitions"]), 3)
+
+    def test_verifier_rejects_slots_of_different_sizes(self):
+        built = bytearray(self.build())
+        with io.BytesIO(bytes(built)) as stream:
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            chain = debug.logical_partitions(stream, mbr)
+        entry = chain[1]["ebr_lba"] * debug.SECTOR_SIZE + 446
+        built[entry + 12 : entry + 16] = (
+            chain[1]["sectors"] - 2
+        ).to_bytes(4, "little")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "erofs.img"
+            path.write_bytes(bytes(built))
+            with self.assertRaisesRegex(ValueError, "same size"):
+                debug.verify_boot_image(path)
+
+    def test_verifier_rejects_a_root_naming_a_slot_without_a_filesystem(self):
+        """A boot script can name a slot that holds nothing and still look
+        complete; the kernel only finds out when it fails to mount."""
+        built = bytearray(self.build())
+        with io.BytesIO(bytes(built)) as stream:
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            chain = debug.logical_partitions(stream, mbr)
+        start = chain[0]["start_lba"] * debug.SECTOR_SIZE
+        built[start + debug.EROFS_SUPERBLOCK_OFFSET : start + debug.EROFS_SUPERBLOCK_OFFSET + 4] = bytes(4)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "erofs.img"
+            path.write_bytes(bytes(built))
+            with self.assertRaisesRegex(ValueError, "not EROFS"):
+                debug.verify_boot_image(path)
+
+    def test_the_script_loads_no_initrd(self):
+        """The point of the system partition is that nothing is read before the
+        kernel starts, so booti must be given a dash where the ramdisk went."""
+        built = self.build()
+        with io.BytesIO(built) as stream:
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            partition = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, partition["start_lba"], partition["sectors"])
+            script = debug._script_body(fat.read("BOOT.SCR")).decode()
+        self.assertIn("booti ${kernel_addr_r} - ${fdt_addr_r}", script)
+        self.assertNotIn("ramdisk_addr_r}:", script)
+        self.assertIn("root=/dev/mmcblk0p5", script)
+        self.assertIn("rootfstype=erofs", script)
+
+    def test_the_second_slot_can_be_the_root(self):
+        built = self.build(root_partition=6)
+        with io.BytesIO(built) as stream:
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            partition = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, partition["start_lba"], partition["sectors"])
+            script = debug._script_body(fat.read("BOOT.SCR")).decode()
+        self.assertIn("root=/dev/mmcblk0p6", script)
+
+    def test_describe_lba_names_the_system_and_data_regions(self):
+        built = self.build()
+        with io.BytesIO(built) as stream:
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            chain = debug.logical_partitions(stream, mbr)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "erofs.img"
+            path.write_bytes(built)
+            self.assertEqual(
+                debug.describe_lba(path, chain[0]["ebr_lba"]),
+                "extended boot record for partition 5",
+            )
+            self.assertEqual(
+                debug.describe_lba(path, chain[0]["start_lba"] + 1), "system A+512"
+            )
+            self.assertEqual(
+                debug.describe_lba(path, chain[1]["start_lba"]), "system B+0"
+            )
+            self.assertEqual(debug.describe_lba(path, chain[2]["start_lba"]), "data+0")
+
+    def test_a_payload_that_is_not_erofs_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "boot.img"
+            boot_image_fixture(path)
+            source = debug.compress_kernel(path.read_bytes(), "gzip")
+        with self.assertRaisesRegex(ValueError, "not EROFS"):
+            debug.make_erofs_image(source, bytes(4096), ext2_fixture())
+        with self.assertRaisesRegex(ValueError, "not ext2"):
+            debug.make_erofs_image(source, erofs_fixture(), bytes(4096))

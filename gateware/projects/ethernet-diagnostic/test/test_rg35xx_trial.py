@@ -9,7 +9,8 @@ trial = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trial)
 
 
-def trace(frames=0, command=0, argument=0, reads=0, lba=0, writes=0, multiblock=()):
+def trace(frames=0, command=0, argument=0, reads=0, lba=0, writes=0, multiblock=(),
+          clock_edges=0):
     return {
         "command_frames": frames,
         "valid_commands": frames,
@@ -19,7 +20,7 @@ def trace(frames=0, command=0, argument=0, reads=0, lba=0, writes=0, multiblock=
         "read_requests": reads,
         "last_read_lba": lba,
         "writes": writes,
-        "clock_edges": 0,
+        "clock_edges": clock_edges,
         "recent_multiblock_reads": [
             {"lba": entry[0], "blocks": entry[1]} for entry in multiblock
         ],
@@ -106,3 +107,45 @@ class TrialTimelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrialZeroTests(unittest.TestCase):
+    """Where the clock starts decides every figure this bench reports."""
+
+    def test_a_floating_clock_pin_does_not_start_the_clock(self):
+        """With the target unpowered the card's clock pin floats and the edge
+        counter still advances, measured on this bench at about fifty edges a
+        second. Anchoring on it puts the zero at the first poll of every run,
+        so each run silently loses however long the power supply took to
+        respond and the fastest-looking runs are the ones measured worst."""
+        baseline = trace(frames=100, clock_edges=1000)
+        samples = [(0.0, baseline)]
+        for index in range(1, 6):
+            samples.append((index * 0.1, trace(frames=100, clock_edges=1000 + 50 * index)))
+        samples.append((0.6, trace(frames=101, clock_edges=1300, reads=12)))
+        self.assertEqual(trial.first_command_index(samples, baseline), 6)
+
+    def test_reads_already_under_way_do_not_move_the_zero(self):
+        """The host's first command is followed within milliseconds by its
+        first read, so a poll that catches the command will usually show reads
+        too. That is not evidence of having joined late."""
+        baseline = trace(frames=7, reads=500)
+        samples = [
+            (0.0, baseline),
+            (0.1, trace(frames=7, reads=500, clock_edges=50)),
+            (0.2, trace(frames=9, reads=830, clock_edges=100)),
+        ]
+        self.assertEqual(trial.first_command_index(samples, baseline), 2)
+
+    def test_a_target_that_never_starts_has_no_zero(self):
+        baseline = trace(frames=4, clock_edges=10)
+        samples = [(index * 0.1, trace(frames=4, clock_edges=10 + index)) for index in range(6)]
+        self.assertIsNone(trial.first_command_index(samples, baseline))
+
+    def test_the_first_poll_is_not_a_sound_zero(self):
+        """If the very first poll already shows a command, no poll saw the card
+        quiet, so the run may have been joined after the host had begun and its
+        total cannot be trusted."""
+        baseline = trace(frames=2)
+        samples = [(0.0, baseline), (0.05, trace(frames=3, reads=40))]
+        self.assertEqual(trial.first_command_index(samples, baseline), 1)

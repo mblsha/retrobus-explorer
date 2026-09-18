@@ -16,14 +16,29 @@ milestone in the raw debug partition, reported as a distribution over at least
 ten standardized cold starts.
 
 ```text
-stage                      measured today   target
-SPL, FIT, U-Boot proper          0.9 s       0.7 s
-kernel read and decompress       5.3 s       1.0 s
-initramfs, device tree           0.7 s       0.1 s
-kernel init to userspace         1.3 s       1.0 s
-rootfs mount and init                 -      0.3 s
-total                            9.8 s      <4 s
+stage                      at the start    reached   target
+SPL, FIT, U-Boot proper          1.0 s       1.05 s    0.7 s
+kernel read and decompress       5.3 s       3.17 s    1.0 s
+device tree                      0.7 s       0.38 s    0.1 s
+kernel init to userspace         1.3 s       0.66 s    1.0 s
+rootfs mount and init                 -      0.51 s    0.3 s
+total                            9.9 s       5.44 s   <4 s
 ```
+
+Measured over ten sound cold starts per stage, from the host's first command to
+the first multi-block write in the debug partition:
+
+```text
+                              median   min    max   stdev   IQR
+quiet console, shipped kernel   9.93   9.88  11.07   0.36   0.06
+trimmed kernel, initramfs       5.75   5.72   5.83   0.03   0.05
+trimmed kernel, EROFS root      5.44   5.42   5.49   0.02   0.02
+```
+
+The boot is repeatable to about thirty milliseconds. The spread these figures
+once showed was the measurement: the clock started when the power-supply CLI
+returned, and that took anywhere from 1.03 to 4.29 seconds. See
+RG35XX-PLUS-DEBUG.md.
 
 The target is dominated by two changes that are not payload tuning: the card
 interface runs at half the rate it advertises, and the kernel carries roughly
@@ -40,6 +55,17 @@ fabric clock that is 5.3 fabric cycles per SD period, inside what the frontend
 already meets. 25 MHz is explicitly not a target: it would leave 2.5 cycles per
 period and reopen the timing work that the 64 MHz build exists to avoid.
 
+This step is blocked, with the measurement that shows it. The card's advertised
+`TRAN_SPEED` was made a build option and swept: at 12, 13 and 20 MHz the host
+clocks at 6.00 MHz, and at 25 MHz it clocks at 25.00 MHz, which the frontend
+cannot serve at a 64 MHz fabric clock because it leaves 2.56 cycles per period.
+The host has no divisor between those two, so there is no intermediate step to
+ask for. Reaching 25 MHz needs roughly a 100 MHz fabric clock, which is the
+timing work this build exists to avoid; the reward would be 11.8 MB/s against
+today's 2.95. Until then the kernel read stays at about 2.8 s and no payload
+change can reach the four-second target: the remaining 5.44 s is 1.05 s of
+loaders, 2.8 s of one transfer and 1.6 s of everything else.
+
 Every byte in the rest of this page is read through this interface, so it is
 worth more than the payload changes combined and should land first.
 
@@ -51,12 +77,22 @@ Four regions, sized so the system slots are fixed and interchangeable:
 LBA 16        eGON SPL                       raw, loaded by the BootROM
 LBA 96        FIT (U-Boot proper)            raw
 partition 1   FAT16, boot                    BOOT.SCR, KERNEL, DTB.IMG
-partition 2   EROFS, system A                read-only, demand paged
-partition 3   EROFS, system B                read-only, same size as A
-partition 4   ext2, data                     rw, noatime
-partition 5   raw debug                      sector 0 host command,
-                                             sectors 1..31 target milestones
+partition 2   raw debug                      sector 0 host command,
+                                             sectors 1..15 U-Boot milestones,
+                                             sectors 16..31 userspace ones
+partition 3   extended                       holds the three below
+partition 5   EROFS, system A                read-only, demand paged
+partition 6   EROFS, system B                read-only, same size as A
+partition 7   ext2, data                     rw, noatime
 ```
+
+Built, and in that order for a reason. Putting the system slots in front of the
+debug partition would move it, and with it the raw sectors the kernel is read
+from; those addresses are qualified and are compiled into a boot script, a
+trace capture and the target's own init. Appending leaves every one of them
+byte for byte identical. That costs the last primary slot, so the three new
+regions are logical partitions inside an extended one, and Linux numbers those
+from five.
 
 The debug partition is not optional. The board has no serial header populated,
 so that partition is the only channel the target can report through, and every
