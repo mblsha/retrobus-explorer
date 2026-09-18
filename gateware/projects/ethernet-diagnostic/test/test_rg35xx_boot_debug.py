@@ -1,4 +1,5 @@
 import importlib.util
+import gzip
 import io
 import struct
 import zlib
@@ -193,12 +194,29 @@ class BootDebugTests(unittest.TestCase):
             body = debug._script_body(fat.read("BOOT.SCR"))
             self.assertEqual(body.decode(), script)
 
-    def test_repair_rejects_a_script_that_outgrows_its_cluster(self):
+    def test_repair_grows_the_script_beyond_its_original_cluster(self):
+        """The compressed-kernel script no longer fits one cluster, so the
+        repair reallocates rather than refusing."""
+        script = "mmc write a 0x1c001 1\nbaredebug=/dev/mmcblk0p2\nbooti a b c\n"
+        script += "# padding to force a second cluster\n" * 12
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "boot.img"
             boot_image_fixture(image)
-            with self.assertRaises(ValueError):
-                debug.repair_boot_script(image.read_bytes(), "booti\n" * 200)
+            patched = debug.repair_boot_script(image.read_bytes(), script)
+            image.write_bytes(patched)
+            stream = io.BytesIO(patched)
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            part = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, part["start_lba"], part["sectors"])
+            self.assertGreater(len(list(fat.clusters("BOOT.SCR"))), 1)
+            self.assertEqual(debug._script_body(fat.read("BOOT.SCR")).decode(), script)
+
+    def test_repair_rejects_a_script_larger_than_the_volume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            with self.assertRaisesRegex(ValueError, "clusters"):
+                debug.repair_boot_script(image.read_bytes(), "booti\n" * 100000)
 
     def test_verifier_rejects_a_script_without_the_length_table(self):
         """The shipped image framed BOOT.SCR this way and could never run it."""
@@ -323,6 +341,50 @@ class BootDebugTests(unittest.TestCase):
             boot_image_fixture(image)
             with self.assertRaises(ValueError):
                 debug.replace_file(image.read_bytes(), "ABSENT", b"x")
+
+    def test_compress_kernel_stores_gzip_and_rewrites_the_script(self):
+        """The card reads about 2.6 MB/s, so the uncompressed Image dominates
+        the boot. A compressed kernel is only useful if the script expands it."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            original = debug.verify_boot_image(image)
+            patched = debug.compress_kernel(image.read_bytes())
+            image.write_bytes(patched)
+
+            stream = io.BytesIO(patched)
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            part = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, part["start_lba"], part["sectors"])
+            stored = fat.read("KERNEL")
+            self.assertEqual(stored[:2], b"\x1f\x8b")
+            self.assertEqual(gzip.decompress(stored)[56:60], b"ARM\x64")
+            self.assertIn(b"unzip ", debug._script_body(fat.read("BOOT.SCR")))
+            # The image must still satisfy every other contract.
+            report = debug.verify_boot_image(image)
+            self.assertEqual(report["debug_command"], original["debug_command"])
+
+    def test_compress_kernel_refuses_to_run_twice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            once = debug.compress_kernel(image.read_bytes())
+            with self.assertRaisesRegex(ValueError, "already compressed"):
+                debug.compress_kernel(once)
+
+    def test_verifier_rejects_a_compressed_kernel_the_script_cannot_expand(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            # Compress the kernel but leave the original script in place.
+            stream = io.BytesIO(image.read_bytes())
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            part = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, part["start_lba"], part["sectors"])
+            squeezed = gzip.compress(fat.read("KERNEL"), 9, mtime=0)
+            image.write_bytes(debug.replace_file(image.read_bytes(), "KERNEL", squeezed))
+            with self.assertRaisesRegex(ValueError, "milestone write or bare Linux"):
+                debug.verify_boot_image(image)
 
     def test_verifier_rejects_corrupt_spl_checksum(self):
         with tempfile.TemporaryDirectory() as directory:

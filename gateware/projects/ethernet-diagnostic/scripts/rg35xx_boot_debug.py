@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import zlib
+import gzip
 import io
 import hashlib
 import json
@@ -236,30 +237,20 @@ def build_boot_script(header: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
     return bytes(rebuilt) + payload
 
 
-def repair_boot_script(image: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
-    """Replace BOOT.SCR in a boot image with a correctly framed script image."""
-    stream = io.BytesIO(image)
-    mbr = _read_at(stream, 0, SECTOR_SIZE)
-    boot_partition = _partition(mbr[446:462])
-    fat = _Fat16(stream, boot_partition["start_lba"], boot_partition["sectors"])
-    if "BOOT.SCR" not in fat.files:
-        raise ValueError("boot image has no BOOT.SCR")
-    cluster, size = fat.files["BOOT.SCR"]
-    rebuilt = build_boot_script(fat.read("BOOT.SCR")[:64], script)
-    if len(rebuilt) > fat.cluster_size:
-        raise ValueError("rebuilt BOOT.SCR does not fit its existing cluster")
-    patched = bytearray(image)
-    offset = fat.data_offset + (cluster - 2) * fat.cluster_size
-    patched[offset : offset + fat.cluster_size] = rebuilt.ljust(fat.cluster_size, b"\0")
-    root = bytearray(_read_at(stream, fat.root_offset, fat.data_offset - fat.root_offset))
-    for entry in range(0, len(root), 32):
-        if root[entry : entry + 11] == b"BOOT    SCR":
-            root[entry + 28 : entry + 32] = struct.pack("<I", len(rebuilt))
-            break
-    else:
-        raise ValueError("BOOT.SCR has no root directory entry")
-    patched[fat.root_offset : fat.root_offset + len(root)] = root
-    return bytes(patched)
+COMPRESSED_KERNEL_SCRIPT = """mmc write ${ramdisk_addr_r} 0x1c001 1
+fatload mmc 0:1 ${ramdisk_addr_r} BOOTMARK
+mmc write ${ramdisk_addr_r} 0x1c002 1
+setenv bootargs 'console=tty0 console=ttyS0,115200 loglevel=7 rdinit=/init baredebug=/dev/mmcblk0p2'
+fatload mmc 0:1 ${kernel_comp_addr_r} KERNEL
+unzip ${kernel_comp_addr_r} ${kernel_addr_r}
+mmc write ${kernel_addr_r} 0x1c003 1
+fatload mmc 0:1 ${ramdisk_addr_r} INITRD
+setenv initrd_size ${filesize}
+mmc write ${ramdisk_addr_r} 0x1c004 1
+fatload mmc 0:1 ${fdt_addr_r} dtb.img
+mmc write ${fdt_addr_r} 0x1c005 1
+booti ${kernel_addr_r} ${ramdisk_addr_r}:${initrd_size} ${fdt_addr_r}
+"""
 
 
 def _script_body(boot_script: bytes) -> bytes:
@@ -367,6 +358,41 @@ def replace_file(image: bytes, name: str, payload: bytes) -> bytes:
     return bytes(patched)
 
 
+def compress_kernel(image: bytes) -> bytes:
+    """Store KERNEL gzip-compressed and boot it through U-Boot's unzip.
+
+    The card reads about 2.6 MB/s, so the 31.9 MB Image costs twelve seconds of
+    the seventeen-second boot. Compression trades that read against a decompress
+    the H700 does from DRAM. The FIT's U-Boot already ships the unzip command
+    and an environment with kernel_comp_addr_r and kernel_comp_size, so nothing
+    on the target has to change.
+    """
+    stream = io.BytesIO(image)
+    mbr = _read_at(stream, 0, SECTOR_SIZE)
+    partition = _partition(mbr[446:462])
+    fat = _Fat16(stream, partition["start_lba"], partition["sectors"])
+    kernel = fat.read("KERNEL")
+    if kernel[:2] == b"\x1f\x8b":
+        raise ValueError("KERNEL is already compressed")
+    if kernel[56:60] != b"ARM\x64":
+        raise ValueError("KERNEL is not an arm64 Image")
+    compressed = gzip.compress(kernel, 9, mtime=0)
+    patched = replace_file(image, "KERNEL", compressed)
+    return repair_boot_script(patched, COMPRESSED_KERNEL_SCRIPT)
+
+
+def repair_boot_script(image: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
+    """Replace BOOT.SCR in a boot image with a correctly framed script image."""
+    stream = io.BytesIO(image)
+    mbr = _read_at(stream, 0, SECTOR_SIZE)
+    partition = _partition(mbr[446:462])
+    fat = _Fat16(stream, partition["start_lba"], partition["sectors"])
+    if "BOOT.SCR" not in fat.files:
+        raise ValueError("boot image has no BOOT.SCR")
+    rebuilt = build_boot_script(fat.read("BOOT.SCR")[:64], script)
+    return replace_file(image, "BOOT.SCR", rebuilt)
+
+
 def describe_lba(path: Path, lba: int) -> str:
     """Name what an absolute image LBA holds.
 
@@ -452,13 +478,19 @@ def verify_boot_image(path: Path) -> dict[str, object]:
         if not boot_script.startswith(b"\x27\x05\x19\x56"):
             raise ValueError("BOOT.SCR is not a U-Boot legacy script image")
         script_text = _script_body(boot_script)
-        required_script_text = (b"mmc write", b"baredebug=/dev/mmcblk0p2", b"booti ")
+        required_script_text = [b"mmc write", b"baredebug=/dev/mmcblk0p2", b"booti "]
+        if payloads["KERNEL"][:2] == b"\x1f\x8b":
+            # A compressed kernel is useless unless the script expands it.
+            required_script_text.append(b"unzip ")
         if any(text not in script_text for text in required_script_text):
             raise ValueError("BOOT.SCR lacks raw milestone write or bare Linux boot")
         bootmark = decode_records(payloads["BOOTMARK"])
         if not bootmark or bootmark[0].get("stage") != "0":
             raise ValueError("BOOTMARK is not the U-Boot stage-0 milestone")
-        if payloads["KERNEL"][56:60] != b"ARM\x64":
+        kernel = payloads["KERNEL"]
+        if kernel[:2] == b"\x1f\x8b":
+            kernel = gzip.decompress(kernel)
+        if kernel[56:60] != b"ARM\x64":
             raise ValueError("KERNEL is not an arm64 Image")
         if not payloads["INITRD"].startswith(b"\x1f\x8b"):
             raise ValueError("INITRD is not gzip-compressed")
@@ -497,6 +529,7 @@ def main() -> None:
     group.add_argument("--repair-boot-script", type=Path, metavar="IMAGE")
     group.add_argument("--describe", type=Path, metavar="IMAGE")
     group.add_argument("--replace-file", type=Path, metavar="IMAGE")
+    group.add_argument("--compress-kernel", type=Path, metavar="IMAGE")
     parser.add_argument("--name")
     parser.add_argument("--payload", type=Path)
     parser.add_argument("--lba", type=int, action="append", default=[])
@@ -513,6 +546,23 @@ def main() -> None:
         print(json.dumps(verify_boot_image(args.verify_image), indent=2))
         return
 
+
+    if args.compress_kernel is not None:
+        if args.output is None:
+            parser.error("--compress-kernel requires --output")
+        source = args.compress_kernel.read_bytes()
+        patched = compress_kernel(source)
+        args.output.write_bytes(patched)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "image_sha256": hashlib.sha256(patched).hexdigest(),
+                },
+                indent=2,
+            )
+        )
+        return
 
     if args.replace_file is not None:
         if args.output is None or args.name is None or args.payload is None:

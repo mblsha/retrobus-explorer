@@ -687,3 +687,45 @@ Both the fragmented and the contiguous initramfs showed it, so file layout is
 not the cause and it is not yet explained; it is the same startup variability
 seen throughout this log, and a boot-time benchmark has to report it rather
 than average it away.
+
+## 2026-09-18 Compressing the kernel
+
+The card reads about 2.64 MB/s, so the 31,873,032-byte arm64 Image was twelve
+of the seventeen seconds. Compressing it trades that read for a decompress the
+H700 does from DRAM. Measured on the image itself:
+
+```text
+uncompressed  31,873,032   100.0%   12.04 s read (measured)
+gzip -9       15,741,883    49.4%    5.96 s at 2.64 MB/s
+zstd -19      13,715,233    43.0%    5.20 s
+xz -9         12,180,304    38.2%    4.61 s
+```
+
+Nothing on the target has to change. The FIT's U-Boot already carries the
+`unzip` command and an environment with `kernel_addr_r=0x40080000`,
+`kernel_comp_addr_r=0x44000000` and `kernel_comp_size=0xb000000`, so
+`rg35xx_boot_debug.py --compress-kernel` stores KERNEL gzipped and rewrites the
+boot script to load it at `kernel_comp_addr_r`, expand it with `unzip`, and
+`booti` the result. gzip is used rather than the smaller xz because inflate is
+far cheaper on a Cortex-A53 than lzma, and the remaining gap is under a second
+of reading.
+
+### Result
+
+```text
+                    uncompressed   gzip
+sectors served            66,740   35,267
+power-on to userspace      17.5 s   11.8 s
+```
+
+The milestones from the compressed boot decode as
+`stage=3 detail=model-Anbernic RG35XX Plus uptime=3.48` and
+`stage=4 detail=framebuffer-present uptime=3.51`, so userspace is not merely
+entered: it reads the device tree and finds a framebuffer.
+
+The unexplained variability remains and now dominates the measurement. Two of
+four compressed runs instead served about 127,000 sectors with a single CMD18
+streaming for around 24 s, the same shape seen with both the fragmented and the
+contiguous initramfs and with the uncompressed kernel. It is independent of the
+payload, so a benchmark has to report the distribution, and finding its cause
+is worth more than the next few seconds of payload tuning.
