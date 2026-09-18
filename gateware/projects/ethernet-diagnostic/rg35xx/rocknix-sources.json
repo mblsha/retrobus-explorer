@@ -1,0 +1,33 @@
+{
+  "commit": "5eb06fab68fa67dd3808cc8d1efec6cfb1d229a0",
+  "config_sha256": "f971efbc32ee5cb4d4d90ef1bf38226e880fe9f2f393848ad53f3bc962dafa24",
+  "patches": {
+    "0002-rg35xx-enable-HDMI-LCD.patch": "3c368ef17a3632532da37c8a126fb82cdd6b21b83333abf2094914cce37a83db",
+    "0003-Update-sun8i_tcon_top.c.patch": "4ae3ed690275570d8f3f67342140d60672f961d626b57dd092d2bbdc8a5273ec",
+    "0007-rg35xx-add-GPU-opp.patch": "a1d22a410c1efb12dfedf59b34d2496a721039a4ae70a1861e3f0fbd89b4b59a",
+    "0008-v8_20260804_james_hilliard1_introduce_allwinner_h616_pwm_controller.patch": "04851821e2a351f6845807db3685e5e3e458133f4e56ac57225e26704f18ba54",
+    "0010-rg35xx-enable-pwm-backlight.patch": "68a4556c4963059adc54b0d2ae7aff66daab22a03aa8e8cb19ece36fd293d44a",
+    "0040-Revert-usb-musb-Fix-hardware-lockup-on-first-Rx-endp.patch": "177c5ad853763d70e8fc07984493624c7ff97f6a71ec22ab461eb28980e6bedb",
+    "0062-imon-pad-ignore-diagonal.patch": "17044b5c184f5e62dbe2239ea96299fca07ebc22af805216ebe91fd75146b7b2",
+    "0110-v2_20250226_kikuchan98_drm_panel_add_generic_mipi_panel_driver.patch": "b13c94db696ebc4f006a6291223855e00a1a372877749593a4c660454604828e",
+    "0111-rg35xx-2024-use-panel-mipi-dpi-spi-driver.patch": "c90f475998b0ec0312f65ffbf8c818904686b997c1895247dfe5bcaf9eccac66",
+    "0124-battery-name.patch": "52baeb041d292e32b8836be69f52fbbd18cff104617fdffc6090428c44dfec3b",
+    "0126-20241018_macroalpha82_rg35xx_add_additional_hardware_support.patch": "0e51972c8b948230f648a4241796dee60485c4a7876d189532b604b0e5be743b",
+    "0127-enable-mmc1-for-RG35XX-2024.patch": "46fbac702ffcc312502f3009d3a6deb8822f910a6b97d9c3dc90129d3d9bd9ab",
+    "0140-rg35xx-2024-use-rocknix-joypad-driver.patch": "8c65d9aa15b36d64146fe9af35983bfac2b020635fc491619acee92b48a2df33",
+    "0144-Update-sun50i-h700-anbernic-rg35xx-h.dts.patch": "ea4059b93a907fe1afe2c5ff73f7f794baef4d51075db7aa4fefa252df3f5863",
+    "0150-add-forcefeedback.patch": "06610169231e9b4e683550035b689fce59756a5b0ba73418a580212f01776112",
+    "0151-phy-fix-OTG-host-mode.patch": "25efd76a799b1ed2075363501381dd6e33a5ab12c61f5771c3bcef8d826fa514",
+    "0152-rg35xx-2024-enable-usb-otg.patch": "ecfe8291e86eb5882c5298a3dfcae99cd2497e61e9770ea0b0b4b5f463b2a76b",
+    "0153-enable-rgb-leds.patch": "6e9a676bfa1dac06846655146d135c09b68360cf9a58ef11833169fb7627a82f",
+    "0154-rocknix-dt-id.patch": "742c8b43006ea8f572acbf43b47a3135aac52a952607d06a4051375ef0672ab8",
+    "0155-sun4i-set-rgb-connector-as-DSI.patch": "d12bc0295b2fe954fe9d91646f68a6eb0483c36500543458610b6336717e98ef",
+    "0156-rg35xx-plus-add-pcf8563-rtc.patch": "7c7bbafe8a09dfc6b670064a3a08ce428f26b1862585b5520b32f6b866818eaf",
+    "0200-h700-update-opps.patch": "8cb23b7d25f6a110116ee070970c0aeaaa488b348a80e94e7d3a120b76f68e89",
+    "0204-dts-Enable-hdmi-sound.patch": "cbc3b96a8b07063dcb341ce6b4dbc6f2bc3c1134f3a66ce9fd9e463270576283",
+    "0901-dts-rg35xx-2024-fix-led-1-color.patch": "ea36a3fe08ee3e65f895cad85e3cd478a63312a85414549289b0cbc19ed8b8f9",
+    "9900-i915-10bit-hack.patch": "79e95885b65f08fc5509eecac8d737e25ef3e1afcbeff6b647e63f97223e15a7",
+    "9901-pm-disable-async-suspend-resume-by-default.patch": "1f254ef3ec3e996e3c21fe81343224d993680db53277210613c314d270864626"
+  },
+  "repository": "ROCKNIX/distribution"
+}

@@ -13,6 +13,8 @@ boot time.
 """
 
 import argparse
+import hashlib
+import json
 import shutil
 import subprocess
 import sys
@@ -24,6 +26,13 @@ GATEWARE = HERE.parents[2]
 KERNEL_VERSION = "7.2"
 KERNEL_SHA256 = "f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3"
 DEFAULT_IMAGE = "alpine:3.20"
+# The patches and the configuration come from ROCKNIX's tree, which this build
+# does not fetch: they are prepared in the work directory out of band. Their
+# content is what decides whether the kernel that comes out is the kernel that
+# was measured, so the commit they came from and their hashes are recorded here
+# and checked before the build. A re-fetch that quietly picks up a newer branch
+# tip would otherwise produce a different kernel under the same name.
+SOURCES = HERE / "rocknix-sources.json"
 
 # Nothing internal is behind USB: the device tree enables one port, the
 # physical socket, and disables the other three. Wi-Fi is SDIO, Bluetooth is
@@ -108,6 +117,39 @@ def find_runner(explicit=None):
     raise RuntimeError("need docker, nerdctl or colima to build the kernel")
 
 
+def verify_sources(work: Path, sources: Path = SOURCES) -> dict:
+    """Check the work directory against the recorded ROCKNIX manifest.
+
+    A missing, extra or altered patch all change the kernel, so all three are
+    refused rather than reported. The configuration is checked the same way,
+    because a trim is only meaningful relative to the configuration it trims.
+    """
+    manifest = json.loads(sources.read_text())
+    present = {path.name: path for path in sorted(work.glob("patches/*.patch"))}
+    expected = manifest["patches"]
+    missing = sorted(set(expected) - set(present))
+    extra = sorted(set(present) - set(expected))
+    if missing or extra:
+        raise ValueError(
+            f"patches do not match {manifest['commit'][:12]}: "
+            f"{len(missing)} missing {missing[:3]}, {len(extra)} extra {extra[:3]}"
+        )
+    changed = [
+        name
+        for name, digest in sorted(expected.items())
+        if hashlib.sha256(present[name].read_bytes()).hexdigest() != digest
+    ]
+    config = hashlib.sha256((work / "base.config").read_bytes()).hexdigest()
+    if config != manifest["config_sha256"]:
+        changed.append("base.config")
+    if changed:
+        raise ValueError(
+            f"{len(changed)} source(s) differ from the recorded manifest: "
+            f"{changed[:4]}"
+        )
+    return manifest
+
+
 def container_command(runner, work, patches, config, out, image):
     return [
         *runner, "run", "--rm", "--platform", "linux/arm64",
@@ -129,11 +171,21 @@ def main():
                         default=GATEWARE / "build/rg35xx-kernel")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--runner")
+    parser.add_argument(
+        "--allow-unpinned", action="store_true",
+        help="Build from patches that do not match the recorded manifest. Use "
+        "when deliberately moving to a newer ROCKNIX tree, and re-record it.",
+    )
     arguments = parser.parse_args()
     work = arguments.work.resolve()
     for required in ("patches", "base.config"):
         if not (work / required).exists():
             parser.error(f"{work / required} is missing")
+    if not arguments.allow_unpinned:
+        try:
+            verify_sources(work)
+        except ValueError as failure:
+            parser.error(str(failure))
     out = work / "out"
     out.mkdir(parents=True, exist_ok=True)
     command = container_command(

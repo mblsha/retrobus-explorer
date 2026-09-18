@@ -1159,3 +1159,19 @@ left to save here; it would matter for a rootfs whose access pattern is sparse.
 Half the boot is one transfer. The payload work is close to done: the kernel is
 already trimmed and the rootfs is already demand paged. What is left is the
 interface, and that is the step the ladder measurement blocked.
+
+## 2026-09-19 Pinning what the kernel was built from
+
+`build_kernel.py` does not fetch ROCKNIX's patches or configuration; they are
+prepared in the work directory out of band, and until now nothing recorded
+which commit they came from. A stale re-fetch running in the background
+rewrote three of the twenty-six patch files after the measured kernel had been
+built, which is what surfaced this. In that instance the branch tip had not
+moved and the rewritten files were byte for byte identical, so the measured
+kernel was never in doubt, but nothing in the tree could have shown that.
+
+`rocknix-sources.json` now records the commit, a SHA-256 for every patch and
+one for the configuration, and the build refuses to run against a tree that
+does not match. Missing, extra and altered files are all refused, because all
+three change the kernel. Moving to a newer ROCKNIX tree is done deliberately
+with `--allow-unpinned` and re-recording the manifest.
