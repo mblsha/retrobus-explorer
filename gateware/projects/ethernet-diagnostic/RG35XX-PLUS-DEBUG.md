@@ -1275,3 +1275,40 @@ The kernel therefore stays gzip, expanded by `unzip`. The cost of that decision
 is 1.17 MB of extra reading, 0.40 s at this card's rate. Changing it means
 replacing U-Boot, which is a larger change than the saving justifies while the
 card interface is the binding constraint.
+
+## 2026-09-19 ThinLTO makes the kernel smaller and the boot slower
+
+The plan asked for the kernel to be built for size with ThinLTO, so
+`build_kernel.py` gained `--toolchain clang`, which installs clang, lld and
+llvm's binutils, builds with `LLVM=1`, and turns on `LTO_CLANG_THIN`. It
+refuses to continue if `olddefconfig` does not keep the option, so a build that
+quietly dropped it cannot be mistaken for one that used it. The same run also
+took `--trim-network-and-crypto`, which drops every wireless vendor but
+Realtek, the wired ethernet drivers, the protocol menus this device never
+speaks, and the crypto algorithms outside what WPA selects.
+
+It worked, and it is a regression:
+
+```text
+                      built-in   uncompressed      gzip -9
+gcc, -Os                  1663     18,659,336    7,363,461
+clang, ThinLTO, -Os       1598     18,294,792    7,969,628
+```
+
+ThinLTO removed 364,544 bytes of kernel and added 606,167 bytes to what the
+card has to read. Cross-module inlining and specialization cut instructions by
+replacing repeated call sequences with specialized ones, which is exactly the
+repetition gzip was exploiting. On a device where the kernel is read at
+2.63 MB/s, the compressed size is the only size that matters, and ThinLTO costs
+0.23 s of boot.
+
+The plan asked for it on the reasonable assumption that a smaller kernel is a
+faster boot. Measured against the thing that is actually slow, it is not. The
+shipped kernel stays gcc.
+
+Every keep survived the run, checked symbol by symbol: Panfrost, Sun4i, RTW88
+with the 8821CS, cfg80211, mac80211, SoC audio, the Sunxi MMC controller,
+EROFS with compression, EXT2, VFAT, EXFAT, gpio-keys and the AXP717, with
+Bluetooth still a module. The crypto trim kept AES and CCM, which mac80211 and
+RTW88 select, and dropped Twofish, Serpent, Camellia, the user-space API and
+the rest.
