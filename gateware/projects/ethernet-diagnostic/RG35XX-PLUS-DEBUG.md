@@ -594,6 +594,20 @@ sector 4  1f8b0808 ... "INITRD", the gzip initramfs
 sector 5  d00dfeed, the flattened device tree
 ```
 
+The same sequence was reproduced after the regression tests were added, on
+bitstream `5dd60bc09a465eb72e865b3cfa52041b0e45094edddf361c4008d1a51ada98e5`,
+placement seed 10, 830,142 configuration bits, with `dclk` at 81.57 MHz and
+`fclk` at 80.50 MHz. That is the current qualified artifact for this profile.
+
+Two attempts to make the idle level safe against a stale final register were
+tried on hardware and reverted, because the register holds the last
+transmitted bit until the next SD edge. Gating the drive on that register
+already reading high releases the lines between blocks of a multiblock read,
+where a floating line reads low and the host reads without stopping; forcing
+the register to the idle level destroys the last CRC bit, which the host
+samples after the transfer's enable drops. The liveness gate already bounds a
+stale value to one host clock period, which is why neither is needed.
+
 This is a boot from the emulator: the H700 loads its SPL, U-Boot, kernel,
 initramfs and device tree from FPGA DDR over the Pmod adapter, and the booted
 kernel drives the emulated card itself. Without serial access the last
