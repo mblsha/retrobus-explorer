@@ -948,3 +948,45 @@ Userspace is reached at 9.81 s, and the kernel reports 1.30 s of its own init,
 so roughly 8.5 s is spent before the kernel starts: SPL, U-Boot, the 5.9 s
 compressed kernel read, its decompression, and the initramfs and device tree.
 The kernel read is now the dominant term by a wide margin.
+
+## 2026-09-18 The host has no clock between 6 and 25 MHz
+
+The card's advertised TRAN_SPEED is now a build option, `--sd-tran-speed`, so
+the field and the CRC7 sharing its register are computed together instead of
+being edited by hand. Four bitstreams, each measured through the block
+capture's own fabric timestamps at the kernel's first sector:
+
+```text
+advertised   measured   block span   fabric cycles   result
+   12 MHz     6.00 MHz     11103 t        10.67      boots
+   13 MHz     6.00 MHz     11103 t        10.67      boots
+   20 MHz     6.00 MHz     11103 t        10.67      boots
+   25 MHz    25.00 MHz      2665 t         2.56      fails after ACMD6
+```
+
+The span is identical to the tick at 12, 13 and 20 MHz, so this is not a
+rounding artefact: the host runs this card at 6.00 MHz for every advertisement
+below the SD default and jumps straight to 25.00 MHz when it sees 25. There is
+no step in between, and 15 MHz was not tried because 20 MHz already lands on 6.
+
+At 25 MHz the boot reaches ACMD6, the four-bit width switch, and stops with 83
+sectors served. That is what 2.56 fabric cycles per SD period looks like: the
+frontend cannot resolve both edges of the host's clock, so the data phase never
+returns a valid block.
+
+### What that means for the plan
+
+The plan's first step, taking the interface to 12 MHz, is not available. The
+host offers 6 MHz or 25 MHz and nothing between, so the card interface cannot
+be improved without supporting 25 MHz, and 25 MHz cannot be supported at the
+64 MHz SD fabric clock.
+
+The trade is now quantified rather than feared. 25 MHz would need roughly 4
+fabric cycles per SD period to be comfortable, which means a 100 MHz SD fabric
+clock in a design that already needs a seed search to meet 80 MHz, and would
+reopen exactly the timing work the 64 MHz build exists to avoid. The reward is
+large: 25 MHz across four bits is about 11.8 MB/s against today's 2.95, which
+would take the compressed kernel read from 5.3 s to about 1.3 s.
+
+Until that is attempted, every remaining boot-time saving has to come from
+reading fewer bytes rather than reading them faster.

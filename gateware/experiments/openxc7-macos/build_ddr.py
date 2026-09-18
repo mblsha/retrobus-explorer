@@ -25,6 +25,7 @@ SD_CSD = 0x0026001A115903FFC002800002400023
 # register as the CRC7 that protects it, so the two are computed together here
 # rather than edited by hand in the Spade source.
 SD_TRAN_SPEED_CODES = {
+    12_000_000: 0x12,
     13_000_000: 0x1A,
     15_000_000: 0x22,
     20_000_000: 0x2A,
