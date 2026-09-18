@@ -812,3 +812,52 @@ produce. Something deterministic is computing them.
 That also rules the FPGA's own data path further out: the card serves both
 outcomes at the same rate with no serializer or pin-readback mismatch, and the
 healthy runs show the same card serving exactly the right sectors.
+
+## 2026-09-18 Eliminating the oversized read
+
+The failure is in U-Boot's filesystem path, not in the card. The card starts the
+transfer at exactly the right sector — the observed CMD18 argument 16,888,320
+is LBA 32,985, which is where KERNEL's first cluster sits — and then serves
+whatever is asked of it. What varies between a healthy and a failing run is the
+length the host asked for.
+
+Since every payload file is contiguous, the filesystem can be removed from the
+boot path entirely. `rg35xx_boot_debug.py --raw-kernel` emits a boot script that
+states every block count explicitly:
+
+```text
+mmc dev 0
+mmc read ${kernel_comp_addr_r} 0x80d9 0x781a
+unzip ${kernel_comp_addr_r} ${kernel_addr_r}
+mmc read ${ramdisk_addr_r} 0x17495 0xbad
+setenv initrd_size 0x17598a
+mmc read ${fdt_addr_r} 0x17431 0x61
+booti ${kernel_addr_r} ${ramdisk_addr_r}:${initrd_size} ${fdt_addr_r}
+```
+
+It refuses to run if any of those files is fragmented, because a raw read would
+then silently fetch the wrong sectors.
+
+### Result over ten standardized cold starts
+
+```text
+                       fatload            mmc read
+oversized runs          6 / 10             0 / 10
+sectors served   35,198 .. 127,283   35,113 .. 35,182
+median to userspace     11.92 s            10.81 s
+range                 8.37 .. 11.92     8.10 .. 11.95
+```
+
+Ten of ten now serve the same work, spread 69 sectors, 0.2%. Nine of ten
+reached userspace inside the 35 s window; the tenth booted and was still ahead
+of its userspace writes when the window closed.
+
+This eliminates the failure and localizes it to U-Boot's filesystem length
+handling, which is not the same as identifying the defect inside U-Boot. The
+two discrete wrong lengths remain unexplained; they are simply no longer on the
+boot path. Anyone restoring `fatload` should expect them back.
+
+The metric itself is worth stating precisely, because the earlier figures used
+a weaker proxy. The raw boot script writes exactly four milestones, so the
+fifth write of a run is the first one userspace made, and that is the instant
+the benchmark measures to.

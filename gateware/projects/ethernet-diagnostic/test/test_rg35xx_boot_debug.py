@@ -386,6 +386,53 @@ class BootDebugTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "milestone write or bare Linux"):
                 debug.verify_boot_image(image)
 
+    def test_raw_kernel_script_states_every_block_count(self):
+        """Six cold starts in ten read a length U-Boot computed rather than the
+        file's, so the raw script must leave no length implicit."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            patched = debug.raw_kernel_script(image.read_bytes())
+            image.write_bytes(patched)
+
+            stream = io.BytesIO(patched)
+            mbr = debug._read_at(stream, 0, debug.SECTOR_SIZE)
+            part = debug._partition(mbr[446:462])
+            fat = debug._Fat16(stream, part["start_lba"], part["sectors"])
+            body = debug._script_body(fat.read("BOOT.SCR")).decode()
+
+            self.assertNotIn("fatload", body, "the filesystem is still in the path")
+            spc = fat.cluster_size // debug.SECTOR_SIZE
+            data_lba = fat.data_offset // debug.SECTOR_SIZE
+            for name in ("KERNEL", "INITRD", "DTB.IMG"):
+                cluster, size = fat.files[name]
+                lba = data_lba + (cluster - 2) * spc
+                blocks = (size + debug.SECTOR_SIZE - 1) // debug.SECTOR_SIZE
+                self.assertIn(f"mmc read", body)
+                self.assertIn(f"{lba:#x} {blocks:#x}", body,
+                              f"{name} is not read by explicit sector and count")
+            # booti needs the initrd's byte length, not its block count.
+            self.assertIn(f"setenv initrd_size {fat.files['INITRD'][1]:#x}", body)
+            debug.verify_boot_image(image)
+
+    def test_raw_kernel_script_refuses_a_fragmented_payload(self):
+        """A raw read assumes contiguity; a fragmented file would silently read
+        the wrong sectors."""
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "boot.img"
+            boot_image_fixture(image)
+            data = bytearray(image.read_bytes())
+            boot = 128 * debug.SECTOR_SIZE
+            # Point KERNEL's first cluster at a chain that jumps.
+            data[boot + 512 + 4 * 2 : boot + 512 + 4 * 2 + 2] = (9).to_bytes(2, "little")
+            data[boot + 512 + 9 * 2 : boot + 512 + 9 * 2 + 2] = b"\xff\xff"
+            entry = boot + 2 * 512
+            while data[entry : entry + 11] != b"KERNEL     ":
+                entry += 32
+            data[entry + 28 : entry + 32] = (1024).to_bytes(4, "little")
+            with self.assertRaisesRegex(ValueError, "fragmented"):
+                debug.raw_kernel_script(bytes(data))
+
     def test_verifier_rejects_corrupt_spl_checksum(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "boot.img"

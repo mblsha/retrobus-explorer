@@ -393,6 +393,56 @@ def repair_boot_script(image: bytes, script: str = MILESTONE_SCRIPT) -> bytes:
     return replace_file(image, "BOOT.SCR", rebuilt)
 
 
+def raw_kernel_script(image: bytes) -> bytes:
+    """Load the payload by absolute sector instead of through the filesystem.
+
+    Roughly six cold starts in ten issue one CMD18 at the kernel's first sector
+    and then read about four times the file, in two discrete and reproducible
+    lengths, before giving up. The card serves it at the normal rate with no
+    mismatch, so the host is reading a length it computed. `mmc read` states the
+    block count explicitly, which removes U-Boot's filesystem length handling
+    from the boot path entirely, and skips the directory and FAT reads as well.
+    """
+    stream = io.BytesIO(image)
+    mbr = _read_at(stream, 0, SECTOR_SIZE)
+    partition = _partition(mbr[446:462])
+    fat = _Fat16(stream, partition["start_lba"], partition["sectors"])
+    placement = {}
+    for name in ("KERNEL", "INITRD", "DTB.IMG"):
+        chain = [cluster for cluster, _ in fat.clusters(name)]
+        if chain != list(range(chain[0], chain[0] + len(chain))):
+            raise ValueError(f"{name} is fragmented and cannot be read raw")
+        sectors_per_cluster = fat.cluster_size // SECTOR_SIZE
+        size = fat.files[name][1]
+        placement[name] = (
+            fat.data_offset // SECTOR_SIZE + (chain[0] - 2) * sectors_per_cluster,
+            (size + SECTOR_SIZE - 1) // SECTOR_SIZE,
+            size,
+        )
+    kernel, initrd, dtb = (placement[n] for n in ("KERNEL", "INITRD", "DTB.IMG"))
+    compressed = fat.read("KERNEL")[:2] == b"\x1f\x8b"
+    expand = (
+        "unzip ${kernel_comp_addr_r} ${kernel_addr_r}\n" if compressed else ""
+    )
+    target = "${kernel_comp_addr_r}" if compressed else "${kernel_addr_r}"
+    script = (
+        "mmc dev 0\n"
+        "mmc write ${ramdisk_addr_r} 0x1c001 1\n"
+        "setenv bootargs 'console=tty0 console=ttyS0,115200 loglevel=7 "
+        "rdinit=/init baredebug=/dev/mmcblk0p2'\n"
+        f"mmc read {target} {kernel[0]:#x} {kernel[1]:#x}\n"
+        f"{expand}"
+        "mmc write ${kernel_addr_r} 0x1c003 1\n"
+        f"mmc read ${{ramdisk_addr_r}} {initrd[0]:#x} {initrd[1]:#x}\n"
+        f"setenv initrd_size {initrd[2]:#x}\n"
+        "mmc write ${ramdisk_addr_r} 0x1c004 1\n"
+        f"mmc read ${{fdt_addr_r}} {dtb[0]:#x} {dtb[1]:#x}\n"
+        "mmc write ${fdt_addr_r} 0x1c005 1\n"
+        "booti ${kernel_addr_r} ${ramdisk_addr_r}:${initrd_size} ${fdt_addr_r}\n"
+    )
+    return repair_boot_script(image, script)
+
+
 def describe_lba(path: Path, lba: int) -> str:
     """Name what an absolute image LBA holds.
 
@@ -530,6 +580,7 @@ def main() -> None:
     group.add_argument("--describe", type=Path, metavar="IMAGE")
     group.add_argument("--replace-file", type=Path, metavar="IMAGE")
     group.add_argument("--compress-kernel", type=Path, metavar="IMAGE")
+    group.add_argument("--raw-kernel", type=Path, metavar="IMAGE")
     parser.add_argument("--name")
     parser.add_argument("--payload", type=Path)
     parser.add_argument("--lba", type=int, action="append", default=[])
@@ -546,6 +597,22 @@ def main() -> None:
         print(json.dumps(verify_boot_image(args.verify_image), indent=2))
         return
 
+
+    if args.raw_kernel is not None:
+        if args.output is None:
+            parser.error("--raw-kernel requires --output")
+        patched = raw_kernel_script(args.raw_kernel.read_bytes())
+        args.output.write_bytes(patched)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "image_sha256": hashlib.sha256(patched).hexdigest(),
+                },
+                indent=2,
+            )
+        )
+        return
 
     if args.compress_kernel is not None:
         if args.output is None:
