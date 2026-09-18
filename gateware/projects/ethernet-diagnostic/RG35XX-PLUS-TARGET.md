@@ -1,0 +1,203 @@
+# RG35XX Plus kernel and rootfs: target state
+
+What the payload should look like when this work is finished. The measurements
+behind every number here are in
+[the boot record](RG35XX-PLUS-DEBUG.md); this page states the destination, not
+the route.
+
+The device is a games handheld. The kernel keeps the GPU, audio and Wi-Fi that
+makes it one, and gives up everything that does not serve that. Bluetooth is
+wanted but secondary, so it stays a module and costs the boot nothing.
+
+## Boot budget
+
+Boot time is measured from the target's power-on to the first userspace
+milestone in the raw debug partition, reported as a distribution over at least
+ten standardized cold starts.
+
+```text
+stage                      measured today   target
+SPL, FIT, U-Boot proper          0.9 s       0.7 s
+kernel read and decompress       5.3 s       1.0 s
+initramfs, device tree           0.7 s       0.1 s
+kernel init to userspace         1.3 s       1.0 s
+rootfs mount and init                 -      0.3 s
+total                            9.8 s      <4 s
+```
+
+The target is dominated by two changes that are not payload tuning: the card
+interface runs at half the rate it advertises, and the kernel carries roughly
+three times the code this device can use.
+
+## Card interface
+
+The FPGA timestamps measure 1,041 sampled edges in 173.5 us, which is a 6.00
+MHz card clock and 2.95 MB/s across four bits, while the card's CSD advertises
+13 MHz. The host is selecting a divisor one step below what it could use.
+
+Target: the host clocks at 12 MHz, giving 5.9 MB/s. At the qualified 64 MHz SD
+fabric clock that is 5.3 fabric cycles per SD period, inside what the frontend
+already meets. 25 MHz is explicitly not a target: it would leave 2.5 cycles per
+period and reopen the timing work that the 64 MHz build exists to avoid.
+
+Every byte in the rest of this page is read through this interface, so it is
+worth more than the payload changes combined and should land first.
+
+## Image layout
+
+Four regions, sized so the system slots are fixed and interchangeable:
+
+```text
+LBA 16        eGON SPL                       raw, loaded by the BootROM
+LBA 96        FIT (U-Boot proper)            raw
+partition 1   FAT16, boot                    BOOT.SCR, KERNEL, DTB.IMG
+partition 2   EROFS, system A                read-only, demand paged
+partition 3   EROFS, system B                read-only, same size as A
+partition 4   ext2, data                     rw, noatime
+partition 5   raw debug                      sector 0 host command,
+                                             sectors 1..31 target milestones
+```
+
+The debug partition is not optional. The board has no serial header populated,
+so that partition is the only channel the target can report through, and every
+boot-time measurement depends on it.
+
+## Kernel
+
+Source is the ROCKNIX tree for this device rather than mainline: Panfrost on
+H700 and the RTL8821CS SDIO glue may carry vendor deltas, and the shipped
+kernel is `7.2.0` built by `aarch64-rocknix-linux-gnu-gcc`. Its exact
+configuration is recoverable from the shipped image, which carries
+`CONFIG_IKCONFIG`, and that config is the starting point to trim rather than a
+defconfig.
+
+### Keep
+
+- `ARCH_SUNXI` and the H700 platform, MMC, clocks, pinctrl, regulators, thermal
+  and cpufreq.
+- `DRM_PANFROST`, `DRM_SUN4I` and the panel drivers the device tree names.
+- SoC audio.
+- `RTW88` with `RTW88_8821CS`, `CFG80211`, `MAC80211`, and the crypto that WPA
+  needs rather than the whole crypto menu.
+- `gpio-keys`; the device tree describes every control that way.
+- `POWER_SUPPLY` and the AXP717 MFD, which is how charging is detected.
+- Serial, because Bluetooth is a UART device here.
+- `EROFS` with compression, `VFAT` for the boot partition, `EXT2` for data, and
+  `EXFAT` for the user's games card on the second SD slot.
+- Bluetooth as a module, `realtek,rtl8821cs-bt` over `uart1`.
+
+### Drop
+
+- USB entirely. The device tree enables one port, the physical socket, and
+  disables the other three; nothing internal is behind it. Wi-Fi is SDIO on
+  `mmc1`, Bluetooth is UART on `uart1`, controls are `gpio-keys`, audio is on
+  the SoC. Charging survives, because `x-powers,axp717-usb-power-supply` is a
+  power-supply driver and not the USB stack. External gamepads come back as
+  modules if they are ever wanted.
+- BTRFS, NTFS3, NFS, SQUASHFS with its five decompressors, EXT4, and the F2FS
+  compression variants.
+- Netfilter, the network schedulers and classifiers, bridging, and the IPv6
+  extras beyond a working stack.
+- SCSI, ATA, NVMe and MTD. None of them exist on this board.
+- Tracing, ftrace, BPF, kexec, crash dump, hibernation, `DEBUG_FS` and
+  `KALLSYMS_ALL`.
+
+### Build
+
+Optimize for size, not speed: the bottleneck is a 5.9 MB/s card and the CPU is
+a 1.5 GHz quad A53, so `CC_OPTIMIZE_FOR_SIZE`, ThinLTO, and
+`TRIM_UNUSED_KSYMS` all convert directly into boot time. KASLR is dropped; its
+relocation pass costs time this device has no threat model to justify.
+
+Expected result is roughly 11 to 16 MiB uncompressed against today's 30.4 MiB.
+
+### Format
+
+Stored zstd-compressed, not gzip. Measured on the current kernel, zstd is 13.7
+MiB against gzip's 15.7 MiB, and an A53 decompresses zstd several times faster
+than it inflates. The FIT's U-Boot carries a zstd decompressor. Because
+`unzip` handles gzip only, the kernel is expanded through `booti`'s compressed
+image path using `kernel_comp_addr_r` and `kernel_comp_size`, both already in
+the environment.
+
+## Rootfs
+
+EROFS, compressed with LZ4HC, mounted read-only straight from the card. The
+Zaurus system image is deliberately uncompressed, which is right for a 400 MHz
+ARMv5 where the CPU is the scarce resource; here the balance is inverted and
+every byte not read saves 0.17 ms at the target clock while LZ4 decompresses at
+hundreds of MB/s. LZ4HC costs build time only. The compression cluster size is
+a measured choice, not a guess: a larger cluster improves the ratio but reads
+more per page fault.
+
+Contents are what a games handheld needs: a static BusyBox base, Mesa with the
+Panfrost driver, SDL2, the emulator itself, `wpa_supplicant`, and BlueZ
+alongside the Bluetooth module.
+
+Nothing is loaded into RAM up front. There is no initramfs at all; the kernel
+mounts the rootfs directly and pages in only what runs. This is what stops boot
+time growing with the size of userspace, and it is why a 100 MiB rootfs and a
+10 MiB rootfs boot at the same speed.
+
+Two system partitions, A and B, identical in size, each a complete image with a
+stable UUID. Data lives on its own `rw,noatime` ext2 partition: ext2 rather
+than ext4 because there is no journal to replay after the unclean power-off
+that every bench trial causes.
+
+## Boot path
+
+The BootROM loads the SPL, which initializes DRAM and loads the FIT. U-Boot
+proper runs a boot script that reads by absolute sector with explicit block
+counts, never through the filesystem: U-Boot's filesystem length handling is
+what produced the oversized reads that failed six cold starts in ten.
+
+```text
+mmc dev 0
+mmc read ${kernel_comp_addr_r} <kernel lba> <kernel blocks>
+mmc read ${fdt_addr_r} <dtb lba> <dtb blocks>
+setenv bootargs 'console=tty0 quiet loglevel=0 ro
+    root=/dev/mmcblk0p2 rootfstype=erofs baredebug=/dev/mmcblk0p5'
+booti ${kernel_addr_r} - ${fdt_addr_r}
+```
+
+`rootfstype` is stated so the kernel does not try each registered filesystem
+against the card in turn. The console is `tty0` only: sending the log to an
+unattached `ttyS0` at `loglevel=7` cost 2.2 s of kernel init, measured through
+the milestones' own uptime field. There is no ramdisk argument to `booti`.
+
+Falcon mode, which would boot the kernel from the SPL and skip U-Boot proper
+entirely, is worth about 0.7 s and is not part of this target. The SPL cannot
+be removed because the H700 BootROM requires it to initialize DRAM, and the
+remaining U-Boot time is small next to the card and kernel terms.
+
+## Tooling and contracts
+
+Every artifact is produced by a committed tool and verified before it reaches
+the card:
+
+- The kernel config is extracted from a shipped image, trimmed, and kept in the
+  repository.
+- `rg35xx_boot_debug.py --verify-image` checks the whole contract before any
+  upload: the MBR layout, the eGON SPL and its checksum, the boot script's
+  legacy framing and length table, that a compressed kernel is matched by a
+  script able to expand it, the EROFS superblocks of both system slots, and a
+  pristine debug volume.
+- The image is uploaded over Ethernet and read back complete before the card is
+  armed.
+- `rg35xx_trial.py` runs each standardized cold start and reports the boot as a
+  distribution, with the FPGA's own timestamps for stage boundaries.
+
+A change is accepted only if it improves the median without widening the
+spread. Predictability is part of the target, not a side effect of it.
+
+## Open questions
+
+- Whether the host selects 12 MHz when the card advertises a higher
+  `TRAN_SPEED`, or stays on the divisor below it. One gateware build settles
+  it.
+- Whether the ROCKNIX kernel tree for this device is publicly obtainable, and
+  whether it builds reproducibly in the arm64 container.
+- The EROFS compression cluster size, which trades ratio against bytes read per
+  page fault and should be measured on this card rather than assumed.
+- The remaining run-to-run spread: healthy boots have varied between 6.5 s and
+  12 s on identical work, and that variation is not yet explained.

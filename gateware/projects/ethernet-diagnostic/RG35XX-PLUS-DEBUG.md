@@ -8,6 +8,9 @@ carries the H700 boot chain, a FAT boot partition, and a raw debug partition
 the target writes milestones into. ROCKNIX is reference material; the booted
 system is a bare kernel and small initramfs.
 
+[RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) states where the payload is
+going; this page records how it got where it is.
+
 Sections below are a chronological record. Read the
 [boot result](#2026-09-18-the-rg35xx-plus-boots-from-the-emulator) for the
 working configuration and its evidence, and
