@@ -54,8 +54,24 @@ python3 experiments/openxc7-macos/build_ddr.py \
   --ethernet --slow-mmc --mmc-only --seed 4
 ```
 
-This profile suppresses the complete initial SD negotiation boundary so a host
-which permits MMC falls back to CMD1. Its MMC CSD advertises 5 MHz; the tested
+The H700 profile boots an Anbernic RG35XX Plus from the emulated card:
+
+```sh
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
+  ./.venv/bin/python experiments/openxc7-macos/build_ddr.py \
+  --ethernet --slow-mmc --h700-mmc --sd-io-clock-hz 64000000 --seed 8
+```
+
+It answers SD negotiation normally and lets the payload choose MMC itself, and
+it holds the idle data lines at the pull-up level the adapter lacks, which the
+host's R1b busy check requires. `--sd-io-clock-hz` selects the SD fabric clock;
+50, 64, 80 and 100 MHz divide the same 1600 MHz VCO as the DDR outputs. This
+profile builds at 64 MHz because the telemetry-rich design does not place
+within 80 MHz, and the card interface it serves runs three orders of magnitude
+slower. See [the boot record](../../ethernet-diagnostic/RG35XX-PLUS-DEBUG.md).
+
+The `--mmc-only` profile above suppresses the complete initial SD negotiation
+boundary so a host which permits MMC falls back to CMD1. Its MMC CSD advertises 5 MHz; the tested
 GKD clock tree generates 4 MHz from that request. CMD23 bounds the next CMD18
 without requiring an on-wire CMD12 after the final requested block. See the
 [GKD validation record](../../ethernet-diagnostic/RG35XX-PLUS-DEBUG.md#gkd-350h-legacy-mmc-validation).

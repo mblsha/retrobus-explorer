@@ -94,6 +94,8 @@ def main():
     if args.ethernet:
         if args.mmc_only:
             default_output = "microsd-ddr-ethernet-mmc-only"
+        elif args.h700_mmc:
+            default_output = "microsd-ddr-ethernet-h700"
         elif args.slow_mmc:
             default_output = "microsd-ddr-ethernet-slow-mmc"
         else:

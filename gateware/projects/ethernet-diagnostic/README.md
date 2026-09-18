@@ -181,7 +181,8 @@ and backend requests establish useful protocol progress.
 The trace records observation points already present in the SD frontend rather
 than instantiating another command decoder. It deliberately keeps only the last
 command, not a command log, to preserve timing in the combined DDR/Ethernet
-build. See [the RG35XX Plus experiment](RG35XX-PLUS-DEBUG.md) for a real example.
+build. See [the RG35XX Plus record](RG35XX-PLUS-DEBUG.md), which uses these
+counters to boot an H700 handheld from the emulated card.
 
 On the GKD, bind the external controller and apply the 13 MHz, four-bit,
 keep-awake settings from the [DDR guide](../microsd-emulator/ddr/README.md).

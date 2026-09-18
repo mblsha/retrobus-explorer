@@ -1,31 +1,54 @@
-# RG35XX Plus SD boot debugging
+# RG35XX Plus SD boot from the emulator
 
-This experiment uses the Arty A7-35T microSD-Pmod emulator as a passive boot
-probe for an Anbernic RG35XX Plus without serial output. The target receives a
-64 MiB card image containing the first 16 MiB of the ROCKNIX H700 boot chain, a
-FAT boot partition, and a raw debug partition intended for later kernel-to-host
-milestones. ROCKNIX is reference material; the intended result is a bare kernel
-and small initramfs.
+The Arty A7-35T microSD-Pmod emulator boots an Anbernic RG35XX Plus. The H700
+loads its SPL, U-Boot, kernel, initramfs and device tree from FPGA DDR over the
+Pmod adapter, and the booted kernel drives the emulated card itself. The target
+has no serial output, so the card is also the debug channel: a 64 MiB image
+carries the H700 boot chain, a FAT boot partition, and a raw debug partition
+the target writes milestones into. ROCKNIX is reference material; the booted
+system is a bare kernel and small initramfs.
 
-## Reproduce the live trace
+Sections below are a chronological record. Read the
+[boot result](#2026-09-18-the-rg35xx-plus-boots-from-the-emulator) for the
+working configuration and its evidence, and
+[the R1b busy finding](#2026-09-18-r1b-busy-and-the-missing-data-line-pull-up)
+for the two defects that had to be fixed.
 
-Connect the Arty Ethernet interface as described in the main README. Upload and
-verify the image, arm SD access, then take a trace baseline:
+## Reproduce the boot
+
+Build the qualified H700 profile. `nextpnr-xilinx` here is linked against Boost
+1.90 and macOS strips `DYLD_LIBRARY_PATH` when launching through `uv run`, so
+invoke the build with the virtualenv interpreter directly:
 
 ```sh
-uv run python experiments/openxc7-macos/build_ddr.py \
-  --ethernet --slow-mmc --h700-mmc --seed 4
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
+  ./.venv/bin/python experiments/openxc7-macos/build_ddr.py \
+  --ethernet --slow-mmc --h700-mmc --sd-io-clock-hz 64000000 --seed 8
+openFPGALoader -b arty_a7_35t -m build/microsd-ddr-ethernet-h700/design.bit
+```
+
+Repair the boot script, verify the image contracts, upload and read it back,
+then arm SD access before powering the target:
+
+```sh
 uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
-  --verify-image build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img
+  --repair-boot-script build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img \
+  --output build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img
+uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
+  --verify-image build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img
 uv run python projects/ethernet-diagnostic/scripts/images.py \
   --state /private/tmp/rg35xx-boot-session.json \
-  --upload build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img \
+  --upload build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img \
   --bulk --window 10
 uv run python projects/ethernet-diagnostic/scripts/images.py \
   --state /private/tmp/rg35xx-boot-session.json --arm
 uv run python projects/ethernet-diagnostic/scripts/images.py \
   --state /private/tmp/rg35xx-boot-session.json --trace
 ```
+
+Power the target only after the readback has verified the image and the card is
+armed. Counters are cumulative from FPGA configuration, so take the baseline
+trace first and compare deltas. Power the target off and disarm between trials.
 
 The image verifier checks the MBR layout, the H700 eGON SPL at byte 8192 and
 its checksum, the FAT16 `BOOT.SCR`, `BOOTMARK`, arm64 kernel, gzip initramfs and
@@ -49,7 +72,7 @@ image upload, then retrieve the first 32 debug sectors after disarming:
 uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
   --make-command continue --output build/rg35xx-bare/debug-command.bin
 dd if=build/rg35xx-bare/debug-command.bin \
-  of=build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img \
+  of=build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img \
   bs=512 seek=114688 conv=notrunc
 
 uv run python projects/ethernet-diagnostic/scripts/images.py \
@@ -63,6 +86,11 @@ uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
 
 Recompute the source image hash after changing its command sector. A new upload
 and complete readback verification are required before ARM.
+
+The repaired boot script writes sector 1 when it starts, sector 2 after
+BOOTMARK, and sectors 3, 4 and 5 after the kernel, initramfs and device tree,
+so the decoded records and the trace's write counter together locate the stage
+a failed boot reached.
 
 ## 2026-09-16 MMC bring-up result
 
