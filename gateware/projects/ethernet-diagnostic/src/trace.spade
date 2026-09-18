@@ -29,6 +29,7 @@ pub entity sd_trace(
     pin_data_mismatch: uint<32>,
     read_request: bool,
     read_lba: uint<32>,
+    capture_lba: uint<32>,
     write_busy: bool,
     word_index: uint<6>,
     word: inv &uint<32>,
@@ -228,15 +229,24 @@ pub entity sd_trace(
     decl block_state;
     decl payload_bits;
     decl crc_bits;
+    // The decoder used to arm on an MMC CMD18, which never fires on the SD
+    // boot path, leaving every timestamp below dead. Arming on a backend read
+    // of a chosen sector measures whichever stage that sector belongs to, in
+    // either bus mode, and the stage the boot spends its time in is the kernel.
+    let wide_bus = protocol_status.to_bits()[30];
+    let lane_mask: uint<4> = if wide_bus { 15 } else { 1 };
     let data_pin = data_pins.to_bits()[0];
-    let arm_block = command_valid && mmc_mode && command_index == 18 &&
+    let data_idle = (data_pins & lane_mask) == lane_mask;
+    let payload_last: uint<13> = if wide_bus { 1023 } else { 4095 };
+    let arm_block = read_request && read_lba == capture_lba &&
         block_state == BLOCK_IDLE;
     reg(clk) block_state: uint<3> reset(rst || !armed: BLOCK_IDLE) = {
         if arm_block {
             BLOCK_WAIT_START
-        } else if clock_tick && block_state == BLOCK_WAIT_START && !data_pin {
+        } else if clock_tick && block_state == BLOCK_WAIT_START && !data_idle {
             BLOCK_PAYLOAD
-        } else if clock_tick && block_state == BLOCK_PAYLOAD && payload_bits == 4095 {
+        } else if clock_tick && block_state == BLOCK_PAYLOAD &&
+            payload_bits == payload_last {
             BLOCK_CRC
         } else if clock_tick && block_state == BLOCK_CRC && crc_bits == 15 {
             BLOCK_END
@@ -246,8 +256,11 @@ pub entity sd_trace(
             block_state
         }
     };
+    // Record the sector that armed the capture rather than the command's
+    // argument: the capture is now keyed to a backend read, and the host needs
+    // to know which sector the bytes and CRC below describe.
     reg(clk) block_argument: uint<32> reset(rst || !armed: 0) =
-        if arm_block { command_argument } else { block_argument };
+        if arm_block { read_lba } else { block_argument };
     reg(clk) payload_bits: uint<13> reset(rst || !armed: 0) = {
         if arm_block {
             0
@@ -269,12 +282,20 @@ pub entity sd_trace(
     reg(clk) payload_prefix: uint<256> reset(rst || !armed: 0) = {
         if arm_block {
             0
-        } else if clock_tick && block_state == BLOCK_PAYLOAD && payload_bits < 256 {
-            (payload_prefix << 1) | (if data_pin { 1 } else { 0 })
+        } else if clock_tick && block_state == BLOCK_PAYLOAD &&
+            payload_bits < (if wide_bus { 64 } else { 256 }) {
+            if wide_bus {
+                (payload_prefix << 4) | zext(data_pins)
+            } else {
+                (payload_prefix << 1) | (if data_pin { 1 } else { 0 })
+            }
         } else {
             payload_prefix
         }
     };
+    // In four-bit mode each lane carries its own CRC16 over its own bits, so
+    // following lane zero through both the payload and the CRC window checks a
+    // quarter of the block against the quarter of the CRC that covers it.
     reg(clk) calculated_crc: uint<16> reset(rst || !armed: 0) = {
         if arm_block {
             0
@@ -312,10 +333,10 @@ pub entity sd_trace(
         if response_complete && block_state == BLOCK_WAIT_START { timestamp }
         else { response_end_timestamp };
     reg(clk) data_start_timestamp: uint<32> reset(rst || !armed: 0) =
-        if clock_tick && block_state == BLOCK_WAIT_START && !data_pin { timestamp }
+        if clock_tick && block_state == BLOCK_WAIT_START && !data_idle { timestamp }
         else { data_start_timestamp };
     reg(clk) data_start_edge: uint<32> reset(rst || !armed: 0) =
-        if clock_tick && block_state == BLOCK_WAIT_START && !data_pin { selected_edges }
+        if clock_tick && block_state == BLOCK_WAIT_START && !data_idle { selected_edges }
         else { data_start_edge };
     reg(clk) block_end_timestamp: uint<32> reset(rst || !armed: 0) =
         if clock_tick && block_state == BLOCK_END { timestamp }

@@ -73,6 +73,11 @@ network_ddr sd(
 `else
 .h700_early_command(1'b0),
 `endif
+`ifdef TRACE_CAPTURE_LBA
+.capture_lba(`TRACE_CAPTURE_LBA),
+`else
+.capture_lba(32'd32985),
+`endif
 `ifdef MMC_ONLY
 .mmc_only(1'b1),
 `else

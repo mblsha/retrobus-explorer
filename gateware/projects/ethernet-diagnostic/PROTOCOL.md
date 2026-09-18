@@ -78,7 +78,7 @@ word at payload bytes 24 through 27, and zero-fills the rest. `images.py
 | 32 | `STC2` enhanced-trace marker |
 | 33..36 | MMC CMD6/CMD13 counts, argument, response status, observed `SWITCH_ERROR`, the latched H700 DAT launch phase, and the compiled CMD launch phase |
 | 37..42 | independently sampled 136-bit CMD9 R2 response and capture state |
-| 43..47 | independently decoded first MMC CMD18 block state, argument, CRC16, clock period, and edge span |
+| 43..47 | independently decoded block state, the sector that armed it, CRC16, clock period, and edge span |
 | 48..55 | first 32 payload bytes observed on raw DAT0 |
 | 56..63 | fabric timestamps and external-edge indexes for CMD18, R1 end, data start/end, CMD12, and DAT release |
 

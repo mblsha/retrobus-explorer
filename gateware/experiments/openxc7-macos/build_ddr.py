@@ -70,6 +70,12 @@ def main():
         help="Launch H700 command responses from the early diagnostic phase",
     )
     parser.add_argument(
+        "--trace-capture-lba",
+        type=int,
+        help="Sector whose block the independent decoder captures and "
+        "timestamps; defaults to the kernel's first sector",
+    )
+    parser.add_argument(
         "--sd-io-clock-hz",
         type=int,
         choices=(50_000_000, 64_000_000, 80_000_000, 100_000_000),
@@ -262,6 +268,10 @@ def main():
             (args.slow_mmc, "-D SLOW_MMC"),
             (args.h700_mmc, "-D H700_MMC"),
             (args.h700_early_command, "-D H700_EARLY_COMMAND"),
+            (
+                args.trace_capture_lba is not None,
+                f"-D TRACE_CAPTURE_LBA=32'd{args.trace_capture_lba}",
+            ),
             (args.mmc_only, "-D MMC_ONLY"),
         )
         if enabled
@@ -416,6 +426,7 @@ def main():
                 "fast_sd": not args.slow_mmc,
                 "h700_mmc": args.h700_mmc,
                 "h700_early_command": args.h700_early_command,
+                "trace_capture_lba": args.trace_capture_lba or 32985,
                 "mmc_only": args.mmc_only,
                 "native_fifo_registers": True,
                 "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",

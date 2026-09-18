@@ -537,7 +537,7 @@ class Images:
                     "crc_match": bool(fields[43] & (1 << 4))
                     if block_state == 5
                     else None,
-                    "raw_argument": fields[44],
+                    "capture_lba": fields[44],
                     "calculated_crc16": fields[45] & 0xFFFF,
                     "observed_crc16": fields[45] >> 16,
                     "first_32_bytes": prefix.hex() if block_state == 5 else None,

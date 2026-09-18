@@ -15,6 +15,7 @@ pub entity network_ddr(
     h700_mode: bool,
     h700_falling_phase: bool,
     h700_early_command: bool,
+    capture_lba: uint<32>,
     mmc_only: bool,
     writable: bool,
     dat_in: uint<4>,
@@ -183,7 +184,7 @@ pub entity network_ddr(
             h700_early_command, cmd_in, dat_in,
         *trace_pin_response, *trace_pin_response_mismatch,
         *trace_pin_data, *trace_pin_data_mismatch,
-        *sd_request, *sd_lba, *write_busy, *trace_word_index,
+        *sd_request, *sd_lba, capture_lba, *write_busy, *trace_word_index,
         trace_word_w);
     set client_cmd_valid_w = &(if sd_commit_owner { *write_cmd_valid } else if *sd_armed {
         *read_cmd_valid } else if network_owner { *network_cmd_valid } else { false });
