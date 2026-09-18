@@ -68,6 +68,11 @@ network_ddr sd(
 .h700_mode(1'b0),
 `endif
 .h700_falling_phase(h700_falling_phase),
+`ifdef H700_EARLY_COMMAND
+.h700_early_command(1'b1),
+`else
+.h700_early_command(1'b0),
+`endif
 `ifdef MMC_ONLY
 .mmc_only(1'b1),
 `else

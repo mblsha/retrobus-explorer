@@ -65,6 +65,11 @@ def main():
         help="Enable the H700 legacy-MMC compatibility and diagnostics profile",
     )
     parser.add_argument(
+        "--h700-early-command",
+        action="store_true",
+        help="Launch H700 command responses from the early diagnostic phase",
+    )
+    parser.add_argument(
         "--mmc-only",
         action="store_true",
         help="Suppress SD negotiation so a host deterministically probes legacy MMC",
@@ -72,6 +77,8 @@ def main():
     args = parser.parse_args()
     if args.h700_mmc and not args.slow_mmc:
         parser.error("--h700-mmc requires --slow-mmc")
+    if args.h700_early_command and not args.h700_mmc:
+        parser.error("--h700-early-command requires --h700-mmc")
     if args.mmc_only and not (args.ethernet and args.slow_mmc):
         parser.error("--mmc-only requires --ethernet and --slow-mmc")
     if args.mmc_only and args.h700_mmc:
@@ -243,6 +250,7 @@ def main():
             (args.ethernet, "-D ETHERNET_SD"),
             (args.slow_mmc, "-D SLOW_MMC"),
             (args.h700_mmc, "-D H700_MMC"),
+            (args.h700_early_command, "-D H700_EARLY_COMMAND"),
             (args.mmc_only, "-D MMC_ONLY"),
         )
         if enabled
@@ -396,6 +404,7 @@ def main():
                 "ethernet_sd": args.ethernet,
                 "fast_sd": not args.slow_mmc,
                 "h700_mmc": args.h700_mmc,
+                "h700_early_command": args.h700_early_command,
                 "mmc_only": args.mmc_only,
                 "native_fifo_registers": True,
                 "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",

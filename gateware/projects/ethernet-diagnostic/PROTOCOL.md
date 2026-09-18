@@ -76,7 +76,7 @@ word at payload bytes 24 through 27, and zero-fills the rest. `images.py
 | 27..30 | four completed CMD18/CMD12 summaries: 20-bit start LBA and 12-bit block count, oldest first |
 | 31 | CMD response mismatch directions and first mismatching bit |
 | 32 | `STC2` enhanced-trace marker |
-| 33..36 | MMC CMD6/CMD13 counts, argument, response status, observed `SWITCH_ERROR`, and latched H700 launch phase |
+| 33..36 | MMC CMD6/CMD13 counts, argument, response status, observed `SWITCH_ERROR`, the latched H700 DAT launch phase, and the compiled CMD launch phase |
 | 37..42 | independently sampled 136-bit CMD9 R2 response and capture state |
 | 43..47 | independently decoded first MMC CMD18 block state, argument, CRC16, clock period, and edge span |
 | 48..55 | first 32 payload bytes observed on raw DAT0 |

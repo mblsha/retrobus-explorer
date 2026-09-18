@@ -37,6 +37,37 @@ async def h700_data_launch_uses_prepared_full_cycle_pipeline(d):
 
 
 @cocotb.test()
+async def h700_command_launch_phase_follows_early_command_option(d):
+    await setup(d)
+    d.h700_mode.value = 1
+
+    # The default slow-command path advances after the external falling edge.
+    d.sd_clk.value = 1
+    for _ in range(8):
+        await tick(d.clk, 1)
+    assert not int(d.command_output_advance.value)
+    d.sd_clk.value = 0
+    late_launches = 0
+    for _ in range(8):
+        await tick(d.clk, 1)
+        late_launches += int(d.command_output_advance.value)
+    assert late_launches == 1
+
+    # The diagnostic alternative advances after the external rising edge.
+    d.h700_early_command.value = 1
+    d.sd_clk.value = 1
+    early_launches = 0
+    for _ in range(8):
+        await tick(d.clk, 1)
+        early_launches += int(d.command_output_advance.value)
+    assert early_launches == 1
+    d.sd_clk.value = 0
+    for _ in range(8):
+        await tick(d.clk, 1)
+    assert not int(d.command_output_advance.value)
+
+
+@cocotb.test()
 async def mmc_fallback_enumerates_and_reads(d):
     h = await setup(d)
     # Match the observed H700 fallback: the SD operation-condition response
@@ -103,7 +134,7 @@ async def h700_profile_leaves_post_loader_sd_probe_available(d):
     await h.command(0, length=0)
     assert (await h.command(8, 0x1AA))[1:5] == bytes.fromhex("000001aa")
     await h.command(55)
-    assert (await h.command(41, 0x00FF8000))[1:5] == bytes.fromhex("c0ff8000")
+    assert (await h.command(41, 0x00FF8000))[1:5] == bytes.fromhex("80ff8000")
 
     # The host may still reset and choose the legacy MMC probe itself.
     await h.command(0, length=0)

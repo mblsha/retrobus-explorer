@@ -37,6 +37,7 @@ async def records_clock_commands_and_backend_activity(dut):
     dut.response_payload.value = 0
     dut.data_release.value = 0
     dut.h700_falling_phase.value = 0
+    dut.h700_early_command.value = 0
     dut.cmd_pin.value = 1
     dut.data_pins.value = 15
     dut.pin_response.value = 0
@@ -124,6 +125,7 @@ async def independently_captures_mmc_negotiation_r2_and_first_block(dut):
         "response_payload": 0,
         "data_release": 0,
         "h700_falling_phase": 1,
+        "h700_early_command": 1,
         "cmd_pin": 1,
         "data_pins": 15,
         "pin_response": 0,
@@ -196,6 +198,7 @@ async def independently_captures_mmc_negotiation_r2_and_first_block(dut):
     assert words[33] & 0xFFFF == 0x0101
     assert words[33] & (1 << 16)
     assert words[33] & (1 << 17)
+    assert words[33] & (1 << 18)
     assert words[34:37] == [0x03B70100, 1 << 22, (1 << 8) | (4 << 9) | (1 << 7)]
     assert words[37] == (3 << 8) | 136
     captured_r2 = bytes([words[38]]) + b"".join(

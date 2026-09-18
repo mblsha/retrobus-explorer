@@ -512,6 +512,7 @@ class Images:
                     "cmd13_count": fields[33] >> 8 & 0xFF,
                     "switch_error_observed": bool(fields[33] & (1 << 16)),
                     "falling_edge_data_launch": bool(fields[33] & (1 << 17)),
+                    "early_command_launch": bool(fields[33] & (1 << 18)),
                     "last_cmd6_argument": fields[34],
                     "last_cmd6_response": fields[35],
                     "last_cmd13_response": fields[36],

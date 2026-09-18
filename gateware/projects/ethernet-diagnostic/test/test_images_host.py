@@ -419,7 +419,7 @@ class BulkHostTests(unittest.TestCase):
             0x002A0302,
         ] + [
             images.ENHANCED_TRACE_MAGIC,
-            0x00030201,
+            0x00070201,
             0x03B70100,
             0x00400900,
             0x00000980,
@@ -497,6 +497,7 @@ class BulkHostTests(unittest.TestCase):
         self.assertTrue(
             trace["enhanced"]["negotiation"]["falling_edge_data_launch"]
         )
+        self.assertTrue(trace["enhanced"]["negotiation"]["early_command_launch"])
         self.assertEqual(
             trace["protocol_status"],
             {

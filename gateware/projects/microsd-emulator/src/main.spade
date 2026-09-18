@@ -87,6 +87,7 @@ pub entity sd_frontend(
     fast_mode: bool,
     h700_mode: bool,
     h700_falling_phase: bool,
+    h700_early_command: bool,
     mmc_only: bool,
     writable: bool,
     dat_in: uint<4>,
@@ -181,7 +182,7 @@ pub entity sd_frontend(
     // Prepared outputs launch after the synchronized rising edge. Their
     // opposite-edge pad registers provide setup time before the next host
     // rising edge; command responses can retain the proven slow path.
-    let command_output_advance = if fast_mode {
+    let command_output_advance = if fast_mode || (h700_mode && h700_early_command) {
         sd_sample_tick
     } else {
         !clk_sync && clk_prev
@@ -1476,6 +1477,7 @@ entity bram_emulator(
         fast_mode: false,
         h700_mode: false,
         h700_falling_phase: false,
+        h700_early_command: false,
         mmc_only: false,
         writable: false,
         dat_in: 15,
@@ -1780,6 +1782,7 @@ entity ddr_emulator(
         fast_mode,
         h700_mode: false,
         h700_falling_phase: false,
+        h700_early_command: false,
         mmc_only: false,
         writable,
         dat_in,

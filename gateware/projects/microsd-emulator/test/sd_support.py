@@ -289,6 +289,7 @@ async def setup(d):
     d.fast_mode.value = int(os.environ.get("MICROSD_FAST_MODE", "0"))
     d.h700_mode.value = 0
     d.h700_falling_phase.value = 0
+    d.h700_early_command.value = 0
     d.mmc_only.value = 0
     d.dat_in.value = 15
     d.write_cmd_ready.value = 0

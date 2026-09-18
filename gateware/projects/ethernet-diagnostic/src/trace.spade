@@ -20,6 +20,7 @@ pub entity sd_trace(
     response_payload: uint<32>,
     data_release: bool,
     h700_falling_phase: bool,
+    h700_early_command: bool,
     cmd_pin: bool,
     data_pins: uint<4>,
     pin_response: uint<32>,
@@ -359,7 +360,8 @@ pub entity sd_trace(
     let switch_summary: uint<32> = zext(cmd6_count) |
         (zext(cmd13_count) << 8) |
         (if saw_switch_error { 1 << 16 } else { 0 }) |
-        (if h700_falling_phase { 1 << 17 } else { 0 });
+        (if h700_falling_phase { 1 << 17 } else { 0 }) |
+        (if h700_early_command { 1 << 18 } else { 0 });
     let r2_summary: uint<32> = zext(r2_count) | (zext(r2_state) << 8);
     let block_summary: uint<32> = zext(block_state) |
         (if observed_end_bit { 1 << 3 } else { 0 }) |

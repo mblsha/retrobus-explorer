@@ -367,6 +367,20 @@ The input is synchronized and latched only while the card is disarmed. Use
 DISARM, set SW0, wait briefly, then ARM. The enhanced trace reports the
 latched choice as `falling_edge_data_launch`.
 
+The optional `--h700-early-command` build selects the alternate CMD response
+launch phase. The normal build retains the slow profile's detected-falling-edge
+advance; the option advances after the detected rising edge, giving the
+response bit an additional half-cycle before the next host sample. The trace
+reports the compiled choice as `early_command_launch`. This is a controlled
+diagnostic for the reproducible CMD3 boundary; it does not change response
+contents or the DAT phase selected by SW0.
+
+A runtime SW1 selector for the command phase was attempted first and rejected:
+no placement seed through 20 met the clock and direct-output bounds with the
+extra mux, so the choice is compiled instead. No `--h700-early-command`
+bitstream has passed the timing, CDC, and direct-output gates yet, so the
+option is unverified on hardware.
+
 The phase-selecting revision was routed at seed 19. Its bitstream SHA-256 is
 `b03dd2d611ec6766e739988c9e58ff14d0891fdfeb13797fcad2c3ae2fd3cc68`.
 All six clocks passed, all 18 CDC paths and five direct SD outputs passed, and
