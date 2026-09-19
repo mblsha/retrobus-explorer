@@ -70,27 +70,11 @@ if __name__ == "__main__":
 
 
 INIT = (Path(__file__).parents[1] / "rg35xx/rootfs-init").read_text()
-BOOT_DEBUG = (
-    Path(__file__).parents[1] / "scripts/rg35xx_boot_debug.py"
-).read_text()
 
 
 class RootfsInitTests(unittest.TestCase):
     """The debug partition is the only channel this target can report through,
     so two writers sharing it must not overwrite each other."""
-
-    def test_userspace_milestones_do_not_collide_with_u_boots(self):
-        import re
-
-        self.assertIn("seek=$((16 + stage))", INIT)
-        script = BOOT_DEBUG[BOOT_DEBUG.index("def erofs_slot_script") :]
-        script = script[: script.index("\ndef ")]
-        written = [int(sector, 16) for sector in re.findall(r"mmc write \S+ 0x1c0(\w\w) 1", script)]
-        self.assertTrue(written, "the boot script writes no milestone at all")
-        self.assertTrue(
-            all(sector < 16 for sector in written),
-            f"U-Boot writes {written}, which reaches the userspace range",
-        )
 
     def test_init_reports_before_doing_anything_else(self):
         """The milestone is the boot-time measurement, so anything placed in

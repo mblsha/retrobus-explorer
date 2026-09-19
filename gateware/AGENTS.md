@@ -32,6 +32,7 @@ uv run python -m unittest discover -s tools -p 'test_*.py'
 uv run python -m unittest discover \
   -s projects/ft-uart-hex-bridge/test \
   -p 'test_ft_uart_hex_bridge_host.py'
+uv run --frozen python -m unittest discover -t projects/ethernet-diagnostic -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
 uv run python -m pytest projects/sharp-pc-e500-card/tests
 ```
 
