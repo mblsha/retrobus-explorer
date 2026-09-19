@@ -1,8 +1,12 @@
+import threading
 import time
 import unittest
 
 from rg35xx import job
-from rg35xx.debug_partition import JOB_SECTOR
+from rg35xx.debug_partition import CARD_CHECK_SECTOR
+from rg35xx.debug_partition import JOB_LBA
+from rg35xx.debug_partition import PAGE_SECTORS
+from rg35xx.debug_partition import JOB_SECTORS
 from rg35xx.debug_partition import RESULT_SECTOR
 from rg35xx.debug_partition import RESULT_SECTORS
 from rg35xx.debug_partition import SECTOR_SIZE
@@ -108,6 +112,22 @@ class SamplerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "another device"):
             job.PsuSampler("cli", "psu1")
 
+    def test_a_reading_waits_while_the_port_is_being_used_to_switch_power(self):
+        """The CLI opens the one serial port the supply modules are behind, and
+        two of them open at once is not an error: the bytes interleave and a
+        command is lost. That is how a power-off went missing on 2026-09-19 and
+        left the target running after the run had reported itself done."""
+        sampler = job.PsuSampler("cli", "psu2", zero=0.0,
+                                 status=lambda cli, channel: ONLINE)
+        with job.CLI_LOCK:
+            reading = threading.Thread(target=sampler.take)
+            reading.start()
+            reading.join(timeout=0.3)
+            self.assertTrue(reading.is_alive(), "sampler ignored the port lock")
+        reading.join(timeout=10)
+        self.assertFalse(reading.is_alive())
+        self.assertEqual(sampler.samples[0].amps, 0.183)
+
 
 class FakeClient:
     """A card that remembers the sectors written to it and replays a trace."""
@@ -116,6 +136,16 @@ class FakeClient:
         self.sectors: dict[int, bytes] = {}
         self.traces = list(traces)
         self.commands: list[str] = []
+        self.initial_upload: dict | None = None
+        self.verified = False
+        self.corrupt: int | None = None
+
+    def begin(self, blocks):
+        self.commands.append("BEGIN")
+        self.initial_upload = {"sectors": blocks, "verified": False}
+
+    def save(self):
+        self.verified = bool((self.initial_upload or {}).get("verified"))
 
     def command(self, opcode, lba=0, count=0, data=b""):
         self.commands.append(opcode.name)
@@ -124,6 +154,12 @@ class FakeClient:
         if opcode == images.Opcode.READ:
             return self.sectors.get(lba, bytes(SECTOR_SIZE))
         return b""
+
+    def bulk_download(self, blocks, start=0, window=0):
+        data = bytearray(self.download(blocks, start))
+        if self.corrupt is not None:
+            data[self.corrupt * SECTOR_SIZE] ^= 0xFF
+        return bytes(data)
 
     def download(self, blocks, start=0):
         return b"".join(
@@ -135,44 +171,73 @@ class FakeClient:
         return self.traces.pop(0) if self.traces else self.traces
 
 
-def trace(writes=0, valid=0, argument=0, command=0, frames=0, reads=0, edges=0):
+def trace(writes=0, valid=0, reads=0, read_lba=0, command=0, frames=0, edges=0):
     return {
         "command_frames": frames,
         "valid_commands": valid,
         "invalid_frames": 0,
         "writes": writes,
         "read_requests": reads,
+        "last_read_lba": read_lba,
         "clock_edges": edges,
         "last_command": command,
-        "last_argument": argument,
+        "last_argument": 0,
         "protocol_status": {"card_state": 4},
     }
 
 
 class ExchangeTests(unittest.TestCase):
-    def test_submitting_a_job_numbers_it_past_the_result_on_the_card(self):
-        client = FakeClient()
-        region = encode_result({"sequence": "4", "status": "done"}, "earlier")
+    """A job is delivered by replaying the deployed image's first sectors with
+    the job substituted, because the gateware takes writes only as one
+    ascending run from sector zero."""
+
+    def image(self):
+        return bytes(range(256)) * 2 * job.prefix_sectors()
+
+    def carrying(self, client, result):
+        region = encode_result(result, result.pop("output", ""))
         for index in range(0, len(region), SECTOR_SIZE):
             client.sectors[DEBUG_START + RESULT_SECTOR + index // SECTOR_SIZE] = (
                 region[index : index + SECTOR_SIZE]
             )
-        submitted = job.submit(client, DEBUG_START, "echo hi\n", "phase0")
-        self.assertEqual(submitted["sequence"], 5)
-        self.assertEqual(submitted["previous"]["output"], "earlier")
-        written = b"".join(
-            client.sectors[DEBUG_START + JOB_SECTOR + index] for index in range(2)
-        )
-        self.assertEqual(decode_job(written)["script"], "echo hi\n")
 
-    def test_the_previous_result_is_cleared_when_the_next_job_is_written(self):
-        """A target that never started would otherwise leave the last run's
-        result in place, and the next run would report it as its own."""
+    def test_a_job_is_written_into_a_replay_of_the_images_first_sectors(self):
         client = FakeClient()
-        region = encode_result({"sequence": "4", "status": "done"}, "earlier")
-        client.sectors[DEBUG_START + RESULT_SECTOR] = region[:SECTOR_SIZE]
-        job.submit(client, DEBUG_START, "echo hi\n", "phase0")
-        self.assertIsNone(job.fetch(client, DEBUG_START))
+        image = self.image()
+        self.carrying(client, {"sequence": "4", "status": "done",
+                               "output": "earlier"})
+        submitted = job.submit(client, image, "echo hi\n", "phase0",
+                               job.fetch(client, DEBUG_START))
+        self.assertEqual(submitted["sequence"], 5)
+        written = client.download(job.prefix_sectors(), 0)
+        self.assertEqual(len(written), job.prefix_sectors() * SECTOR_SIZE)
+        self.assertEqual(written[: JOB_LBA * SECTOR_SIZE],
+                         image[: JOB_LBA * SECTOR_SIZE])
+        self.assertEqual(
+            decode_job(written[JOB_LBA * SECTOR_SIZE :])["script"], "echo hi\n"
+        )
+        self.assertEqual(client.commands.count("BEGIN"), 1)
+
+    def test_the_card_is_armed_only_after_the_readback_matches(self):
+        """The client's own guard refuses ARM until an upload is verified, and
+        what is verified here is the prefix, because the whole image is no
+        longer what was just written."""
+        client = FakeClient()
+        client.corrupt = JOB_LBA + 1
+        with self.assertRaisesRegex(RuntimeError, "readback differs"):
+            job.submit(client, self.image(), "echo hi\n", "phase0")
+        self.assertFalse(client.verified)
+
+    def test_a_result_left_by_an_earlier_job_is_not_this_jobs_result(self):
+        """The region cannot be cleared before a run any more: clearing it
+        would cost the same three minutes as putting the job there."""
+        client = FakeClient()
+        self.carrying(client, {"sequence": "4", "status": "done",
+                               "output": "earlier"})
+        self.assertIsNone(job.current_result(client, DEBUG_START, 5))
+        self.assertEqual(
+            job.current_result(client, DEBUG_START, 4)["output"], "earlier"
+        )
 
     def test_a_card_with_no_result_numbers_the_first_job_one(self):
         self.assertEqual(job.next_sequence(None), 1)
@@ -181,7 +246,8 @@ class ExchangeTests(unittest.TestCase):
 
 
 class WatchTests(unittest.TestCase):
-    """What the host knows about a live target is the trace and nothing else."""
+    """What the host knows about a live target is the trace and nothing else,
+    and in the trace only a read carries a sector number."""
 
     def follow(self, traces, done=None):
         """Replay a series of trace readings, one per poll, and stop at its end.
@@ -202,52 +268,83 @@ class WatchTests(unittest.TestCase):
         )
         return watch, reason
 
-    def test_a_write_to_the_mark_sector_opens_and_closes_a_window(self):
-        mark = DEBUG_START + SLEEP_MARK_SECTOR
+    def marked(self, reads, page_after=True):
+        """A mark, reported at either of the two LBAs a read can come back as."""
+        lba = DEBUG_START + SLEEP_MARK_SECTOR + (PAGE_SECTORS if page_after else 0)
+        return trace(reads=reads, read_lba=lba)
+
+    def polled(self, reads):
+        return trace(reads=reads, read_lba=JOB_LBA + PAGE_SECTORS)
+
+    def test_a_mark_counts_at_either_lba_a_read_is_reported_as(self):
+        watch, _ = self.follow([trace(), self.marked(1, page_after=False),
+                                self.marked(2, page_after=True)])
+        self.assertEqual(len(watch.marks), 2)
+
+    def test_a_card_check_is_not_mistaken_for_a_mark(self):
+        """It is the read a job does on waking, a page below the mark, and
+        counting it would open a window that never closes."""
+        check = DEBUG_START + CARD_CHECK_SECTOR
         watch, _ = self.follow(
-            [
-                trace(),
-                trace(writes=1, argument=mark),
-                trace(writes=2, argument=DEBUG_START + RESULT_SECTOR),
-                trace(writes=3, argument=mark),
-                trace(writes=3, argument=mark),
-            ]
+            [trace(), trace(reads=1, read_lba=check),
+             trace(reads=2, read_lba=check + PAGE_SECTORS)]
+        )
+        self.assertEqual(watch.marks, [])
+
+    def test_a_read_of_the_mark_sector_opens_and_closes_a_window(self):
+        watch, _ = self.follow(
+            [trace(), self.marked(1), self.marked(2), self.marked(2)]
         )
         self.assertEqual(len(watch.marks), 2)
-        self.assertEqual(watch.results_written, 1)
         self.assertFalse(watch.inside_window)
         self.assertEqual(len(watch.windows), 1)
 
-    def test_a_job_is_not_finished_while_the_target_is_inside_a_window(self):
-        """Quiet is what a suspended target looks like, and cutting its power
-        for being quiet is the one mistake this check exists to prevent."""
-        mark = DEBUG_START + SLEEP_MARK_SECTOR
+    def test_the_first_sign_of_life_ends_a_state_even_if_the_mark_is_missed(self):
+        """On waking the runner marks, checks the card and writes a result
+        inside a third of a second, and a poll that lands after all of that
+        sees only the last of them. The window has to end anyway."""
+        watch, _ = self.follow(
+            [trace(), self.marked(1), trace(reads=1, writes=1, read_lba=99)]
+        )
+        self.assertEqual(len(watch.windows), 1)
+        self.assertFalse(watch.inside_window)
+
+    def test_a_job_is_not_finished_while_the_target_is_polling_for_one(self):
+        """Before the job starts the runner is already reading the job region
+        once a second, and that is not a job that has been and gone."""
         watch, reason = self.follow(
-            [
-                trace(writes=1, argument=DEBUG_START + RESULT_SECTOR),
-                trace(writes=2, argument=mark),
-            ]
-            + [trace(writes=2, argument=mark)] * 6,
+            [trace(), self.polled(1), self.polled(2), self.polled(3)],
+            done=job.job_is_done(quiet=5.0),
+        )
+        self.assertEqual(reason, "exhausted")
+        self.assertIsNone(watch.job_started)
+        self.assertEqual(watch.polls, 3)
+
+    def test_the_poll_that_ends_the_gap_ends_the_job(self):
+        """The runner does not touch the job region while a job runs, so the
+        gap is the job and the read that ends it is the job's last act."""
+        watch, reason = self.follow(
+            [trace(), self.polled(1)] + [self.polled(1)] * 3 + [self.polled(2)],
+            done=job.job_is_done(quiet=0.0),
+        )
+        self.assertEqual(reason, "job-done")
+        self.assertIsNotNone(watch.job_started)
+        self.assertIsNotNone(watch.job_finished)
+
+    def test_a_suspended_target_is_not_a_finished_job(self):
+        """Quiet is exactly what a sleeping target looks like, and cutting its
+        power for being quiet is the mistake this exists to prevent."""
+        watch, reason = self.follow(
+            [trace(), self.polled(1), self.marked(2)] + [self.marked(2)] * 6,
             done=job.job_is_done(quiet=0.0),
         )
         self.assertEqual(reason, "exhausted")
         self.assertTrue(watch.inside_window)
-
-    def test_a_job_that_wrote_a_result_and_went_quiet_is_finished(self):
-        watch, reason = self.follow(
-            [
-                trace(),
-                trace(writes=1, argument=DEBUG_START + RESULT_SECTOR),
-                trace(writes=1, argument=DEBUG_START + RESULT_SECTOR),
-            ],
-            done=job.job_is_done(quiet=0.0),
-        )
-        self.assertEqual(reason, "job-done")
+        self.assertIsNone(watch.job_finished)
 
     def test_a_sleep_is_an_opening_mark_followed_by_silence(self):
-        mark = DEBUG_START + SLEEP_MARK_SECTOR
         watch, reason = self.follow(
-            [trace(), trace(writes=1, argument=mark), trace(writes=1, argument=mark)],
+            [trace(), self.marked(1), self.marked(1)],
             done=job.target_is_asleep(quiet=0.0),
         )
         self.assertEqual(reason, "asleep")

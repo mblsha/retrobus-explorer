@@ -55,6 +55,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Cap the clock Linux gives the emulated card, in the image's "
              "device tree; an image that starts the display needs 6000000",
     )
+    parser.add_argument(
+        "--debug-command",
+        help="Host command to build into the image's debug sector, for an "
+             "image whose whole purpose is one mode; the default is the "
+             "boot-shell the base image carries",
+    )
     parser.add_argument("--name")
     parser.add_argument("--payload", type=Path)
     parser.add_argument("--lba", type=int, action="append", default=[])
@@ -82,6 +88,7 @@ def main(argv: list[str] | None = None) -> None:
             root_partition=root,
             export_env=args.export_env,
             card_max_hz=args.card_max_hz,
+            debug_command=args.debug_command,
         )
         args.output.write_bytes(built)
         with io.BytesIO(built) as stream:

@@ -17,8 +17,13 @@
 
 BB=/tmp/busybox
 DEBUG_DEVICE=@DEBUG_DEVICE@
+# The job is read from the whole card rather than from a partition: the host
+# can only write sectors in one ascending run from zero, so the job lives in
+# the unused gap below the first partition, where rewriting everything under it
+# costs a megabyte instead of fifty-seven.
+CARD_DEVICE=@CARD_DEVICE@
 MAGIC=@MAGIC@
-JOB_SECTOR=@JOB_SECTOR@
+JOB_LBA=@JOB_LBA@
 JOB_SECTORS=@JOB_SECTORS@
 RESULT_SECTOR=@RESULT_SECTOR@
 RESULT_OUTPUT_BYTES=@RESULT_OUTPUT_BYTES@
@@ -37,27 +42,28 @@ export PATH
 $BB mkdir -p /tmp/bin
 $BB --install -s /tmp/bin 2>/dev/null || true
 
-# Whether a read of the card can bypass the page cache. It matters because the
-# host rewrites the job region behind the kernel's back: a cached read would
-# return the previous job for as long as the page stayed clean, which is
-# forever. If O_DIRECT is not available the whole cache is dropped before each
-# read instead, which is heavier but has the same effect. Which one is in use
-# is reported in every result, because it changes what a read costs.
-DIRECT=
-if $BB dd if="$DEBUG_DEVICE" of=/dev/null bs=512 skip="$JOB_SECTOR" count=1 \
-    iflag=direct 2>/dev/null; then
-    DIRECT=yes
+# Every read of the card here goes past the page cache, and it takes both of
+# these to do it. The host rewrites the job region behind the kernel's back, so
+# a cached read returns the previous job for as long as the page stays clean,
+# which is forever.
+#
+# Measured on 2026-09-20, and the reason this is not just `iflag=direct`:
+# BusyBox dd accepts that flag and the card still saw a nine-sector transfer
+# for a one-sector read, which is readahead, and then saw nothing at all for
+# thirty-two seconds of once-a-second polling. The one read that did reach the
+# card was the one that followed a card check, which drops the caches itself.
+# BLKFLSBUF on the device is the specific tool and drop_caches the blunt one;
+# both are cheap here because everything this loop touches is in tmpfs.
+FLUSH=blockdev
+if ! $BB blockdev --flushbufs "$CARD_DEVICE" 2>/dev/null; then
+    FLUSH=drop_caches
 fi
 
 read_sectors() {
-    # start count destination
-    if [ -n "$DIRECT" ]; then
-        $BB dd if="$DEBUG_DEVICE" of="$3" bs=512 skip="$1" count="$2" \
-            iflag=direct 2>/dev/null
-    else
-        echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
-        $BB dd if="$DEBUG_DEVICE" of="$3" bs=512 skip="$1" count="$2" 2>/dev/null
-    fi
+    # device start count destination
+    $BB blockdev --flushbufs "$1" 2>/dev/null
+    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+    $BB dd if="$1" of="$4" bs=512 skip="$2" count="$3" 2>/dev/null
 }
 
 write_sectors() {
@@ -112,14 +118,21 @@ suspend_success() {
 }
 
 mark_sector() {
-    # One sector written to a sector nothing else uses, so that the host can
-    # see in the FPGA's passive trace -- the only thing it can read while the
-    # card is armed -- that the target reached this point. The trace reports
-    # the last command and its argument, so the LBA is the message.
+    # A sector nothing else touches, written and then read straight back, so
+    # that the host can see in the FPGA's passive trace -- the only thing it
+    # can read while the card is armed -- that the target reached this point.
+    #
+    # The read is what carries the message, not the write. The trace keeps the
+    # LBA of the last read command, and a read is one command with the sector
+    # in it; a write is followed by the card-status poll Linux sends after
+    # every transfer, whose argument is the card's address, so by the time the
+    # host looks the write's own LBA is gone. The label in the sector is for
+    # reading afterwards, when the card can be taken back.
     $BB printf 'mark %s %s\n' "$1" "$($BB cut -d' ' -f1 /proc/uptime)" > /tmp/mark
     $BB dd if=/tmp/mark of="$DEBUG_DEVICE" bs=512 seek="$SLEEP_MARK_SECTOR" \
         count=1 conv=sync,notrunc 2>/dev/null
     $BB sync
+    read_sectors "$DEBUG_DEVICE" "$SLEEP_MARK_SECTOR" 1 /tmp/mark-back
 }
 
 card_check() {
@@ -132,8 +145,7 @@ card_check() {
     $BB dd if=/tmp/card-check of="$DEBUG_DEVICE" bs=512 seek="$CARD_CHECK_SECTOR" \
         count=1 conv=sync,notrunc 2>/dev/null
     $BB sync
-    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
-    read_sectors "$CARD_CHECK_SECTOR" 1 /tmp/card-check-back
+    read_sectors "$DEBUG_DEVICE" "$CARD_CHECK_SECTOR" 1 /tmp/card-check-back
     back="$($BB tr -d '\000' < /tmp/card-check-back)"
     if [ "$back" = "$tag" ]; then
         echo "card-check ok"
@@ -209,7 +221,7 @@ flush_result() {
         $BB printf 'name=%s\n' "$JOB_NAME"
         $BB printf 'status=%s\n' "$status"
         $BB printf 'exit=%s\n' "$code"
-        $BB printf 'direct=%s\n' "${DIRECT:-no}"
+        $BB printf 'flush=%s\n' "$FLUSH"
         $BB printf 'start_uptime=%s\n' "$JOB_START_UPTIME"
         $BB printf 'end_uptime=%s\n' "$($BB cut -d' ' -f1 /proc/uptime)"
         $BB printf 'start_rtc=%s\n' "$JOB_START_RTC"
@@ -234,18 +246,18 @@ run_job() {
 
 # --- the loop --------------------------------------------------------------
 
-write_stage 6 "job-runner-ready direct-${DIRECT:-no}"
+write_stage 6 "job-runner-ready flush-${FLUSH}"
 snapshot_kernel_log
 last=none
 
 while true; do
-    read_sectors "$JOB_SECTOR" 1 /tmp/job-header
+    read_sectors "$CARD_DEVICE" "$JOB_LBA" 1 /tmp/job-header
     if $BB grep -q "^kind=job$" /tmp/job-header 2>/dev/null; then
         sequence="$(field sequence /tmp/job-header)"
         bytes="$(field script_bytes /tmp/job-header)"
         digest="$(field script_md5 /tmp/job-header)"
         if [ -n "$sequence" ] && [ "$sequence" != "$last" ] && [ -n "$bytes" ]; then
-            read_sectors $((JOB_SECTOR + 1)) $((JOB_SECTORS - 1)) /tmp/job-body
+            read_sectors "$CARD_DEVICE" $((JOB_LBA + 1)) $((JOB_SECTORS - 1)) /tmp/job-body
             $BB head -c "$bytes" /tmp/job-body > /tmp/job.sh
             got="$($BB md5sum < /tmp/job.sh | $BB cut -d' ' -f1)"
             if [ "$got" = "$digest" ]; then

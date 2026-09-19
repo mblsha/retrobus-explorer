@@ -89,11 +89,20 @@ class SectorMapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside the debug partition"):
             debug_partition.absolute_lba(114688, debug_partition.PARTITION_SECTORS)
 
-    def test_the_job_exchange_clears_the_boot_records_and_stays_inside(self):
+    def test_the_job_lives_below_the_first_partition_and_above_u_boot(self):
+        """The host can only write an ascending run from sector zero, so the
+        job is put where rewriting everything under it is a megabyte: the gap
+        between U-Boot's FIT image, which ends at sector 1228, and the first
+        partition at 32768."""
+        self.assertGreater(debug_partition.JOB_LBA, 1228)
+        self.assertLess(
+            debug_partition.JOB_LBA + debug_partition.JOB_SECTORS, 32768
+        )
+
+    def test_what_the_target_writes_clears_the_boot_records_and_stays_inside(self):
         """The runner writes results while U-Boot's and init's records from the
         same boot are still wanted, and both are in the same partition."""
         regions = [
-            (debug_partition.JOB_SECTOR, debug_partition.JOB_SECTORS),
             (debug_partition.RESULT_SECTOR, debug_partition.RESULT_SECTORS),
             (debug_partition.SCRATCH_SECTOR, debug_partition.SCRATCH_SECTORS),
         ]
@@ -111,6 +120,21 @@ class SectorMapTests(unittest.TestCase):
         )
         self.assertNotEqual(
             debug_partition.SLEEP_MARK_SECTOR, debug_partition.CARD_CHECK_SECTOR
+        )
+
+    def test_the_two_signalling_sectors_are_a_page_apart(self):
+        """The target writes them through the block device's page cache. A
+        512-byte write folded into its 4096-byte page reaches the card as the
+        page's LBA, and the host reads that LBA as the message: two sectors of
+        one page would make a card check indistinguishable from a suspend."""
+        page = debug_partition.PAGE_SECTORS
+        for sector in (debug_partition.JOB_LBA, debug_partition.RESULT_SECTOR,
+                       debug_partition.CARD_CHECK_SECTOR,
+                       debug_partition.SLEEP_MARK_SECTOR):
+            self.assertEqual(sector % page, 0)
+        self.assertNotEqual(
+            debug_partition.SLEEP_MARK_SECTOR // page,
+            debug_partition.CARD_CHECK_SECTOR // page,
         )
 
 

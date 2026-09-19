@@ -50,32 +50,66 @@ KERNEL_LOG_SECTORS = USERSPACE_SECTORS - USERSPACE_STAGES
 DEBUG_SECTORS = USERSPACE_BASE + USERSPACE_SECTORS
 
 # The whole partition is 8 MiB, and everything above is in its first 16 KiB.
-# The job exchange lives further up, with sectors 32..63 left free so the boot
-# records can grow without moving it: a job region that moved would have to be
-# moved in the same commit in the image, the host and the target's runner, and
-# a host talking to a target built before the move would write a script over
+# What the target writes for the host lives further up, with sectors 32..63
+# left free so the boot records can grow without moving it: a region that moved
+# would have to move in the same commit in the image, the host and the target's
+# runner, and a host talking to a target built before the move would write over
 # whatever now lives there.
 PARTITION_SECTORS = 16384
-# Sectors 64..127 are one job: a header sector naming the sequence number and
-# the script's length and digest, then the script itself.
-JOB_SECTOR = 64
-JOB_SECTORS = 64
-JOB_SCRIPT_BYTES = (JOB_SECTORS - 1) * SECTOR_SIZE
 # Sectors 128..255 are the job's result: a header sector, then what the script
 # wrote to its stdout and stderr.
 RESULT_SECTOR = 128
 RESULT_SECTORS = 128
 RESULT_OUTPUT_BYTES = (RESULT_SECTORS - 1) * SECTOR_SIZE
-# Sectors 256..263 are the runner's own scratch. The first is where a job's
-# card check writes its pattern and reads it back, which is how a resumed
-# target proves the card still answers. The second is written immediately
-# before a suspend and again immediately after it, which is how the host --
-# which cannot read the partition while the card is armed -- sees in the FPGA's
+# Sectors 256..279 are the runner's own scratch. The card check writes a
+# pattern into the first and reads it back, which is how a resumed target
+# proves the card still answers. The mark is written immediately before a
+# suspend and again immediately after it, which is how the host -- which
+# cannot read the partition while the card is armed -- sees in the FPGA's
 # passive trace that the target has gone to sleep and come back.
+#
+# They are two pages apart on purpose, because of how little the host can see
+# and how imprecisely. The target reads a sector to signal, and the FPGA's
+# trace reports that read at one of two LBAs: the page's first sector, or the
+# sector after its last, depending on whether the backend has begun fetching
+# the sector beyond the transfer when the host looks. A read of the page at
+# 256 is therefore reported as 256 or 264, and a read of the page at 264 as
+# 264 or 272 -- one page apart is not enough to tell two signals apart. Two
+# pages is: {256, 264} and {272, 280} do not meet.
 SCRATCH_SECTOR = 256
-SCRATCH_SECTORS = 8
+SCRATCH_SECTORS = 24
+PAGE_SECTORS = 8
 CARD_CHECK_SECTOR = SCRATCH_SECTOR
-SLEEP_MARK_SECTOR = SCRATCH_SECTOR + 1
+SLEEP_MARK_SECTOR = SCRATCH_SECTOR + 2 * PAGE_SECTORS
+
+
+def read_reported_at(sector: int) -> tuple[int, int]:
+    """The two LBAs the trace may report for a read of one page at `sector`.
+
+    Measured on 2026-09-19: a 512-byte O_DIRECT read of sector 2048 was
+    reported as 2056, and of sector 114952 as 114960, both one page past
+    their start. Both values are accepted because which one appears depends
+    on timing inside the card frontend rather than on anything the target did.
+    """
+    return (sector, sector + PAGE_SECTORS)
+
+
+# The host's half of the exchange is not in this partition at all, because of
+# how the gateware takes a write: a session declares how many sectors it is
+# about to receive, and each write must land at exactly the sector after the
+# last one, starting at zero. There is no such thing as writing one sector in
+# the middle. The cost of putting a job somewhere is therefore the cost of
+# rewriting everything below it -- 57 MB and about three minutes at the debug
+# partition, a megabyte and three seconds here.
+#
+# Here is the gap between U-Boot's FIT image, which ends at sector 1228, and
+# the first partition at 32768: fifteen megabytes that the boot never reads and
+# no filesystem owns. The target reads it through /dev/mmcblk0 by absolute LBA,
+# the way U-Boot's script reads the kernel, and writes nothing there: its
+# writes stay inside the debug partition, where they cannot reach a boot file.
+JOB_LBA = 2048
+JOB_SECTORS = 64
+JOB_SCRIPT_BYTES = (JOB_SECTORS - 1) * SECTOR_SIZE
 
 
 def absolute_lba(debug_start_lba: int, sector: int) -> int:

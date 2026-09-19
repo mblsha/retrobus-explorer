@@ -321,13 +321,15 @@ class JobRunnerTests(unittest.TestCase):
         self.init = builder.render_init()
 
     def test_the_template_states_no_layout_value_of_its_own(self):
-        for placeholder in ("@DEBUG_DEVICE@", "@MAGIC@", "@JOB_SECTOR@",
-                            "@RESULT_SECTOR@", "@SLEEP_MARK_SECTOR@"):
+        for placeholder in ("@DEBUG_DEVICE@", "@MAGIC@", "@JOB_LBA@",
+                            "@CARD_DEVICE@", "@RESULT_SECTOR@",
+                            "@SLEEP_MARK_SECTOR@"):
             self.assertIn(placeholder, self.template)
         self.assertNotIn(MAGIC, self.template)
 
     def test_rendering_fills_the_runner_from_the_same_map_as_init(self):
-        self.assertIn(f"JOB_SECTOR={debug_partition.JOB_SECTOR}", self.rendered)
+        self.assertIn(f"JOB_LBA={debug_partition.JOB_LBA}", self.rendered)
+        self.assertIn("CARD_DEVICE=/dev/mmcblk0", self.rendered)
         self.assertIn(f"RESULT_SECTOR={debug_partition.RESULT_SECTOR}", self.rendered)
         self.assertIn(
             f"SLEEP_MARK_SECTOR={debug_partition.SLEEP_MARK_SECTOR}", self.rendered
@@ -366,13 +368,19 @@ class JobRunnerTests(unittest.TestCase):
         )
         self.assertIn("snapshot_kernel_log", self.rendered)
 
-    def test_the_job_region_is_read_past_the_page_cache(self):
-        """The host rewrites that region behind the kernel's back, so a cached
-        read would return the previous job for as long as the page stayed
-        clean, which is forever."""
-        self.assertIn("iflag=direct", self.rendered)
-        self.assertIn("echo 3 > /proc/sys/vm/drop_caches", self.rendered)
-        self.assertIn("direct=%s", self.rendered)
+    def test_every_read_of_the_card_goes_past_the_page_cache(self):
+        """The host rewrites the job region behind the kernel's back, so a
+        cached read returns the previous job for as long as the page stays
+        clean, which is forever. `iflag=direct` is not enough and is not used:
+        the card saw a nine-sector transfer for a one-sector O_DIRECT read,
+        which is readahead, and then nothing for thirty-two seconds of
+        polling."""
+        body = self.rendered[self.rendered.index("read_sectors() {"):]
+        body = body[: body.index("\n}\n")]
+        self.assertIn("blockdev --flushbufs", body)
+        self.assertIn("echo 3 > /proc/sys/vm/drop_caches", body)
+        self.assertNotIn("iflag=direct", body)
+        self.assertIn("flush=%s", self.rendered)
 
     def test_a_script_is_run_only_when_it_matches_the_digest_in_its_header(self):
         body = self.rendered[self.rendered.index("while true; do"):]

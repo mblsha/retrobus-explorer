@@ -31,7 +31,7 @@ from rg35xx.containers import find_runner
 from rg35xx.containers import run
 from rg35xx.debug_partition import CARD_CHECK_SECTOR
 from rg35xx.debug_partition import DEBUG_PARTITION
-from rg35xx.debug_partition import JOB_SECTOR
+from rg35xx.debug_partition import JOB_LBA
 from rg35xx.debug_partition import JOB_SECTORS
 from rg35xx.debug_partition import KERNEL_LOG_SECTOR
 from rg35xx.debug_partition import KERNEL_LOG_SECTORS
@@ -71,7 +71,8 @@ def init_values() -> dict[str, str]:
         "KERNEL_LOG_SECTOR": str(KERNEL_LOG_SECTOR),
         "KERNEL_LOG_SECTORS": str(KERNEL_LOG_SECTORS),
         "KERNEL_LOG_BYTES": str(KERNEL_LOG_SECTORS * SECTOR_SIZE),
-        "JOB_SECTOR": str(JOB_SECTOR),
+        "CARD_DEVICE": "/dev/mmcblk0",
+        "JOB_LBA": str(JOB_LBA),
         "JOB_SECTORS": str(JOB_SECTORS),
         "RESULT_SECTOR": str(RESULT_SECTOR),
         "RESULT_OUTPUT_BYTES": str(RESULT_OUTPUT_BYTES),

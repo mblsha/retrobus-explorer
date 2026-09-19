@@ -21,6 +21,7 @@ how a current window is lined up with what the target was doing.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -34,7 +35,8 @@ from dataclasses import field
 from pathlib import Path
 
 from rg35xx.debug_partition import DEBUG_SECTORS
-from rg35xx.debug_partition import JOB_SECTOR
+from rg35xx.debug_partition import JOB_LBA
+from rg35xx.debug_partition import JOB_SECTORS
 from rg35xx.debug_partition import RESULT_SECTOR
 from rg35xx.debug_partition import RESULT_SECTORS
 from rg35xx.debug_partition import SECTOR_SIZE
@@ -44,8 +46,9 @@ from rg35xx.debug_partition import decode_records
 from rg35xx.debug_partition import decode_result
 from rg35xx.debug_partition import encode_job
 from rg35xx.debug_partition import kernel_log
+from rg35xx.debug_partition import read_reported_at
+from rg35xx.deploy import UPLOAD_WINDOW
 from rg35xx.deploy import checked_channel
-from rg35xx.deploy import output_is_off
 from rg35xx.deploy import psu_status
 from rg35xx.deploy import supply_is_online
 from rg35xx.trial import power
@@ -60,6 +63,12 @@ DEFAULT_DEBUG_START = 114688
 # throw away what the first seconds of it show, and report the spread.
 MIN_DWELL_SECONDS = 20.0
 DISCARD_SECONDS = 3.0
+# Every conversation with the supply goes through this. The CLI opens the one
+# serial port the modules are behind, and two of them open at once is not an
+# error: the bytes interleave and a command is silently lost. On 2026-09-19
+# that lost a power-off, and the target ran on for several minutes after the
+# run that was measuring it had reported itself finished.
+CLI_LOCK = threading.Lock()
 CURRENT = re.compile(r"^\s*Current:\s*([0-9]+(?:\.[0-9]+)?)\s*A", re.MULTILINE)
 VOLTAGE = re.compile(r"^\s*Voltage:\s*([0-9]+(?:\.[0-9]+)?)\s*V", re.MULTILINE)
 
@@ -77,6 +86,28 @@ def voltage_volts(status: str) -> float:
     if len(found) != 1:
         raise ValueError("PSU status does not report exactly one voltage")
     return float(found[0])
+
+
+def locked_status(cli: Path, channel: str) -> str:
+    with CLI_LOCK:
+        return psu_status(cli, channel)
+
+
+def locked_power(cli: Path, channel: str, state: str) -> None:
+    """Switch the channel with nothing else on the port, and wait for it.
+
+    A job does not need the sub-second accuracy a boot trial needs, so this
+    waits rather than launching the CLI alongside the sampler. What a job
+    measures is a state the target holds for half a minute, and the target
+    says when that state began.
+    """
+    with CLI_LOCK:
+        power(cli, checked_channel(channel), state)
+
+
+def locked_power_off(cli: Path, channel: str) -> bool:
+    with CLI_LOCK:
+        return power_off_confirmed(cli, checked_channel(channel))
 
 
 @dataclass
@@ -165,12 +196,16 @@ class PsuSampler(threading.Thread):
         self.zero = time.monotonic() if zero is None else zero
         self.samples: list[Sample] = []
         self._status = status
-        self._stop = threading.Event()
+        # Not _stop: Thread already has one, and shadowing it breaks join().
+        self._halt = threading.Event()
 
     def take(self) -> Sample:
         elapsed = time.monotonic() - self.zero
         try:
-            status = self._status(self.cli, self.channel)
+            # The port lock, not the status function's: a sample must wait for
+            # a power command rather than interleave its bytes with it.
+            with CLI_LOCK:
+                status = self._status(self.cli, self.channel)
             online = supply_is_online(status)
             sample = Sample(
                 elapsed, online,
@@ -184,25 +219,33 @@ class PsuSampler(threading.Thread):
         return sample
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._halt.is_set():
             self.take()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
         self.join(timeout=180)
 
 
 def trace_fields(trace: dict) -> dict:
-    """The few counters that say what the card is doing, per poll."""
+    """The few counters that say what the card is doing, per poll.
+
+    `read_lba` is the one that carries a message. A read is a single command
+    with its sector in it and the trace keeps that sector until the next read;
+    a write is followed by the card-status poll Linux sends after every
+    transfer, whose argument is the card's address, so a write's own LBA is
+    gone before the host can look. Everything the target wants seen while the
+    card is armed it therefore reads.
+    """
     return {
         "frames": trace["command_frames"],
         "valid": trace["valid_commands"],
         "invalid": trace["invalid_frames"],
         "writes": trace["writes"],
         "reads": trace["read_requests"],
+        "read_lba": trace["last_read_lba"],
         "edges": trace["clock_edges"],
         "last_command": trace["last_command"],
-        "argument": trace["last_argument"],
         "card_state": trace["protocol_status"]["card_state"],
     }
 
@@ -212,18 +255,21 @@ class Watch:
     """What the passive trace showed while a job ran.
 
     Everything the host knows about a live target is in here: when it first
-    spoke, when it wrote the mark that opens and closes a measured state, and
-    when it went quiet. The marks come in pairs -- the target writes one
-    entering a state and one leaving it -- so an odd count means the target is
-    inside one, which for a suspend means it is asleep and the card can safely
-    be taken away.
+    spoke, when it last polled for a job, and when it marked the boundary of a
+    state it wants measured. Marks come in pairs -- one entering the state and
+    one leaving it -- so an odd count means the target is inside one, which for
+    a suspend means it is asleep and the card can safely be taken away.
     """
 
     first_command: float | None = None
     marks: list[dict] = field(default_factory=list)
     windows: list[dict] = field(default_factory=list)
-    results_written: int = 0
+    polls: int = 0
+    last_poll: float | None = None
+    job_started: float | None = None
+    job_finished: float | None = None
     last_write: float | None = None
+    last_read: float | None = None
     samples: list[dict] = field(default_factory=list)
     resumed_card_state: int | None = None
 
@@ -237,14 +283,13 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
                 done=None, record_every: float = 1.0) -> str:
     """Poll the card's passive trace until something ends the wait.
 
-    Returns why it stopped. The poll is fast because the only events that
-    matter -- a mark write, the card going quiet -- are single commands that
-    the next command overwrites in the trace's "last command" register, and a
-    poll slower than the target's own one-second job poll would miss them.
+    Returns why it stopped. The poll is fast because the events that matter --
+    the runner's once-a-second look at the job region, a mark -- are single
+    read commands that the next read overwrites in the trace's register, and a
+    poll slower than the target's own would miss them.
     """
-    mark_lba = debug_start + SLEEP_MARK_SECTOR
-    result_range = range(debug_start + RESULT_SECTOR,
-                         debug_start + RESULT_SECTOR + RESULT_SECTORS)
+    mark = read_reported_at(debug_start + SLEEP_MARK_SECTOR)
+    job_region = read_reported_at(JOB_LBA)
     previous = None
     recorded = 0.0
     started = time.monotonic()
@@ -258,20 +303,31 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
         if previous is not None:
             if fields["valid"] > previous["valid"] and watch.first_command is None:
                 watch.first_command = now
-            if fields["writes"] > previous["writes"]:
+            read = fields["reads"] > previous["reads"]
+            wrote = fields["writes"] > previous["writes"]
+            if wrote:
                 watch.last_write = now
-                if fields["argument"] == mark_lba:
-                    watch.marks.append({"elapsed": round(now, 2),
-                                        "opening": not watch.inside_window})
-                    if not watch.inside_window and len(watch.marks) >= 2:
-                        watch.windows.append(
-                            {
-                                "start": watch.marks[-2]["elapsed"],
-                                "end": watch.marks[-1]["elapsed"],
-                            }
-                        )
-                elif fields["argument"] in result_range:
-                    watch.results_written += 1
+            if read:
+                watch.last_read = now
+                if fields["read_lba"] in job_region:
+                    watch.polls += 1
+                    if watch.job_started is not None and watch.job_finished is None:
+                        watch.job_finished = now
+                    watch.last_poll = now
+            if watch.inside_window and (read or wrote):
+                # Anything at all ends the state. The closing mark is a read
+                # like the opening one, but a poll that lands after the target
+                # has already gone on to its next card operation sees only the
+                # later one: on waking the runner marks, checks the card and
+                # writes a result inside a third of a second. So the window
+                # ends at the first sign of life, which is the same instant to
+                # within one poll and does not depend on catching the mark.
+                watch.marks.append({"elapsed": round(now, 2), "opening": False})
+                watch.windows.append(
+                    {"start": watch.marks[-2]["elapsed"], "end": round(now, 2)}
+                )
+            elif read and fields["read_lba"] in mark:
+                watch.marks.append({"elapsed": round(now, 2), "opening": True})
         if previous is None or now - recorded >= record_every:
             watch.samples.append({"elapsed": round(now, 2), **fields})
             recorded = now
@@ -286,20 +342,23 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
 
 
 def job_is_done(quiet: float):
-    """A job has finished when it has written a result and gone quiet.
+    """A job has finished when the runner goes back to polling for the next.
 
-    Quiet alone is not enough: a job that suspends is quiet for as long as it
-    sleeps, and a host that took that for the end would cut the target's power
-    in the middle of the measurement. The target's marks say which it is --
-    inside a marked state it is doing something on purpose.
+    The runner reads the job region once a second when it is idle and not at
+    all while a job runs, so the gap in those reads is the job, and the read
+    that ends the gap is the job's last act. Nothing else the host can see
+    says as much: a write's LBA does not survive in the trace, and silence on
+    its own is what a suspended target looks like.
     """
 
     def done(watch: Watch, fields: dict, now: float) -> str | None:
-        if watch.inside_window or not watch.results_written:
+        if watch.last_poll is None:
             return None
-        if watch.last_write is not None and now - watch.last_write >= quiet:
-            return "job-done"
-        return None
+        if watch.job_started is None:
+            if now - watch.last_poll >= quiet:
+                watch.job_started = watch.last_poll
+            return None
+        return "job-done" if watch.job_finished is not None else None
 
     return done
 
@@ -307,45 +366,59 @@ def job_is_done(quiet: float):
 def target_is_asleep(quiet: float):
     """The target is asleep once it has marked a state and stopped entirely.
 
-    A mark write is not proof by itself: the target writes one at both ends of
-    a state. Quiet after an opening mark is, because a suspended host drives
-    no clock at all, and the runner's own poll would otherwise touch the card
+    A mark is not proof by itself: the target reads that sector at both ends of
+    a state. Quiet after an opening mark is, because a suspended host drives no
+    clock at all, and the runner's own poll would otherwise touch the card
     every second.
     """
 
     def done(watch: Watch, fields: dict, now: float) -> str | None:
-        if not watch.inside_window or watch.last_write is None:
+        if not watch.inside_window or watch.last_read is None:
             return None
-        return "asleep" if now - watch.last_write >= quiet else None
+        return "asleep" if now - watch.last_read >= quiet else None
 
     return done
 
 
-def sector_writes(client, lba: int, payload: bytes) -> None:
-    """Write whole sectors into DDR one at a time; the card must be disarmed."""
-    if len(payload) % SECTOR_SIZE:
-        raise ValueError("payload must be a whole number of sectors")
-    for index in range(len(payload) // SECTOR_SIZE):
-        client.command(
-            images.Opcode.WRITE, lba + index, 1,
-            payload[index * SECTOR_SIZE : (index + 1) * SECTOR_SIZE],
-        )
+def prefix_sectors() -> int:
+    """How many sectors a job costs to deliver."""
+    return JOB_LBA + JOB_SECTORS
 
 
-def submit(client, debug_start: int, script: str, name: str) -> dict:
-    """Put one job on the card, and take the previous result off it.
+def submit(client, image: bytes, script: str, name: str,
+           previous: dict | None = None) -> dict:
+    """Put one job on the card, in the only way the gateware accepts a write.
 
-    The result region is cleared in the same disarmed window as the job is
-    written. A run that ended early or a target that never started would
-    otherwise leave the previous result there, and the next run would read it
-    back and report the wrong experiment as a success.
+    A session declares how many sectors it will receive and then takes them in
+    one ascending run from sector zero; there is no writing a sector in the
+    middle. So a job is delivered by replaying the first 2112 sectors of the
+    deployed image with the job region substituted -- three seconds, against
+    the three minutes it would take to reach the debug partition.
+
+    Everything above those sectors is left exactly as the deploy verified it.
+    The bytes below are read back and compared before the frontend is armed,
+    which is what the client's own arm guard is for; it is satisfied here with
+    the digest of the prefix rather than of the whole image, because the whole
+    image is no longer what was just written.
     """
-    previous = fetch(client, debug_start)
+    if len(image) < prefix_sectors() * SECTOR_SIZE:
+        raise ValueError("image is shorter than the job region it must carry")
     sequence = next_sequence(previous)
-    client.command(images.Opcode.WRITE, debug_start + RESULT_SECTOR, 1,
-                   bytes(SECTOR_SIZE))
-    sector_writes(client, debug_start + JOB_SECTOR,
-                  encode_job(sequence, script, name))
+    job = encode_job(sequence, script, name)
+    prefix = bytearray(image[: prefix_sectors() * SECTOR_SIZE])
+    prefix[JOB_LBA * SECTOR_SIZE : JOB_LBA * SECTOR_SIZE + len(job)] = job
+    prefix = bytes(prefix)
+
+    client.begin(prefix_sectors())
+    client.initial_upload["sha256"] = hashlib.sha256(prefix).hexdigest()
+    client.save()
+    for lba in range(prefix_sectors()):
+        client.command(images.Opcode.WRITE, lba, 1,
+                       prefix[lba * SECTOR_SIZE : (lba + 1) * SECTOR_SIZE])
+    if client.bulk_download(prefix_sectors(), window=UPLOAD_WINDOW) != prefix:
+        raise RuntimeError("the job readback differs from what was written")
+    client.initial_upload["verified"] = True
+    client.save()
     return {"sequence": sequence, "previous": previous}
 
 
@@ -354,6 +427,21 @@ def fetch(client, debug_start: int) -> dict | None:
     return decode_result(
         client.download(RESULT_SECTORS, debug_start + RESULT_SECTOR)
     )
+
+
+def current_result(client, debug_start: int, sequence: int) -> dict | None:
+    """The result of this job, or nothing.
+
+    The region cannot be cleared before a run any more -- clearing it would
+    cost the same three minutes that putting the job there would -- so a
+    result left by the job before it is still on the card. The sequence number
+    is what tells them apart, and a result numbered for another job is no
+    result at all rather than a quietly wrong one.
+    """
+    result = fetch(client, debug_start)
+    if result is None or result.get("sequence") != sequence:
+        return None
+    return result
 
 
 def fetch_boot_records(client, debug_start: int) -> dict:
@@ -380,7 +468,7 @@ def next_sequence(previous: dict | None) -> int:
 
 
 def require_online(cli: Path, channel: str) -> str:
-    status = psu_status(cli, checked_channel(channel))
+    status = locked_status(cli, checked_channel(channel))
     if not supply_is_online(status):
         raise RuntimeError(
             f"{channel} is offline; nothing it reports is evidence and nothing "
@@ -431,11 +519,12 @@ def run_reboot(arguments, client, script: str) -> dict:
     """
     channel = checked_channel(arguments.channel)
     require_online(arguments.psu_cli, channel)
-    if not power_off_confirmed(arguments.psu_cli, channel):
+    if not locked_power_off(arguments.psu_cli, channel):
         raise RuntimeError(f"{channel} never confirmed its output off")
     if client.trace()["armed"]:
         client.command(images.Opcode.DISARM)
-    submitted = submit(client, arguments.debug_start, script, arguments.name)
+    submitted = submit(client, arguments.image.read_bytes(), script,
+                       arguments.name, fetch(client, arguments.debug_start))
     client.command(images.Opcode.ARM)
     time.sleep(arguments.settle)
 
@@ -445,21 +534,23 @@ def run_reboot(arguments, client, script: str) -> dict:
     watch = Watch()
     reason = "aborted"
     try:
-        launch = power(arguments.psu_cli, channel, "on", wait=False)
+        locked_power(arguments.psu_cli, channel, "on")
         reason = watch_trace(
             client, watch, zero, arguments.run_seconds, arguments.interval,
             arguments.debug_start, done=job_is_done(arguments.quiet),
         )
-        launch.wait(timeout=180)
     finally:
         finished = time.monotonic() - zero
-        powered_off = power_off_confirmed(arguments.psu_cli, channel)
+        # The sampler stops before the power-off rather than after it: they
+        # share one serial port, and an "off" lost to a collision is the one
+        # thing this bench must never leave behind.
         sampler.stop()
+        powered_off = locked_power_off(arguments.psu_cli, channel)
         time.sleep(2)
         client.command(images.Opcode.DISARM)
     if not powered_off:
         print(f"WARNING: {channel} never confirmed its output off")
-    result = fetch(client, arguments.debug_start)
+    result = current_result(client, arguments.debug_start, submitted["sequence"])
     return {
         "mode": "reboot",
         "stopped_because": reason,
@@ -473,66 +564,92 @@ def run_reboot(arguments, client, script: str) -> dict:
     }
 
 
-def run_resident(arguments, client, script: str) -> dict:
-    """Exchange a job for a result through the window where the target sleeps.
+def run_exchange(arguments, client, script: str) -> dict:
+    """Swap the next job in through the window where the target sleeps.
 
-    The target must already be up and running a job that ends in a timed
-    sleep. While it sleeps it issues no card commands at all, so the frontend
-    can be disarmed, the result it flushed before suspending read, the next
-    job written and the frontend re-armed, all before the RTC alarm fires.
-    Whether Linux forgives the card for having been away is exactly what this
-    is for; the answer is in the next result's card check.
+    One job runs to its timed sleep. While the target is suspended it issues no
+    card command at all, so the frontend can be disarmed, the result the job
+    flushed before suspending read off, the next job written and the frontend
+    re-armed, all before the RTC alarm fires. The target then wakes onto a card
+    that was withdrawn and put back while it was not looking, and the second
+    job's card check says whether Linux forgave that.
+
+    This is the whole experiment in one command rather than two, because the
+    interesting part is the seam: a target left asleep between two commands
+    would wake with nobody watching.
     """
     channel = checked_channel(arguments.channel)
-    status = require_online(arguments.psu_cli, channel)
-    if output_is_off(status):
-        raise RuntimeError(
-            f"{channel} is off; a resident job needs a target already running "
-            "the job runner"
-        )
+    require_online(arguments.psu_cli, channel)
+    if not locked_power_off(arguments.psu_cli, channel):
+        raise RuntimeError(f"{channel} never confirmed its output off")
+    if client.trace()["armed"]:
+        client.command(images.Opcode.DISARM)
+    first = submit(client, arguments.image.read_bytes(), script, arguments.name,
+                   fetch(client, arguments.debug_start))
+    client.command(images.Opcode.ARM)
+    time.sleep(arguments.settle)
+
     zero = time.monotonic()
     sampler = PsuSampler(arguments.psu_cli, channel, zero)
     sampler.start()
     watch = Watch()
-    exchange: dict = {}
+    exchange: dict = {"first_sequence": first["sequence"]}
     try:
+        locked_power(arguments.psu_cli, channel, "on")
         reason = watch_trace(
             client, watch, zero, arguments.wait_seconds, arguments.interval,
             arguments.debug_start, done=target_is_asleep(arguments.quiet),
         )
+        exchange["asleep"] = reason == "asleep"
         if reason != "asleep":
             raise RuntimeError(
-                "the target never marked a sleep; a resident job needs the "
-                "previous job to end in rtc_sleep"
+                "the target never marked a sleep; an exchange needs a job that "
+                "ends in rtc_sleep"
             )
         asleep_at = watch.marks[-1]["elapsed"]
         while time.monotonic() - zero < asleep_at + arguments.dwell:
             time.sleep(0.2)
         began = time.monotonic()
         client.command(images.Opcode.DISARM)
-        submitted = submit(client, arguments.debug_start, script, arguments.name)
+        flushed = fetch(client, arguments.debug_start)
+        second = submit(client, arguments.image.read_bytes(),
+                        arguments.second_script.read_text(),
+                        arguments.name + "-second", flushed)
         client.command(images.Opcode.ARM)
-        exchange = {
-            "asleep_at": asleep_at,
-            "disarmed_at": round(began - zero, 2),
-            "rearmed_at": round(time.monotonic() - zero, 2),
-            "exchange_seconds": round(time.monotonic() - began, 2),
-            "sequence": submitted["sequence"],
-            "result_read": submitted["previous"],
-        }
-        watch_trace(
+        exchange.update(
+            {
+                "asleep_at": asleep_at,
+                "disarmed_at": round(began - zero, 2),
+                "rearmed_at": round(time.monotonic() - zero, 2),
+                "exchange_seconds": round(time.monotonic() - began, 2),
+                "second_sequence": second["sequence"],
+                "flushed_result": flushed,
+            }
+        )
+        # From here the target wakes, finishes the first job, finds the second
+        # and runs that. Both have to happen for the exchange to have worked.
+        watch.job_started = watch.job_finished = None
+        reason = watch_trace(
             client, watch, zero, arguments.wait_seconds, arguments.interval,
             arguments.debug_start, done=job_is_done(arguments.quiet),
         )
+        exchange["second_ran"] = reason == "job-done"
     finally:
         sampler.stop()
+        powered_off = locked_power_off(arguments.psu_cli, channel)
+        time.sleep(2)
+        client.command(images.Opcode.DISARM)
+    if not powered_off:
+        print(f"WARNING: {channel} never confirmed its output off")
     return {
-        "mode": "resident",
+        "mode": "exchange",
         "exchange": exchange,
+        "powered_off": powered_off,
         "watch": watch,
         "sampler": sampler,
-        "result": exchange.get("result_read"),
-        "boot": None,
+        "result": current_result(client, arguments.debug_start,
+                                 exchange.get("second_sequence", -1)),
+        "boot": fetch_boot_records(client, arguments.debug_start),
     }
 
 
@@ -540,12 +657,22 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True, help="images.py session file")
     parser.add_argument("--script", type=Path, help="Shell script to run on the target")
+    parser.add_argument(
+        "--image", type=Path,
+        help="The image deployed on the card. A job is delivered by replaying "
+             "this image's first sectors with the job substituted, so it must "
+             "be the file the card was loaded from",
+    )
     parser.add_argument("--name", default="job", help="Name carried in the record")
     parser.add_argument(
-        "--mode", choices=("reboot", "resident", "fetch"), default="reboot",
+        "--mode", choices=("reboot", "exchange", "fetch"), default="reboot",
         help="reboot: power the target up for this job and down after. "
-        "resident: exchange through a running target's sleep window. "
-        "fetch: read the last result off a disarmed card and print it",
+        "exchange: run a job that sleeps and swap the next one in through the "
+        "sleep. fetch: read the last result off a disarmed card and print it",
+    )
+    parser.add_argument(
+        "--second-script", type=Path,
+        help="The job to swap in during the sleep, for --mode exchange",
     )
     parser.add_argument("--run-seconds", type=float, default=90.0)
     parser.add_argument("--wait-seconds", type=float, default=120.0)
@@ -581,6 +708,10 @@ def main(argv: list[str] | None = None) -> None:
     if arguments.mode != "fetch":
         if arguments.script is None:
             parser.error("--script is required unless --mode fetch")
+        if arguments.image is None:
+            parser.error("--image is required to deliver a job")
+        if arguments.mode == "exchange" and arguments.second_script is None:
+            parser.error("--second-script is required for --mode exchange")
         if arguments.psu_cli is None:
             parser.error("--psu-cli or $MDP_CLI is required to power the target")
 
@@ -588,13 +719,11 @@ def main(argv: list[str] | None = None) -> None:
     try:
         if arguments.mode == "fetch":
             result = fetch(client, arguments.debug_start)
-            job = decode_job(
-                client.download(2, arguments.debug_start + JOB_SECTOR)
-            )
+            job = decode_job(client.download(JOB_SECTORS, JOB_LBA))
             print(json.dumps({"job": job, "result": result}, indent=2))
             return
         script = arguments.script.read_text()
-        runner = run_reboot if arguments.mode == "reboot" else run_resident
+        runner = run_reboot if arguments.mode == "reboot" else run_exchange
         run = runner(arguments, client, script)
     finally:
         client.close()
@@ -614,7 +743,7 @@ def main(argv: list[str] | None = None) -> None:
             f"status={result.get('status')} exit={result.get('exit')} "
             f"uptime {result.get('start_uptime')}..{result.get('end_uptime')} "
             f"rtc {result.get('start_rtc')}..{result.get('end_rtc')} "
-            f"direct={result.get('direct')} truncated={result.get('truncated')}"
+            f"flush={result.get('flush')} truncated={result.get('truncated')}"
         )
         if arguments.print_output:
             print(result.get("output", ""))

@@ -25,6 +25,7 @@ from rg35xx.debug_partition import DEBUG_PARTITION
 from rg35xx.debug_partition import DEBUG_SECTORS
 from rg35xx.debug_partition import SECTOR_SIZE
 from rg35xx.debug_partition import decode_records
+from rg35xx.debug_partition import encode_command
 from rg35xx.device_tree import CARD_CLOCK_PROPERTY
 from rg35xx.device_tree import CARD_CONTROLLER
 from rg35xx.device_tree import get_cell
@@ -202,7 +203,8 @@ def make_erofs_image(image: bytes, system: bytes, data: bytes,
                      root_partition: int = SYSTEM_A_PARTITION,
                      minimum_slot_sectors: int = MINIMUM_SLOT_SECTORS,
                      export_env: bool = False,
-                     card_max_hz: int | None = None) -> bytes:
+                     card_max_hz: int | None = None,
+                     debug_command: str | None = None) -> bytes:
     """Return a card image carrying EROFS system slots and an ext2 data volume.
 
     Both slots are written with the same image and are exactly the same size,
@@ -213,6 +215,12 @@ def make_erofs_image(image: bytes, system: bytes, data: bytes,
     tree, where U-Boot's own clock is out of its reach. Linux otherwise runs the
     card at 12.5 MHz, twice U-Boot's rate, and at that rate the link fails
     within a second of the display starting.
+
+    debug_command sets the host command init reads out of the debug partition.
+    It is normally written to the card afterwards, but the gateware takes a
+    write only as part of an ascending run from sector zero, so putting a
+    command at sector 114688 means rewriting everything under it. An image
+    built to run jobs says so in the image.
     """
     if system[EROFS_SUPERBLOCK_OFFSET:EROFS_SUPERBLOCK_OFFSET + 4] != EROFS_MAGIC:
         raise ValueError("system image is not EROFS")
@@ -269,6 +277,10 @@ def make_erofs_image(image: bytes, system: bytes, data: bytes,
         grown[offset:offset + SECTOR_SIZE] = bytes(record)
         start = region["start_lba"] * SECTOR_SIZE
         grown[start:start + len(payload)] = payload
+
+    if debug_command is not None:
+        offset = debug["start_lba"] * SECTOR_SIZE
+        grown[offset:offset + SECTOR_SIZE] = encode_command(debug_command)
 
     built = bytes(grown)
     if card_max_hz is not None:
