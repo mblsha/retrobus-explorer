@@ -1,9 +1,11 @@
 # RG35XX Plus kernel and rootfs: target state
 
-What the payload should look like when this work is finished. The measurements
-behind every number here are in
-[the boot record](RG35XX-PLUS-DEBUG.md); this page states the destination, not
-the route.
+What the payload should look like when this work is finished. This page states
+the destination, not the route and not the result. What was actually measured
+is in [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md), the commands that
+build and measure it are in [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md),
+and the order it happened in is in
+[RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md).
 
 The device is a games handheld. The kernel keeps the GPU, audio and Wi-Fi that
 makes it one, and gives up everything that does not serve that. Bluetooth is
@@ -16,112 +18,37 @@ milestone in the raw debug partition, reported as a distribution over at least
 ten standardized cold starts.
 
 ```text
-stage                      at the start    reached   target
-SPL, FIT, U-Boot proper          1.0 s       1.05 s    0.7 s
-kernel read and decompress       5.3 s       3.17 s    1.0 s
-device tree                      0.7 s       0.38 s    0.1 s
-kernel init to userspace         1.3 s       0.66 s    1.0 s
-rootfs mount and init                 -      0.51 s    0.3 s
-total                            9.9 s       5.44 s   <4 s
+stage                      at the start    target
+SPL, FIT, U-Boot proper          1.0 s      0.7 s
+kernel read and decompress       5.3 s      1.0 s
+device tree                      0.7 s      0.1 s
+kernel init to userspace         1.3 s      1.0 s
+rootfs mount and init                 -     0.3 s
+total                            9.9 s     <4 s
 ```
 
-Each row below is a separate image, uploaded after passing `--verify-image` and
-measured on its own. No row blends runs from two configurations. Measured from
-the host's first command to the first multi-block write in the debug partition:
-
-```text
-                                  n   median   min    max   stdev   IQR
-baseline, shipped kernel          10   9.93   9.88  11.07   0.36   0.06
-trimmed kernel, initramfs         10   5.75   5.72   5.83   0.03   0.05
-trimmed kernel, EROFS root        20   5.44   5.41   6.72   0.29   0.02
-+ network and crypto trim         20   5.38   5.34   6.68   0.39   0.05
-```
-
-Stage 1 delivered no change to the interface, so its row is the unchanged
-interface carrying the shipped kernel. Stage 2's row is the trimmed kernel with
-the initramfs it replaced nothing of yet. Stage 3's row is the EROFS root on
-that same kernel. The fourth row is stage 2's kernel trimmed further, rebuilt,
-re-uploaded and re-measured in full; it is the delivered image. The twenty-run
-rows are twenty runs of one image each, not two tens of different ones.
-
-ThinLTO was built and measured and is not in the delivered image: on the identical configuration it costs 778,737 compressed bytes, 0.30 s
-of reading, because cross-module specialization removes the repetition gzip was
-exploiting. A smaller kernel is not a faster boot here; a smaller *compressed*
-kernel is.
-
-Each stage improves the median and none widens the interquartile range. The
-standard deviations are carried by a single slow boot in each of the first and
-last rows; both have a sound zero and are real boots.
-
-### Why four seconds needs the interface, in numbers
-
-The card moves 2.63 MB/s end to end, measured identically during U-Boot's
-kernel read and during Linux's demand paging, so one rate describes the whole
-boot. Split the 5.44 s by it:
-
-```text
-kernel read, 7.36 MB at 2.63 MB/s        2.80 s
-everything else                          2.64 s
-```
-
-Four seconds leaves 1.36 s for the read, which at this rate is a compressed
-kernel of 3.58 MB. The trimmed kernel is 7.36 MB compressed from 17.8 MB, a
-2.42x ratio, so 3.58 MB means an 8.7 MB kernel: half of what is already a
-trimmed kernel, while keeping Panfrost, the Sun4i display, RTW88 and SoC audio,
-which the plan requires. No payload change reaches it.
-
-Double the clock and the same payload arrives:
-
-```text
- 6.0 MHz, 2.63 MB/s    kernel read 2.80 s    total 5.44 s
-12.0 MHz, 5.26 MB/s    kernel read 1.40 s    total 4.04 s
-```
-
-The 12 MHz target in this plan was the four-second target. The host will not
-take 12 MHz, and the measurement above is why the aim is missed rather than
-the payload work.
-
-The boot is repeatable to about thirty milliseconds. The spread these figures
-once showed was the measurement: the clock started when the power-supply CLI
-returned, and that took anywhere from 1.03 to 4.29 seconds. See
-RG35XX-PLUS-DEBUG.md.
+A change is accepted only if it improves the median without widening the
+spread. Predictability is part of the target, not a side effect of it.
 
 The target is dominated by two changes that are not payload tuning: the card
 interface runs at half the rate it advertises, and the kernel carries roughly
-three times the code this device can use.
+three times the code this device can use. What each stage reached against this
+budget, and why the total landed where it did, is in the findings.
 
 ## Card interface
-
-The FPGA timestamps measure 1,041 sampled edges in 173.5 us, which is a 6.00
-MHz card clock and 2.95 MB/s across four bits, while the card's CSD advertises
-13 MHz. The host is selecting a divisor one step below what it could use.
 
 Target: the host clocks at 12 MHz, giving 5.9 MB/s. At the qualified 64 MHz SD
 fabric clock that is 5.3 fabric cycles per SD period, inside what the frontend
 already meets. 25 MHz is explicitly not a target: it would leave 2.5 cycles per
 period and reopen the timing work that the 64 MHz build exists to avoid.
 
-This step is blocked, with the measurement that shows it, and one part of it
-is unanswered. The plan asked which divisor the host selects. What is
-established is the rate it lands on, bit-identically, and that the rate has no
-rung between 6 and 25 MHz; the divider and parent clock that produce those two
-values are not established, because the board offers no console and each
-advertised speed costs a bitstream rebuild to try. 6.001 MHz is consistent with
-a 24 MHz oscillator divided by four, which would put 12 MHz on the same ladder
-at a divisor of two, but the host does not take it when the card asks for it,
-and why it does not is not known from the outside. The card's advertised
-`TRAN_SPEED` was made a build option and swept: at 12, 13 and 20 MHz the host
-clocks at 6.00 MHz, and at 25 MHz it clocks at 25.00 MHz, which the frontend
-cannot serve at a 64 MHz fabric clock because it leaves 2.56 cycles per period.
-The host has no divisor between those two, so there is no intermediate step to
-ask for. Reaching 25 MHz needs roughly a 100 MHz fabric clock, which is the
-timing work this build exists to avoid; the reward would be 11.8 MB/s against
-today's 2.95. Until then the kernel read stays at about 2.8 s and no payload
-change can reach the four-second target: the remaining 5.44 s is 1.05 s of
-loaders, 2.8 s of one transfer and 1.6 s of everything else.
-
 Every byte in the rest of this page is read through this interface, so it is
 worth more than the payload changes combined and should land first.
+
+**This step is blocked.** The host offers 6 MHz or 25 MHz and nothing between,
+whatever the card advertises, so 12 MHz is not reachable by asking for it. The
+measurement that establishes the whole ladder, and what it would cost to serve
+25 MHz instead, is in the findings.
 
 ## Image layout
 
@@ -194,21 +121,27 @@ defconfig.
 
 ### Build
 
-Optimize for size, not speed: the bottleneck is a 5.9 MB/s card and the CPU is
-a 1.5 GHz quad A53, so `CC_OPTIMIZE_FOR_SIZE`, ThinLTO, and
-`TRIM_UNUSED_KSYMS` all convert directly into boot time. KASLR is dropped; its
-relocation pass costs time this device has no threat model to justify.
+Optimize for size, not speed: the bottleneck is the card and the CPU is a
+1.5 GHz quad A53, so `CC_OPTIMIZE_FOR_SIZE` and `TRIM_UNUSED_KSYMS` convert
+directly into boot time. KASLR is dropped; its relocation pass costs time this
+device has no threat model to justify.
+
+ThinLTO was part of this target and is not any more. It was built, measured and
+rejected: it makes the kernel smaller and the boot slower, because what matters
+here is the compressed size and ThinLTO removes the repetition gzip was
+exploiting. The findings carry the three builds side by side. The kernel is
+built with gcc.
 
 Expected result is roughly 11 to 16 MiB uncompressed against today's 30.4 MiB.
 
 ### Format
 
-Stored zstd-compressed, not gzip. Measured on the current kernel, zstd is 13.7
-MiB against gzip's 15.7 MiB, and an A53 decompresses zstd several times faster
-than it inflates. The FIT's U-Boot carries a zstd decompressor. Because
-`unzip` handles gzip only, the kernel is expanded through `booti`'s compressed
-image path using `kernel_comp_addr_r` and `kernel_comp_size`, both already in
-the environment.
+Stored gzip, expanded by U-Boot's `unzip` into `kernel_addr_r` from a copy read
+into `kernel_comp_addr_r`. zstd would be about 1.17 MB smaller and would
+decompress faster on an A53, and it was the plan, but this U-Boot has no zstd
+decompressor: `booti`'s compressed-image path was tried with both of its
+prerequisites met and the kernel never started. Changing this means replacing
+U-Boot.
 
 ## Rootfs
 
@@ -218,7 +151,8 @@ ARMv5 where the CPU is the scarce resource; here the balance is inverted and
 every byte not read saves 0.17 ms at the target clock while LZ4 decompresses at
 hundreds of MB/s. LZ4HC costs build time only. The compression cluster size is
 a measured choice, not a guess: a larger cluster improves the ratio but reads
-more per page fault.
+more per page fault. It was measured; 64 KiB is the value, and what it costs is
+in the findings.
 
 Contents are what a games handheld needs: a static BusyBox base, Mesa with the
 Panfrost driver, SDL2, the emulator itself, `wpa_supplicant`, and BlueZ
@@ -243,12 +177,20 @@ what produced the oversized reads that failed six cold starts in ten.
 
 ```text
 mmc dev 0
+mmc write ${ramdisk_addr_r} <script-running milestone> 1
+setenv bootargs 'console=tty0 quiet loglevel=0 root=/dev/mmcblk0p5
+    rootfstype=erofs ro rootwait init=/sbin/init baredebug=/dev/mmcblk0p2'
 mmc read ${kernel_comp_addr_r} <kernel lba> <kernel blocks>
+unzip ${kernel_comp_addr_r} ${kernel_addr_r}
+mmc write ${kernel_addr_r} <kernel-loaded milestone> 1
 mmc read ${fdt_addr_r} <dtb lba> <dtb blocks>
-setenv bootargs 'console=tty0 quiet loglevel=0 ro
-    root=/dev/mmcblk0p2 rootfstype=erofs baredebug=/dev/mmcblk0p5'
+mmc write ${fdt_addr_r} <device-tree milestone> 1
 booti ${kernel_addr_r} - ${fdt_addr_r}
 ```
+
+Every milestone is addressed from where the debug partition actually starts, so
+a card laid out differently still reports into it rather than into whatever
+happens to live at a remembered sector.
 
 `rootfstype` is stated so the kernel does not try each registered filesystem
 against the card in turn. The console is `tty0` only: sending the log to an
@@ -263,31 +205,32 @@ remaining U-Boot time is small next to the card and kernel terms.
 ## Tooling and contracts
 
 Every artifact is produced by a committed tool and verified before it reaches
-the card:
+the card. All of them are reached through one entry point,
+`projects/ethernet-diagnostic/scripts/rg35xx.py`:
 
 - The kernel config is extracted from a shipped image, trimmed, and kept in the
-  repository.
-- `rg35xx_boot_debug.py --verify-image` checks the whole contract before any
-  upload: the MBR layout, the eGON SPL and its checksum, the boot script's
-  legacy framing and length table, that a compressed kernel is matched by a
-  script able to expand it, the EROFS superblocks of both system slots, and a
-  pristine debug volume.
-- The image is uploaded over Ethernet and read back complete before the card is
-  armed.
-- `rg35xx_trial.py` runs each standardized cold start and reports the boot as a
-  distribution, with the FPGA's own timestamps for stage boundaries.
-
-A change is accepted only if it improves the median without widening the
-spread. Predictability is part of the target, not a side effect of it.
+  repository. `build-kernel` refuses to build against a source tree that does
+  not match the recorded ROCKNIX manifest.
+- `image --verify-image` checks the whole contract before any upload: the MBR
+  layout, the eGON SPL and its checksum, the boot script's legacy framing and
+  length table, that a compressed kernel is matched by a script able to expand
+  it, the EROFS superblocks of both system slots, and a pristine debug volume.
+- `deploy` refuses each of its four steps unless the step before it can be
+  shown to have happened, and the image is uploaded over Ethernet and read back
+  complete before the card is armed.
+- `trial` runs each standardized cold start and `report` reduces a set of them
+  to the distribution that compares them, with the FPGA's own timestamps for
+  stage boundaries.
 
 ## Open questions
 
-- Whether the host selects 12 MHz when the card advertises a higher
-  `TRAN_SPEED`, or stays on the divisor below it. One gateware build settles
-  it.
-- Whether the ROCKNIX kernel tree for this device is publicly obtainable, and
-  whether it builds reproducibly in the arm64 container.
-- The EROFS compression cluster size, which trades ratio against bytes read per
-  page fault and should be measured on this card rather than assumed.
-- The remaining run-to-run spread: healthy boots have varied between 6.5 s and
-  12 s on identical work, and that variation is not yet explained.
+- Which divisor the host actually selects, and why it will not take 12 MHz when
+  the card advertises it. The rate it lands on is established; the mechanism is
+  not, and the board offers no console to observe it from.
+- Whether 25 MHz is worth the roughly 100 MHz SD fabric clock it needs. That
+  reopens the timing work the 64 MHz build exists to avoid, against a reward of
+  about 11.8 MB/s.
+- Whether to select the active A/B slot at run time now that a failed script
+  command is known not to cost the boot.
+- The 1.4 s `rootwait` retry that appears in roughly one boot in ten with an
+  EROFS root. Diagnosing it further needs a console the board does not have.

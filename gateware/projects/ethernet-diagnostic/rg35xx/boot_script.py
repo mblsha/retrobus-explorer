@@ -120,9 +120,11 @@ def erofs_slot_script(image: bytes, root_partition: int,
 
     The active slot is compiled into this script rather than read from the
     debug sector at run time. Reading it would need `setexpr`, which this
-    U-Boot has not been shown to have, and a script that aborts on an unknown
-    command produces no boot and no milestone to diagnose it with. Switching
-    slots rewrites this one file, which is what an update would do anyway.
+    U-Boot has not been shown to have; that is now known to cost nothing more
+    than the command itself, because a failed command does not abort the
+    script, so run-time selection is safe to attempt and simply is not needed.
+    Switching slots rewrites this one file, which is what an update would do
+    anyway.
     """
     _, fat, partitions = boot_volume(image)
     kernel = fat.placement("KERNEL")[:2]
