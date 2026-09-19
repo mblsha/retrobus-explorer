@@ -92,16 +92,19 @@ output is already in `build/rg35xx-kernel-trim/out/Image` and rebuilding it
 costs about an hour. The manifest check it starts with was run against that
 tree, and the gzip step at the end of this section was run.
 
-`build-kernel` does not fetch ROCKNIX's patches or configuration. They are
-prepared in the work directory out of band, as `patches/*.patch` and
-`base.config` beside the `linux-7.2.tar.xz` tarball, and
-`rg35xx/rocknix-sources.json` records the commit they came from with a SHA-256
-for each. The build verifies the work tree against that manifest first and
-refuses a missing, extra or altered file, because all three change the kernel:
+The kernel is mainline plus ROCKNIX's patches and configuration, which live in
+ROCKNIX's repository. `rg35xx/rocknix-sources.json` records the commit they
+come from with a SHA-256 for each, and `--fetch` turns that manifest back into
+files: `patches/*.patch` and `base.config` in the work directory, each requested
+at the pinned commit and written only if its hash matches. All 27 arrive in
+under ten seconds (run on 2026-09-19 into an empty directory, and the manifest
+check below passed on the result). The build then verifies the work tree against
+the manifest whether or not it fetched, and refuses a missing, extra or altered
+file, because all three change the kernel:
 
 ```sh
 uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
-  build-kernel --work build/rg35xx-kernel-trim --trim-network-and-crypto
+  build-kernel --work build/rg35xx-kernel-trim --fetch --trim-network-and-crypto
 ```
 
 The recorded tree is ROCKNIX/distribution at `5eb06fab68fa` with 26 patches,
@@ -382,3 +385,44 @@ name and by pattern whatever is asked.
 Before a finished experiment is removed its `result.json` is copied to
 `build/pruned-manifests/`, so the seed and options to build it again outlive
 the netlists.
+
+## 10. Display bring-up and the flight recorder
+
+The panel's init sequence is firmware, and it is compiled into the kernel:
+`build-kernel` takes it from `--firmware-dir` (default `build/rg35xx-firmware`),
+checks it against the hashes in `rg35xx/rocknix-sources.json`, and refuses to
+build without it; `--fetch` downloads it together with the patches. A rootfs
+carries no firmware.
+
+`build-rootfs` puts a test picture at `/usr/share/rg35xx/display-proof.ppm`,
+colour bars, a grey ramp, a one-pixel border and up to four lines of text given
+with `--proof-line`, and init draws it with `fbsplash` once the kernel has
+registered `/dev/fb0`, reporting the geometry and the result in the stage-5
+milestone. Build into a directory of its own: `build/rg35xx-bare` holds the
+inputs that reproduce the delivered image.
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-rootfs --out build/rg35xx-display --proof-line "RG35XX PLUS" --proof-line "DISPLAY OK"
+```
+
+Sectors 24..31 of the debug partition are a flight recorder: the tail of the
+kernel log, rewritten ten times a second from init's first milestone on. After a
+run, with the card disarmed:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/images.py \
+  --state "$STATE" --download /tmp/debug.bin --start 114688 --blocks 32
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image --decode /tmp/debug.bin
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image --kernel-log /tmp/debug.bin
+```
+
+A trial's JSON also keeps `final_trace`, everything the FPGA knew when the run
+ended, and `trial` does not report itself finished until the supply has
+confirmed its output off.
+
+As of 2026-09-19 none of this reports once the panel is running, because a
+write to the emulated card fails shortly after the panel starts; see the display
+section of RG35XX-PLUS-FINDINGS.md. The shipped-kernel image of 2026-09-18,
+`build/rg35xx-bare/rg35xx-plus-bare-64m-quiet.img`, shows its init banner on the
+panel and is the quickest way to see the display work.

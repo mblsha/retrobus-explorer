@@ -1313,3 +1313,123 @@ yields 25.00 MHz, and those are every representable `TRAN_SPEED` rung between
 the two, so no advertised speed reaches the four-second target. Why the host
 picks those two divisors and nothing between them is still not established
 from outside the board.
+
+## 2026-09-19 The display works, and turning it on breaks the card
+
+### The screen was dark because the kernel build dropped its firmware
+
+Asked to show something on the panel, the first thing the target said was that
+it had no framebuffer: the stage-5 milestone of the delivered image reads
+`framebuffer-absent`. The display stack in the trimmed configuration is option
+for option the same as ROCKNIX's, so the kernel was not missing a driver. It was
+missing a file. The panel driver from patch 0110 asks the firmware loader for
+`panels/<compatible>.panel`, here `panels/anbernic,rg35xx-plus-panel.panel`, and
+gets its init sequence from it. ROCKNIX's shipped kernel has all ten of its
+panel files compiled in, which is visible in the binary: the pinned 695-byte
+file occurs in it verbatim. `build_kernel.py` cleared `EXTRA_FIRMWARE` to keep
+the RTL8821CS blobs out of the image the card has to read, and the panel files
+went with them. It now builds the two RG35XX Plus panel files in, verified
+against `rocknix-sources.json` like the patches, and with them the kernel logs
+`panel-mipi spi0.0: Modeline "640x480" ... added` and binds the mixers, the TCON
+top and the LCD controller at 0.438 s.
+
+### A flight recorder, because there is no console
+
+The second page of the userspace range in the debug partition, sectors 24..31,
+is now the tail of the kernel log, rewritten ten times a second from the first
+milestone on and read back with `image --kernel-log`. On its first outing it
+returned the first kernel log anyone has read from this board:
+
+```text
+[    0.409899] panel-mipi spi0.0: supply io not found, using dummy regulator
+[    0.410152] panel-mipi spi0.0: Direct firmware load for panels/anbernic,rg35xx-plus-panel.panel failed with error -2
+[    0.410178] panel-mipi spi0.0: probe with driver panel-mipi failed with error -2
+```
+
+### The proof, and what it cost to believe it
+
+The display was proven by a photograph. The image of 2026-09-18 that boots
+ROCKNIX's shipped kernel with the old initramfs shows, on the panel, backlit
+and sharp: `RG35XX Plus bare Linux bring-up`, `ROCKNIX kernel reference; custom
+initramfs; no SYSTEM image`, `Model: Anbernic RG35XX Plus`, `Framebuffer:
+/dev/fb0 present`, and a blinking cursor. The panel had been working under the
+shipped kernel all along; nobody had looked at it.
+
+Every boot that lights the panel then stops reporting through the card within
+about a second, under the shipped kernel and the trimmed one alike. Three
+explanations were held for that in turn, and each was wrong:
+
+- *Binding the display after the kernel disables unused clocks hangs the SoC.*
+  The first attempt carried the firmware in the rootfs and re-probed the panel
+  from init, and reporting stopped at once. But it stops just the same when the
+  display binds at 0.438 s from built-in firmware, and under ROCKNIX's kernel.
+- *Init blocked on a console held by a wedged display.* The stall first
+  appeared at an `echo`, so init was taken off the console. It was blocked in
+  the card write beside it; the console was never stuck, and that change was
+  reverted.
+- *The board browns out when the backlight switches on*, fed from USB-C with no
+  battery. The supply sat at 4.997 V, about 0.19 A, in constant-voltage mode
+  throughout, the screen stays lit for minutes, and the cursor keeps blinking:
+  the kernel is alive.
+
+What is true was on the panel once the kernel was allowed to speak
+(`loglevel=7`, the same image otherwise):
+
+```text
+[    1.355599] sunxi-mmc 4020000.mmc: data error, sending stop command
+[    2.352581] sunxi-mmc 4020000.mmc: send stop command failed
+```
+
+A write from Linux to the emulated card fails with a data error shortly after
+the panel starts, the stop command that should recover from it times out, and
+the MMC layer never tries again. From the card's side the last thing sent is a
+CRC-status token on DAT0, partway through a multi-block write, after which the
+host never clocks again; the card is idle in `tran`, not holding busy and not
+driving the data lines. In hundreds of boots without a working panel the same
+writes never failed once.
+
+A control run on the display-less image matters as much as the failure. Its
+trace shows `pin_data.serializer_mismatch` with a count of 331,
+`pin_response.serializer_mismatch`, and a minimum clock period of zero fabric
+cycles, all in a boot that wrote 67 sectors without error. Those monitors do
+not distinguish a failed link from a healthy one and must not be read as if
+they did.
+
+What is open: why the write fails. The emulator does not drive the data lines
+between the blocks of a multi-block write, this host has no working pull-up on
+DAT0, and a running panel adds both electrical noise and DMA contention that
+stretches the gaps between blocks, so a false start bit on a floating DAT0 is
+the leading suspect; and once the host stops clocking, the liveness gate stops
+the card's idle-high drive, which would leave DAT0 low and the host waiting for
+a busy that never ends. Neither is established. The trace records nothing about
+the write path, so the next step is to make it record what the card saw: blocks
+received, blocks failing CRC16, the status token sent, and the longest gap
+between blocks.
+
+### What the bench taught on the way
+
+The RG35XX's supply module drops off its controller for a minute or two at a
+time. While it is gone the CLI either prints a status of all zeroes with the
+output shown OFF, or does not know the `psu2` command at all. `deploy` took the
+first form as proof the target was off, `trial` switched on a channel that was
+not listening, and an `off` sent into a dropout left the target powered for
+minutes after a run had ended. Both tools now refuse a module that is not
+reporting, and `trial` confirms its power-off by reading the status back and
+repeating the command until the supply agrees.
+
+`trial` also anchored its clock on the first command frame of any kind, and
+switching the supply glitches the floating lines into a frame that fails its
+checksum; it anchors on the first valid command now. Its JSON keeps the FPGA's
+whole final trace, because that is the post-mortem.
+
+`build_rootfs.py` staged its payload in the system temporary directory, which
+colima does not share with its VM, so the container saw an empty `/payload` and
+failed five minutes in; it stages inside the output directory now. That bug
+came in with the cleanup and no unit test could have seen it.
+
+`build-kernel --fetch` was the first real use of the pinned fetcher and ran out
+of GitHub's anonymous quota, sixty requests an hour, at the twenty-third patch.
+It now lists each of ROCKNIX's two patch directories once instead of asking for
+every patch in both, and goes through the authenticated `gh` CLI when there is
+one; with the anonymous quota at zero it fetched all 27 sources and both
+firmware files in twelve seconds.

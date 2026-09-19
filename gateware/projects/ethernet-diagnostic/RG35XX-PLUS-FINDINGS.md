@@ -369,3 +369,25 @@ The 12 MHz target in the plan was the four-second target, and the host will not
 take 12 MHz. The remaining 5.44 s is 1.05 s of loaders, 2.8 s of one transfer
 and 1.6 s of everything else; until the interface moves, every further saving
 has to come from reading fewer bytes rather than reading them faster.
+
+## The display
+
+The panel works. Under ROCKNIX's shipped kernel it shows a sharp, backlit
+640x480 framebuffer console, photographed on 2026-09-19. The trimmed kernel
+brings the same pipeline up at 0.438 s once the panel's init sequence is
+compiled into it: the driver from patch 0110 loads
+`panels/anbernic,rg35xx-plus-panel.panel` through the firmware loader, probes at
+0.41 s before any filesystem exists, and nothing retries a probe that fails, so
+the file has to be in the kernel, where ROCKNIX also puts it.
+`build_kernel.py` builds the two RG35XX Plus panel files in and leaves the
+RTL8821CS blobs out; it costs 1,358 bytes of gzip.
+
+**Open: a Linux write to the emulated card fails once the panel is running.**
+The kernel reports `sunxi-mmc 4020000.mmc: data error, sending stop command`
+and then `send stop command failed`, and never retries; the kernel itself stays
+alive. It happens under both kernels and never without a working panel. Until it
+is fixed, nothing the target says after the panel starts reaches the debug
+partition, including the flight recorder. The pin monitors and the clock-period
+monitor in the FPGA trace read the same in a healthy boot as in a failed one and
+are not evidence either way. See the 2026-09-19 entry in the history for what
+was ruled out and what is suspected.
