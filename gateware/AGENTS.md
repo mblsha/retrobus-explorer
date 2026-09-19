@@ -19,21 +19,34 @@ and application policy in the consuming project.
 
 ## Development commands
 
-Run commands from `gateware/`:
+Run Python as `uv run --frozen`, and never run `uv sync`. The user's global
+`~/.config/uv/uv.toml` sets `exclude-newer`, so `uv sync --locked` fails and a
+plain `uv run` resolves and rewrites `uv.lock`; if `uv.lock` shows as modified,
+`git checkout gateware/uv.lock` before committing. Do not delete or recreate
+`gateware/.venv`: the one that exists has a working `cocotb` 1.9.2, and
+building that version from source on this Mac fails at link time. A fresh
+clone needs `--no-config` to sync at all, and should expect the cocotb install
+to need attention.
+
+Bitstream builds are the one exception to `uv run`: `nextpnr-xilinx` is linked
+against Homebrew's Boost by absolute path, so they need
+`DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib` and must be launched
+with `./.venv/bin/python`, because macOS strips that variable through `uv run`.
+
+Run these from `gateware/`:
 
 ```sh
-uv sync --locked --all-packages
-uv run python tools/project_inventory.py --check
-uv run python tools/run_tb.py --project projects/<name>
-uv run python tools/run_tb.py --project projects/<name> --waves
-uv run python lib/shared-components/scripts/test_component.py <component>
-uv run python lib/shared-components/scripts/test_all_components.py
-uv run python -m unittest discover -s tools -p 'test_*.py'
-uv run python -m unittest discover \
+uv run --frozen python tools/project_inventory.py --check
+uv run --frozen python tools/run_tb.py --project projects/<name>
+uv run --frozen python tools/run_tb.py --project projects/<name> --waves
+uv run --frozen python lib/shared-components/scripts/test_component.py <component>
+uv run --frozen python lib/shared-components/scripts/test_all_components.py
+uv run --frozen python -m unittest discover -s tools -p 'test_*.py'
+uv run --frozen python -m unittest discover \
   -s projects/ft-uart-hex-bridge/test \
   -p 'test_ft_uart_hex_bridge_host.py'
 uv run --frozen python -m unittest discover -t projects/ethernet-diagnostic -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
-uv run python -m pytest projects/sharp-pc-e500-card/tests
+uv run --frozen python -m pytest projects/sharp-pc-e500-card/tests
 ```
 
 The supported behavioral verification path is Spade, generated SystemVerilog,

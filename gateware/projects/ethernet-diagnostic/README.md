@@ -22,11 +22,12 @@ Install the [macOS toolchain](../../experiments/openxc7-macos/README.md) and
 [DDR prerequisites](../microsd-emulator/ddr/README.md) first. From `gateware/`:
 
 ```sh
-uv sync --locked --all-packages
-uv run python tools/project_inventory.py --check
-uv run python projects/ethernet-diagnostic/scripts/test_with_vcd.py
-uv run python -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
-uv run python -O -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
+uv run --frozen python tools/project_inventory.py --check
+uv run --frozen python projects/ethernet-diagnostic/scripts/test_with_vcd.py
+uv run --frozen python -m unittest discover -t projects/ethernet-diagnostic \
+  -s projects/ethernet-diagnostic/test_host -p test_images_host.py
+uv run --frozen python -O -m unittest discover -t projects/ethernet-diagnostic \
+  -s projects/ethernet-diagnostic/test_host -p test_images_host.py
 python3 experiments/openxc7-macos/build_ddr.py --ethernet --seed 12
 ```
 
@@ -45,6 +46,37 @@ Ethernet → SD write → Ethernet readback path. They also stall accepted SD
 reads and writes while disarming and verify that network access waits for
 them to drain, and vary PHY clock phase and reset release.
 `--waves` retains waveforms when diagnosing a failure.
+
+## RG35XX Plus boot tooling
+
+The host tooling that boots an Anbernic RG35XX Plus from the emulated card
+lives in the `rg35xx` package, and every part of it is reached through one
+entry point:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py --help
+```
+
+Its subcommands are `image` (build, patch, verify and describe a card image),
+`trial` (one standardized cold start), `report` (reduce a set of trials to a
+distribution), `deploy` (program, upload, verify, arm), `build-kernel` and
+`build-rootfs`.
+
+Three documents cover it. [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md) is
+the commands, in the order they have to happen.
+[RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) is what is known, by topic.
+[RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md) is the chronological record,
+superseded by the other two wherever they differ, and
+[RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) is the payload target.
+
+Tests for this project come in two sets. Host tests need neither hardware nor a
+simulator; the Cocotb testbenches need Verilator and a built design:
+
+```sh
+uv run --frozen python -m unittest discover -t projects/ethernet-diagnostic \
+  -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
+uv run --frozen python tools/run_tb.py --project projects/ethernet-diagnostic
+```
 
 ## Ownership rules
 
@@ -181,8 +213,8 @@ and backend requests establish useful protocol progress.
 The trace records observation points already present in the SD frontend rather
 than instantiating another command decoder. It deliberately keeps only the last
 command, not a command log, to preserve timing in the combined DDR/Ethernet
-build. See [the RG35XX Plus record](RG35XX-PLUS-DEBUG.md), which uses these
-counters to boot an H700 handheld from the emulated card.
+build. See [the RG35XX Plus findings](RG35XX-PLUS-FINDINGS.md), which use
+these counters to boot an H700 handheld from the emulated card.
 
 On the GKD, bind the external controller and apply the 13 MHz, four-bit,
 keep-awake settings from the [DDR guide](../microsd-emulator/ddr/README.md).
