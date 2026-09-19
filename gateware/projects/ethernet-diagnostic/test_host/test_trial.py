@@ -1,12 +1,6 @@
-import importlib.util
 import unittest
-from pathlib import Path
 
-
-SCRIPT = Path(__file__).parents[1] / "scripts/rg35xx_trial.py"
-SPEC = importlib.util.spec_from_file_location("rg35xx_trial", SCRIPT)
-trial = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(trial)
+from rg35xx import trial
 
 
 def trace(frames=0, command=0, argument=0, reads=0, lba=0, writes=0, multiblock=(),
@@ -193,4 +187,45 @@ class InterfaceRateTests(unittest.TestCase):
                  "data_start_edge": 0, "first_block_end_edge": 5},
                 64e6,
             )
+        )
+
+
+class UserspaceReportTests(unittest.TestCase):
+    """The number a run prints and the number a later summary prints have to
+    be the same number, so the run line is rendered from the shared metric
+    rather than read off the timeline by eye."""
+
+    def run_of(self, samples, sound=True):
+        return {"zero_is_sound": sound, "timeline": trial.transitions(samples)}
+
+    def test_a_run_that_reached_userspace_says_when(self):
+        samples = [
+            (0.0, trace(frames=1, command=18, writes=2)),
+            (3.0, trace(frames=2, command=24, writes=3)),
+            (5.37, trace(frames=3, command=25, writes=3)),
+        ]
+        self.assertEqual(
+            trial.userspace_report(self.run_of(samples)),
+            "userspace milestone at 5.37s",
+        )
+
+    def test_a_run_that_stopped_in_u_boot_says_so(self):
+        samples = [
+            (0.0, trace(frames=1, command=18, writes=2)),
+            (2.0, trace(frames=2, command=24, writes=3)),
+            (9.0, trace(frames=3, command=24, writes=4)),
+        ]
+        self.assertEqual(
+            trial.userspace_report(self.run_of(samples)),
+            "no userspace milestone observed",
+        )
+
+    def test_a_run_whose_zero_is_unsound_reports_no_milestone(self):
+        samples = [
+            (0.0, trace(frames=1, command=18, writes=2)),
+            (5.0, trace(frames=2, command=25, writes=3)),
+        ]
+        self.assertEqual(
+            trial.userspace_report(self.run_of(samples, sound=False)),
+            "no userspace milestone observed",
         )
