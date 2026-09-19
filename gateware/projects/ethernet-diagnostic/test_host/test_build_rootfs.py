@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -76,8 +77,11 @@ class BuildRootfsTests(unittest.TestCase):
     def test_the_rendered_payload_is_written_and_executable(self):
         with tempfile.TemporaryDirectory() as directory:
             init = builder.write_payload(Path(directory) / "payload")
+            # Only what was rendered for this build, never the source directory:
+            # the init and the picture it draws.
             self.assertEqual(
-                [path.name for path in init.parent.iterdir()], ["rootfs-init"]
+                sorted(path.name for path in init.parent.iterdir()),
+                ["display-proof.ppm", "rootfs-init"],
             )
             self.assertTrue(init.stat().st_mode & 0o111)
             self.assertIn(f"MAGIC={MAGIC}", init.read_text())
@@ -127,3 +131,97 @@ class RootfsInitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DisplayPayloadTests(unittest.TestCase):
+    """What the rootfs contributes to the display: a picture, and patience."""
+
+    def test_the_payload_carries_the_picture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload = Path(directory) / "payload"
+            builder.write_payload(payload)
+            self.assertTrue((payload / "display-proof.ppm").read_bytes().startswith(b"P6\n640 480\n"))
+
+    def test_the_image_installs_the_picture_and_no_firmware(self):
+        """The panel firmware is compiled into the kernel; a second copy here
+        would be a second thing to keep in step with nothing that reads it."""
+        self.assertIn("usr/share/rg35xx/display-proof.ppm", builder.BUILD)
+        self.assertNotIn("firmware", builder.BUILD)
+
+    def test_init_never_asks_the_kernel_to_probe_the_panel(self):
+        """Init does not manage drivers. Carrying the firmware in the rootfs and
+        re-probing the panel from here was the first attempt at a display; the
+        firmware is compiled into the kernel now and the panel binds there."""
+        template = builder.INIT_TEMPLATE.read_text()
+        code = "\n".join(line for line in template.splitlines() if not line.lstrip().startswith("#"))
+        self.assertNotIn("drivers_probe", code)
+        self.assertNotIn("/bind", code)
+        self.assertNotIn("firmware_class", code)
+
+    def test_the_picture_is_drawn_after_everything_init_has_to_say(self):
+        template = builder.INIT_TEMPLATE.read_text()
+        self.assertIn("/usr/share/rg35xx/display-proof.ppm", template)
+        self.assertLess(template.index("write_stage 7 "), template.index("fbsplash"))
+
+class PayloadStagingTests(unittest.TestCase):
+    def test_the_payload_is_staged_where_the_container_can_see_it(self):
+        """colima shares the home directory with its VM and nothing else, so a
+        payload staged in the system temp directory mounts empty and the build
+        fails five minutes in, at the first file it tries to copy."""
+        from unittest.mock import patch
+
+        seen = {}
+
+        def capture(command):
+            seen["command"] = command
+            return 1  # stop before anything is read back
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "out"
+            with (
+                patch.object(builder, "find_runner", return_value=["docker"]),
+                patch.object(builder, "run", side_effect=capture),
+                self.assertRaises(SystemExit),
+            ):
+                builder.main(["--out", str(out)])
+            mounts = [
+                argument.split(":")[0]
+                for flag, argument in zip(seen["command"], seen["command"][1:])
+                if flag == "-v" and argument.split(":")[1] == "/payload"
+            ]
+            self.assertEqual(len(mounts), 1)
+            self.assertIn(out.resolve(), Path(mounts[0]).resolve().parents)
+
+
+class FlightRecorderTests(unittest.TestCase):
+    """The first boots with a working display stopped reporting a second into
+    userspace and left nothing behind to say why."""
+
+    def setUp(self):
+        self.template = builder.INIT_TEMPLATE.read_text()
+        self.rendered = builder.render_init()
+
+    def test_recording_starts_right_after_the_first_milestone(self):
+        """After it, so the boot-time figure is untouched; before anything
+        else, so whatever goes wrong next is on the card."""
+        order = [
+            self.template.index("write_stage 0 "),
+            self.template.index("record_kernel_log &"),
+            self.template.index("write_stage 1 "),
+        ]
+        self.assertEqual(order, sorted(order))
+
+    def test_no_milestone_lands_in_the_recorder_page(self):
+        import re
+
+        stages = {int(stage) for stage in re.findall(r"write_stage (\d+)", self.template)}
+        self.assertTrue(stages)
+        self.assertLess(max(stages), debug_partition.USERSPACE_STAGES)
+
+    def test_the_recorder_writes_exactly_its_own_page(self):
+        self.assertIn(f"seek={debug_partition.KERNEL_LOG_SECTOR}", self.rendered)
+        self.assertIn(f"count={debug_partition.KERNEL_LOG_SECTORS}", self.rendered)
+        self.assertEqual(
+            debug_partition.KERNEL_LOG_SECTOR + debug_partition.KERNEL_LOG_SECTORS,
+            debug_partition.DEBUG_SECTORS,
+        )

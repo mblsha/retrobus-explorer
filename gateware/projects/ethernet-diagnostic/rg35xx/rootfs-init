@@ -44,6 +44,25 @@ write_stage() {
 # multi-block command and is distinguishable from U-Boot's single-block ones.
 write_stage 0 rootfs-init-entered
 
+# A flight recorder. There is no serial console on this board, so the tail of
+# the kernel log is copied to its own page of the debug partition several times
+# a second and read back afterwards with `image --kernel-log`. It starts after
+# the first milestone so it cannot delay it. It reports everything except the
+# one failure that takes the card link down with it.
+snapshot_kernel_log() {
+    $BB dmesg | $BB tail -c @KERNEL_LOG_BYTES@ > /tmp/kernel-log
+    $BB dd if=/tmp/kernel-log of="$DEBUG_DEVICE" bs=512 seek=@KERNEL_LOG_SECTOR@ \
+        count=@KERNEL_LOG_SECTORS@ conv=sync,notrunc 2>/dev/null
+    $BB sync
+}
+record_kernel_log() {
+    while true; do
+        snapshot_kernel_log
+        $BB sleep 0.1
+    done
+}
+record_kernel_log &
+
 $BB printf '\033[2J\033[H'
 echo 'RG35XX Plus bare Linux: EROFS system partition, no initramfs'
 
@@ -67,8 +86,22 @@ else
     write_stage 4 data-absent
 fi
 
+# The panel is brought up by the kernel, not from here. Its driver is built in
+# and so is its init sequence, so it binds at the first probe, about 0.4 s in,
+# and the framebuffer follows. All that is left to do here is wait for it.
+polls=0
+while [ ! -c /dev/fb0 ] && [ "$polls" -lt 60 ]; do
+    $BB sleep 0.05
+    polls=$((polls + 1))
+done
+for backlight in /sys/class/backlight/*; do
+    [ -e "$backlight/max_brightness" ] && $BB cat "$backlight/max_brightness" > "$backlight/brightness" 2>/dev/null
+done
+
 if [ -c /dev/fb0 ]; then
-    write_stage 5 framebuffer-present
+    geometry="$($BB cat /sys/class/graphics/fb0/virtual_size 2>/dev/null)"
+    depth="$($BB cat /sys/class/graphics/fb0/bits_per_pixel 2>/dev/null)"
+    write_stage 5 "framebuffer-present ${geometry} ${depth}bpp polls-${polls}"
 else
     write_stage 5 framebuffer-absent
 fi
@@ -81,13 +114,19 @@ case "$command" in
 esac
 
 write_stage 7 userspace-ready
-cat <<'BANNER'
+echo ''
+echo 'Userspace is ready on a read-only EROFS root.'
+echo 'U-Boot milestones are in raw partition 2, sectors 1..15.'
+echo 'Userspace milestones are in the same partition, sectors 16..31.'
+echo 'The host command is in sector 0.'
 
-Userspace is ready on a read-only EROFS root.
-U-Boot milestones are in raw partition 2, sectors 1..15.
-Userspace milestones are in the same partition, sectors 16..31.
-The host command is in sector 0.
-BANNER
+# Drawn last, after everything that prints, so the console does not write over
+# it; the cursor is hidden because its blink would keep redrawing one cell.
+if [ -c /dev/fb0 ]; then
+    $BB printf '\033[2J\033[H\033[?25l'
+    $BB fbsplash -s /usr/share/rg35xx/display-proof.ppm -d /dev/fb0
+    write_stage 5 "framebuffer-present ${geometry} ${depth}bpp polls-${polls} fbsplash-$? backlight-$($BB cat /sys/class/backlight/*/brightness 2>/dev/null | $BB head -n 1)"
+fi
 
 while true; do
     setsid $BB cttyhack $BB sh

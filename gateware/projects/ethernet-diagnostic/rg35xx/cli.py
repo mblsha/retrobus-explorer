@@ -15,6 +15,7 @@ from pathlib import Path
 
 from rg35xx.debug_partition import SECTOR_SIZE
 from rg35xx.debug_partition import decode_records
+from rg35xx.debug_partition import kernel_log
 from rg35xx.debug_partition import encode_command
 from rg35xx.fat16 import read_at
 from rg35xx.fat16 import replace_file
@@ -32,6 +33,8 @@ def main(argv: list[str] | None = None) -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--make-command", metavar="COMMAND")
     group.add_argument("--decode", type=Path, metavar="IMAGE")
+    group.add_argument("--kernel-log", type=Path, metavar="DUMP",
+                       help="Print the flight recorder page from a dump of the debug partition")
     group.add_argument("--verify-image", type=Path, metavar="IMAGE")
     group.add_argument("--make-spl-loop", type=Path, metavar="IMAGE")
     group.add_argument("--describe", type=Path, metavar="IMAGE")
@@ -133,6 +136,10 @@ def main(argv: list[str] | None = None) -> None:
                 indent=2,
             )
         )
+        return
+
+    if args.kernel_log is not None:
+        print(kernel_log(args.kernel_log.read_bytes()), end="")
         return
 
     for record in decode_records(args.decode.read_bytes()):

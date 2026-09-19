@@ -32,11 +32,18 @@ DEVICE_TREE_LOADED = 5
 # so a variable U-Boot resolves at run time cannot be read any other way.
 ENV_EXPORT_SECTOR = 8
 ENV_EXPORT_SECTORS = 8
-# Sectors 16..31 are userspace's, stage N at USERSPACE_BASE + N, so a U-Boot
-# record and a userspace record from the same boot both survive to be read
-# back together.
+# Sectors 16..31 are userspace's. The first page holds its milestones, stage N
+# at USERSPACE_BASE + N, so a U-Boot record and a userspace record from the same
+# boot both survive to be read back together.
 USERSPACE_BASE = 16
 USERSPACE_SECTORS = 16
+USERSPACE_STAGES = 8
+# The second page is a flight recorder: the tail of the kernel log, rewritten
+# several times a second while the target runs. The board has no console and
+# the kernel no hung-task detector, so when bring-up wedges the machine this
+# page is the only account of what the kernel was doing on the way in.
+KERNEL_LOG_SECTOR = USERSPACE_BASE + USERSPACE_STAGES
+KERNEL_LOG_SECTORS = USERSPACE_SECTORS - USERSPACE_STAGES
 # What a host reads back to see one whole boot.
 DEBUG_SECTORS = USERSPACE_BASE + USERSPACE_SECTORS
 
@@ -72,3 +79,15 @@ def decode_records(data: bytes) -> list[dict[str, str]]:
                 fields[key] = value
         records.append(fields)
     return records
+
+
+def kernel_log(dump: bytes) -> str:
+    """Return the flight recorder's text from a dump of the debug partition.
+
+    The page is raw log text, not a record, so that all of it is log; the
+    padding dd adds and the erased flash behind a short first snapshot are
+    dropped rather than shown.
+    """
+    start = KERNEL_LOG_SECTOR * SECTOR_SIZE
+    page = dump[start : start + KERNEL_LOG_SECTORS * SECTOR_SIZE]
+    return page.replace(b"\xff", b"").replace(b"\0", b"").decode("utf-8", "replace")

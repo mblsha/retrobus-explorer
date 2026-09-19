@@ -91,3 +91,20 @@ class SectorMapTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class KernelLogTests(unittest.TestCase):
+    def test_the_log_page_is_read_back_without_its_padding(self):
+        dump = bytearray(b"\xff" * debug_partition.DEBUG_SECTORS * debug_partition.SECTOR_SIZE)
+        text = b"[    1.02] panel-mipi spi0.0: firmware loaded\n"
+        start = debug_partition.KERNEL_LOG_SECTOR * debug_partition.SECTOR_SIZE
+        dump[start : start + len(text)] = text
+        dump[start + len(text) : start + 512] = bytes(512 - len(text))
+        self.assertEqual(debug_partition.kernel_log(bytes(dump)), text.decode())
+
+    def test_milestones_and_the_log_share_the_range_without_overlapping(self):
+        self.assertEqual(
+            debug_partition.USERSPACE_BASE + debug_partition.USERSPACE_STAGES,
+            debug_partition.KERNEL_LOG_SECTOR,
+        )

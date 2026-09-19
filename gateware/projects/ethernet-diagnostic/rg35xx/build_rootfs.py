@@ -30,9 +30,13 @@ from rg35xx.containers import container_command as run_in_container
 from rg35xx.containers import find_runner
 from rg35xx.containers import run
 from rg35xx.debug_partition import DEBUG_PARTITION
+from rg35xx.debug_partition import KERNEL_LOG_SECTOR
+from rg35xx.debug_partition import KERNEL_LOG_SECTORS
 from rg35xx.debug_partition import MAGIC
+from rg35xx.debug_partition import SECTOR_SIZE
 from rg35xx.debug_partition import USERSPACE_BASE
 from rg35xx.image import DATA_PARTITION
+from rg35xx import display_proof
 
 HERE = Path(__file__).resolve().parent
 GATEWARE = HERE.parents[2]
@@ -48,14 +52,15 @@ DEFAULT_BUSYBOX_SHA256 = (
 # place for them to drift out of agreement with the boot script.
 INIT_TEMPLATE = HERE / "rootfs-init"
 PLACEHOLDER = re.compile(r"@[A-Z0-9_]+@")
-
-
 def init_values() -> dict[str, str]:
     return {
         "DEBUG_DEVICE": f"/dev/mmcblk0p{DEBUG_PARTITION}",
         "DATA_DEVICE": f"/dev/mmcblk0p{DATA_PARTITION}",
         "MAGIC": MAGIC,
         "USERSPACE_BASE": str(USERSPACE_BASE),
+        "KERNEL_LOG_SECTOR": str(KERNEL_LOG_SECTOR),
+        "KERNEL_LOG_SECTORS": str(KERNEL_LOG_SECTORS),
+        "KERNEL_LOG_BYTES": str(KERNEL_LOG_SECTORS * SECTOR_SIZE),
     }
 
 
@@ -75,12 +80,17 @@ def render_init(template: str | None = None) -> str:
     return text
 
 
-def write_payload(directory: Path) -> Path:
-    """Render init into a directory the container can mount as /payload."""
+DEFAULT_PROOF_LINES = ("RG35XX PLUS", "DISPLAY OK", "EROFS ROOT")
+
+
+def write_payload(directory: Path, proof_lines=DEFAULT_PROOF_LINES) -> Path:
+    """Put everything the container installs into one directory it can mount:
+    the rendered init, and the picture init draws to prove the panel works."""
     directory.mkdir(parents=True, exist_ok=True)
     init = directory / INIT_TEMPLATE.name
     init.write_text(render_init())
     init.chmod(0o755)
+    (directory / "display-proof.ppm").write_bytes(display_proof.render(list(proof_lines)))
     return init
 
 
@@ -117,6 +127,9 @@ chmod 0755 sbin/init
 # have to exist, and /init is what a converted initramfs image would use.
 ln -sf sbin/init init
 printf 'rg35xx-plus\n' > etc/hostname
+# The picture init draws once the kernel has brought the panel up.
+mkdir -p usr/share/rg35xx
+cp /payload/display-proof.ppm usr/share/rg35xx/display-proof.ppm
 
 # --all-root keeps ownership independent of the build container, and -T pins
 # every timestamp so the same input produces the same image.
@@ -176,13 +189,24 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--out", type=Path, default=GATEWARE / "build/rg35xx-bare",
     )
+    parser.add_argument(
+        "--proof-line", action="append", default=[],
+        help="Text for the display proof picture; repeat for more lines",
+    )
     arguments = parser.parse_args(argv)
     arguments.out.mkdir(parents=True, exist_ok=True)
     system_name = system_image_name(arguments.cluster)
     data_name = "data.ext2"
-    with tempfile.TemporaryDirectory() as directory:
+    # The payload is staged inside the output directory, not the system temp
+    # directory: a container runtime that runs in a VM shares only part of the
+    # host, and a path it does not share mounts as an empty directory without
+    # complaint. The output directory is known to be shared because /out is it.
+    with tempfile.TemporaryDirectory(dir=arguments.out, prefix=".payload-") as directory:
         payload = Path(directory) / "payload"
-        write_payload(payload)
+        try:
+            write_payload(payload, arguments.proof_line or DEFAULT_PROOF_LINES)
+        except ValueError as failure:
+            parser.error(str(failure))
         command = container_command(
             find_runner(arguments.runner), payload, arguments.out.resolve(),
             arguments.image, arguments.busybox, arguments.busybox_sha256,
