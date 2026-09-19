@@ -1,5 +1,5 @@
-import importlib.util
 import hashlib
+import importlib
 import io
 import json
 from pathlib import Path
@@ -11,13 +11,11 @@ import unittest
 from unittest.mock import Mock, patch
 import zlib
 
-from packet_support import READ_WHILE_ARMED
-
-spec = importlib.util.spec_from_file_location(
-    "images_host", Path(__file__).resolve().parents[1] / "scripts/images.py"
-)
-images = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(images)
+from scripts import images
+# The protocol scenarios are shared with the Cocotb testbenches, which assert
+# the gateware against the same table this asserts the host model against; a
+# second copy here would let the two drift apart silently.
+from test.packet_support import READ_WHILE_ARMED
 
 
 def reply(request, status=0, payload=bytes(512)):
@@ -605,12 +603,11 @@ class ReadOnlyIntentTests(unittest.TestCase):
 
 class BenchmarkTests(unittest.TestCase):
     def test_hash_and_cached_reply_checks_are_operational_guards(self):
-        spec = importlib.util.spec_from_file_location(
-            "benchmark_reads", Path(images.__file__).with_name("benchmark_reads.py")
-        )
-        benchmark = importlib.util.module_from_spec(spec)
+        # benchmark_reads is a standalone entry point that imports `images` as
+        # a top-level module, so it is imported with that name bound to the
+        # client under test rather than through the path it is run from.
         with patch.dict("sys.modules", {"images": images}):
-            spec.loader.exec_module(benchmark)
+            benchmark = importlib.import_module("scripts.benchmark_reads")
         expected = bytes(512)
         arguments = [
             "benchmark",
