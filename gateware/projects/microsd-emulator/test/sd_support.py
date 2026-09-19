@@ -121,10 +121,9 @@ class Host:
         csd = int.from_bytes((await self.command(9, 0x10000, length=136))[1:], "big")
         if writable:
             sys.path.insert(
-                0,
-                str(Path(__file__).resolve().parents[3] / "experiments/openxc7-macos"),
+                0, str(Path(__file__).resolve().parents[3] / "tools")
             )
-            from build_ddr import SD_CSD, csd_crc7
+            from sd_csd import SD_CSD, csd_crc7
 
             # The card returns whatever CSD the build supplied. Check it
             # against that rather than a fixed constant, and check the build's
