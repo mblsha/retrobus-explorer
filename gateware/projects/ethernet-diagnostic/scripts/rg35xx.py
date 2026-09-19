@@ -22,6 +22,7 @@ if sys.path[:1] != [str(PROJECT)]:
 SUBCOMMANDS = {
     "image": "rg35xx.cli",
     "trial": "rg35xx.trial",
+    "job": "rg35xx.job",
     "report": "rg35xx.report",
     "deploy": "rg35xx.deploy",
     "build-kernel": "rg35xx.build_kernel",
