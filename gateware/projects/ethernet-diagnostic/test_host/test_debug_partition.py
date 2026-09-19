@@ -1,3 +1,4 @@
+import hashlib
 import unittest
 
 from rg35xx import debug_partition
@@ -84,9 +85,100 @@ class SectorMapTests(unittest.TestCase):
             0x1C003,
         )
 
-    def test_a_sector_outside_the_map_is_refused(self):
+    def test_a_sector_outside_the_partition_is_refused(self):
         with self.assertRaisesRegex(ValueError, "outside the debug partition"):
-            debug_partition.absolute_lba(114688, debug_partition.DEBUG_SECTORS)
+            debug_partition.absolute_lba(114688, debug_partition.PARTITION_SECTORS)
+
+    def test_the_job_exchange_clears_the_boot_records_and_stays_inside(self):
+        """The runner writes results while U-Boot's and init's records from the
+        same boot are still wanted, and both are in the same partition."""
+        regions = [
+            (debug_partition.JOB_SECTOR, debug_partition.JOB_SECTORS),
+            (debug_partition.RESULT_SECTOR, debug_partition.RESULT_SECTORS),
+            (debug_partition.SCRATCH_SECTOR, debug_partition.SCRATCH_SECTORS),
+        ]
+        for start, length in regions:
+            self.assertGreaterEqual(start, debug_partition.DEBUG_SECTORS)
+            self.assertLessEqual(start + length, debug_partition.PARTITION_SECTORS)
+        for (start, length), (following, _) in zip(regions, regions[1:]):
+            self.assertLessEqual(start + length, following)
+        self.assertIn(
+            debug_partition.SLEEP_MARK_SECTOR,
+            range(
+                debug_partition.SCRATCH_SECTOR,
+                debug_partition.SCRATCH_SECTOR + debug_partition.SCRATCH_SECTORS,
+            ),
+        )
+        self.assertNotEqual(
+            debug_partition.SLEEP_MARK_SECTOR, debug_partition.CARD_CHECK_SECTOR
+        )
+
+
+class JobRecordTests(unittest.TestCase):
+    """A job and its result cross between a Python host and a BusyBox shell
+    through raw sectors, so both ends of the format are pinned here."""
+
+    def test_a_job_round_trips_through_whole_sectors(self):
+        script = "echo hello\nexit 3\n"
+        encoded = debug_partition.encode_job(7, script, "phase0")
+        self.assertEqual(len(encoded) % SECTOR_SIZE, 0)
+        self.assertEqual(len(encoded), 2 * SECTOR_SIZE)
+        self.assertEqual(
+            debug_partition.decode_job(encoded),
+            {"sequence": 7, "name": "phase0", "script": script},
+        )
+
+    def test_the_header_names_the_length_and_the_digest_the_target_checks(self):
+        encoded = debug_partition.encode_job(1, "echo hi\n")
+        fields = decode_records(encoded[:SECTOR_SIZE])[0]
+        self.assertEqual(fields["kind"], "job")
+        self.assertEqual(fields["script_bytes"], "8")
+        self.assertEqual(
+            fields["script_md5"], hashlib.md5(b"echo hi\n").hexdigest()
+        )
+
+    def test_a_job_caught_half_written_is_not_a_job(self):
+        """The host writes this region sector by sector while the runner reads
+        it on its own schedule. Without the digest the runner would sooner or
+        later run the first half of one script and the second half of another."""
+        encoded = bytearray(debug_partition.encode_job(1, "echo one\n" * 60))
+        encoded[SECTOR_SIZE:] = b"\0" * (len(encoded) - SECTOR_SIZE)
+        self.assertIsNone(debug_partition.decode_job(bytes(encoded)))
+
+    def test_an_empty_region_holds_no_job_and_no_result(self):
+        self.assertIsNone(debug_partition.decode_job(bytes(2 * SECTOR_SIZE)))
+        self.assertIsNone(debug_partition.decode_result(bytes(2 * SECTOR_SIZE)))
+
+    def test_a_script_too_long_for_the_region_is_refused_before_the_bench(self):
+        with self.assertRaisesRegex(ValueError, "the region holds"):
+            debug_partition.encode_job(
+                1, "x" * (debug_partition.JOB_SCRIPT_BYTES + 1)
+            )
+
+    def test_a_result_is_bounded_by_its_byte_count_not_by_its_padding(self):
+        """A short result written over a long one leaves the tail of the long
+        one behind it; reading to the padding would report the two together."""
+        region = bytearray(
+            debug_partition.encode_result({"sequence": "1"}, "the long previous one")
+        )
+        short = debug_partition.encode_result(
+            {"sequence": "2", "status": "done", "exit": "0"}, "short"
+        )
+        region[: len(short)] = short
+        decoded = debug_partition.decode_result(bytes(region))
+        self.assertEqual(decoded["output"], "short")
+        self.assertEqual(decoded["sequence"], 2)
+        self.assertEqual(decoded["exit"], 0)
+        self.assertEqual(decoded["truncated"], 0)
+
+    def test_output_larger_than_the_region_is_cut_and_says_so(self):
+        decoded = debug_partition.decode_result(
+            debug_partition.encode_result(
+                {"sequence": "1"}, "x" * (debug_partition.RESULT_OUTPUT_BYTES + 10)
+            )
+        )
+        self.assertEqual(decoded["truncated"], 1)
+        self.assertEqual(len(decoded["output"]), debug_partition.RESULT_OUTPUT_BYTES)
 
 
 if __name__ == "__main__":
