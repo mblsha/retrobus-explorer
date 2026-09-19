@@ -30,24 +30,31 @@ DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
 openFPGALoader -b arty_a7_35t -m build/microsd-ddr-ethernet-h700/design.bit
 ```
 
-Repair the boot script, verify the image contracts, upload and read it back,
-then arm SD access before powering the target:
+Build the image the target boots -- the two EROFS system slots and the data
+volume behind the debug partition, with the boot script that loads the kernel
+and roots from a slot -- verify its contracts, then put it on the bench:
 
 ```sh
-uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
-  --repair-boot-script build/rg35xx-bare/rg35xx-plus-bare-64m-uboot-debug.img \
-  --output build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img
-uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
-  --verify-image build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img
-uv run python projects/ethernet-diagnostic/scripts/images.py \
-  --state /private/tmp/rg35xx-boot-session.json \
-  --upload build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img \
-  --bulk --window 10
-uv run python projects/ethernet-diagnostic/scripts/images.py \
-  --state /private/tmp/rg35xx-boot-session.json --arm
-uv run python projects/ethernet-diagnostic/scripts/images.py \
-  --state /private/tmp/rg35xx-boot-session.json --trace
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
+  --make-erofs-image build/rg35xx-bare/rg35xx-plus-bare-64m-trimmed.img \
+  --system build/rg35xx-bare/system-c65536.erofs \
+  --data build/rg35xx-bare/data.ext2 --slot a \
+  --output build/rg35xx-bare/rg35xx-plus-erofs.img
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
+  --verify-image build/rg35xx-bare/rg35xx-plus-erofs.img
+MDP_CLI=/path/to/miniware-mdp-m01/cli \
+  PYTHONPATH=projects/ethernet-diagnostic uv run --frozen python -m rg35xx.deploy \
+  --build-dir build/microsd-ddr-ethernet-h700 \
+  --image build/rg35xx-bare/rg35xx-plus-erofs.img \
+  --state /private/tmp/rg35xx-boot-session.json
 ```
+
+`rg35xx/deploy.py` is the four bench steps with their premises checked: it
+verifies the image before the FPGA is programmed, refuses to program while
+the target's channel reports its output on, and compares the sha the card
+reports back with the file's before arming. `scripts/images.py --upload
+--bulk --window 10`, `--arm` and `--trace` remain available for running the
+steps by hand.
 
 Power the target only after the readback has verified the image and the card is
 armed. Counters are cumulative from FPGA configuration, so take the baseline
@@ -80,8 +87,11 @@ contiguous. Its channel default is `psu2`; `psu1` carries the Zaurus on this
 bench and must never be switched by a card trial.
 
 The image verifier checks the MBR layout, the H700 eGON SPL at byte 8192 and
-its checksum, the FAT16 `BOOT.SCR`, `BOOTMARK`, arm64 kernel, gzip initramfs and
-DTB, plus the pristine raw debug command and empty milestone sectors. Run it
+its checksum, the FAT16 `BOOT.SCR`, `BOOTMARK`, arm64 kernel and DTB, the EROFS
+slots and ext2 data volume behind the debug partition, plus the pristine raw
+debug command and empty milestone sectors. `INITRD` is deliberately not among
+them: the delivered boot loads no initramfs, so the file is left in the volume
+and no longer has to be anything. Run it
 before upload; a matching whole-image hash alone does not prove those contracts.
 
 Power the RG35XX Plus, query `--trace` again, and compare counters. The image's
