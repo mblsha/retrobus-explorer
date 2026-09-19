@@ -652,6 +652,12 @@ was combined with three offlined cores that added nothing. Awake and idle with
 the panel asleep it is worth about 8 mA: 139 mA (IQR 5, n=8) against the 144
 and 151 mA the same state measured under `performance`.
 
+Experiment 10 was run a third time afterwards by someone who had not written
+it, from the committed script and a cold boot: 124 (unsound), 129 and 125 mA
+under `performance` against 114, 116 and 115 under `powersave`, a mean of 126
+against 115 again, with six wakes of six, six card checks good, and `vdd-cpu`
+read back at 1.100 and 0.900 V in the two states.
+
 So in the kept configuration the target draws 139 mA awake and idle and about
 114 mA asleep, and the suspend itself is worth about 25 mA of that.
 
