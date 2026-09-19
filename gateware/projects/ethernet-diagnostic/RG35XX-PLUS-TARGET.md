@@ -25,8 +25,9 @@ rootfs mount and init                 -      0.51 s    0.3 s
 total                            9.9 s       5.44 s   <4 s
 ```
 
-Measured over ten sound cold starts per stage, from the host's first command to
-the first multi-block write in the debug partition:
+Each row below is a separate image, uploaded after passing `--verify-image` and
+measured on its own. No row blends runs from two configurations. Measured from
+the host's first command to the first multi-block write in the debug partition:
 
 ```text
                                   n   median   min    max   stdev   IQR
@@ -36,8 +37,14 @@ trimmed kernel, EROFS root        20   5.44   5.41   6.72   0.29   0.02
 + network and crypto trim         20   5.38   5.34   6.68   0.39   0.05
 ```
 
-The delivered image is the last row. ThinLTO was built and measured and is not
-in it: on the identical configuration it costs 778,737 compressed bytes, 0.30 s
+Stage 1 delivered no change to the interface, so its row is the unchanged
+interface carrying the shipped kernel. Stage 2's row is the trimmed kernel with
+the initramfs it replaced nothing of yet. Stage 3's row is the EROFS root on
+that same kernel. The fourth row is stage 2's kernel trimmed further, rebuilt,
+re-uploaded and re-measured in full; it is the delivered image. The twenty-run
+rows are twenty runs of one image each, not two tens of different ones.
+
+ThinLTO was built and measured and is not in the delivered image: on the identical configuration it costs 778,737 compressed bytes, 0.30 s
 of reading, because cross-module specialization removes the repetition gzip was
 exploiting. A smaller kernel is not a faster boot here; a smaller *compressed*
 kernel is.
@@ -94,7 +101,15 @@ fabric clock that is 5.3 fabric cycles per SD period, inside what the frontend
 already meets. 25 MHz is explicitly not a target: it would leave 2.5 cycles per
 period and reopen the timing work that the 64 MHz build exists to avoid.
 
-This step is blocked, with the measurement that shows it. The card's advertised
+This step is blocked, with the measurement that shows it, and one part of it
+is unanswered. The plan asked which divisor the host selects. What is
+established is the rate it lands on, bit-identically, and that the rate has no
+rung between 6 and 25 MHz; the divider and parent clock that produce those two
+values are not established, because the board offers no console and each
+advertised speed costs a bitstream rebuild to try. 6.001 MHz is consistent with
+a 24 MHz oscillator divided by four, which would put 12 MHz on the same ladder
+at a divisor of two, but the host does not take it when the card asks for it,
+and why it does not is not known from the outside. The card's advertised
 `TRAN_SPEED` was made a build option and swept: at 12, 13 and 20 MHz the host
 clocks at 6.00 MHz, and at 25 MHz it clocks at 25.00 MHz, which the frontend
 cannot serve at a 64 MHz fabric clock because it leaves 2.56 cycles per period.
