@@ -1312,3 +1312,57 @@ EROFS with compression, EXT2, VFAT, EXFAT, gpio-keys and the AXP717, with
 Bluetooth still a module. The crypto trim kept AES and CCM, which mac80211 and
 RTW88 select, and dropped Twofish, Serpent, Camellia, the user-space API and
 the rest.
+
+## 2026-09-19 Three kernels, and the last of the payload
+
+Building the network and crypto trim twice, once with each toolchain,
+separates what the trim does from what ThinLTO does:
+
+```text
+                              built-in   uncompressed      gzip -9   read
+gcc, -Os                          1663     18,659,336    7,363,461   2.80 s
+gcc, -Os, net and crypto trim     1590     18,323,464    7,190,891   2.73 s
+clang ThinLTO, same trim          1598     18,294,792    7,969,628   3.03 s
+```
+
+The trim is worth 172,570 compressed bytes. ThinLTO, applied on top of the
+identical configuration, costs 778,737. It is the toolchain and not the
+configuration that made the earlier clang build worse, which is only visible
+because both were built.
+
+Every keep survived the trim: Panfrost, Sun4i, RTW88 with the 8821CS,
+mac80211, SoC audio, EROFS with compression, EXT2, VFAT, EXFAT, gpio-keys and
+the AXP717, Bluetooth a module, and AES and CCM kept by the selects mac80211
+and RTW88 carry while Twofish, Serpent, Camellia and the user-space API went.
+
+### The delivered image, twenty cold starts
+
+```text
+                        n   median   core span        slow boots
+gcc trim, EROFS        20     5.44   5.41-5.49 s      1 at 6.72 s
++ net and crypto trim  20     5.38   5.34-5.43 s      2 at 6.61, 6.68 s
+```
+
+The median falls 0.07 s, which is what 172,570 bytes at 2.63 MB/s predicts, and
+the core spread is unchanged at about 90 ms against a 50 ms poll. The slow-boot
+rate, one and two in twenty, is not distinguishable at this sample size.
+
+### What the slow boots are
+
+They are not the card and not the measurement. Lining a slow run up against a
+normal one, every stage matches until the partition scan, and then:
+
+```text
+                              normal    slow
+partition table scanned         4.93    4.83
+first read from system A        5.09    6.31
+```
+
+The gap is between Linux finishing the partition scan and the root filesystem
+becoming mountable, so it is the root device not yet being there when the
+kernel first asks and `rootwait` sleeping before it asks again. It appears in
+both EROFS configurations and never appeared with the initramfs, which is what
+would be expected: an initramfs root is already in memory, while this root has
+to be discovered on a device that is still probing. It costs about 1.4 s when
+it happens, in roughly one boot in ten, and it is not diagnosed further here
+because the board has no console to watch the retry on.

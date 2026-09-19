@@ -33,7 +33,14 @@ the first multi-block write in the debug partition:
 baseline, shipped kernel          10   9.93   9.88  11.07   0.36   0.06
 trimmed kernel, initramfs         10   5.75   5.72   5.83   0.03   0.05
 trimmed kernel, EROFS root        20   5.44   5.41   6.72   0.29   0.02
++ network and crypto trim         20   5.38   5.34   6.68   0.39   0.05
 ```
+
+The delivered image is the last row. ThinLTO was built and measured and is not
+in it: on the identical configuration it costs 778,737 compressed bytes, 0.30 s
+of reading, because cross-module specialization removes the repetition gzip was
+exploiting. A smaller kernel is not a faster boot here; a smaller *compressed*
+kernel is.
 
 Each stage improves the median and none widens the interquartile range. The
 standard deviations are carried by a single slow boot in each of the first and
