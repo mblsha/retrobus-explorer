@@ -343,21 +343,28 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
             signalled = read and fields["read_lba"] in mark
             settled = (watch.marks
                        and now - watch.marks[-1]["elapsed"] >= GRACE_SECONDS)
-            if watch.inside_window and (signalled or (settled and (read or wrote))):
-                # Anything at all ends the state. The closing mark is a read
-                # like the opening one, but a poll that lands after the target
-                # has already gone on to its next card operation sees only the
-                # later one: on waking the runner marks, checks the card and
-                # writes a result inside a third of a second. So the window
-                # ends on its closing mark, or failing that at the first sign
-                # of life once the state has had a moment to settle: the same
-                # instant to within one poll, without depending on the mark
-                # being caught, and without the kernel's own sync on the way
-                # into a suspend ending the suspend it is entering.
-                watch.marks.append({"elapsed": round(now, 2), "opening": False})
-                watch.windows.append(
-                    {"start": watch.marks[-2]["elapsed"], "end": round(now, 2)}
-                )
+            if watch.inside_window:
+                # Anything at all ends the state, once it has had a moment to
+                # settle. The closing mark is a read like the opening one, but a
+                # poll that lands after the target has already gone on to its
+                # next card operation sees only the later one: on waking the
+                # runner marks, checks the card and writes a result inside a
+                # third of a second. So the window ends at the first sign of
+                # life, which is the same instant to within one poll and does
+                # not depend on the mark being caught.
+                #
+                # Nothing ends it before it has settled, a second sight of the
+                # mark included. The read that carries the opening mark can
+                # still be counting when the next poll lands a fifth of a
+                # second later, and the kernel syncs on its way into a suspend;
+                # taken for the end, either costs the whole window. On
+                # 2026-09-20 the first did: a 45 s sleep was measured as 0.23 s
+                # with no readings in it.
+                if settled and (read or wrote):
+                    watch.marks.append({"elapsed": round(now, 2), "opening": False})
+                    watch.windows.append(
+                        {"start": watch.marks[-2]["elapsed"], "end": round(now, 2)}
+                    )
             elif signalled:
                 watch.marks.append({"elapsed": round(now, 2), "opening": True})
         if previous is None or now - recorded >= record_every:

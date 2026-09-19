@@ -287,9 +287,10 @@ class WatchTests(unittest.TestCase):
         return trace(reads=reads, read_lba=JOB_LBA + PAGE_SECTORS)
 
     def test_a_mark_counts_at_either_lba_a_read_is_reported_as(self):
-        watch, _ = self.follow([trace(), self.marked(1, page_after=False),
-                                self.marked(2, page_after=True)])
-        self.assertEqual(len(watch.marks), 2)
+        for page_after in (False, True):
+            watch, _ = self.follow([trace(), self.marked(1, page_after=page_after)])
+            self.assertEqual(len(watch.marks), 1)
+            self.assertTrue(watch.inside_window)
 
     def test_a_card_check_is_not_mistaken_for_a_mark(self):
         """It is the read a job does on waking, a page below the mark, and
@@ -302,12 +303,31 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(watch.marks, [])
 
     def test_a_read_of_the_mark_sector_opens_and_closes_a_window(self):
-        watch, _ = self.follow(
-            [trace(), self.marked(1), self.marked(2), self.marked(2)]
-        )
+        watch, _ = self.follow([trace(), self.marked(1)])
+        self.assertTrue(watch.inside_window)
+        # The state has lasted a minute by the time the target marks again.
+        watch.marks[-1]["elapsed"] = -60.0
+        client = FakeClient([self.marked(1), self.marked(2), self.marked(2)])
+
+        def stop(watching, fields, now):
+            return "exhausted" if not client.traces else None
+
+        job.watch_trace(client, watch, zero=time.monotonic(), seconds=60.0,
+                        interval=0.0, debug_start=DEBUG_START, done=stop)
         self.assertEqual(len(watch.marks), 2)
         self.assertFalse(watch.inside_window)
         self.assertEqual(len(watch.windows), 1)
+
+    def test_a_second_sight_of_the_opening_mark_does_not_close_the_window(self):
+        """The read that carries the mark can still be counting when the next
+        poll lands. Taken for the closing mark, it turned a 45 s sleep into a
+        window of 0.23 s with no readings in it."""
+        watch, _ = self.follow(
+            [trace(), self.marked(1), self.marked(2), self.marked(3, page_after=False)]
+        )
+        self.assertEqual(len(watch.marks), 1)
+        self.assertTrue(watch.inside_window)
+        self.assertEqual(watch.windows, [])
 
     def test_the_first_sign_of_life_ends_a_state_even_if_the_mark_is_missed(self):
         """On waking the runner marks, checks the card and writes a result
