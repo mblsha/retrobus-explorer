@@ -4,9 +4,15 @@ import json
 from pathlib import Path
 import subprocess
 
+from build_common import check_place_and_route_runs
+
 
 def check(toolchain, output):
     toolchain, output = Path(toolchain).resolve(), Path(output).resolve()
+    # This is the first thing in a build that spawns nextpnr, so a binary that
+    # cannot load is diagnosed here rather than surfacing as SIGABRT from
+    # whichever subprocess reached it first.
+    check_place_and_route_runs(toolchain)
     output.mkdir(parents=True, exist_ok=True)
     (output / "probe.v").write_text(
         "module probe(input clk, output reg q);\n"
