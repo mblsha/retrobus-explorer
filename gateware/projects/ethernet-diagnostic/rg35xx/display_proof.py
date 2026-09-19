@@ -13,6 +13,7 @@ and drawn without an imaging library because the build environment has none.
 """
 
 import argparse
+import hashlib
 from pathlib import Path
 
 WIDTH, HEIGHT = 640, 480
@@ -115,15 +116,50 @@ def render(lines: list[str], width: int = WIDTH, height: int = HEIGHT) -> bytes:
     return b"P6\n%d %d\n255\n" % (width, height) + b"".join(bytes(row) for row in rows)
 
 
+def framebuffer_bytes(ppm: bytes) -> bytes:
+    """Return the picture as it sits in an XRGB8888 framebuffer.
+
+    That is the format the DRM framebuffer emulation gives /dev/fb0 on this
+    board, and BusyBox's fbsplash fills it from the variable screen info: blue
+    at bit 0, green at 8, red at 16 and nothing in the top byte, so each pixel
+    is the bytes B, G, R, 0 in memory.
+    """
+    header_end = 0
+    for _ in range(3):
+        header_end = ppm.index(b"\n", header_end) + 1
+    rgb = ppm[header_end:]
+    out = bytearray(len(rgb) // 3 * 4)
+    out[0::4] = rgb[2::3]
+    out[1::4] = rgb[1::3]
+    out[2::4] = rgb[0::3]
+    return bytes(out)
+
+
+def framebuffer_md5(lines: list[str]) -> str:
+    """The checksum init should report after drawing `lines`, in full.
+
+    Init reads the first 640x480x4 bytes of /dev/fb0 back after fbsplash has
+    drawn and reports the first sixteen digits of their MD5, so whether the
+    right picture reached the scanout buffer can be checked with nobody there
+    to look at the panel.
+    """
+    return hashlib.md5(framebuffer_bytes(render(lines))).hexdigest()
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--line", action="append", default=[],
                         help="A line of text; repeat for more (A-Z 0-9 space - . : /)")
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--expect", action="store_true",
+                        help="Print the framebuffer checksum init should report")
     arguments = parser.parse_args(argv)
     lines = arguments.line or ["RG35XX PLUS", "DISPLAY OK"]
-    arguments.output.write_bytes(render(lines))
-    print(f"wrote {arguments.output} ({arguments.output.stat().st_size} bytes)")
+    if arguments.expect:
+        print(f"fb-md5-{framebuffer_md5(lines)[:16]}")
+    if arguments.output is not None:
+        arguments.output.write_bytes(render(lines))
+        print(f"wrote {arguments.output} ({arguments.output.stat().st_size} bytes)")
 
 
 if __name__ == "__main__":

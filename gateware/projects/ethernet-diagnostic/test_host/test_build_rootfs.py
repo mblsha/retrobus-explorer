@@ -158,6 +158,14 @@ class DisplayPayloadTests(unittest.TestCase):
         self.assertNotIn("/bind", code)
         self.assertNotIn("firmware_class", code)
 
+    def test_init_reads_back_exactly_one_screen_of_pixels(self):
+        """640x480 at four bytes a pixel is 300 blocks of 4096; reading more
+        would checksum whatever the driver keeps behind the visible frame."""
+        template = builder.INIT_TEMPLATE.read_text()
+        self.assertIn("dd if=/dev/fb0 bs=4096 count=300", template)
+        self.assertEqual(300 * 4096, 640 * 480 * 4)
+        self.assertLess(template.index("fbsplash -s"), template.index("dd if=/dev/fb0"))
+
     def test_the_picture_is_drawn_after_everything_init_has_to_say(self):
         template = builder.INIT_TEMPLATE.read_text()
         self.assertIn("/usr/share/rg35xx/display-proof.ppm", template)

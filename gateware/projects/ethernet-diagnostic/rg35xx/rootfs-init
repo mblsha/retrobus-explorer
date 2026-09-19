@@ -125,7 +125,13 @@ echo 'The host command is in sector 0.'
 if [ -c /dev/fb0 ]; then
     $BB printf '\033[2J\033[H\033[?25l'
     $BB fbsplash -s /usr/share/rg35xx/display-proof.ppm -d /dev/fb0
-    write_stage 5 "framebuffer-present ${geometry} ${depth}bpp polls-${polls} fbsplash-$? backlight-$($BB cat /sys/class/backlight/*/brightness 2>/dev/null | $BB head -n 1)"
+    drawn=$?
+    # Read back what the panel is scanning out, so that whether the picture got
+    # there can be checked with nobody looking: 300 blocks of 4096 bytes is
+    # exactly 640x480 at four bytes a pixel, and display_proof.py --expect
+    # prints what this has to be.
+    fb_md5="$($BB dd if=/dev/fb0 bs=4096 count=300 2>/dev/null | $BB md5sum | $BB cut -c1-16)"
+    write_stage 5 "framebuffer-present ${geometry} ${depth}bpp polls-${polls} fbsplash-${drawn} fb-md5-${fb_md5} stride-$($BB cat /sys/class/graphics/fb0/stride 2>/dev/null) backlight-$($BB cat /sys/class/backlight/*/brightness 2>/dev/null | $BB head -n 1)"
 fi
 
 while true; do

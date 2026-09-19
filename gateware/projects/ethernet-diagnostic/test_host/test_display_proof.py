@@ -41,6 +41,19 @@ class DisplayProofTests(unittest.TestCase):
         blank = display_proof.render([" ", " "])
         self.assertNotEqual(blank, self.ppm)
 
+    def test_the_framebuffer_form_is_blue_green_red_zero(self):
+        """XRGB8888 in memory: the yellow bar is B=0 G=255 R=255 X=0."""
+        fb = display_proof.framebuffer_bytes(self.ppm)
+        self.assertEqual(len(fb), 640 * 480 * 4)
+        offset = 4 * (100 * 640 + 120)   # inside the second bar, yellow
+        self.assertEqual(fb[offset : offset + 4], bytes([0, 255, 255, 0]))
+
+    def test_the_expected_checksum_follows_the_text(self):
+        one = display_proof.framebuffer_md5(["RG35XX PLUS", "DISPLAY OK"])
+        self.assertEqual(len(one), 32)
+        self.assertEqual(one, display_proof.framebuffer_md5(["RG35XX PLUS", "DISPLAY OK"]))
+        self.assertNotEqual(one, display_proof.framebuffer_md5(["RG35XX PLUS", "DISPLAY BAD"]))
+
     def test_the_picture_is_reproducible(self):
         self.assertEqual(self.ppm, display_proof.render(["RG35XX PLUS", "DISPLAY OK"]))
 
