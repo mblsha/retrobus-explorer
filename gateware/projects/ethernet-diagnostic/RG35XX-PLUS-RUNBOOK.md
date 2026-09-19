@@ -575,3 +575,63 @@ MDP_CLI=/Users/mblsha/src/miniware-mdp-m01/cli \
 
 The exchange itself takes three seconds. See the findings for what it proves
 and what it does not.
+
+### Re-running the sleep experiments
+
+The scripts are in `projects/ethernet-diagnostic/jobs/sleep/`, one per row of
+the findings' experiment table, numbered in the order they were run. They are
+job scripts, not host scripts: each is passed to `rg35xx.py job --script`.
+Nothing has to be rebuilt or redeployed to run any of them -- the image on the
+card already carries the `job-runner` debug command -- so the only thing that
+changes between rows is the path and the labels.
+
+```sh
+MDP_CLI=/Users/mblsha/src/miniware-mdp-m01/cli \
+  uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py job \
+  --state /private/tmp/rg35xx-sleep-session.json \
+  --image build/rg35xx-sleep/rg35xx-plus-sleep.img \
+  --script projects/ethernet-diagnostic/jobs/sleep/10-powersave-only-abba.sh \
+  --name powersave --run-seconds 360 \
+  --label A1 --label B1 --label B2 --label A2 --label A3 --label B3 \
+  --output /tmp/powersave.json --print-output
+```
+
+One `--label` per marked window, in the order the job marks them; each
+`rtc_sleep` marks one. `--run-seconds` has to cover the whole job, which is
+roughly twelve seconds of boot plus forty-three per sleep plus the gaps: 360
+for the six-sleep alternations, 540 for the ten-cycle run, 150 for a single
+sleep. A job that overruns is cut off at `--run-seconds` with its power, which
+costs a power cycle and nothing else.
+
+Two things that are easy to get wrong:
+
+- **Leave at least three seconds between one `rtc_sleep` and the next.** The
+  host reads the card's passive trace five times a second, and on this target
+  the wake, the mark, the card check and the next suspend all fit inside one
+  poll: the end of one window and the start of the next are then the same
+  event, and the second window is never opened at all. Every script here has
+  `$BB sleep 3` between cycles for that reason and no other.
+- **An UNSOUND window is not a measurement.** The supply's wireless link drops
+  for a minute or two about once per eight-minute run and reports zeroes while
+  it is down; the harness marks the window rather than averaging them in. Run
+  it again.
+
+### Applying the best sleep configuration
+
+`jobs/sleep/apply-best.sh` is the whole of it and it is one knob: the
+`powersave` cpufreq governor, set before suspending, which takes the policy to
+480 MHz and `vdd-cpu` from 1.1 V to 0.9 V and is worth 11 mA asleep and about
+8 mA awake. It sets the governor and then prints what it got, so it can be
+used as a job on its own to check the target agrees. From another job, put the
+same loop at the top:
+
+```sh
+for p in /sys/devices/system/cpu/cpufreq/policy*; do
+    echo powersave > "$p/scaling_governor" 2>/dev/null
+done
+```
+
+It is policy rather than device state, so one write per boot is enough and it
+survives every resume. Nothing else measured above the noise: see the findings
+for the twenty-five devices that can be unbound for nothing, the one that
+costs the wake, and the powered-off reference point at 33 mA.

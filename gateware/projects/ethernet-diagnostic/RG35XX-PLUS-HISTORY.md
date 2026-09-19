@@ -1678,3 +1678,84 @@ a seventy-second sleep. The target wakes onto a card that was withdrawn and put
 back, re-initialises it without being asked, and runs the next job within a
 fifth of a second, with no controller error and no bad command frame. Two jobs
 for one boot.
+
+## 2026-09-20 One knob out of a dozen, and a reference point worth more
+
+With the harness built and the baselines taken, the question was how far the
+sleeping current could be pushed down. Seventeen experiments later the answer
+is eleven milliamps, from one knob, and the interesting part is everything
+that turned out not to matter.
+
+**The first three attempts measured the bench, not the knobs.** The plan was
+paired: a reference sleep, the knob, another sleep, both in one boot, which
+takes the seven milliamps of between-boot noise out. The first job did two
+sleeps back to back and the host reported one window. The wake, the mark, the
+card check and the next suspend all fit inside a single trace poll, so the end
+of the first window and the start of the second were the same event and the
+second was never opened; three seconds of deliberate quiet between sleeps
+fixed it and every script here has them. Then a ladder of device unbinds
+measured 126, 116, 130 and 134 milliamps for four states that should have been
+monotonically cheaper, which was the second lesson: the current climbs through
+a boot. Six identical sleeps in a row read 121, 125, 125, 128, 126 and 129 --
+about a milliamp and a half per cycle, always the same direction. A knob
+measured once, after its reference, is three milliamps out before anything
+real happens. Everything that decided anything afterwards alternates A B B A
+A B, which puts both groups at the same mean position in the run.
+
+That correction changed two answers. Offlining three of the four cores looked
+like ten milliamps in the ladder and was nothing at all when alternated: 124
+against 127, the wrong way round. Unbinding the two card controllers that are
+not the root device looked like ten and was one, even though both of their
+regulators -- `vcc-wifi`, for a part with no driver bound, and `vcc3v3-mmc2` --
+genuinely went off and came back six times. And the one knob that survived was
+one the ladder had underrated: the `powersave` cpufreq governor, which pins
+the policy at 480 MHz and takes `vdd-cpu` from 1.1 V to 0.9 V, read 126 mean
+against 115 mean over three alternations. Combined with the offlined cores it
+read 123 against 112 -- the same eleven milliamps, which is how it became
+clear the cores were contributing none of it.
+
+**Two jobs cost a wake.** A screen that applied every knob at once armed its
+alarm, wrote its result to the card and suspended, and the board never came
+back; so did the device half of it on its own. A ladder found the culprit on
+the fourth rung: unbinding `panel-mipi` from spi0.0 while `sun4i-drm` still
+holds the panel. With the DRM master unbound first, the same unbind and nine
+more underneath it are harmless -- the display pipeline can be taken down
+entirely at runtime and the target still wakes -- and it is worth nothing, not
+one regulator changes state.
+
+**Nothing else sysfs can reach is worth anything either.** The last screen
+unbound twenty-five devices at once on top of the kept governor: the whole
+display pipeline, the GPU, three audio codecs, both non-root card
+controllers, the backlight PWM, the watchdog, the eFuse, the spare UART, the
+PMIC's ADC and its battery and USB power-supply drivers, the SoC's ADC, and
+both LEDs off. 112 milliamps before, 109 after, with the drift running the
+other way. The rails still standing afterwards are the answer: `vdd-dram`,
+`vdd-gpu-sys`, `vcc-pll`, `vcc-io`, `avcc`, `cpusldo`, `vcc-spkr-amp`, and
+`aldo3` and `dcdc4`, which have no users at all and cannot be switched off
+because the one attempt the kernel makes lands at 32 seconds of uptime, inside
+the first suspend, where the PMIC's I2C controller is suspended and answers
+`-ETIMEDOUT`. It is never retried.
+
+**And then the reference point, which is not a sleep and is worth more than
+all of it.** `poweroff -f` with 5 V still on the USB-C port leaves the board
+at 33 milliamps -- the steadiest reading this bench has taken, a 2 mA
+interquartile range where a sleeping target gives 7 to 18 -- and the RTC alarm
+brings it back. Sixty seconds out, twice in one run, both within a second. The
+control says it is really the alarm: with the alarm cleared the board powered
+off and the card saw nothing for the remaining 193 seconds. So a timed wake
+that can afford to lose its state costs a quarter of what s2idle costs, and
+the twelve-second cold boot is the price.
+
+The kept configuration was then run ten times in a row, twice, in one boot
+each: twenty sleeps, twenty wakes, RTC elapsed 41 seconds for a requested 40
+on all of them, `suspend_stats/success` 0 to 10 and `fail` 0 in both runs, and
+twenty-four card checks all good. Sixteen of the twenty current windows are
+sound and run from 110 to 119 milliamps; the other four lost two or three
+readings each to the supply's link dropping, which is a hole in the
+measurement rather than in the sleep.
+
+So: 126 milliamps asleep at the start of the day, 114 at the end, 139 awake
+and idle, and 33 powered off. The suspend is worth about 25 milliamps and the
+governor about 11, and everything below that is a device-tree and firmware
+question -- there is still no `cpus/idle-states`, the DRAM is still not in
+self-refresh, and no power domain is collapsed by anything s2idle does.
