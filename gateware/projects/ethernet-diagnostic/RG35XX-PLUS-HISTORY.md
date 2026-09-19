@@ -1,135 +1,21 @@
-# RG35XX Plus SD boot from the emulator
+# RG35XX Plus SD boot from the emulator: chronological record
 
 The Arty A7-35T microSD-Pmod emulator boots an Anbernic RG35XX Plus. The H700
-loads its SPL, U-Boot, kernel, initramfs and device tree from FPGA DDR over the
-Pmod adapter, and the booted kernel drives the emulated card itself. The target
-has no serial output, so the card is also the debug channel: a 64 MiB image
-carries the H700 boot chain, a FAT boot partition, and a raw debug partition
-the target writes milestones into. ROCKNIX is reference material; the booted
-system is a bare kernel and small initramfs.
+loads its SPL, U-Boot, kernel and device tree from FPGA DDR over the Pmod
+adapter, and the booted kernel drives the emulated card itself. The target has
+no serial header populated, so the card is also the only debug channel.
 
-[RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) states where the payload is
-going; this page records how it got where it is.
+What follows is the record of how the boot got where it is, in the order it
+happened, kept because the route explains why several decisions are what they
+are. It is not instructions, and it is not the current state: a number of the
+sections below state a conclusion that a later section corrects, and they name
+tools and options that were since renamed or removed.
 
-Sections below are a chronological record. Read the
-[boot result](#2026-09-18-the-rg35xx-plus-boots-from-the-emulator) for the
-working configuration and its evidence, and
-[the R1b busy finding](#2026-09-18-r1b-busy-and-the-missing-data-line-pull-up)
-for the two defects that had to be fixed.
-
-## Reproduce the boot
-
-Build the qualified H700 profile. `nextpnr-xilinx` here is linked against Boost
-1.90 and macOS strips `DYLD_LIBRARY_PATH` when launching through `uv run`, so
-invoke the build with the virtualenv interpreter directly:
-
-```sh
-DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
-  ./.venv/bin/python experiments/openxc7-macos/build_ddr.py \
-  --ethernet --slow-mmc --h700-mmc --sd-io-clock-hz 64000000 --seed 8
-openFPGALoader -b arty_a7_35t -m build/microsd-ddr-ethernet-h700/design.bit
-```
-
-Build the image the target boots -- the two EROFS system slots and the data
-volume behind the debug partition, with the boot script that loads the kernel
-and roots from a slot -- verify its contracts, then put it on the bench:
-
-```sh
-uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
-  --make-erofs-image build/rg35xx-bare/rg35xx-plus-bare-64m-trimmed.img \
-  --system build/rg35xx-bare/system-c65536.erofs \
-  --data build/rg35xx-bare/data.ext2 --slot a \
-  --output build/rg35xx-bare/rg35xx-plus-erofs.img
-uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
-  --verify-image build/rg35xx-bare/rg35xx-plus-erofs.img
-MDP_CLI=/path/to/miniware-mdp-m01/cli \
-  PYTHONPATH=projects/ethernet-diagnostic uv run --frozen python -m rg35xx.deploy \
-  --build-dir build/microsd-ddr-ethernet-h700 \
-  --image build/rg35xx-bare/rg35xx-plus-erofs.img \
-  --state /private/tmp/rg35xx-boot-session.json
-```
-
-`rg35xx/deploy.py` is the four bench steps with their premises checked: it
-verifies the image before the FPGA is programmed, refuses to program while
-the target's channel reports its output on, and compares the sha the card
-reports back with the file's before arming. `scripts/images.py --upload
---bulk --window 10`, `--arm` and `--trace` remain available for running the
-steps by hand.
-
-Power the target only after the readback has verified the image and the card is
-armed. Counters are cumulative from FPGA configuration, so take the baseline
-trace first and compare deltas. Power the target off and disarm between trials.
-
-`rg35xx_trial.py` performs one standardized cold start: it takes that baseline,
-powers the target's PSU channel, polls the trace, and always powers off and
-disarms afterwards. It collapses the poll series to the moments card activity
-changed and names the sectors each stage touched, which is how a boot is read
-without serial output:
-
-```sh
-MDP_CLI=/path/to/miniware-mdp-m01/cli \
-  ./.venv/bin/python projects/ethernet-diagnostic/scripts/rg35xx_trial.py \
-  --state /private/tmp/rg35xx-boot-session.json --observe 25 \
-  --image build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img
-```
-
-```text
-t=   0.30s CMD18 arg=16890368 frames= 411 writes= 7 lba=  33138 KERNEL+76288
-t=  12.41s CMD18 arg=16808448 frames= 434 writes= 9 lba=  32833 boot partition FAT table
-t=  12.49s CMD13 arg=65536    frames= 453 writes=10 lba=  95377 DTB.IMG+49152
-t=  15.44s CMD6  arg=2        frames= 474 writes=10 lba=  95377 DTB.IMG+49152
-t=  16.15s CMD12 arg=65535    frames= 478 writes=10 lba= 114720 partition 2 sector 32
-```
-
-`rg35xx_boot_debug.py --describe <image> --lba N` names a single sector the
-same way, following the real FAT chain rather than assuming a file is
-contiguous. Its channel default is `psu2`; `psu1` carries the Zaurus on this
-bench and must never be switched by a card trial.
-
-The image verifier checks the MBR layout, the H700 eGON SPL at byte 8192 and
-its checksum, the FAT16 `BOOT.SCR`, `BOOTMARK`, arm64 kernel and DTB, the EROFS
-slots and ext2 data volume behind the debug partition, plus the pristine raw
-debug command and empty milestone sectors. `INITRD` is deliberately not among
-them: the delivered boot loads no initramfs, so the file is left in the volume
-and no longer has to be anything. Run it
-before upload; a matching whole-image hash alone does not prove those contracts.
-
-Power the RG35XX Plus, query `--trace` again, and compare counters. The image's
-raw debug partition reserves sector 0 for a host command and sectors 1 through
-31 for target milestones. `scripts/rg35xx_boot_debug.py` encodes and decodes
-those records; U-Boot or Linux must explicitly write them before they can
-appear. Power the target off before DISARM, then wait for the output-enable
-trace fields to clear before another cold start. ARM only after the source
-image has passed complete readback verification. This preserves the verified
-DDR image and prevents an independently powered FPGA from driving an unpowered
-target.
-
-The raw partition starts at image LBA 114688. Prepare a command before the full
-image upload, then retrieve the first 32 debug sectors after disarming:
-
-```sh
-uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
-  --make-command continue --output build/rg35xx-bare/debug-command.bin
-dd if=build/rg35xx-bare/debug-command.bin \
-  of=build/rg35xx-bare/rg35xx-plus-bare-64m-bootscr.img \
-  bs=512 seek=114688 conv=notrunc
-
-uv run python projects/ethernet-diagnostic/scripts/images.py \
-  --state /private/tmp/rg35xx-boot-session.json --disarm
-uv run python projects/ethernet-diagnostic/scripts/images.py \
-  --state /private/tmp/rg35xx-boot-session.json \
-  --download build/rg35xx-bare/debug-records.bin --start 114688 --blocks 32 --bulk
-uv run python projects/ethernet-diagnostic/scripts/rg35xx_boot_debug.py \
-  --decode build/rg35xx-bare/debug-records.bin
-```
-
-Recompute the source image hash after changing its command sector. A new upload
-and complete readback verification are required before ARM.
-
-The repaired boot script writes sector 1 when it starts, sector 2 after
-BOOTMARK, and sectors 3, 4 and 5 after the kernel, initramfs and device tree,
-so the decoded records and the trace's write counter together locate the stage
-a failed boot reached.
+Where this file differs from [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md)
+or [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md), those two are right. The
+findings state what is true now, the runbook states the commands that work now,
+and [RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) states what the payload was
+aiming at.
 
 ## 2026-09-16 MMC bring-up result
 
@@ -1401,3 +1287,29 @@ which is the same reason this file already recommends it.
 `check_place_and_route_runs` now runs before anything spawns nextpnr and turns
 this into one line naming the Boost mismatch and the Cellar paths to try,
 instead of a SIGABRT from whichever subprocess happened to reach it first.
+
+## 2026-09-19 15 MHz closes the advertised-speed ladder
+
+The sweep that found no rung between 6 and 25 MHz skipped 15 MHz on the
+grounds that 20 MHz already landed on 6, which left the one untried rung
+between the two the plan cared about. A bitstream advertising 15 MHz was
+built, seed 7, `fde8dbe0b519…`, with every clock met at the 64 MHz SD fabric
+clock: `fclk` 73.44 MHz and `dclk` 85.51 MHz.
+
+One standardized cold start on it, carrying the delivered image
+`bd44e08c…`, measured the interface through the FPGA's own block capture:
+
+```text
+card clock   6.00 MHz
+throughput   2.95 MB/s
+```
+
+Identical to every other advertisement below 25, to the fabric tick: 11,103
+ticks across 1,041 sampled edges, the same numbers the delivered build
+produces. The boot completed normally and reached userspace at 5.27 s.
+
+That finishes the ladder. 12, 13, 15 and 20 MHz all yield 6.00 MHz and 25
+yields 25.00 MHz, and those are every representable `TRAN_SPEED` rung between
+the two, so no advertised speed reaches the four-second target. Why the host
+picks those two divisors and nothing between them is still not established
+from outside the board.
