@@ -12,6 +12,7 @@ from pathlib import Path
 from build_common import (
     GATEWARE,
     DEFAULT_TOOLCHAIN,
+    check_place_and_route_runs,
     pack_and_verify_bitstream,
     begin_build,
     publish_result,
@@ -124,6 +125,7 @@ def main():
         help="Suppress SD negotiation so a host deterministically probes legacy MMC",
     )
     args = parser.parse_args()
+    check_place_and_route_runs(args.toolchain)
     if args.h700_mmc and not args.slow_mmc:
         parser.error("--h700-mmc requires --slow-mmc")
     if args.h700_early_command and not args.h700_mmc:

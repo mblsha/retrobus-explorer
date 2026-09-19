@@ -7,6 +7,38 @@ GATEWARE = Path(__file__).resolve().parents[2]
 DEFAULT_TOOLCHAIN = GATEWARE / "build/openxc7-macos"
 
 
+def check_place_and_route_runs(toolchain):
+    """Fail early and legibly if the nextpnr binary cannot load.
+
+    nextpnr is linked against Homebrew's Boost by absolute path, so a Boost
+    upgrade breaks it: the symbols it wants are gone and dyld aborts the
+    process. That surfaces as SIGABRT from whichever subprocess happens to run
+    it first, which looks like a placement or timing failure and is not one.
+    The remedy is to point DYLD_LIBRARY_PATH at the Boost it was built
+    against, which Homebrew keeps in the Cellar after an upgrade.
+    """
+    binary = Path(toolchain) / "bin/nextpnr-xilinx"
+    probe = subprocess.run(
+        [str(binary), "--version"], capture_output=True, text=True, check=False
+    )
+    if probe.returncode == 0:
+        return
+    detail = (probe.stderr or probe.stdout).strip().splitlines()
+    cellar = sorted(Path("/opt/homebrew/Cellar/boost").glob("*/lib"))
+    hint = ""
+    if "Symbol not found" in (probe.stderr or "") and cellar:
+        options = " or ".join(str(path) for path in cellar)
+        hint = (
+            "\nThis is a Boost mismatch, not a placement problem. Re-run with "
+            f"DYLD_LIBRARY_PATH set to one of: {options}"
+        )
+    raise RuntimeError(
+        f"{binary} cannot run (exit {probe.returncode}): "
+        + (detail[0] if detail else "no output")
+        + hint
+    )
+
+
 def verify_frames(output):
     """Compare decoded payload against assembler frames, excluding generated ECC."""
     expected = set()

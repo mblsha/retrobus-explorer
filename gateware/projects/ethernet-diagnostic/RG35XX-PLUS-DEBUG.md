@@ -1366,3 +1366,28 @@ would be expected: an initramfs root is already in memory, while this root has
 to be discovered on a device that is still probing. It costs about 1.4 s when
 it happens, in roughly one boot in ten, and it is not diagnosed further here
 because the board has no console to watch the retry on.
+
+## 2026-09-19 The gateware toolchain stopped working
+
+Building any bitstream failed, twice, with nextpnr dying on SIGABRT inside the
+negative-edge timing probe. It looked like a placement failure on a new
+configuration and was not one: nextpnr is linked against Homebrew's Boost by
+absolute path, Homebrew has moved to 1.92.0, and the symbol
+`boost::program_options::arg` is gone from it. The binary cannot load at all,
+so `nextpnr-xilinx --version` aborts just as readily as a real run does.
+
+Homebrew keeps the previous version in the Cellar, so the fix is to point
+`DYLD_LIBRARY_PATH` at it:
+
+```sh
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib ./.venv/bin/python \
+  experiments/openxc7-macos/build_ddr.py ...
+```
+
+`./.venv/bin/python` rather than `uv run`, because macOS strips
+`DYLD_LIBRARY_PATH` when a process is re-executed through a signed launcher,
+which is the same reason this file already recommends it.
+
+`check_place_and_route_runs` now runs before anything spawns nextpnr and turns
+this into one line naming the Boost mismatch and the Cellar paths to try,
+instead of a SIGABRT from whichever subprocess happened to reach it first.
