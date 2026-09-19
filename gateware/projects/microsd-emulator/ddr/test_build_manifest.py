@@ -1,5 +1,7 @@
 """A failed build must never retain a previous successful programming manifest."""
 
+import contextlib
+import io
 import sys
 import tempfile
 import unittest
@@ -43,6 +45,88 @@ class BuildManifestTests(unittest.TestCase):
             self.assertFalse((output / "result.json.tmp").exists())
             publish_result(output, '{"checked": true}')
             self.assertEqual((output / "result.json").read_text(), '{"checked": true}')
+
+
+class ProfileTests(unittest.TestCase):
+    """The shipped bitstream's options used to survive only in a build log."""
+
+    PROFILE = "h700-rg35xx"
+
+    def test_the_profile_expands_to_the_qualified_options(self):
+        args = build_ddr.parse_arguments(["--profile", self.PROFILE])
+        self.assertTrue(args.ethernet)
+        self.assertTrue(args.slow_mmc)
+        self.assertTrue(args.h700_mmc)
+        self.assertEqual(args.seed, 19)
+        self.assertEqual(args.sd_io_clock_hz, 64_000_000)
+        self.assertEqual(args.sd_tran_speed, 13_000_000)
+        self.assertEqual(args.trace_capture_lba, 32985)
+        self.assertFalse(args.h700_early_command)
+        self.assertFalse(args.mmc_only)
+
+    def test_the_profile_keeps_the_h700_output_directory(self):
+        """The profile leaves --output alone so the transport still names the
+        directory, which is where the qualified bitstream already lives."""
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch("sys.argv", ["build", "--profile", self.PROFILE]),
+                patch.object(build_ddr, "GATEWARE", Path(directory)),
+                patch(
+                    "check_negative_edge_timing.check",
+                    side_effect=RuntimeError("stop"),
+                ) as check,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "stop"):
+                    build_ddr.main()
+        self.assertEqual(
+            check.call_args.args[1].parent.name, "microsd-ddr-ethernet-h700"
+        )
+
+    def test_an_explicit_flag_overrides_the_profile(self):
+        args = build_ddr.parse_arguments(
+            [
+                "--profile",
+                self.PROFILE,
+                "--seed",
+                "7",
+                "--sd-tran-speed",
+                "15000000",
+                "--output",
+                "build/x",
+            ]
+        )
+        self.assertEqual(args.seed, 7)
+        self.assertEqual(args.sd_tran_speed, 15_000_000)
+        self.assertEqual(args.output, Path("build/x"))
+        self.assertEqual(args.sd_io_clock_hz, 64_000_000, "untouched by the override")
+        self.assertTrue(args.h700_mmc)
+
+    def test_every_profile_satisfies_the_cross_flag_rules(self):
+        """A profile that needed a flag the caller had to remember to add
+        would be a trap, so each one has to parse on its own."""
+        for name in build_ddr.PROFILES:
+            with self.subTest(profile=name):
+                self.assertEqual(
+                    build_ddr.parse_arguments(["--profile", name]).profile, name
+                )
+
+    def test_the_manifest_records_the_profile(self):
+        recorded = build_ddr.recorded_settings(
+            build_ddr.parse_arguments(["--profile", self.PROFILE])
+        )
+        self.assertEqual(recorded["profile"], self.PROFILE)
+        self.assertEqual(recorded["sd_io_clock_hz"], 64_000_000)
+        self.assertEqual(recorded["trace_capture_lba"], 32985)
+        self.assertTrue(recorded["h700_mmc"])
+        plain = build_ddr.recorded_settings(build_ddr.parse_arguments([]))
+        self.assertIsNone(plain["profile"], "an unprofiled build says so")
+
+    def test_an_unencodable_transfer_speed_is_refused(self):
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()) as complaint:
+                build_ddr.parse_arguments(["--sd-tran-speed", "24000000"])
+        self.assertIn("20000000", complaint.getvalue())
+        self.assertIn("25000000", complaint.getvalue())
 
 
 def previous_manifests(root, folder, profiles, suffix=""):

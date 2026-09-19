@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from build_common import (
     GATEWARE,
@@ -17,58 +18,46 @@ from build_common import (
     publish_result,
 )
 
+# The card contract and its TRAN_SPEED encoding are shared with the host-side
+# tooling, so they live in tools/ and are imported the way this script already
+# imports its siblings: by bare name, off sys.path.
+sys.path.insert(0, str(GATEWARE / "tools"))
+from sd_csd import sd_csd_with_speed, sd_properties, tran_speed_code
 
-# The supported card contract is checked against actual CMD9 responses by
-# the Spade testbench, rather than inferred from the source's formatting.
-SD_CSD = 0x0026001A115903FFC002800002400023
-# TRAN_SPEED decides which clock the host selects, and it sits in the same
-# register as the CRC7 that protects it, so the two are computed together here
-# rather than edited by hand in the Spade source.
-SD_TRAN_SPEED_CODES = {
-    12_000_000: 0x12,
-    13_000_000: 0x1A,
-    15_000_000: 0x22,
-    20_000_000: 0x2A,
-    25_000_000: 0x32,
-}
-
-
-def csd_crc7(data: bytes) -> int:
-    crc = 0
-    for byte in data:
-        for bit in range(8):
-            crc <<= 1
-            if ((byte << bit) & 0x80) ^ (crc & 0x80):
-                crc ^= 0x09
-            crc &= 0x7F
-    return crc
-
-
-def sd_csd_with_speed(code: int) -> int:
-    body = bytearray(SD_CSD.to_bytes(16, "big"))
-    body[3] = code
-    body[15] = (csd_crc7(bytes(body[:15])) << 1) | 1
-    return int.from_bytes(bytes(body), "big")
 CONFIG = GATEWARE / "projects/microsd-emulator/ddr/arty-bios-80-depth2.yml"
 BOARD = GATEWARE / "projects/microsd-emulator/ddr/board.v"
 
+# The bitstream that qualified the RG35XX Plus was built from this exact set of
+# options, which existed only in a build log until it was named here. A profile
+# has to satisfy the cross-flag rules below by construction, so that asking for
+# the shipped card cannot produce a combination the parser then rejects.
+PROFILES = {
+    "h700-rg35xx": dict(
+        ethernet=True,
+        slow_mmc=True,
+        h700_mmc=True,
+        seed=19,
+        sd_io_clock_hz=64_000_000,
+        sd_tran_speed=13_000_000,
+        trace_capture_lba=32985,
+    ),
+}
 
-def sd_properties(sd_csd=SD_CSD):
-    csd = sd_csd
-    speed = (csd >> 96) & 255
-    values = (0, 10, 12, 13, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80)
-    return dict(
-        sd_csd=f"{csd:032x}",
-        sd_capacity_bytes=(((csd >> 62) & 4095) + 1)
-        * (1 << (((csd >> 47) & 7) + 2))
-        * (1 << ((csd >> 80) & 15)),
-        sd_max_clock_hz=100_000 * 10 ** (speed & 7) * values[(speed >> 3) & 15] // 10,
-    )
 
+def parse_arguments(argv=None):
+    """Resolve the command line, expanding a profile into its settings.
 
-def main():
+    A profile supplies defaults, so a flag given alongside it still wins and
+    an experiment can start from the shipped build and change one thing.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", type=Path, default=DEFAULT_TOOLCHAIN)
+    parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILES),
+        help="Start from a named, qualified set of options; flags given "
+        "alongside it override the settings it supplies",
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -100,10 +89,10 @@ def main():
     parser.add_argument(
         "--sd-tran-speed",
         type=int,
-        choices=sorted(SD_TRAN_SPEED_CODES),
         default=13_000_000,
         help="Transfer speed the writable card advertises in its CSD; the host "
-        "picks a divisor at or below it",
+        "picks a divisor at or below it. Only the rates the SD TRAN_SPEED byte "
+        "can name are accepted",
     )
     parser.add_argument(
         "--trace-capture-lba",
@@ -123,7 +112,13 @@ def main():
         action="store_true",
         help="Suppress SD negotiation so a host deterministically probes legacy MMC",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.profile:
+        # Re-reading the command line against the profile's defaults is what
+        # makes an explicit flag win: argparse only falls back to a default
+        # for an option the caller left out.
+        parser.set_defaults(**PROFILES[args.profile])
+        args = parser.parse_args(argv)
     if args.h700_mmc and not args.slow_mmc:
         parser.error("--h700-mmc requires --slow-mmc")
     if args.h700_early_command and not args.h700_mmc:
@@ -132,7 +127,48 @@ def main():
         parser.error("--mmc-only requires --ethernet and --slow-mmc")
     if args.mmc_only and args.h700_mmc:
         parser.error("--mmc-only and --h700-mmc are distinct diagnostic profiles")
-    sd_csd = sd_csd_with_speed(SD_TRAN_SPEED_CODES[args.sd_tran_speed])
+    # A slow-command frontend cannot hold the fabric at the full rate, so the
+    # transport picks the clock unless the caller overrode it.
+    args.sd_io_clock_hz = args.sd_io_clock_hz or (
+        80_000_000 if args.slow_mmc else 100_000_000
+    )
+    try:
+        args.sd_csd = sd_csd_with_speed(tran_speed_code(args.sd_tran_speed))
+    except ValueError as unencodable:
+        parser.error(str(unencodable))
+    return args
+
+
+def recorded_settings(args):
+    """Manifest fields describing how the command line configured this build.
+
+    They are what a later reader of build/*/result.json has to work from when
+    deciding which experiment a directory holds.
+    """
+    return {
+        "with_sd": True,
+        "profile": args.profile,
+        "ethernet_sd": args.ethernet,
+        "fast_sd": not args.slow_mmc,
+        "h700_mmc": args.h700_mmc,
+        "h700_early_command": args.h700_early_command,
+        "trace_capture_lba": args.trace_capture_lba or 32985,
+        "mmc_only": args.mmc_only,
+        "native_fifo_registers": True,
+        "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",
+        "sd_command_output_fabric_edge": "rising" if args.slow_mmc else "falling",
+        "sd_data_output_fabric_edge": (
+            "falling"
+            if args.h700_mmc or args.mmc_only or not args.slow_mmc
+            else "rising"
+        ),
+        "sd_io_clock_hz": args.sd_io_clock_hz,
+    }
+
+
+def main():
+    args = parse_arguments()
+    sd_csd = args.sd_csd
     project_name = "ethernet-diagnostic" if args.ethernet else "microsd-emulator"
     if args.ethernet:
         if args.mmc_only:
@@ -150,9 +186,7 @@ def main():
     env = dict(os.environ)
     env["PYTHONHASHSEED"] = "0"
     env["SOURCE_DATE_EPOCH"] = "0"
-    sd_io_clk_freq = args.sd_io_clock_hz or (
-        80_000_000 if args.slow_mmc else 100_000_000
-    )
+    sd_io_clk_freq = args.sd_io_clock_hz
     env["MICROSD_IO_CLOCK_HZ"] = str(sd_io_clk_freq)
     env["PATH"] = (
         str(GATEWARE / "build/xpack-riscv-none-elf-gcc-15.2.0-1/bin")
@@ -459,24 +493,7 @@ def main():
                     (tc / "bin/nextpnr-xilinx").read_bytes()
                 ).hexdigest(),
                 "negative_edge_timing_checked": True,
-                "with_sd": True,
-                "ethernet_sd": args.ethernet,
-                "fast_sd": not args.slow_mmc,
-                "h700_mmc": args.h700_mmc,
-                "h700_early_command": args.h700_early_command,
-                "trace_capture_lba": args.trace_capture_lba or 32985,
-                "mmc_only": args.mmc_only,
-                "native_fifo_registers": True,
-                "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",
-                "sd_command_output_fabric_edge": (
-                    "rising" if args.slow_mmc else "falling"
-                ),
-                "sd_data_output_fabric_edge": (
-                    "falling"
-                    if args.h700_mmc or args.mmc_only or not args.slow_mmc
-                    else "rising"
-                ),
-                "sd_io_clock_hz": sd_io_clk_freq,
+                **recorded_settings(args),
                 "registered_bank": True,
                 "register_command_buffers": True,
                 "native_bist": True,
