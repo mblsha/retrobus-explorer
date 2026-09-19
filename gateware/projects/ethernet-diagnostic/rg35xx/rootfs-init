@@ -62,6 +62,7 @@ record_kernel_log() {
     done
 }
 record_kernel_log &
+recorder=$!
 
 $BB printf '\033[2J\033[H'
 echo 'RG35XX Plus bare Linux: EROFS system partition, no initramfs'
@@ -72,6 +73,21 @@ write_stage 1 "root-${root_device:-unknown}"
 
 command="$($BB dd if="$DEBUG_DEVICE" bs=512 count=1 2>/dev/null | $BB tr '\000' '\n' | $BB sed -n 's/^command=//p' | $BB head -n 1)"
 [ -n "$command" ] || command=boot-shell
+# A sweep has to get its results out, and the link has been seen to die within
+# a tenth of a second of the panel coming up. So the backlight's level is noted
+# and the whole display pipeline put to sleep before anything more is written.
+display_sleeps() {
+    echo 4 > /sys/class/graphics/fb0/blank 2>/dev/null
+}
+display_wakes() {
+    echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
+}
+if [ "$command" = display-sweep ]; then
+    for backlight in /sys/class/backlight/*; do
+        [ -e "$backlight/brightness" ] && initial_brightness="$($BB cat "$backlight/brightness")"
+    done
+    display_sleeps
+fi
 write_stage 2 "command-$command"
 
 model="$($BB tr -d '\000' </proc/device-tree/model 2>/dev/null)"
@@ -94,9 +110,12 @@ while [ ! -c /dev/fb0 ] && [ "$polls" -lt 60 ]; do
     $BB sleep 0.05
     polls=$((polls + 1))
 done
-for backlight in /sys/class/backlight/*; do
-    [ -e "$backlight/max_brightness" ] && $BB cat "$backlight/max_brightness" > "$backlight/brightness" 2>/dev/null
-done
+# A sweep sets its own levels.
+if [ "$command" != display-sweep ]; then
+    for backlight in /sys/class/backlight/*; do
+        [ -e "$backlight/max_brightness" ] && $BB cat "$backlight/max_brightness" > "$backlight/brightness" 2>/dev/null
+    done
+fi
 
 if [ -c /dev/fb0 ]; then
     geometry="$($BB cat /sys/class/graphics/fb0/virtual_size 2>/dev/null)"
@@ -106,7 +125,63 @@ else
     write_stage 5 framebuffer-absent
 fi
 
+# A host command that measures, with nobody watching, what the display does to
+# the card link. It goes through a series of display states and in each one does
+# the same work, 25 rewrites of the recorder's page and 256 KiB read back past
+# the page cache, and counts the errors the MMC driver logged meanwhile. The
+# recorder is stopped first so that the only traffic is the sweep's own. Every
+# record is written with the display asleep, and one is written before a state
+# is entered as well as after, so that a state that kills the link is named by
+# the record before it rather than lost with its own. The series ends where it
+# began, asleep, to tell the display from the passage of time.
+# Only the controller's own complaints: the log also says "error" about a
+# wireless firmware it cannot find and an SDIO probe of a card that is not one.
+mmc_errors() {
+    $BB dmesg | $BB grep -c 'sunxi-mmc .*\(error\|failed\)'
+}
+display_sweep() {
+    kill "$recorder" 2>/dev/null
+    backlight="$($BB ls -d /sys/class/backlight/* 2>/dev/null | $BB head -n 1)"
+    if [ -z "$backlight" ]; then
+        write_stage 6 display-sweep-no-backlight
+        return
+    fi
+    max="$($BB cat "$backlight/max_brightness")"
+    results="display-sweep initial-${initial_brightness} max-$max"
+    snapshot_kernel_log
+    for state in asleep lit-0 lit-100 lit-50 asleep; do
+        write_stage 6 "$results ${state}=entered"
+        case "$state" in
+            lit-*)
+                echo $((max * ${state#lit-} / 100)) > "$backlight/brightness"
+                display_wakes
+                ;;
+        esac
+        $BB sleep 0.5
+        dpms="$($BB cat /sys/class/drm/card*-*/dpms 2>/dev/null | $BB head -n 1)"
+        before="$(mmc_errors)"
+        writes=0
+        while [ "$writes" -lt 25 ]; do
+            $BB dd if=/tmp/kernel-log of="$DEBUG_DEVICE" bs=512 seek=@KERNEL_LOG_SECTOR@ \
+                count=@KERNEL_LOG_SECTORS@ conv=sync,notrunc 2>/dev/null
+            $BB sync
+            writes=$((writes + 1))
+        done
+        written="$(mmc_errors)"
+        echo 3 > /proc/sys/vm/drop_caches
+        $BB dd if="$DATA_DEVICE" of=/dev/null bs=4096 count=64 2>/dev/null
+        read_back="$(mmc_errors)"
+        display_sleeps
+        $BB sleep 0.2
+        results="$results ${state}=w$((written - before))r$((read_back - written))/${dpms:-unknown}"
+        write_stage 6 "$results"
+    done
+    write_stage 6 "$results done"
+    record_kernel_log &
+}
+
 case "$command" in
+    display-sweep) display_sweep ;;
     poweroff) write_stage 6 command-poweroff; exec $BB poweroff -f ;;
     reboot)   write_stage 6 command-reboot;   exec $BB reboot -f ;;
     boot-shell|shell) ;;

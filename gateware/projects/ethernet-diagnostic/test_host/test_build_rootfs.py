@@ -233,3 +233,73 @@ class FlightRecorderTests(unittest.TestCase):
             debug_partition.KERNEL_LOG_SECTOR + debug_partition.KERNEL_LOG_SECTORS,
             debug_partition.DEBUG_SECTORS,
         )
+
+
+class DisplaySweepTests(unittest.TestCase):
+    """With a pull-up holding DAT0 the link outlived the panel's start by a few
+    seconds, and its errors began within a tenth of a second of the panel coming
+    up, whatever the backlight was then set to. The sweep measures which display
+    state does it, with nobody watching."""
+
+    def setUp(self):
+        self.rendered = builder.render_init()
+        start = self.rendered.index("display_sweep() {")
+        self.sweep = self.rendered[start : self.rendered.index("\n}\n", start)]
+        self.body = self.sweep[self.sweep.index("for state in") :]
+
+    def test_the_host_asks_for_it_by_command(self):
+        self.assertIn("display-sweep) display_sweep ;;", self.rendered)
+
+    def test_the_display_sleeps_before_the_sweep_writes_anything_more(self):
+        """Left running, the link died between two milestones, before the sweep
+        had begun."""
+        order = [
+            self.rendered.index("command=\"$("),
+            self.rendered.index('if [ "$command" = display-sweep ]; then'),
+            self.rendered.index('initial_brightness="$($BB cat "$backlight/brightness")"'),
+            self.rendered.index("    display_sleeps\nfi"),
+            self.rendered.index("write_stage 2 "),
+        ]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("initial-${initial_brightness}", self.sweep)
+
+    def test_a_sweep_is_not_followed_by_full_brightness(self):
+        guard = self.rendered.index('if [ "$command" != display-sweep ]; then')
+        raised = self.rendered.index('"$backlight/max_brightness" > "$backlight/brightness"')
+        self.assertLess(guard, raised)
+
+    def test_the_series_begins_and_ends_asleep(self):
+        import re
+
+        states = re.search(r"for state in ([\w\- ]+);", self.sweep).group(1).split()
+        self.assertEqual(states[0], "asleep")
+        self.assertEqual(states[-1], "asleep")
+        self.assertIn("lit-0", states)
+        self.assertIn("lit-100", states)
+
+    def test_every_record_is_written_with_the_display_asleep(self):
+        """A state that breaks the link must not take its own result with it."""
+        asleep = self.body.index("        display_sleeps")
+        self.assertLess(self.body.index("read_back="), asleep)
+        self.assertLess(asleep, self.body.index('write_stage 6 "$results"'))
+        self.assertLess(self.body.index("=entered"), self.body.index("display_wakes"))
+
+    def test_a_state_that_kills_the_link_is_named_by_the_record_before_it(self):
+        self.assertLess(
+            self.body.index('write_stage 6 "$results ${state}=entered"'),
+            self.body.index("before="),
+        )
+
+    def test_each_result_says_whether_the_display_was_really_on(self):
+        self.assertIn("/sys/class/drm/card*-*/dpms", self.body)
+        self.assertIn("/${dpms:-unknown}", self.body)
+
+    def test_the_only_traffic_is_the_sweeps_own(self):
+        stopped = self.sweep.index('kill "$recorder"')
+        self.assertLess(stopped, self.sweep.index("for state in"))
+        self.assertIn("recorder=$!", self.rendered)
+        self.assertGreater(self.sweep.rindex("record_kernel_log &"), self.sweep.rindex("done"))
+
+    def test_the_reads_go_past_the_page_cache(self):
+        dropped = self.sweep.index("echo 3 > /proc/sys/vm/drop_caches")
+        self.assertLess(dropped, self.sweep.index('dd if="$DATA_DEVICE" of=/dev/null'))
