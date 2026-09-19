@@ -1,0 +1,265 @@
+#!/bin/sh
+# The job runner. Init execs this when the host command is `job-runner`, and it
+# never returns: from here on the target's whole job is to read a script out of
+# the card, run it, and write back what it printed.
+#
+# It exists because the interesting measurements -- what suspending costs, what
+# a regulator or a clock costs -- are a dozen small experiments, and rebuilding
+# a rootfs, an image and a bitstream deployment for each of them costs minutes
+# where the experiment costs seconds. A script in a sector is the cheapest
+# possible experiment.
+#
+# Everything it needs is copied into tmpfs before the loop starts. The card is
+# not always there: the host disarms the FPGA's card frontend to read a result
+# and write the next job, and a runner that had to page its own shell in from
+# the card during that window would wedge on a device that is not answering.
+# After the copy, nothing in this loop reads a file from the root filesystem.
+
+BB=/tmp/busybox
+DEBUG_DEVICE=@DEBUG_DEVICE@
+MAGIC=@MAGIC@
+JOB_SECTOR=@JOB_SECTOR@
+JOB_SECTORS=@JOB_SECTORS@
+RESULT_SECTOR=@RESULT_SECTOR@
+RESULT_OUTPUT_BYTES=@RESULT_OUTPUT_BYTES@
+CARD_CHECK_SECTOR=@CARD_CHECK_SECTOR@
+SLEEP_MARK_SECTOR=@SLEEP_MARK_SECTOR@
+KERNEL_LOG_SECTOR=@KERNEL_LOG_SECTOR@
+KERNEL_LOG_SECTORS=@KERNEL_LOG_SECTORS@
+KERNEL_LOG_BYTES=@KERNEL_LOG_BYTES@
+USERSPACE_BASE=@USERSPACE_BASE@
+POLL_SECONDS=1
+
+PATH=/tmp/bin:/usr/bin:/usr/sbin
+export PATH
+# Applet symlinks in tmpfs, so a job can call `cat` or `grep` by name without
+# reaching back into the root filesystem for the symlink that names busybox.
+$BB mkdir -p /tmp/bin
+$BB --install -s /tmp/bin 2>/dev/null || true
+
+# Whether a read of the card can bypass the page cache. It matters because the
+# host rewrites the job region behind the kernel's back: a cached read would
+# return the previous job for as long as the page stayed clean, which is
+# forever. If O_DIRECT is not available the whole cache is dropped before each
+# read instead, which is heavier but has the same effect. Which one is in use
+# is reported in every result, because it changes what a read costs.
+DIRECT=
+if $BB dd if="$DEBUG_DEVICE" of=/dev/null bs=512 skip="$JOB_SECTOR" count=1 \
+    iflag=direct 2>/dev/null; then
+    DIRECT=yes
+fi
+
+read_sectors() {
+    # start count destination
+    if [ -n "$DIRECT" ]; then
+        $BB dd if="$DEBUG_DEVICE" of="$3" bs=512 skip="$1" count="$2" \
+            iflag=direct 2>/dev/null
+    else
+        echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+        $BB dd if="$DEBUG_DEVICE" of="$3" bs=512 skip="$1" count="$2" 2>/dev/null
+    fi
+}
+
+write_sectors() {
+    # source start
+    $BB dd if="$1" of="$DEBUG_DEVICE" bs=512 seek="$2" conv=sync,notrunc 2>/dev/null
+    $BB sync
+}
+
+field() {
+    # name file -- the value of one key= line in a record sector
+    $BB tr '\000' '\n' < "$2" | $BB sed -n "s/^$1=//p" | $BB head -n 1
+}
+
+write_stage() {
+    record=/tmp/stage
+    {
+        $BB printf '%s\n' "$MAGIC"
+        $BB printf 'direction=target-to-host\n'
+        $BB printf 'stage=%s\n' "$1"
+        $BB printf 'detail=%s\n' "$2"
+        $BB printf 'uptime=%s\n' "$($BB cut -d' ' -f1 /proc/uptime)"
+    } > "$record"
+    $BB dd if="$record" of="$DEBUG_DEVICE" bs=512 \
+        seek=$((USERSPACE_BASE + $1)) count=1 conv=sync,notrunc 2>/dev/null
+    $BB sync
+}
+
+snapshot_kernel_log() {
+    # The flight recorder, taken once per result rather than ten times a second:
+    # a runner that wrote to the card continuously would leave the host no
+    # window in which it could disarm, and would make its own idle current the
+    # thing being measured.
+    $BB dmesg | $BB tail -c "$KERNEL_LOG_BYTES" > /tmp/kernel-log
+    $BB dd if=/tmp/kernel-log of="$DEBUG_DEVICE" bs=512 seek="$KERNEL_LOG_SECTOR" \
+        count="$KERNEL_LOG_SECTORS" conv=sync,notrunc 2>/dev/null
+}
+
+# --- what a job may call ---------------------------------------------------
+# A job is sourced into a subshell, so everything defined here is available to
+# it, and nothing it defines or exits survives into the runner.
+
+rtc_now() {
+    # Seconds since the epoch as the RTC counts them. /proc/uptime is not a
+    # substitute: whether it advances across a suspend is one of the things
+    # being measured, and on a target that never really suspended the two
+    # agree, which is itself the answer.
+    $BB cat /sys/class/rtc/rtc0/since_epoch 2>/dev/null || echo 0
+}
+
+suspend_success() {
+    $BB cat /sys/power/suspend_stats/success 2>/dev/null || echo unknown
+}
+
+mark_sector() {
+    # One sector written to a sector nothing else uses, so that the host can
+    # see in the FPGA's passive trace -- the only thing it can read while the
+    # card is armed -- that the target reached this point. The trace reports
+    # the last command and its argument, so the LBA is the message.
+    $BB printf 'mark %s %s\n' "$1" "$($BB cut -d' ' -f1 /proc/uptime)" > /tmp/mark
+    $BB dd if=/tmp/mark of="$DEBUG_DEVICE" bs=512 seek="$SLEEP_MARK_SECTOR" \
+        count=1 conv=sync,notrunc 2>/dev/null
+    $BB sync
+}
+
+card_check() {
+    # Whether the card still answers, proved rather than assumed: a unique
+    # pattern written, the cache dropped, the pattern read back. After a resume
+    # this is the difference between a card that re-initialised and a card
+    # whose controller came back wedged, which looks identical from a distance.
+    tag="card-check $($BB cut -d' ' -f1 /proc/uptime) $$"
+    $BB printf '%s' "$tag" > /tmp/card-check
+    $BB dd if=/tmp/card-check of="$DEBUG_DEVICE" bs=512 seek="$CARD_CHECK_SECTOR" \
+        count=1 conv=sync,notrunc 2>/dev/null
+    $BB sync
+    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+    read_sectors "$CARD_CHECK_SECTOR" 1 /tmp/card-check-back
+    back="$($BB tr -d '\000' < /tmp/card-check-back)"
+    if [ "$back" = "$tag" ]; then
+        echo "card-check ok"
+    else
+        echo "card-check FAILED wrote [$tag] read [$back]"
+    fi
+}
+
+rtc_sleep() {
+    # Sleep for a requested number of seconds and report what actually
+    # happened. The requested duration is what the host schedules its
+    # measurement around; the RTC delta is what the target really slept; the
+    # uptime delta says whether the clock ran while it was down.
+    seconds="$1"
+    state="${2:-mem}"
+    mode="${3:-}"
+    [ -n "$mode" ] && echo "$mode" > /sys/power/mem_sleep 2>/dev/null
+    before_success="$(suspend_success)"
+    before_fail="$($BB cat /sys/power/suspend_stats/fail 2>/dev/null || echo unknown)"
+    echo "sleep requested=${seconds}s state=$state mem_sleep=$($BB cat /sys/power/mem_sleep 2>/dev/null)"
+    echo 0 > /sys/class/rtc/rtc0/wakealarm 2>/dev/null
+    if ! echo "+$seconds" > /sys/class/rtc/rtc0/wakealarm 2>/tmp/alarm-error; then
+        echo "sleep ABORTED: wakealarm refused: $($BB cat /tmp/alarm-error)"
+        return 1
+    fi
+    echo "wakealarm=$($BB cat /sys/class/rtc/rtc0/wakealarm) now=$(rtc_now)"
+    before_rtc="$(rtc_now)"
+    before_up="$($BB cut -d' ' -f1 /proc/uptime)"
+    # Everything the host needs is on the card before the target stops
+    # answering: the output so far as a result it can read during the sleep,
+    # and the mark that tells it the sleep has begun.
+    flush_result running
+    mark_sector sleep-enter
+    echo "$state" > /sys/power/state 2>/tmp/state-error
+    entered=$?
+    mark_sector sleep-exit
+    after_rtc="$(rtc_now)"
+    after_up="$($BB cut -d' ' -f1 /proc/uptime)"
+    echo "sleep returned=$entered $($BB cat /tmp/state-error 2>/dev/null)"
+    echo "sleep rtc_before=$before_rtc rtc_after=$after_rtc rtc_elapsed=$((after_rtc - before_rtc))"
+    echo "sleep uptime_before=$before_up uptime_after=$after_up"
+    echo "sleep success_before=$before_success success_after=$(suspend_success)"
+    echo "sleep fail_before=$before_fail fail_after=$($BB cat /sys/power/suspend_stats/fail 2>/dev/null || echo unknown)"
+    echo "sleep last_failed_dev=$($BB cat /sys/power/suspend_stats/last_failed_dev 2>/dev/null)"
+    card_check
+}
+
+# --- results ---------------------------------------------------------------
+
+JOB_SEQUENCE=none
+JOB_NAME=
+JOB_START_UPTIME=0
+JOB_START_RTC=0
+JOB_OUTPUT=/tmp/job.out
+
+flush_result() {
+    # Write what the job has printed so far. Called once with `running` before
+    # a suspend, so the host has something to read in the window where the
+    # target cannot answer, and once with `done` when the job returns.
+    status="$1"
+    code="${2:-}"
+    bytes="$($BB wc -c < "$JOB_OUTPUT" 2>/dev/null || echo 0)"
+    truncated=0
+    if [ "$bytes" -gt "$RESULT_OUTPUT_BYTES" ]; then
+        truncated=1
+        bytes="$RESULT_OUTPUT_BYTES"
+    fi
+    {
+        $BB printf '%s\n' "$MAGIC"
+        $BB printf 'direction=target-to-host\n'
+        $BB printf 'kind=result\n'
+        $BB printf 'sequence=%s\n' "$JOB_SEQUENCE"
+        $BB printf 'name=%s\n' "$JOB_NAME"
+        $BB printf 'status=%s\n' "$status"
+        $BB printf 'exit=%s\n' "$code"
+        $BB printf 'direct=%s\n' "${DIRECT:-no}"
+        $BB printf 'start_uptime=%s\n' "$JOB_START_UPTIME"
+        $BB printf 'end_uptime=%s\n' "$($BB cut -d' ' -f1 /proc/uptime)"
+        $BB printf 'start_rtc=%s\n' "$JOB_START_RTC"
+        $BB printf 'end_rtc=%s\n' "$(rtc_now)"
+        $BB printf 'output_bytes=%s\n' "$bytes"
+        $BB printf 'truncated=%s\n' "$truncated"
+    } > /tmp/result-header
+    $BB dd if=/tmp/result-header of=/tmp/result bs=512 count=1 conv=sync 2>/dev/null
+    $BB head -c "$bytes" "$JOB_OUTPUT" >> /tmp/result 2>/dev/null
+    write_sectors /tmp/result "$RESULT_SECTOR"
+}
+
+run_job() {
+    JOB_START_UPTIME="$($BB cut -d' ' -f1 /proc/uptime)"
+    JOB_START_RTC="$(rtc_now)"
+    : > "$JOB_OUTPUT"
+    ( . /tmp/job.sh ) >> "$JOB_OUTPUT" 2>&1
+    code=$?
+    snapshot_kernel_log
+    flush_result done "$code"
+}
+
+# --- the loop --------------------------------------------------------------
+
+write_stage 6 "job-runner-ready direct-${DIRECT:-no}"
+snapshot_kernel_log
+last=none
+
+while true; do
+    read_sectors "$JOB_SECTOR" 1 /tmp/job-header
+    if $BB grep -q "^kind=job$" /tmp/job-header 2>/dev/null; then
+        sequence="$(field sequence /tmp/job-header)"
+        bytes="$(field script_bytes /tmp/job-header)"
+        digest="$(field script_md5 /tmp/job-header)"
+        if [ -n "$sequence" ] && [ "$sequence" != "$last" ] && [ -n "$bytes" ]; then
+            read_sectors $((JOB_SECTOR + 1)) $((JOB_SECTORS - 1)) /tmp/job-body
+            $BB head -c "$bytes" /tmp/job-body > /tmp/job.sh
+            got="$($BB md5sum < /tmp/job.sh | $BB cut -d' ' -f1)"
+            if [ "$got" = "$digest" ]; then
+                JOB_SEQUENCE="$sequence"
+                JOB_NAME="$(field name /tmp/job-header)"
+                write_stage 7 "job-${sequence}-running"
+                run_job
+                write_stage 7 "job-${sequence}-done"
+                last="$sequence"
+            fi
+            # A script whose digest does not match is a region caught in the
+            # middle of being written. Saying nothing and looking again is the
+            # whole handling: the next poll reads the finished job.
+        fi
+    fi
+    $BB sleep "$POLL_SECONDS"
+done

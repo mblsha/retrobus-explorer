@@ -81,7 +81,7 @@ class BuildRootfsTests(unittest.TestCase):
             # the init and the picture it draws.
             self.assertEqual(
                 sorted(path.name for path in init.parent.iterdir()),
-                ["display-proof.ppm", "rootfs-init"],
+                ["display-proof.ppm", "rootfs-init", "rootfs-job-runner"],
             )
             self.assertTrue(init.stat().st_mode & 0o111)
             self.assertIn(f"MAGIC={MAGIC}", init.read_text())
@@ -255,7 +255,9 @@ class DisplaySweepTests(unittest.TestCase):
         had begun."""
         order = [
             self.rendered.index("command=\"$("),
-            self.rendered.index('if [ "$command" = display-sweep ]; then'),
+            self.rendered.index(
+                'if [ "$command" = display-sweep ] || [ "$command" = job-runner ]; then'
+            ),
             self.rendered.index('initial_brightness="$($BB cat "$backlight/brightness")"'),
             self.rendered.index("    display_sleeps\nfi"),
             self.rendered.index("write_stage 2 "),
@@ -264,7 +266,9 @@ class DisplaySweepTests(unittest.TestCase):
         self.assertIn("initial-${initial_brightness}", self.sweep)
 
     def test_a_sweep_is_not_followed_by_full_brightness(self):
-        guard = self.rendered.index('if [ "$command" != display-sweep ]; then')
+        guard = self.rendered.index(
+            'if [ "$command" != display-sweep ] && [ "$command" != job-runner ]; then'
+        )
         raised = self.rendered.index('"$backlight/max_brightness" > "$backlight/brightness"')
         self.assertLess(guard, raised)
 
@@ -303,3 +307,106 @@ class DisplaySweepTests(unittest.TestCase):
     def test_the_reads_go_past_the_page_cache(self):
         dropped = self.sweep.index("echo 3 > /proc/sys/vm/drop_caches")
         self.assertLess(dropped, self.sweep.index('dd if="$DATA_DEVICE" of=/dev/null'))
+
+
+class JobRunnerTests(unittest.TestCase):
+    """The runner turns a boot into a bench instrument: it reads a script out
+    of the card, runs it, and writes back what it printed. It runs while the
+    host takes the card away and while the target is suspended, so what it may
+    touch and when is a contract rather than a style."""
+
+    def setUp(self):
+        self.template = builder.JOB_RUNNER_TEMPLATE.read_text()
+        self.rendered = builder.render_job_runner()
+        self.init = builder.render_init()
+
+    def test_the_template_states_no_layout_value_of_its_own(self):
+        for placeholder in ("@DEBUG_DEVICE@", "@MAGIC@", "@JOB_SECTOR@",
+                            "@RESULT_SECTOR@", "@SLEEP_MARK_SECTOR@"):
+            self.assertIn(placeholder, self.template)
+        self.assertNotIn(MAGIC, self.template)
+
+    def test_rendering_fills_the_runner_from_the_same_map_as_init(self):
+        self.assertIn(f"JOB_SECTOR={debug_partition.JOB_SECTOR}", self.rendered)
+        self.assertIn(f"RESULT_SECTOR={debug_partition.RESULT_SECTOR}", self.rendered)
+        self.assertIn(
+            f"SLEEP_MARK_SECTOR={debug_partition.SLEEP_MARK_SECTOR}", self.rendered
+        )
+        self.assertIn(
+            f"RESULT_OUTPUT_BYTES={debug_partition.RESULT_OUTPUT_BYTES}",
+            self.rendered,
+        )
+        self.assertIn(f"MAGIC={MAGIC}", self.rendered)
+
+    def test_an_unrendered_placeholder_stops_the_build(self):
+        with self.assertRaisesRegex(ValueError, "rootfs-job-runner still carries"):
+            builder.render_job_runner("JOB_SECTOR=@NOT_A_VALUE@\n")
+
+    def test_init_copies_everything_into_tmpfs_before_it_execs(self):
+        """The host disarms the card frontend to exchange a job for a result.
+        A runner that had to page its own shell back in from a card that is not
+        answering would wedge rather than wait."""
+        order = [
+            self.init.index('job_runner() {'),
+            self.init.index('$BB cp "$BB" /tmp/busybox'),
+            self.init.index("$BB cp /usr/bin/job-runner /tmp/job-runner"),
+            self.init.index("exec /tmp/busybox sh /tmp/job-runner"),
+        ]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("job-runner) job_runner ;;", self.init)
+        self.assertIn("BB=/tmp/busybox", self.rendered)
+
+    def test_the_flight_recorder_is_stopped_before_the_runner_takes_over(self):
+        """Ten card writes a second leave the host no window in which it could
+        disarm, and they would be most of what an idle target draws."""
+        runner = self.init[self.init.index("job_runner() {"):]
+        self.assertLess(
+            runner.index('kill "$recorder"'),
+            runner.index("exec /tmp/busybox"),
+        )
+        self.assertIn("snapshot_kernel_log", self.rendered)
+
+    def test_the_job_region_is_read_past_the_page_cache(self):
+        """The host rewrites that region behind the kernel's back, so a cached
+        read would return the previous job for as long as the page stayed
+        clean, which is forever."""
+        self.assertIn("iflag=direct", self.rendered)
+        self.assertIn("echo 3 > /proc/sys/vm/drop_caches", self.rendered)
+        self.assertIn("direct=%s", self.rendered)
+
+    def test_a_script_is_run_only_when_it_matches_the_digest_in_its_header(self):
+        body = self.rendered[self.rendered.index("while true; do"):]
+        self.assertLess(body.index("md5sum"), body.index("run_job"))
+        self.assertIn('if [ "$got" = "$digest" ]; then', body)
+
+    def test_a_job_that_has_already_run_is_not_run_again(self):
+        body = self.rendered[self.rendered.index("while true; do"):]
+        self.assertIn('[ "$sequence" != "$last" ]', body)
+        self.assertIn('last="$sequence"', body)
+
+    def test_a_sleep_is_marked_on_the_card_at_both_ends(self):
+        """While the target is suspended the trace is all the host has, and a
+        mark at each end is what tells it the window is open and then shut."""
+        sleep = self.rendered[self.rendered.index("rtc_sleep() {"):]
+        sleep = sleep[: sleep.index("\n}\n")]
+        order = [
+            sleep.index("flush_result running"),
+            sleep.index("mark_sector sleep-enter"),
+            sleep.index('echo "$state" > /sys/power/state'),
+            sleep.index("mark_sector sleep-exit"),
+            sleep.index("card_check"),
+        ]
+        self.assertEqual(order, sorted(order))
+        self.assertIn("since_epoch", self.rendered)
+
+    def test_the_panel_stays_dark_unless_a_job_asks_for_it(self):
+        """The backlight is the largest single item on this supply, and every
+        measurement made with it lit is measuring the backlight."""
+        self.assertIn(
+            'if [ "$command" = display-sweep ] || [ "$command" = job-runner ]; then',
+            self.init,
+        )
+        self.assertIn(
+            'if [ "$command" != display-sweep ] && [ "$command" != job-runner ]; then',
+            self.init,
+        )

@@ -82,7 +82,7 @@ display_sleeps() {
 display_wakes() {
     echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
 }
-if [ "$command" = display-sweep ]; then
+if [ "$command" = display-sweep ] || [ "$command" = job-runner ]; then
     for backlight in /sys/class/backlight/*; do
         [ -e "$backlight/brightness" ] && initial_brightness="$($BB cat "$backlight/brightness")"
     done
@@ -110,8 +110,10 @@ while [ ! -c /dev/fb0 ] && [ "$polls" -lt 60 ]; do
     $BB sleep 0.05
     polls=$((polls + 1))
 done
-# A sweep sets its own levels.
-if [ "$command" != display-sweep ]; then
+# A sweep sets its own levels, and a job run leaves the panel dark until a job
+# asks for it: the backlight is the largest single item on this board's supply
+# and every measurement made with it lit is measuring the backlight.
+if [ "$command" != display-sweep ] && [ "$command" != job-runner ]; then
     for backlight in /sys/class/backlight/*; do
         [ -e "$backlight/max_brightness" ] && $BB cat "$backlight/max_brightness" > "$backlight/brightness" 2>/dev/null
     done
@@ -180,8 +182,25 @@ display_sweep() {
     record_kernel_log &
 }
 
+# The host command that turns this boot into a bench instrument. Everything the
+# runner needs is copied into tmpfs first, because the host disarms the card
+# frontend to exchange a job for a result and a runner that had to page its own
+# shell back in from a card that is not there would wedge rather than wait.
+# The flight recorder is stopped for the same reason: ten card writes a second
+# leave no window to disarm in, and they would be most of the current an idle
+# target draws. The runner snapshots the log once per result instead.
+job_runner() {
+    kill "$recorder" 2>/dev/null
+    $BB cp "$BB" /tmp/busybox
+    $BB chmod 0755 /tmp/busybox
+    $BB cp /usr/bin/job-runner /tmp/job-runner
+    write_stage 6 job-runner-starting
+    exec /tmp/busybox sh /tmp/job-runner
+}
+
 case "$command" in
     display-sweep) display_sweep ;;
+    job-runner) job_runner ;;
     poweroff) write_stage 6 command-poweroff; exec $BB poweroff -f ;;
     reboot)   write_stage 6 command-reboot;   exec $BB reboot -f ;;
     boot-shell|shell) ;;

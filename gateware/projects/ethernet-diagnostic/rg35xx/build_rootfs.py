@@ -29,11 +29,17 @@ from rg35xx.containers import DEFAULT_IMAGE
 from rg35xx.containers import container_command as run_in_container
 from rg35xx.containers import find_runner
 from rg35xx.containers import run
+from rg35xx.debug_partition import CARD_CHECK_SECTOR
 from rg35xx.debug_partition import DEBUG_PARTITION
+from rg35xx.debug_partition import JOB_SECTOR
+from rg35xx.debug_partition import JOB_SECTORS
 from rg35xx.debug_partition import KERNEL_LOG_SECTOR
 from rg35xx.debug_partition import KERNEL_LOG_SECTORS
 from rg35xx.debug_partition import MAGIC
+from rg35xx.debug_partition import RESULT_OUTPUT_BYTES
+from rg35xx.debug_partition import RESULT_SECTOR
 from rg35xx.debug_partition import SECTOR_SIZE
+from rg35xx.debug_partition import SLEEP_MARK_SECTOR
 from rg35xx.debug_partition import USERSPACE_BASE
 from rg35xx.image import DATA_PARTITION
 from rg35xx import display_proof
@@ -51,6 +57,10 @@ DEFAULT_BUSYBOX_SHA256 = (
 # decided by the image layout. A second copy of those values here is a second
 # place for them to drift out of agreement with the boot script.
 INIT_TEMPLATE = HERE / "rootfs-init"
+# The job runner init execs when the host asks for one. It is a second template
+# rather than a function inside init because it runs from tmpfs, copied there
+# before the loop starts, and a separate file is what can be copied.
+JOB_RUNNER_TEMPLATE = HERE / "rootfs-job-runner"
 PLACEHOLDER = re.compile(r"@[A-Z0-9_]+@")
 def init_values() -> dict[str, str]:
     return {
@@ -61,23 +71,37 @@ def init_values() -> dict[str, str]:
         "KERNEL_LOG_SECTOR": str(KERNEL_LOG_SECTOR),
         "KERNEL_LOG_SECTORS": str(KERNEL_LOG_SECTORS),
         "KERNEL_LOG_BYTES": str(KERNEL_LOG_SECTORS * SECTOR_SIZE),
+        "JOB_SECTOR": str(JOB_SECTOR),
+        "JOB_SECTORS": str(JOB_SECTORS),
+        "RESULT_SECTOR": str(RESULT_SECTOR),
+        "RESULT_OUTPUT_BYTES": str(RESULT_OUTPUT_BYTES),
+        "CARD_CHECK_SECTOR": str(CARD_CHECK_SECTOR),
+        "SLEEP_MARK_SECTOR": str(SLEEP_MARK_SECTOR),
     }
 
 
-def render_init(template: str | None = None) -> str:
-    """Fill the init template from the layout, or refuse to build.
+def render(path: Path, template: str | None = None) -> str:
+    """Fill one target-side template from the layout, or refuse to build.
 
     An unrendered placeholder would reach the target as a shell word, and the
     failure it produces is a boot that writes nothing at all: exactly the
-    silence this init exists to break.
+    silence these scripts exist to break.
     """
-    text = INIT_TEMPLATE.read_text() if template is None else template
+    text = path.read_text() if template is None else template
     for name, value in init_values().items():
         text = text.replace(f"@{name}@", value)
     left = sorted(set(PLACEHOLDER.findall(text)))
     if left:
-        raise ValueError(f"rootfs-init still carries {', '.join(left)}")
+        raise ValueError(f"{path.name} still carries {', '.join(left)}")
     return text
+
+
+def render_init(template: str | None = None) -> str:
+    return render(INIT_TEMPLATE, template)
+
+
+def render_job_runner(template: str | None = None) -> str:
+    return render(JOB_RUNNER_TEMPLATE, template)
 
 
 DEFAULT_PROOF_LINES = ("RG35XX PLUS", "DISPLAY OK", "EROFS ROOT")
@@ -90,6 +114,9 @@ def write_payload(directory: Path, proof_lines=DEFAULT_PROOF_LINES) -> Path:
     init = directory / INIT_TEMPLATE.name
     init.write_text(render_init())
     init.chmod(0o755)
+    runner = directory / JOB_RUNNER_TEMPLATE.name
+    runner.write_text(render_job_runner())
+    runner.chmod(0o755)
     (directory / "display-proof.ppm").write_bytes(display_proof.render(list(proof_lines)))
     return init
 
@@ -123,6 +150,8 @@ mkdir -p dev proc sys tmp data etc usr/bin
 [ -e usr/bin/busybox ] || cp bin/busybox usr/bin/busybox
 cp /payload/rootfs-init sbin/init
 chmod 0755 sbin/init
+cp /payload/rootfs-job-runner usr/bin/job-runner
+chmod 0755 usr/bin/job-runner
 # The kernel tries /sbin/init first, but rdinit= and init= both name paths that
 # have to exist, and /init is what a converted initramfs image would use.
 ln -sf sbin/init init
