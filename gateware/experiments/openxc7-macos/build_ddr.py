@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from build_common import (
     GATEWARE,
@@ -17,53 +18,14 @@ from build_common import (
     publish_result,
 )
 
+# The card contract and its TRAN_SPEED encoding are shared with the host-side
+# tooling, so they live in tools/ and are imported the way this script already
+# imports its siblings: by bare name, off sys.path.
+sys.path.insert(0, str(GATEWARE / "tools"))
+from sd_csd import sd_csd_with_speed, sd_properties, tran_speed_code
 
-# The supported card contract is checked against actual CMD9 responses by
-# the Spade testbench, rather than inferred from the source's formatting.
-SD_CSD = 0x0026001A115903FFC002800002400023
-# TRAN_SPEED decides which clock the host selects, and it sits in the same
-# register as the CRC7 that protects it, so the two are computed together here
-# rather than edited by hand in the Spade source.
-SD_TRAN_SPEED_CODES = {
-    12_000_000: 0x12,
-    13_000_000: 0x1A,
-    15_000_000: 0x22,
-    20_000_000: 0x2A,
-    25_000_000: 0x32,
-}
-
-
-def csd_crc7(data: bytes) -> int:
-    crc = 0
-    for byte in data:
-        for bit in range(8):
-            crc <<= 1
-            if ((byte << bit) & 0x80) ^ (crc & 0x80):
-                crc ^= 0x09
-            crc &= 0x7F
-    return crc
-
-
-def sd_csd_with_speed(code: int) -> int:
-    body = bytearray(SD_CSD.to_bytes(16, "big"))
-    body[3] = code
-    body[15] = (csd_crc7(bytes(body[:15])) << 1) | 1
-    return int.from_bytes(bytes(body), "big")
 CONFIG = GATEWARE / "projects/microsd-emulator/ddr/arty-bios-80-depth2.yml"
 BOARD = GATEWARE / "projects/microsd-emulator/ddr/board.v"
-
-
-def sd_properties(sd_csd=SD_CSD):
-    csd = sd_csd
-    speed = (csd >> 96) & 255
-    values = (0, 10, 12, 13, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80)
-    return dict(
-        sd_csd=f"{csd:032x}",
-        sd_capacity_bytes=(((csd >> 62) & 4095) + 1)
-        * (1 << (((csd >> 47) & 7) + 2))
-        * (1 << ((csd >> 80) & 15)),
-        sd_max_clock_hz=100_000 * 10 ** (speed & 7) * values[(speed >> 3) & 15] // 10,
-    )
 
 
 def main():
@@ -100,10 +62,10 @@ def main():
     parser.add_argument(
         "--sd-tran-speed",
         type=int,
-        choices=sorted(SD_TRAN_SPEED_CODES),
         default=13_000_000,
         help="Transfer speed the writable card advertises in its CSD; the host "
-        "picks a divisor at or below it",
+        "picks a divisor at or below it. Only the rates the SD TRAN_SPEED byte "
+        "can name are accepted",
     )
     parser.add_argument(
         "--trace-capture-lba",
@@ -132,7 +94,10 @@ def main():
         parser.error("--mmc-only requires --ethernet and --slow-mmc")
     if args.mmc_only and args.h700_mmc:
         parser.error("--mmc-only and --h700-mmc are distinct diagnostic profiles")
-    sd_csd = sd_csd_with_speed(SD_TRAN_SPEED_CODES[args.sd_tran_speed])
+    try:
+        sd_csd = sd_csd_with_speed(tran_speed_code(args.sd_tran_speed))
+    except ValueError as unencodable:
+        parser.error(str(unencodable))
     project_name = "ethernet-diagnostic" if args.ethernet else "microsd-emulator"
     if args.ethernet:
         if args.mmc_only:
