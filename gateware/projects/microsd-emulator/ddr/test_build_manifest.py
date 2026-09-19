@@ -277,3 +277,28 @@ class PackagingTests(unittest.TestCase):
                     if override
                     else build_common.DEFAULT_TOOLCHAIN.resolve(),
                 )
+
+
+class SdPullupTests(unittest.TestCase):
+    """The H700 has no working pull-up on DAT0, and the card releases the data
+    lines between the blocks of a multi-block write."""
+
+    def test_pullups_are_off_unless_asked_for(self):
+        """The qualified profiles were measured without them."""
+        self.assertFalse(any("PULLTYPE" in line for line in build_ddr.sd_pin_constraints(True, False)))
+        self.assertFalse(build_ddr.parse_arguments([]).sd_pullups)
+
+    def test_pullups_go_on_the_shared_lines_and_not_on_the_clock(self):
+        lines = build_ddr.sd_pin_constraints(True, True)
+        pulled = {i for i, line in enumerate(lines) if "PULLTYPE PULLUP" in line}
+        self.assertEqual(pulled, {0, 1, 2, 3, 7})  # DAT2, DAT3, CMD, DAT0, DAT1
+        self.assertNotIn("PULLTYPE", lines[6])     # the clock
+
+    def test_the_option_is_recorded_in_the_manifest(self):
+        args = build_ddr.parse_arguments(["--profile", "h700-rg35xx", "--sd-pullups"])
+        self.assertTrue(build_ddr.recorded_settings(args)["sd_pullups"])
+
+    def test_every_pin_keeps_its_slew(self):
+        for slow, word in ((True, "SLEW SLOW"), (False, "SLEW FAST")):
+            for line in build_ddr.sd_pin_constraints(slow, True):
+                self.assertIn(word, line)

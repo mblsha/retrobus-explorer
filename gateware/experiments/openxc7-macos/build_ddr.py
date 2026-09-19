@@ -108,6 +108,12 @@ def parse_arguments(argv=None):
         "for routability in congested diagnostic builds",
     )
     parser.add_argument(
+        "--sd-pullups",
+        action="store_true",
+        help="Enable the FPGA's weak pull-ups on CMD and DAT0..3, for a host "
+        "that has none of its own",
+    )
+    parser.add_argument(
         "--mmc-only",
         action="store_true",
         help="Suppress SD negotiation so a host deterministically probes legacy MMC",
@@ -156,6 +162,7 @@ def recorded_settings(args):
         "mmc_only": args.mmc_only,
         "native_fifo_registers": True,
         "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",
+        "sd_pullups": args.sd_pullups,
         "sd_command_output_fabric_edge": "rising" if args.slow_mmc else "falling",
         "sd_data_output_fabric_edge": (
             "falling"
@@ -164,6 +171,36 @@ def recorded_settings(args):
         ),
         "sd_io_clock_hz": args.sd_io_clock_hz,
     }
+
+
+SD_PMOD_PINS = "D4 D3 F4 F3 E2 D2 H2 G2".split()
+# board.v wires CMD to pmod[2] and DAT0..3 to pmod[3], pmod[7], pmod[0], pmod[1].
+# Those are the lines the card shares with the host; pmod[6] is the clock, which
+# the host always drives.
+SD_SHARED_LINES = frozenset({0, 1, 2, 3, 7})
+
+
+def sd_pin_constraints(slow_mmc: bool, pullups: bool) -> list[str]:
+    """Return the XDC lines for the eight Pmod pins the card occupies.
+
+    The slow MMC profile is capped at 13 MHz and benefits from gentler edges on
+    the Pmod/card interconnect. The qualified SD profile keeps its existing
+    fast-edge electrical contract.
+
+    The SD bus expects pull-ups on CMD and DAT, and the card releases those
+    lines between the blocks of a multi-block write and after every response.
+    A host that has none leaves them held by nothing but charge, which is how
+    the H700 leaves DAT0. The FPGA's own weak pull-ups are an option rather
+    than the default because the qualified profiles were measured without them.
+    """
+    slew = " SLEW SLOW" if slow_mmc else " SLEW FAST"
+    lines = []
+    for i, pin in enumerate(SD_PMOD_PINS):
+        pull = " PULLTYPE PULLUP" if pullups and i in SD_SHARED_LINES else ""
+        lines.append(
+            f"set_property -dict {{ PACKAGE_PIN {pin} IOSTANDARD LVCMOS33{slew}{pull} }} [get_ports {{pmod[{i}]}}]"
+        )
+    return lines
 
 
 def main():
@@ -301,14 +338,7 @@ def main():
         "set_property INTERNAL_VREF 0.675 [get_iobanks 34]",
         "create_clock -period 10.000 -name sys_clk [get_ports {clk}]",
     ]
-    for i, pin in enumerate("D4 D3 F4 F3 E2 D2 H2 G2".split()):
-        # The slow MMC profile is capped at 13 MHz and benefits from gentler
-        # edges on the Pmod/card interconnect. The qualified SD profile keeps
-        # its existing fast-edge electrical contract.
-        slew = " SLEW SLOW" if args.slow_mmc else " SLEW FAST"
-        xdc.append(
-            f"set_property -dict {{ PACKAGE_PIN {pin} IOSTANDARD LVCMOS33{slew} }} [get_ports {{pmod[{i}]}}]"
-        )
+    xdc += sd_pin_constraints(args.slow_mmc, args.sd_pullups)
     if args.ethernet:
         ethernet_xdc = GATEWARE / "projects/ethernet-diagnostic/constraints/pins.xdc"
         xdc.extend(ethernet_xdc.read_text().splitlines())
