@@ -174,7 +174,7 @@ def userspace_report(run: dict) -> str:
     return f"userspace milestone at {seconds:.2f}s"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True, help="images.py session file")
     parser.add_argument("--observe", type=float, default=45.0)
@@ -208,7 +208,7 @@ def main() -> None:
         "timestamps are counted in it",
     )
     parser.add_argument("--output", type=Path, help="Write the timeline as JSON")
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
     if arguments.psu_cli is None:
         parser.error("--psu-cli or $MDP_CLI is required to power the target")
 

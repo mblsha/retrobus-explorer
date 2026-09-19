@@ -158,7 +158,7 @@ def system_image_name(cluster: int) -> str:
     return f"system-c{cluster}.erofs"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--busybox", default=DEFAULT_BUSYBOX)
     parser.add_argument("--busybox-sha256", default=DEFAULT_BUSYBOX_SHA256,
@@ -176,7 +176,7 @@ def main() -> None:
     parser.add_argument(
         "--out", type=Path, default=GATEWARE / "build/rg35xx-bare",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
     arguments.out.mkdir(parents=True, exist_ok=True)
     system_name = system_image_name(arguments.cluster)
     data_name = "data.ext2"

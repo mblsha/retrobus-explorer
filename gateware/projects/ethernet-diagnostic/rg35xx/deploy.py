@@ -162,7 +162,7 @@ def deploy(build_dir: Path, image: Path, state: Path, psu_cli: Path,
     return digest
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, required=True,
                         help="Build directory holding design.bit and result.json")
@@ -178,7 +178,7 @@ def main() -> None:
         "--channel", default=DEFAULT_CHANNEL,
         help="PSU channel powering the target; it must already be off",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
     if arguments.psu_cli is None:
         parser.error("--psu-cli or $MDP_CLI is required to read the target's power")
     try:

@@ -27,7 +27,7 @@ from rg35xx.image import make_spl_entry_loop
 from rg35xx.image import verify_boot_image
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--make-command", metavar="COMMAND")
@@ -51,7 +51,7 @@ def main() -> None:
     parser.add_argument("--payload", type=Path)
     parser.add_argument("--lba", type=int, action="append", default=[])
     parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.make_command is not None:
         if args.output is None:

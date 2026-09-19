@@ -215,7 +215,7 @@ def container_command(runner, work, patches, config, out, image,
     )
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work", type=Path,
                         default=GATEWARE / "build/rg35xx-kernel")
@@ -234,7 +234,7 @@ def main():
         help="Build from patches that do not match the recorded manifest. Use "
         "when deliberately moving to a newer ROCKNIX tree, and re-record it.",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
     work = arguments.work.resolve()
     for required in ("patches", "base.config"):
         if not (work / required).exists():

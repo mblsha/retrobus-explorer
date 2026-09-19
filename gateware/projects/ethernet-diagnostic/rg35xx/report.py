@@ -114,13 +114,13 @@ def format_summary(label: str, summary: dict) -> list[str]:
     ]
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "distribution", nargs="+", metavar="LABEL=GLOB",
         help="A label and the trial JSON files it covers, e.g. erofs='ero-*.json'",
     )
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
     for entry in arguments.distribution:
         label, separator, pattern = entry.partition("=")
         if not separator:
