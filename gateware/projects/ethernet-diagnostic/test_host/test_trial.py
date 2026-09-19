@@ -263,3 +263,47 @@ class SupplyGateTests(unittest.TestCase):
             trial.main(["--state", "/nonexistent", "--psu-cli", "/cli", "--channel", "psu1"])
         run.assert_not_called()
         client.assert_not_called()
+
+
+class ValidCommandAnchorTests(unittest.TestCase):
+    def test_a_frame_that_failed_its_checksum_does_not_start_the_clock(self):
+        """Switching the supply glitches the floating lines into something the
+        card frames as a command; only one that passed CRC7 is the host."""
+        baseline = trace(frames=10)
+        glitch = dict(trace(frames=10)); glitch["command_frames"] = 11; glitch["invalid_frames"] = 1
+        real = dict(trace(frames=11)); real["command_frames"] = 12; real["invalid_frames"] = 1
+        samples = [(0.0, baseline), (0.1, glitch), (0.2, glitch), (0.3, real)]
+        self.assertEqual(trial.first_command_index(samples, baseline), 3)
+
+
+class ConfirmedPowerOffTests(unittest.TestCase):
+    ON = "  Online: YES\n  Output: ON\n"
+    OFF = "  Online: YES\n  Output: OFF\n"
+    GONE = "  Online: NO\n  Output: OFF\n"
+
+    def run_off(self, statuses, attempts=6):
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with (
+            patch.object(trial, "psu_status", side_effect=statuses),
+            patch.object(trial, "power") as power,
+            patch.object(trial.time, "sleep"),
+        ):
+            return trial.power_off_confirmed(Path("/cli"), "psu2", attempts=attempts), power
+
+    def test_an_off_lost_in_a_dropout_is_sent_again(self):
+        """The first command went into a dead link; the output is still on when
+        the module comes back, so it is commanded again and then believed."""
+        confirmed, power = self.run_off([self.ON, self.GONE, self.ON, self.OFF])
+        self.assertTrue(confirmed)
+        self.assertEqual(power.call_count, 2)
+
+    def test_an_offline_module_reporting_off_is_not_believed(self):
+        confirmed, power = self.run_off([self.GONE] * 4, attempts=4)
+        self.assertFalse(confirmed)
+        power.assert_not_called()
+
+    def test_a_cli_that_cannot_see_the_module_is_waited_out(self):
+        confirmed, _ = self.run_off([RuntimeError("unknown command 'psu2'"), self.OFF])
+        self.assertTrue(confirmed)

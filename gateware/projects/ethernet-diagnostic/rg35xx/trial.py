@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 from rg35xx.deploy import checked_channel
+from rg35xx.deploy import output_is_off
 from rg35xx.deploy import psu_status
 from rg35xx.deploy import supply_is_online
 from rg35xx.image import describe_lba
@@ -142,6 +143,29 @@ def power(cli: Path, channel: str, state: str, wait: bool = True):
     return None
 
 
+def power_off_confirmed(cli: Path, channel: str, attempts: int = 12, pause: float = 5.0) -> bool:
+    """Switch the target off and do not believe it until the supply says so.
+
+    The supply's link to its controller drops for a minute or two at a time. An
+    "off" sent into a dropout is lost without an error, and on 2026-09-19 that
+    left the target powered for minutes after a trial had reported itself done.
+    So the status is read back, and the command repeated, until the module is
+    online and reports its output off, or the attempts run out.
+    """
+    for _ in range(attempts):
+        try:
+            status = psu_status(cli, channel)
+            if supply_is_online(status):
+                if output_is_off(status):
+                    return True
+                power(cli, channel, "off")
+                continue
+        except (RuntimeError, ValueError):
+            pass
+        time.sleep(pause)
+    return False
+
+
 def first_command_index(samples: list[tuple[float, dict]], baseline: dict) -> int | None:
     """Return the first sample in which the host issued a command.
 
@@ -153,12 +177,17 @@ def first_command_index(samples: list[tuple[float, dict]], baseline: dict) -> in
     floating line does not produce a frame that passes CRC7. The host's first
     command follows its first clock edge by microseconds, which is far below
     the resolution of this poll, so it is the same instant for this purpose.
+
+    Only a command that passed CRC7 counts. Switching the supply puts an edge on
+    floating lines, the card frames it as a command that fails its checksum, and
+    a zero anchored on "any frame" then lands on the power switch instead of on
+    the host, which flagged two otherwise good runs as unsound.
     """
     return next(
         (
             index
             for index, (_, trace) in enumerate(samples)
-            if index and trace["command_frames"] > baseline["command_frames"]
+            if index and trace["valid_commands"] > baseline["valid_commands"]
         ),
         None,
     )
@@ -243,9 +272,14 @@ def main(argv: list[str] | None = None) -> None:
             time.sleep(arguments.interval)
         launch.wait(timeout=120)
     finally:
-        power(arguments.psu_cli, arguments.channel, "off")
+        powered_off = power_off_confirmed(arguments.psu_cli, arguments.channel)
         time.sleep(2)
         client.command(images.Opcode.DISARM)
+        if not powered_off:
+            print(
+                f"WARNING: {arguments.channel} never confirmed its output off; the "
+                "target may still be powered. The card has been disarmed."
+            )
 
     # Everything is reported from the host's first command rather than from the
     # power-on, so the figures do not carry the power CLI's start-up time.
@@ -326,6 +360,10 @@ def main(argv: list[str] | None = None) -> None:
             enhanced.get("timing", {}), arguments.fabric_clock_hz
         ),
         "block_capture": enhanced.get("first_mmc_block", {}),
+        # Everything the card knew at the end of the run: pin monitors,
+        # response and data mismatches, card state. When a boot stops, this
+        # says what the card saw it stop on.
+        "final_trace": samples[-1][1],
         "timeline": timeline,
     }
     print(f"\n{userspace_report(run)}")
