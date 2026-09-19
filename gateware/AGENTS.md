@@ -61,6 +61,23 @@ Cocotb, and Verilator. `tools/run_tb.py` must finish successfully and its
 strict JUnit XML check must report at least one testcase with no failures or
 errors.
 
+The JUnit file records only that a test failed. `run_tb.py` prints the failed
+test's traceback and keeps the run's full output, `results.xml`, and what it
+was run against (commit, uncommitted paths, environment) under the project's
+`build/run_tb_failures/`; the latest run's output is always
+`build/run_tb.log`. The simulation is deterministic: the same tree gives the
+same simulation times whatever else the machine is doing, and Cocotb's
+`RANDOM_SEED` shapes nothing unless a testbench imports `random`. Do not
+compare `build/spade.sv` hashes to decide whether two runs saw the same design:
+the Spade compiler numbers its expressions differently on every rebuild of
+unchanged sources, and the renumbered netlist simulates identically. A test
+that fails once and then passes was run against a different tree, usually
+because another session was editing this checkout, so read the failure record
+before suspecting the bench; `run_tb.py` also warns when a source it consumed
+changed during the run. Runs on one project wait for each other, since they
+share its `build/` and `test/results.xml`; runs on different projects share
+nothing and may overlap.
+
 ## Refactoring and testing
 
 - Before refactoring behavior, add characterization tests that pass against
