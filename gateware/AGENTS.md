@@ -1,5 +1,11 @@
 # Gateware repository guidelines
 
+The active RetroBus Explorer FPGA workspace is this directory. Gateware is
+written in Spade, compiled with Swim, and tested with Cocotb and Verilator.
+Read [README.md](./README.md) for the workspace overview. This file is the one
+set of contribution, testing and environment rules for every contributor and
+coding agent; there is deliberately no `CLAUDE.md` beside it.
+
 ## Scope and organization
 
 - Active FPGA implementations are Spade projects under `projects/`.
@@ -8,6 +14,7 @@
 - Put shared ACF inputs in `constraints/boards/`, `constraints/interfaces/`,
   or `constraints/targets/`; keep truly project-specific constraints with the
   project.
+- Put common test, inventory, constraint, build, and flash helpers in `tools/`.
 - Put shared compatibility or vendor SystemVerilog in `rtl/vendor/`. Declare
   any HDL a project consumes under `[verilog].sources` in its `swim.toml`.
 - Treat `projects.toml` as the source of truth for project discovery. Keep it

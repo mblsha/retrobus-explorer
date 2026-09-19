@@ -69,7 +69,7 @@ def source_files(root: Path):
     for path in root.rglob("*"):
         if not path.is_file() or any(part in IGNORED_PARTS for part in path.parts):
             continue
-        if path.suffix in TEXT_SUFFIXES or path.name in {"AGENTS.md", "CLAUDE.md"}:
+        if path.suffix in TEXT_SUFFIXES or path.name == "AGENTS.md":
             yield path
 
 
