@@ -144,6 +144,30 @@ class VerifierTests(unittest.TestCase):
             verify_boot_image(self.image)
 
 
+class RawReadTests(unittest.TestCase):
+    """A device tree replaced to cap the card's clock changed nothing: the file
+    had moved, and the script went on reading the sectors the old one lay in."""
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.image = Path(self.directory.name) / "card.img"
+        self.image.write_bytes(erofs_image(self.directory.name))
+
+    def test_a_built_image_reads_its_files_where_they_lie(self):
+        verify_boot_image(self.image)
+
+    def test_a_file_replaced_behind_the_scripts_back_is_refused(self):
+        built = self.image.read_bytes()
+        _, fat, _ = boot_volume(built)
+        moved = replace_file(built, "DTB.IMG", fat.read("DTB.IMG") + bytes(4096))
+        _, after, _ = boot_volume(moved)
+        self.assertNotEqual(fat.placement("DTB.IMG")[:2], after.placement("DTB.IMG")[:2])
+        self.image.write_bytes(moved)
+        with self.assertRaisesRegex(ValueError, "where DTB.IMG lies now"):
+            verify_boot_image(self.image)
+
+
 class DescribeTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

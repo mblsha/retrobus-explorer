@@ -50,6 +50,11 @@ def main(argv: list[str] | None = None) -> None:
         "--slot", choices=("a", "b"), default="a",
         help="Which system slot the boot script roots from",
     )
+    parser.add_argument(
+        "--card-max-hz", type=int, metavar="HZ",
+        help="Cap the clock Linux gives the emulated card, in the image's "
+             "device tree; an image that starts the display needs 6000000",
+    )
     parser.add_argument("--name")
     parser.add_argument("--payload", type=Path)
     parser.add_argument("--lba", type=int, action="append", default=[])
@@ -76,6 +81,7 @@ def main(argv: list[str] | None = None) -> None:
             args.data.read_bytes(),
             root_partition=root,
             export_env=args.export_env,
+            card_max_hz=args.card_max_hz,
         )
         args.output.write_bytes(built)
         with io.BytesIO(built) as stream:

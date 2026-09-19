@@ -11,6 +11,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import re
 import struct
 import subprocess
 from pathlib import Path
@@ -24,6 +25,10 @@ from rg35xx.debug_partition import DEBUG_PARTITION
 from rg35xx.debug_partition import DEBUG_SECTORS
 from rg35xx.debug_partition import SECTOR_SIZE
 from rg35xx.debug_partition import decode_records
+from rg35xx.device_tree import CARD_CLOCK_PROPERTY
+from rg35xx.device_tree import CARD_CONTROLLER
+from rg35xx.device_tree import get_cell
+from rg35xx.device_tree import set_cell
 from rg35xx.fat16 import Fat16
 from rg35xx.fat16 import boot_volume
 from rg35xx.fat16 import mbr_partition as _partition
@@ -196,12 +201,18 @@ def erofs_layout(debug_end: int, slot_sectors: int, data_sectors: int) -> dict:
 def make_erofs_image(image: bytes, system: bytes, data: bytes,
                      root_partition: int = SYSTEM_A_PARTITION,
                      minimum_slot_sectors: int = MINIMUM_SLOT_SECTORS,
-                     export_env: bool = False) -> bytes:
+                     export_env: bool = False,
+                     card_max_hz: int | None = None) -> bytes:
     """Return a card image carrying EROFS system slots and an ext2 data volume.
 
     Both slots are written with the same image and are exactly the same size,
     so either is bootable and an update can be staged into the inactive one
     without moving anything.
+
+    card_max_hz caps the clock Linux gives the emulated card, in the device
+    tree, where U-Boot's own clock is out of its reach. Linux otherwise runs the
+    card at 12.5 MHz, twice U-Boot's rate, and at that rate the link fails
+    within a second of the display starting.
     """
     if system[EROFS_SUPERBLOCK_OFFSET:EROFS_SUPERBLOCK_OFFSET + 4] != EROFS_MAGIC:
         raise ValueError("system image is not EROFS")
@@ -259,8 +270,18 @@ def make_erofs_image(image: bytes, system: bytes, data: bytes,
         start = region["start_lba"] * SECTOR_SIZE
         grown[start:start + len(payload)] = payload
 
+    built = bytes(grown)
+    if card_max_hz is not None:
+        # Before the script is written: replacing the file moves it, and the
+        # script reads it by sector.
+        _, fat, _ = boot_volume(built)
+        built = replace_file(
+            built, "DTB.IMG",
+            set_cell(fat.read("DTB.IMG"), CARD_CONTROLLER, CARD_CLOCK_PROPERTY,
+                     card_max_hz),
+        )
     return repair_boot_script(
-        bytes(grown), erofs_slot_script(bytes(grown), root_partition, export_env)
+        built, erofs_slot_script(built, root_partition, export_env)
     )
 
 
@@ -376,6 +397,14 @@ def describe_lba(path: Path, lba: int) -> str:
     return "unallocated area"
 
 
+def _card_max_hz(device_tree: bytes) -> int | None:
+    """Return the clock the device tree lets Linux give the card, if it says."""
+    try:
+        return get_cell(device_tree, CARD_CONTROLLER, CARD_CLOCK_PROPERTY)
+    except (ValueError, struct.error):
+        return None
+
+
 def verify_boot_image(path: Path) -> dict[str, object]:
     """Check everything the delivered boot path depends on, before programming.
 
@@ -431,6 +460,24 @@ def verify_boot_image(path: Path) -> dict[str, object]:
             required_script_text.append(b"unzip ")
         if any(text not in script_text for text in required_script_text):
             raise ValueError("BOOT.SCR lacks raw milestone write or bare Linux boot")
+        # A script that reads raw sectors names where a file lay when it was
+        # written. Replacing the file moves it, and U-Boot then boots the stale
+        # copy without complaint, so every file has to lie where a read says.
+        raw_reads = {
+            (int(lba, 16), int(count, 16))
+            for lba, count in re.findall(
+                rb"mmc read \S+ (0x[0-9a-fA-F]+) (0x[0-9a-fA-F]+)", script_text
+            )
+        }
+        if raw_reads:
+            for name in ("KERNEL", "DTB.IMG"):
+                lba, count, _ = fat.placement(name)
+                if (lba, count) not in raw_reads:
+                    raise ValueError(
+                        f"BOOT.SCR reads raw sectors and none of its reads is "
+                        f"where {name} lies now ({lba:#x}, {count:#x} sectors); "
+                        "rebuild the script after replacing a file"
+                    )
         bootmark = decode_records(payloads["BOOTMARK"])
         if not bootmark or bootmark[0].get("stage") != "0":
             raise ValueError("BOOTMARK is not the U-Boot stage-0 milestone")
@@ -507,4 +554,5 @@ def verify_boot_image(path: Path) -> dict[str, object]:
         "logical_partitions": logicals,
         "boot_files": {name: len(payloads[name]) for name in REQUIRED_BOOT_FILES},
         "debug_command": records[0]["command"],
+        "card_max_hz": _card_max_hz(payloads["DTB.IMG"]),
     }
