@@ -39,6 +39,7 @@ PROGRAM_SETTLE_SECONDS = 8
 # reply costs one window rather than the whole image.
 UPLOAD_WINDOW = 10
 OUTPUT_STATE = re.compile(r"^\s*Output:\s*(\S+)\s*$", re.MULTILINE)
+ONLINE_STATE = re.compile(r"^\s*Online:\s*(\S+)\s*$", re.MULTILINE)
 
 
 def checked_channel(channel: str) -> str:
@@ -62,6 +63,21 @@ def output_is_off(status: str) -> bool:
     return states[0].upper() == "OFF"
 
 
+def supply_is_online(status: str) -> bool:
+    """Whether the module behind this channel is actually reporting.
+
+    The supply modules reach the controller over a wireless link that drops.
+    While it is down the CLI still prints a status, all zeroes with the output
+    shown OFF, which is what it knows and not what is true: the module may be
+    powering the target at that moment. A status that does not say the module
+    is online is therefore evidence of nothing.
+    """
+    states = ONLINE_STATE.findall(status)
+    if len(states) != 1:
+        raise ValueError("PSU status does not report exactly one online state")
+    return states[0].upper() == "YES"
+
+
 def psu_status(cli: Path, channel: str) -> str:
     result = subprocess.run(
         ["npm", "run", "start", "--silent", "--", checked_channel(channel), "--status"],
@@ -79,7 +95,13 @@ def require_target_off(cli: Path, channel: str) -> None:
     powered through that sees an I/O error rather than a slow card, and the
     boot it then attempts is not the boot under test.
     """
-    if not output_is_off(psu_status(cli, channel)):
+    status = psu_status(cli, channel)
+    if not supply_is_online(status):
+        raise RuntimeError(
+            f"{channel} is offline, so whether the target is powered is unknown; "
+            "bring the supply module back before deploying"
+        )
+    if not output_is_off(status):
         raise RuntimeError(f"{channel} output is ON; power the target off first")
 
 

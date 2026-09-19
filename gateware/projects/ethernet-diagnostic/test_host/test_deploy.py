@@ -229,3 +229,30 @@ class DeployTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# What the CLI printed on 2026-09-19 while the RG35XX's module had dropped off
+# the controller: a complete-looking status that is all zeroes.
+OFFLINE = """psu2 (P906) channel 1:
+  Online: NO
+  Voltage: 0.000 V (target 0.000 V)
+  Current: 0.000 A (target 0.000 A)
+  Temperature: 0.0 °C
+  Output: OFF
+  Mode: Normal
+"""
+
+
+class OfflineSupplyTests(unittest.TestCase):
+    def test_an_offline_module_reporting_off_is_not_accepted_as_off(self):
+        """Its output state is unknown, not off: the module may be powering the
+        target while the link to it is down."""
+        self.assertTrue(deploy.output_is_off(OFFLINE))
+        self.assertFalse(deploy.supply_is_online(OFFLINE))
+        with patch("rg35xx.deploy.psu_status", return_value=OFFLINE):
+            with self.assertRaisesRegex(RuntimeError, "is offline"):
+                deploy.require_target_off(Path("/cli"), "psu2")
+
+    def test_a_status_that_does_not_say_is_not_evidence_of_online(self):
+        with self.assertRaisesRegex(ValueError, "exactly one online state"):
+            deploy.supply_is_online("Output: OFF\n")

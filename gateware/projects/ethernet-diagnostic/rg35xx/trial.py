@@ -18,6 +18,9 @@ import subprocess
 import time
 from pathlib import Path
 
+from rg35xx.deploy import checked_channel
+from rg35xx.deploy import psu_status
+from rg35xx.deploy import supply_is_online
 from rg35xx.image import describe_lba
 from rg35xx.report import userspace_time
 from scripts import images
@@ -212,6 +215,18 @@ def main(argv: list[str] | None = None) -> None:
     if arguments.psu_cli is None:
         parser.error("--psu-cli or $MDP_CLI is required to power the target")
 
+    # A supply module whose link has dropped accepts "on" and does nothing, and
+    # the run then ends blaming a target that was never powered.
+    try:
+        online = supply_is_online(psu_status(arguments.psu_cli, checked_channel(arguments.channel)))
+    except (RuntimeError, ValueError) as failure:
+        raise SystemExit(str(failure))
+    if not online:
+        raise SystemExit(
+            f"{arguments.channel} is offline; the target cannot be powered until "
+            "its supply module is reporting again"
+        )
+
     client = images.Images(state=arguments.state)
     baseline = client.trace()
     if not baseline["armed"]:
@@ -236,7 +251,10 @@ def main(argv: list[str] | None = None) -> None:
     # power-on, so the figures do not carry the power CLI's start-up time.
     edge = first_command_index(samples, baseline)
     if edge is None:
-        raise SystemExit("the card saw no command; the target did not start")
+        raise SystemExit(
+            "the card saw no command; the target did not start. If the supply's "
+            "link dropped during the run the power-on never reached it"
+        )
     zero = samples[edge][0]
     # The first command is only known to be the first if a poll saw the card
     # quiet before it. Reads start within a poll of it either way, so their

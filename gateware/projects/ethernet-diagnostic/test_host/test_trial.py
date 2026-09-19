@@ -229,3 +229,37 @@ class UserspaceReportTests(unittest.TestCase):
             trial.userspace_report(self.run_of(samples, sound=False)),
             "no userspace milestone observed",
         )
+
+
+class SupplyGateTests(unittest.TestCase):
+    """A trial that powers nothing reports a target that did not start."""
+
+    def run_main(self, status, *extra):
+        from unittest.mock import patch
+
+        with (
+            patch.object(trial, "psu_status", return_value=status) as asked,
+            patch.object(trial.images, "Images") as client,
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            trial.main(["--state", "/nonexistent", "--psu-cli", "/cli", *extra])
+        return asked, client, stopped.exception
+
+    def test_an_offline_supply_stops_the_trial_before_the_card_is_touched(self):
+        offline = "psu2 (P906) channel 1:\n  Online: NO\n  Output: OFF\n"
+        asked, client, stopped = self.run_main(offline)
+        self.assertIn("offline", str(stopped))
+        client.assert_not_called()
+
+    def test_the_other_bench_channel_is_refused_before_anything_runs(self):
+        """psu1 powers a different machine; until now only deploy refused it."""
+        from unittest.mock import patch
+
+        with (
+            patch("rg35xx.deploy.subprocess.run") as run,
+            patch.object(trial.images, "Images") as client,
+            self.assertRaises((SystemExit, ValueError)),
+        ):
+            trial.main(["--state", "/nonexistent", "--psu-cli", "/cli", "--channel", "psu1"])
+        run.assert_not_called()
+        client.assert_not_called()
