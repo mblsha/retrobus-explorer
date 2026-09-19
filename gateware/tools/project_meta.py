@@ -43,3 +43,20 @@ def resolve_verilog_sources(project: Path) -> list[Path]:
                 seen.add(path)
                 resolved.append(path)
     return resolved
+
+
+def path_libraries(project: Path) -> list[Path]:
+    """Directories of every path library the project compiles, transitively."""
+    found: list[Path] = []
+    pending = [project.resolve()]
+    while pending:
+        declaring = pending.pop()
+        for library in load_swim(declaring).get("libraries", {}).values():
+            if not isinstance(library, dict) or "path" not in library:
+                continue
+            # swim resolves a library path against the swim.toml declaring it.
+            directory = (declaring / library["path"]).resolve()
+            if directory not in found and (directory / "swim.toml").is_file():
+                found.append(directory)
+                pending.append(directory)
+    return found
