@@ -1433,3 +1433,91 @@ It now lists each of ROCKNIX's two patch directories once instead of asking for
 every patch in both, and goes through the authenticated `gh` CLI when there is
 one; with the anonymous quota at zero it fetched all 27 sources and both
 firmware files in twelve seconds.
+
+## 2026-09-19 The card failed at Linux's clock, not at the display
+
+Everything in this entry was measured with nobody at the bench. The picture is
+checked by the target: init reads back the 1,228,800 bytes the panel is scanning
+out and reports the first half of their MD5 in the stage-5 milestone, and
+`display_proof.py --expect` prints what it has to be. `fb-md5-add757487e3a9f6f`
+is the picture, whole.
+
+### Pull-ups: one helps, five stop the boot
+
+`build_ddr.py --sd-pullups` turns on the FPGA's weak pull-ups on CMD and
+DAT0..3. With them the target reads the SPL, 83 sectors ending at LBA 96, and
+then sends nothing more: the host goes on clocking at about 200 kHz and no
+command follows. It is the pull-ups and not the placement. A pull-up is one
+configuration bit in an I/O block, so the routed design of the qualified
+bitstream was patched rather than rebuilt: the FASM of seed 19 with
+`PULLTYPE.NONE` changed to `PULLTYPE.PULLUP` on the same five sites differs from
+the qualified bitstream in exactly five configuration bits, and stops at the
+same place. Which of the five lines does it was not pursued.
+
+With a pull-up on DAT0 alone (F3, `RIOB33_X43Y73.IOB_Y1`) the display image
+booted, drew, and reported: stage 5 came back with the right checksum. The link
+no longer died at its first error. It died later instead, after 370 writes and
+some twenty-five `data error, sending stop command` lines, with 37 command
+frames failing their checksum at the card, where a healthy boot has one. So
+DAT0 floating was making one error fatal, and was not what made the errors.
+
+### Not the backlight, and not measurable at 12.5 MHz
+
+The first error landed at 1.147 s, just after init raised the backlight, which
+made the backlight the suspect for an afternoon. Init was given a host command,
+`display-sweep`, to measure it: put the display to sleep, do a fixed piece of
+card work in each of a series of display states, count the controller's errors
+in each, and write every record with the display asleep. It never got to
+measure anything. With the backlight untouched, with it put out before the
+second milestone, and with the whole pipeline asleep, the link died within a
+fifth of a second of the first error every time, the first error at 1.08 to
+1.09 s in each. The command is kept; it works at a clock where the link
+survives a state that disturbs it.
+
+### The clock
+
+What the runs had in common was in the trace all along. The card counts clock
+edges, and the rate between polls is 6.00 MHz for as long as U-Boot is reading
+and 12.5 MHz from the moment Linux takes the card over. It is 12.5 MHz in the
+display-less boots of the delivered image too, where it never failed: the card
+advertises 13 MHz, U-Boot rounds that down to 6 and Linux to 12.5. The
+interface rate quoted everywhere in these notes is U-Boot's, measured on a
+sector of the kernel load.
+
+So the device tree was given `max-frequency = <6000000>` on `mmc@4020000`, and
+nothing else was changed. The first attempt changed nothing at all, which the
+trace also showed, as 12.5 MHz: `--replace-file` had moved `DTB.IMG` to new
+clusters and the boot script reads it by sector, so U-Boot loaded the old tree
+from where it still lay. `--verify-image` now refuses an image whose script
+reads raw sectors that are not where `KERNEL` and `DTB.IMG` lie.
+
+With the cap really in the tree, on the DAT0 pull-up bitstream and then on the
+qualified bitstream with no pull-up at all, the same image, backlight at full:
+
+| Linux card clock | bitstream | writes before the link died | controller errors | bad command frames |
+| --- | --- | --- | --- | --- |
+| 12.5 MHz | qualified | about 20 | 1, fatal | 1 or 2 |
+| 12.5 MHz | DAT0 pull-up, five runs | 56 to 370 | 1 to 25 | 4 to 37 |
+| 6 MHz | DAT0 pull-up | never; 2855 in 31 s | 0 | 1 |
+| 6 MHz | qualified | never; 2855 in 31 s | 0 | 0 |
+
+The card's receive path samples CMD and DAT with the fabric clock, 64 MHz, on
+the fabric edge where it first sees SD_CLK high: up to 15.6 ns after the host's
+rising edge. A default-speed host changes its lines on the falling edge, which
+is 83 ns after the rising one at 6 MHz and 40 ns after it at 12.5 MHz, so at
+Linux's rate the sample sits much nearer the moment the line changes. Without the display that margin was enough in every
+boot measured. With the display running it is not. That is the mechanism as far
+as it has been established: the failure needs both the faster clock and the
+display, and removing either removes it. Whether the display costs the margin
+through supply noise on the SoC's I/O rail or through something else has not
+been measured, and the write-path forensics proposed in the last entry were not
+needed to find this and have not been built.
+
+`image --make-erofs-image --card-max-hz 6000000` puts the cap in through the
+pipeline, before the boot script is written. The image built that way,
+`build/rg35xx-display/rg35xx-plus-display-6mhz.img` (sha256 `f623878c3a23...`),
+was then cold-started five times on the qualified bitstream: five pictures with
+the right checksum, no controller error in any kernel log, and the recorder
+still writing when each 15 s window closed. The cap costs the Linux part of the
+boot its faster reads: the userspace milestone was 5.66, 5.69, 5.71, 5.71 and
+5.76 s, against about 5.5 s for the same image at 12.5 MHz.

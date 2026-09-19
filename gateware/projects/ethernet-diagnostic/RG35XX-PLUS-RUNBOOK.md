@@ -421,8 +421,37 @@ A trial's JSON also keeps `final_trace`, everything the FPGA knew when the run
 ended, and `trial` does not report itself finished until the supply has
 confirmed its output off.
 
-As of 2026-09-19 none of this reports once the panel is running, because a
-write to the emulated card fails shortly after the panel starts; see the display
-section of RG35XX-PLUS-FINDINGS.md. The shipped-kernel image of 2026-09-18,
-`build/rg35xx-bare/rg35xx-plus-bare-64m-quiet.img`, shows its init banner on the
-panel and is the quickest way to see the display work.
+An image whose kernel starts the display has to be built with
+`--card-max-hz 6000000`, which caps the clock Linux gives the card in the
+image's device tree; without it Linux runs the card at 12.5 MHz and the link
+fails within a second of the panel starting (see the display section of
+RG35XX-PLUS-FINDINGS.md). `--verify-image` reports the cap as `card_max_hz`.
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --make-erofs-image BASE.img --system build/rg35xx-display/system-c65536.erofs \
+  --data build/rg35xx-display/data.ext2 --slot a --card-max-hz 6000000 \
+  --output build/rg35xx-display/rg35xx-plus-display-6mhz.img
+```
+
+Nobody has to look at the panel. The stage-5 milestone ends in
+`fbsplash-0 fb-md5-<16 digits>`, the checksum of what the panel is scanning out,
+and this prints what it must be for the same `--proof-line`s:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/rg35xx/display_proof.py \
+  --line "RG35XX PLUS" --line "DISPLAY OK" --expect
+```
+
+`display-sweep` is a host command like `poweroff`: put it in sector 0 of the
+debug partition (`image --make-command display-sweep`, written at LBA 114688)
+and init puts the display to sleep, then does the same card work asleep, lit at
+0, 100 and 50 percent, and asleep again, counting the controller's errors in
+each state and writing every record to stage 6 with the display asleep. At
+12.5 MHz the link dies before it can measure anything; it is for a clock at
+which the link survives.
+
+Replacing a file in the boot partition moves it, and the boot script reads
+`KERNEL` and `DTB.IMG` by sector. `--replace-file` alone therefore leaves U-Boot
+loading the old copy; `--make-erofs-image` rewrites the script, and
+`--verify-image` refuses an image whose script and files disagree.

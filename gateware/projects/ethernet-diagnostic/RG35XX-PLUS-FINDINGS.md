@@ -382,12 +382,40 @@ the file has to be in the kernel, where ROCKNIX also puts it.
 `build_kernel.py` builds the two RG35XX Plus panel files in and leaves the
 RTL8821CS blobs out; it costs 1,358 bytes of gzip.
 
-**Open: a Linux write to the emulated card fails once the panel is running.**
-The kernel reports `sunxi-mmc 4020000.mmc: data error, sending stop command`
-and then `send stop command failed`, and never retries; the kernel itself stays
-alive. It happens under both kernels and never without a working panel. Until it
-is fixed, nothing the target says after the panel starts reaches the debug
-partition, including the flight recorder. The pin monitors and the clock-period
-monitor in the FPGA trace read the same in a healthy boot as in a failed one and
-are not evidence either way. See the 2026-09-19 entry in the history for what
-was ruled out and what is suspected.
+**The picture is checked without anyone looking at it.** Init draws the test
+picture with `fbsplash`, reads back the 1,228,800 bytes the panel is scanning
+out, and reports the first sixteen digits of their MD5 in the stage-5 milestone;
+`display_proof.py --expect` prints the value the picture has to give. For the
+image measured here, whose four lines are `RG35XX PLUS`, `DISPLAY OK`,
+`EROFS ROOT - 6 MHZ CARD` and `2026-09-19`, it is `fb-md5-add757487e3a9f6f`, and
+every boot of that image that got as far as drawing reported it.
+
+**An image that starts the display has to cap Linux's card clock at 6 MHz.**
+The card advertises 13 MHz. U-Boot turns that into 6.00 MHz and Linux into
+12.5 MHz; every interface figure in this document is U-Boot's. At 12.5 MHz with
+the display running, the card sees command frames fail their checksum (4 to 37
+in a boot, against 0 or 1), the controller reports
+`sunxi-mmc 4020000.mmc: data error, sending stop command`, and within one to
+twenty-five such errors one of them leaves the controller wedged: it stops the
+clock and never sends another command, and nothing the target says afterwards
+reaches the card. At 12.5 MHz without the display it never failed, and at 6 MHz
+with the display, backlight full, it carried 2855 writes in 31 s with no error
+and no bad frame, on the qualified bitstream unchanged.
+`image --make-erofs-image --card-max-hz 6000000` sets the cap in the image's
+device tree, which U-Boot's own clock does not read. Five cold starts of the
+image built that way all drew the picture, logged no controller error, and
+reached userspace in 5.66 to 5.76 s (median 5.71), against about 5.5 s at
+12.5 MHz.
+
+The card samples CMD and DAT up to 15.6 ns after the host's rising edge, one
+fabric cycle at 64 MHz, and the distance from there to the host's next change of
+the line halves between 6 and 12.5 MHz. That the display is what uses up the
+remainder is measured; how it does is not.
+
+A pull-up on DAT0 alone makes a single error survivable rather than fatal and
+is otherwise harmless; pull-ups on CMD and all four DAT lines stop the boot
+after the SPL is read. Neither is needed at 6 MHz and the qualified bitstream
+has none. The pin monitors and the clock-period monitor in the FPGA trace read
+the same in a healthy boot as in a failed one and are not evidence either way;
+the count of invalid command frames is. See the two 2026-09-19 display entries
+in the history.
