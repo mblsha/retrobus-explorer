@@ -464,3 +464,114 @@ Replacing a file in the boot partition moves it, and the boot script reads
 `KERNEL` and `DTB.IMG` by sector. `--replace-file` alone therefore leaves U-Boot
 loading the old copy; `--make-erofs-image` rewrites the script, and
 `--verify-image` refuses an image whose script and files disagree.
+
+## 11. The job harness
+
+A job is a shell script. The host writes it into the card, the runner init
+execs reads it, runs it, and writes back what it printed; the host samples the
+bench supply meanwhile and reports what each state the job marked off drew.
+Changing an experiment costs a file on this Mac, not a rootfs and an image.
+
+Build a rootfs and an image whose debug sector already says `job-runner`, and
+deploy it once. The image must carry the command, because the debug partition
+is at sector 114688 and the gateware only takes writes as an ascending run
+from sector zero:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-rootfs --out "$PWD/build/rg35xx-sleep" --proof-line "RG35XX PLUS" \
+  --proof-line "JOB RUNNER" --proof-line "SLEEP HARNESS" --proof-line "2026-09-20"
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --make-erofs-image build/rg35xx-display/base-display-kernel.img \
+  --system build/rg35xx-sleep/system-c65536.erofs \
+  --data build/rg35xx-sleep/data.ext2 --slot a --card-max-hz 6000000 \
+  --debug-command job-runner \
+  --output build/rg35xx-sleep/rg35xx-plus-sleep.img
+
+MDP_CLI=/Users/mblsha/src/miniware-mdp-m01/cli \
+  uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py deploy \
+  --build-dir build/microsd-ddr-ethernet-h700 \
+  --image build/rg35xx-sleep/rg35xx-plus-sleep.img \
+  --state /private/tmp/rg35xx-sleep-session.json
+```
+
+The deploy is eight minutes and is needed only when the rootfs or the image
+changes. Every job after it is one command:
+
+```sh
+MDP_CLI=/Users/mblsha/src/miniware-mdp-m01/cli \
+  uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py job \
+  --state /private/tmp/rg35xx-sleep-session.json \
+  --image build/rg35xx-sleep/rg35xx-plus-sleep.img \
+  --script /tmp/experiment.sh --name idle-dark --run-seconds 120 \
+  --label idle-dark --output /tmp/idle-dark.json
+```
+
+```text
+job idle-dark-2: done exit=0 | idle-dark 145 mA (126-156, IQR 10, n=16)
+first card command at 5.28s
+  idle-dark: {"start": 11.73, "end": 56.78, "dwell_seconds": 45.05, ...}
+result sequence=3 status=done exit=0 uptime 2.98..48.06 rtc 86405..86452 flush=blockdev
+```
+
+It powers the target off, writes the job, arms the card, powers the target on,
+watches what the card sees, powers it off again, disarms and reads the result.
+Ninety seconds for a job that holds a state for forty-five, of which about
+twenty-five is overhead: six seconds settling, six booting, three writing the
+job and the rest switching and confirming the supply. `--print-output` prints
+what the script printed; `--mode fetch` reads the last result off a disarmed
+card without touching anything.
+
+### What a job may call
+
+The script is sourced into a subshell of the runner, so everything the runner
+defines is available to it and nothing it defines survives. `$BB` is BusyBox in
+tmpfs and always works; the applets are also on `PATH` as `/tmp/bin/*`.
+
+- `rtc_sleep SECONDS [STATE [MEM_SLEEP]]` arms the RTC alarm, writes everything
+  printed so far to the card, marks the sleep, suspends, and on waking reports
+  the requested duration against the RTC's and `/proc/uptime`'s accounts of it,
+  `suspend_stats` either side, and a card check.
+- `card_check` writes a unique pattern to a scratch sector, drops the buffers,
+  reads it back and prints `card-check ok` or what it got instead.
+- `mark_sector LABEL` puts a boundary in the card's trace. A state the host is
+  to measure is `mark_sector x-begin`, the state, `mark_sector x-end`, and each
+  marked state becomes one `--label` in order.
+- `rtc_now` is the RTC's seconds since the epoch. `/proc/uptime` is not a
+  substitute: whether it advances across a suspend is a thing being measured.
+
+A job that wedges the target costs one power cycle: the run ends at
+`--run-seconds`, the target is switched off, and whatever the job flushed
+before it stopped is still on the card.
+
+### Measuring current
+
+Every window is summarised the way this note quotes a figure: median, range
+and interquartile range of the readings taken wholly inside it, after
+discarding the first three seconds, over a dwell of at least twenty. A reading
+costs a second or more, so about one every two and a half seconds; a window
+that is too short, too sparse, or contains a moment when the supply's link was
+down is marked `UNSOUND` rather than quietly averaged. The supply reports
+zeroes while its link is down, and a zero averaged into a current is a wrong
+answer rather than a missing one.
+
+### Exchanging a job through the target's sleep
+
+`--mode exchange` runs a job that ends in a long `rtc_sleep`, and while the
+target is suspended -- issuing no card command at all -- disarms the frontend,
+reads the result the job flushed before suspending, writes the next job and
+re-arms, all before the alarm fires:
+
+```sh
+MDP_CLI=/Users/mblsha/src/miniware-mdp-m01/cli \
+  uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py job \
+  --state /private/tmp/rg35xx-sleep-session.json \
+  --image build/rg35xx-sleep/rg35xx-plus-sleep.img --mode exchange \
+  --script /tmp/sleeps-70s.sh --second-script /tmp/next-job.sh \
+  --name swap --dwell 25 --wait-seconds 100 --label asleep \
+  --output /tmp/swap.json
+```
+
+The exchange itself takes three seconds. See the findings for what it proves
+and what it does not.

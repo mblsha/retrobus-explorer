@@ -442,3 +442,119 @@ has none. The pin monitors and the clock-period monitor in the FPGA trace read
 the same in a healthy boot as in a failed one and are not evidence either way;
 the count of invalid command frames is. See the two 2026-09-19 display entries
 in the history.
+
+## Sleep
+
+Measured on 2026-09-20 with the job harness, on the qualified bitstream and an
+image built with `--card-max-hz 6000000`. Everything below is from the target's
+own records and the bench supply; nothing was read off a screen.
+
+**There is one sleep state and it is s2idle.** `/sys/power/state` offers
+`freeze mem`, and `/sys/power/mem_sleep` offers `[s2idle]` and nothing else, so
+`mem` and `freeze` are the same state. Writing `deep` or `shallow` to
+`mem_sleep` returns EINVAL. The device tree has a `psci` node with method
+`smc` and `cpus/cpu@0` has `enable-method = "psci"`, but there is no
+`cpus/idle-states` node, and `/sys/devices/system/cpu/cpuidle/current_driver`
+reads `none`: nothing tells the kernel what the idle or suspend states of this
+SoC are, so the CPUs only ever WFI and `mem` can only ever be s2idle. Giving
+the kernel a deeper state is a device-tree and firmware question, not a
+configuration one.
+
+**One sleep and one RTC wake, proved.** `rtc_sleep 45 freeze`: the alarm was
+set to RTC 86450 at 86405, the RTC read 86451 on waking, 46 s for a requested
+45; `/proc/uptime` went 1.83 to 47.62, so the clock keeps running in s2idle and
+uptime is not evidence of anything here; `suspend_stats/success` went 0 to 1
+with `fail` 0 and `last_failed_dev` empty; and the card check passed both
+before and after. The same with `mem` in place of `freeze`, and the same with a
+70 s sleep. Six sleeps, six wakes, no failure.
+
+**The card's clock stops dead.** In the FPGA's passive trace the clock runs at
+6.0 MHz through the boot, and from the target's mark to its wake it counts
+exactly zero edges a second for the whole 45 or 70 seconds, then resumes. This
+is not the floating-pin case a powered-off target shows, which still counts
+about fifty edges a second: the H700 gates the clock off and holds the line.
+
+### Baseline currents
+
+Median of the readings taken wholly inside the state, first three seconds
+discarded, dwell 45 s, at 5.00 V into the USB-C port with no battery fitted.
+Two runs of each, each run a cold boot.
+
+```text
+state                                      median      range        IQR   n
+supply output off                             1 mA          -          -   -
+asleep, s2idle                          121, 126 mA   107-153 mA   7-21 mA  12-17
+asleep, s2idle, entered through `mem`       124 mA    116-131 mA     8 mA   10
+awake and idle, panel asleep            151, 144 mA   124-168 mA  10-15 mA  15-18
+awake and idle, panel lit, kernel level 176, 183 mA   161-200 mA   9-11 mA  12-20
+awake and idle, panel lit, full         246, 252 mA   139-267 mA   9-11 mA  15-16
+```
+
+The kernel's own backlight level is 1250 of a maximum of 2499, and the panel is
+a 640x480 DSI unit on `card1-DSI-1`. "Panel asleep" is `echo 4 >
+/sys/class/graphics/fb0/blank`, which is how init leaves the display in
+job-runner mode, and which takes `dpms` to `Off`.
+
+**The noise figure is about 7 mA.** Two runs of the same state a few minutes
+apart differ by 5.5 to 7.5 mA (121 against 126, 144 against 151, 176 against
+183, 246 against 252), which is more than the interquartile range inside a
+single run, 7 to 21 mA, would suggest. A difference of less than about 10 mA
+between two configurations is not a difference until it has been repeated.
+
+So s2idle saves about 22 mA on an idle target whose panel is already asleep,
+roughly 15 percent, and the backlight at full costs about 100 mA more than a
+sleeping panel -- four times what the suspend saves. The largest single item on
+this supply is the backlight and the second is whatever keeps an idle awake
+target at 145 mA.
+
+### What is still holding power up
+
+From the discovery job, with the target awake and idle:
+
+- **`performance` at 1416 MHz.** `cpufreq-dt` is bound with the `performance`
+  governor and `scaling_cur_freq` 1416000, the top of a ladder that goes down
+  to 480000. `conservative ondemand userspace powersave schedutil` are all
+  available. Nothing has measured what a lower governor is worth.
+- **No cpuidle driver**, as above. All four CPUs are online.
+- **Regulators enabled with the display asleep**: `vcc-pll` 1.8 V,
+  `vcc-spkr-amp` 3.3 V, `vcc-io` 3.3 V, `vcc-wifi` 3.3 V, `cpusldo` 0.9 V,
+  `vdd-cpu` 1.1 V, `vcc3v3-mmc2` 3.3 V, `vdd-gpu-sys` 0.9 V, `vdd-dram` 1.1 V,
+  `dcdc4` 1.0 V, `aldo3` 1.8 V, `avcc` 1.8 V. Disabled: `bldo1`, `bldo3`,
+  `bldo4`, `cldo2`, `vdd-lcd`, `boost`, `usb0-vbus`, `aldo1`, `aldo2`.
+  `dcdc4` is enabled with zero users. `vcc-wifi` is enabled although there is
+  no rfkill device and no wireless driver bound -- the RTW88 firmware is not in
+  this kernel. `vcc3v3-mmc2` powers the second card slot, the one whose
+  controller causes the slow boots.
+- **Bound platform drivers**: `panfrost` on `1800000.gpu`, `sun4i-codec`,
+  `sun50i-de2-bus`, `sunxi-de2-clks`, `sun6i-dma`, `sunxi-mmc` on all three
+  slots, `axp20x-usb-power-supply`, and the HDMI audio codecs. There are no USB
+  devices.
+- **Wakeup sources**: `7000000.rtc`, `alarmtimer.0.auto`, `axp20x-pek` (the
+  power key), `axp20x-usb`, `battery`, and `mmc0`, `mmc1`, `mmc2`. No IRQ under
+  `/sys/kernel/irq` has wakeup enabled.
+- **The PMIC's I2C bus is unusable during the suspend.** The kernel log from
+  every sleep shows the regulator core trying to disable `aldo3` thirty seconds
+  in and getting `mv64xxx: I2C bus locked` and `-ETIMEDOUT`, repeated every two
+  seconds until the wake. Whatever a deeper sleep would want to do to the PMIC,
+  it cannot be done from there as things stand.
+
+`DEBUG_FS` and `PM_DEBUG` are not set in this kernel, so there is no
+`suspend_stats` timing breakdown, no `pm_print_times`, no `wakeup_sources`
+debugfs file and no regulator summary. What is above is everything sysfs will
+say; the rest needs a kernel rebuild.
+
+### Exchanging a job through the sleep works
+
+Twice, on the qualified bitstream: the target suspends, the host disarms the
+card frontend, reads the result the job flushed on its way down, writes the
+next job into the card and re-arms, and the target wakes onto a card that was
+withdrawn and put back while it was not looking. The exchange took 3.43 s and
+3.02 s of a 70 s sleep. After the wake the card re-initialised on its own --
+the trace shows the card state going from 0 back to 4 -- the second job ran
+within a fifth of a second of the resume, its card check passed, and the
+controller logged no error. The count of command frames failing their checksum
+stayed at the 5 the power edge and the SPL contribute, with none after.
+
+This makes a two-job cycle cost one boot instead of two. It has not been run
+for more than two jobs in a row, and nothing here says how a target that is
+disarmed twice in one boot behaves.

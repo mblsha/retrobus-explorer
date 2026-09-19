@@ -1598,3 +1598,83 @@ removed with `prune_builds.py`, 413 MiB; their manifests are in
 qualified routing, `PULLTYPE.PULLUP` in place of `PULLTYPE.NONE` on
 `RIOB33_X43Y73.IOB_Y1`, and repacking it takes a minute.
 
+
+## 2026-09-20 A harness for experiments, and what sleeping costs
+
+The next thing wanted from this target is the smallest current it can be made
+to draw in a timed sleep, which is a dozen small experiments rather than one.
+Rebuilding a rootfs, an image and a deployment for each of them is eight
+minutes; the experiments themselves are seconds. So the boot got a job runner:
+a host command like `display-sweep`, but one that loops, reading a shell script
+out of the card, running it, and writing back what it printed. The host side is
+`rg35xx.py job`, which delivers a script, powers the target through it, samples
+the bench supply, and reads the result off.
+
+Four things had to be corrected before any of it worked, each of them something
+the bench said rather than something that was designed.
+
+**The gateware only takes a write as part of an ascending run from sector
+zero.** A session declares how many sectors it will receive and each write must
+land at exactly the next one. The job region had been put in the debug
+partition at sector 114688, where a single sector costs 57 MB of rewriting,
+about three minutes. It moved into the gap between U-Boot's FIT image, which
+ends at sector 1228, and the first partition at 32768: delivering a job is now
+a replay of the image's first 2112 sectors with the job substituted, which at
+the 707 sectors a second this link writes is three seconds. The target reads it
+from `/dev/mmcblk0` by absolute LBA and still writes only inside the debug
+partition. The host command moved into the image for the same reason. The
+result region can no longer be cleared before a run, so a result is matched to
+its job by sequence number.
+
+**A write's LBA does not survive in the trace.** The plan was for the target to
+write one sector nothing else uses, so the host could see in the passive trace
+that it had reached a point. It cannot: Linux polls the card's status after
+every transfer and that poll's argument is the card's address, so by the time
+the host looks the write's sector is gone. A read works -- one command with the
+sector in it, kept until the next read -- so the target now reads the sector it
+just wrote. Two such signals need two pages between them, because the trace
+reports a read of a page either at its first sector or at the sector after its
+last, and one page of separation made a job's card check indistinguishable from
+a suspend.
+
+**BusyBox `dd iflag=direct` reads through the page cache.** The runner polled
+the job region once a second and the card saw one read and then nothing for
+thirty-two seconds. The flag is accepted and the card saw nine sectors for a
+one-sector read, which is readahead, so it was never O_DIRECT at all. The one
+read that did reach the card was the one after a card check, which drops the
+caches itself. The runner now drops the buffers before every read, with
+BLKFLSBUF and `drop_caches` both.
+
+**The supply's serial port takes one speaker at a time.** The sampler and the
+power-off ran into each other on the first measured run, the off was lost, and
+the target ran on for minutes after the run had reported itself finished. Every
+conversation with the supply now goes through one lock and the sampler stops
+before the power-off.
+
+Two smaller ones followed from watching real runs. A job is finished when the
+runner is steadily polling again, not when the card goes quiet: quiet is
+exactly what a suspended target looks like, and cutting its power for being
+quiet is the one mistake this harness must not make. And a measured state is
+left alone for two seconds after it begins, because entering a suspend the
+kernel syncs filesystems and that write, landing a fraction of a second after
+the target's own mark, read as the end of the state and cost the whole sleep
+window on the first exchange attempt.
+
+What it then measured is in the findings' Sleep section. In short: there is one
+sleep state, s2idle, because the device tree has no `cpus/idle-states` and the
+kernel has no cpuidle driver bound; `deep` and `shallow` are refused with
+EINVAL. Six sleeps and six RTC wakes, none failed, the RTC accounting for 46
+seconds of a requested 45 and the card's clock counting exactly zero edges for
+the whole of it. Asleep the board draws 121 to 126 mA, awake and idle with the
+panel asleep 144 to 151, with the panel lit at the kernel's own level 176 to
+183, and at full brightness 246 to 252. The backlight costs four times what the
+suspend saves. Two runs of the same state differ by about 7 mA, which is the
+figure any later comparison has to beat.
+
+And the exchange works: with the target suspended and issuing no card command
+at all, the frontend can be disarmed, the result the job flushed on its way
+down read, the next job written and the frontend re-armed, in three seconds of
+a seventy-second sleep. The target wakes onto a card that was withdrawn and put
+back, re-initialises it without being asked, and runs the next job within a
+fifth of a second, with no controller error and no bad command frame. Two jobs
+for one boot.
