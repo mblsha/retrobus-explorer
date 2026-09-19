@@ -582,32 +582,34 @@ run, and a difference below about 8 mA is not believed.
 Each cell below is median / interquartile range / readings, in milliamps, over
 a 40 s sleep with the first 3 s discarded; `!` marks a window the harness
 called UNSOUND because the supply's wireless link dropped inside it. "mean" is
-the mean of the three medians in an alternating run.
+the mean of the three medians in an alternating run. In the last column, "to
+N" means the row was a first look that row N then decided properly, and "ref."
+means the row is a reference point and not a sleep at all.
 
 ```text
-  #  knob                                       before       after        wake  card  kept
-  1  nothing: two identical sleeps in one boot  126/4/11     129/13/12    yes   ok    --
-  2  the 32 s regulator cleanup inside sleep 1  125/15/6 !   126/4/11     yes   ok    no
-  3  every knob at once                         126/12/11    NO WAKE      NO    --    no
-  4  the device knobs at once                   124/10/9     NO WAKE      NO    --    no
-  5  ladder: LEDs off, 4021000 + 4022000.mmc    126/10/7     116/12/9     yes   ok    see 8
-     ladder: + panfrost off 1800000.gpu         116/12/9     130/12/10    yes   ok    no
-     ladder: + sun4i-codec off 5096000.codec    130/12/10    134/16/11    yes   ok    no
-     ladder: + panel-mipi off spi0.0            134/16/11    NO WAKE      NO    --    no
-  6  ladder: powersave governor                 121/10/13    119/12/9     yes   ok    see 10
-     ladder: + cpus 1-3 offline                 119/12/9     109/8/15     yes   ok    see 9
-     ladder: everything back to the default     109/8/15     126/16/12    yes   ok    --
-  7  cpus 1-3 offline, performance, ABBAAB      124 mean     127 mean     yes   ok    no
-  8  4021000.mmc + 4022000.mmc unbound, ABBAAB  125 mean     126 mean     yes   ok    no
-  9  powersave + cpus 1-3 offline, ABBAAB       123 mean     112 mean     yes   ok    no
- 10  powersave governor alone, ABBAAB           126 mean     115 mean     yes   ok    YES
- 11  PMIC pollers, SoC ADC, thermal, LEDs       112 mean     116 mean     yes   ok    no
- 12  ladder: DRM master, then the rest of it    114/15/6     109/11/11 !  yes   ok    no
- 13  25 devices unbound at once, A B B B        112/7/8      110 mean     yes   ok    no
- 14  poweroff -f with an RTC alarm armed        --           33/2/19      yes   --    not sleep
- 15  poweroff -f with no alarm armed            --           33/2/62      n/a   --    not sleep
- 16  awake and idle in the kept configuration   --           139/5/8      --    ok    --
- 17  ten consecutive cycles, kept configuration --           110-119      10/10 ok    --
+ #  knob                                before      after        wake  card kept
+ 1  nothing: two sleeps in one boot     126/4/11    129/13/12    yes   ok   --
+ 2  the 32 s reg. cleanup in sleep 1    125/15/6 !  126/4/11     yes   ok   no
+ 3  every knob at once                  126/12/11   NO WAKE      NO    --   no
+ 4  the device knobs at once            124/10/9    NO WAKE      NO    --   no
+ 5  ladder: LEDs, 4021000+4022000.mmc   126/10/7    116/12/9     yes   ok   to 8
+    ladder: + panfrost, 1800000.gpu     116/12/9    130/12/10    yes   ok   no
+    ladder: + sun4i-codec, 5096000      130/12/10   134/16/11    yes   ok   no
+    ladder: + panel-mipi, spi0.0        134/16/11   NO WAKE      NO    --   no
+ 6  ladder: powersave governor          121/10/13   119/12/9     yes   ok   to 10
+    ladder: + cpus 1-3 offline          119/12/9    109/8/15     yes   ok   to 9
+    ladder: everything back             109/8/15    126/16/12    yes   ok   --
+ 7  cpus 1-3 offline, perf., ABBAAB     124 mean    127 mean     yes   ok   no
+ 8  4021000+4022000.mmc off, ABBAAB     125 mean    126 mean     yes   ok   no
+ 9  powersave + cpus 1-3 off, ABBAAB    123 mean    112 mean     yes   ok   no
+10  powersave governor alone, ABBAAB    126 mean    115 mean     yes   ok   YES
+11  PMIC pollers, ADC, thermal, LEDs    112 mean    116 mean     yes   ok   no
+12  ladder: DRM master, then the rest   114/15/6    109/11/11 !  yes   ok   no
+13  25 devices unbound at once, ABBB    112/7/8     110 mean     yes   ok   no
+14  poweroff -f, RTC alarm armed        --          33/2/19      yes   --   ref.
+15  poweroff -f, no alarm armed         --          33/2/62      n/a   --   ref.
+16  awake and idle, kept configuration  --          139/5/8      --    ok   --
+17  ten consecutive cycles, kept cfg.   --          110-119      10/10 ok   --
 ```
 
 The alternating runs in full, A first:
