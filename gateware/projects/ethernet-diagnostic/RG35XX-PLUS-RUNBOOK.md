@@ -181,14 +181,14 @@ files untouched.
 uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
   --make-erofs-image /tmp/base-kernel.img \
   --system build/rg35xx-bare/system-c65536.erofs \
-  --data build/rg35xx-bare/data.ext2 --slot a \
+  --data build/rg35xx-bare/data.ext2 --slot a --card-max-hz 6000000 \
   --output /tmp/rg35xx-plus-erofs.img
 ```
 
 ```text
 {
   "bytes": 137363456,
-  "sha256": "bd44e08c0aa567a4b3aa4104d6dc447860d7ff8b4b597e467b2d618759034620",
+  "sha256": "93e49da1e5a1313f19539018b3354b5c25b4ebe3de4ff432519daa81a3980cb3",
   "root": "/dev/mmcblk0p5",
   "logical_partitions": [
     {"index": 5, "ebr_lba": 131072, "type": 131, "start_lba": 133120, "sectors": 32768},
@@ -198,8 +198,16 @@ uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
 }
 ```
 
-That sha256 is the delivered card image. `--slot b` roots from the other system
-partition instead; the slot is compiled into `BOOT.SCR`, so switching it
+That sha256 is the delivered card image, kept as
+`build/rg35xx-bare/rg35xx-plus-bare-erofs-6mhz.img`. `--card-max-hz 6000000`
+caps the clock Linux gives the emulated card, in the image's device tree: left
+alone Linux runs the card at 12.5 MHz, twice U-Boot's rate, where the link has
+little margin and fails outright once a display is running (see the display
+section of the findings). It is for the emulated card only; an image meant for a
+real card must not carry it. Without the option the same command gives
+`bd44e08c0aa567a4b3aa4104d6dc447860d7ff8b4b597e467b2d618759034620`, the image
+delivered on 2026-09-19 and measured in the findings' stage table. `--slot b`
+roots from the other system partition instead; the slot is compiled into `BOOT.SCR`, so switching it
 rewrites one file and changes nothing else.
 
 Verify the contract before any upload. A matching whole-image hash alone does
@@ -212,8 +220,9 @@ uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
 
 ```text
 "spl": {"offset": 8192, "length": 40960, "checksum": "a629138d"},
-"boot_files": {"BOOT.SCR": 494, "BOOTMARK": 512, "KERNEL": 7190891, "DTB.IMG": 49511},
-"debug_command": "boot-shell"
+"boot_files": {"BOOT.SCR": 493, "BOOTMARK": 512, "KERNEL": 7190891, "DTB.IMG": 49511},
+"debug_command": "boot-shell",
+"card_max_hz": 6000000
 ```
 
 It checks the MBR layout, the H700 eGON SPL at byte 8192 and its checksum, the

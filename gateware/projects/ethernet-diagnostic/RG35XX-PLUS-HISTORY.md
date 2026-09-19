@@ -1572,3 +1572,29 @@ log at 0.75 s apiece, the card is never announced, and the root is mounted at
 for every probe in flight before it mounts the root, so a slot this boot does
 not use holds up a root that was ready a second earlier.
 
+## 2026-09-19 The delivered image takes the cap too
+
+The display-less image never failed at 12.5 MHz in twenty cold starts, and the
+display image showed how little that says: 10 MHz looked clean for a sweep and
+four boots before the fifth died. The emulated card is an instrument for getting
+to a real card, not the product, so its margin matters and its speed does not.
+The delivered image was rebuilt with `--card-max-hz 6000000` and nothing else
+changed. Without the option the recipe still gives `bd44e08c...` byte for byte;
+with it, `93e49da1e5a1313f19539018b3354b5c25b4ebe3de4ff432519daa81a3980cb3`,
+kept as `build/rg35xx-bare/rg35xx-plus-bare-erofs-6mhz.img`.
+
+Twenty cold starts on the qualified bitstream: median 5.58 s, 5.53 to 5.64,
+standard deviation 0.03, interquartile range 0.05, against 5.38 s uncapped. Every
+run reported stages 0 to 5 and 7, the card's edge counter put Linux at 6.0 to
+6.4 MHz in each, and the only command frames that failed their checksum were at
+the power edge and in the SPL's re-initialisation, 0.09 s in, none under Linux.
+There was no slow boot among them. The cap is an option and stays one: it is for
+the emulated card, and an image for a real card must not carry it.
+
+The three bitstream directories the pull-up experiments left behind,
+`microsd-ddr-h700-pullups`, `-seed19-pullups-fasm` and `-s19-pull-dat0`, were
+removed with `prune_builds.py`, 413 MiB; their manifests are in
+`build/pruned-manifests/`. The DAT0 variant is one FASM feature away from the
+qualified routing, `PULLTYPE.PULLUP` in place of `PULLTYPE.NONE` on
+`RIOB33_X43Y73.IOB_Y1`, and repacking it takes a minute.
+

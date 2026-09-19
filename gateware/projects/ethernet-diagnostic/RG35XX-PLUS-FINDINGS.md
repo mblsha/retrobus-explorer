@@ -286,6 +286,7 @@ stage 1  baseline, shipped kernel  10   9.93   9.88  11.07   0.36   0.06
 stage 2  trimmed kernel, initramfs 10   5.75   5.72   5.83   0.03   0.05
 stage 3  trimmed kernel, EROFS     20   5.44   5.41   6.72   0.29   0.02
 delivered, + net and crypto trim   20   5.38   5.34   6.68   0.39   0.05
+the same, Linux capped at 6 MHz    20   5.58   5.53   5.64   0.03   0.05
 ```
 
 Stage 1 delivered no change to the interface, so its row is the unchanged
@@ -304,6 +305,20 @@ runs fall within 80 ms of each other; the delivered row's core spread is about
 
 The delivered median falls 0.07 s below stage 3, which is what 172,570 bytes at
 2.63 MB/s predicts.
+
+The last row is the delivered image rebuilt with `--card-max-hz 6000000`
+(sha256 `93e49da1...`), and it is the image to use on the emulated card. It is
+the one row that is slower than the row above it, by 0.20 s, and it was taken
+knowingly: every row above it lets Linux run the card at 12.5 MHz, where the
+link fails outright once a display is running and one cold start in six still
+fails at 10 (see the display section), so their twenty clean boots measured a
+margin that was there on those days and not one that can be relied on. The cap
+buys that margin for the part of the boot Linux reads, which is small. All
+twenty runs reported every userspace stage, Linux clocked the card at 6 MHz in
+each, no command frame failed its checksum after the SPL, and none was a slow
+boot. The card is a bench instrument and the destination is a real one, which
+must not carry the cap; what is worth making faster from here is whatever
+survives that move, and the card's own rate is not.
 
 Where the 5.44 s of stage 3 goes:
 
@@ -347,7 +362,7 @@ times out in one boot in ten is not known.
 ## Why four seconds needed the interface
 
 The target was under four seconds and the result is 5.44 for stage 3, 5.38
-delivered. The two payload stages delivered 4.49 s of the 5.9 s that would have
+delivered, 5.58 with Linux's card clock capped. The two payload stages delivered 4.49 s of the 5.9 s that would have
 been needed. The rest was in the interface, and the ladder above is why it
 could not be taken.
 
