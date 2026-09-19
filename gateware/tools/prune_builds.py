@@ -9,18 +9,27 @@ bitstream's sha256, the placement seed it was routed with, and the options it
 was configured from. This prints that as a table, largest first, and removes
 the directories you do not name.
 
-Only a finished bitstream experiment is ever a candidate. The openxc7
+By default only a finished bitstream experiment is a candidate. The openxc7
 toolchain, the pinned LiteX interpreter, and the RG35XX kernel trees and card
 images live in the same directory; they take hours to reproduce and some of
 them cannot be rebuilt from this repository at all. They are refused by name
-and by pattern, as is any directory whose result.json is missing or unreadable,
-because a directory that cannot say what it is has not earned a deletion.
-Those refusals are not overridable: --keep chooses among the experiments, it
-never widens what may be deleted.
+and by pattern, and no option overrides that: --keep chooses among the
+experiments, it never widens what may be deleted.
+
+A directory whose result.json is missing or unreadable is also refused by
+default, because a directory that cannot say what it is has not earned a
+deletion. Most of those are exactly the junk worth removing, though: build_ddr
+deletes the previous manifest when a build starts and only publishes a new one
+when the build succeeds, so every placement that missed timing leaves a
+gigabyte with no manifest. --include-unfinished admits them, and only them: a
+directory qualifies by holding board.v, the first file a bitstream build writes,
+which nothing else in this tree contains.
 
 Nothing is removed without --delete. The default run prints the plan, and
 --delete re-checks every rule against the directory it is about to remove
-rather than trusting the listing it just printed.
+rather than trusting the listing it just printed. Before a finished experiment
+is removed its result.json is copied to pruned-manifests/, so the seed and the
+options needed to build it again outlive the netlists.
 """
 
 import argparse
@@ -33,7 +42,9 @@ from typing import NamedTuple
 GATEWARE = Path(__file__).resolve().parents[1]
 
 # Not bitstream experiments, and expensive or impossible to rebuild.
-PROTECTED_NAMES = frozenset({"openxc7-macos", "litedram-py311"})
+ARCHIVE = "pruned-manifests"
+UNFINISHED_MARKER = "board.v"
+PROTECTED_NAMES = frozenset({"openxc7-macos", "litedram-py311", ARCHIVE})
 PROTECTED_GLOBS = ("rg35xx-*",)
 
 
@@ -58,20 +69,28 @@ def read_manifest(directory: Path):
     return manifest if isinstance(manifest, dict) else None
 
 
-def deletable(directory: Path, root: Path) -> bool:
+def is_unfinished_build(directory: Path) -> bool:
+    """Whether a directory without a manifest is nonetheless a bitstream build."""
+    return (directory / UNFINISHED_MARKER).is_file()
+
+
+def deletable(directory: Path, root: Path, include_unfinished: bool = False) -> bool:
     """Whether this tool may ever remove `directory`.
 
     Consulted when the plan is printed and again immediately before each
     deletion, so a directory that changed in between is skipped rather than
     removed on the strength of a stale listing.
     """
-    return (
+    if not (
         directory.is_dir()
         and not directory.is_symlink()
         and directory.parent == root
         and not is_protected(directory)
-        and read_manifest(directory) is not None
-    )
+    ):
+        return False
+    if read_manifest(directory) is not None:
+        return True
+    return include_unfinished and is_unfinished_build(directory)
 
 
 def directory_size(directory: Path) -> int:
@@ -85,7 +104,7 @@ def directory_size(directory: Path) -> int:
 
 class Experiment(NamedTuple):
     path: Path
-    manifest: dict
+    manifest: dict | None  # None for a build that never published one
     size: int
 
     @property
@@ -93,13 +112,13 @@ class Experiment(NamedTuple):
         return self.path.name
 
 
-def experiments(root: Path) -> list[Experiment]:
-    """Every finished bitstream experiment directly under `root`, largest first."""
+def experiments(root: Path, include_unfinished: bool = False) -> list[Experiment]:
+    """Every bitstream experiment directly under `root`, largest first."""
     root = root.resolve()
     found = [
         Experiment(directory, read_manifest(directory), directory_size(directory))
         for directory in sorted(root.iterdir() if root.is_dir() else [])
-        if deletable(directory, root)
+        if deletable(directory, root, include_unfinished)
     ]
     return sorted(found, key=lambda experiment: -experiment.size)
 
@@ -131,12 +150,14 @@ HEADINGS = (
 
 
 def row(experiment: Experiment, keep: set) -> tuple:
-    manifest = experiment.manifest
+    manifest = experiment.manifest or {}
     h700 = manifest.get("h700_mmc")
     return (
         "keep" if experiment.name in keep else "prune",
         experiment.name,
-        str(manifest.get("bitstream_sha256", "-"))[:12],
+        "unfinished"
+        if experiment.manifest is None
+        else str(manifest.get("bitstream_sha256", "-"))[:12],
         str(manifest.get("placement_seed", "-")),
         str(manifest.get("profile") or "-"),
         "-" if h700 is None else ("yes" if h700 else "no"),
@@ -174,6 +195,12 @@ def main(argv=None) -> int:
         help="Experiment directories to retain; everything else is pruned",
     )
     parser.add_argument(
+        "--include-unfinished",
+        action="store_true",
+        help="Also prune builds that failed or were interrupted: directories "
+        f"holding {UNFINISHED_MARKER} but no readable result.json",
+    )
+    parser.add_argument(
         "--delete",
         action="store_true",
         help="Actually remove the directories instead of printing the plan",
@@ -193,9 +220,9 @@ def main(argv=None) -> int:
         )
 
     keep = set(args.keep)
-    found = experiments(root)
+    found = experiments(root, args.include_unfinished)
     if not found:
-        print(f"No finished bitstream experiments under {root}.")
+        print(f"No bitstream experiments under {root}.")
         return 0
     print(render_table(row(experiment, keep) for experiment in found))
 
@@ -216,12 +243,17 @@ def main(argv=None) -> int:
 
     freed = 0
     for experiment in doomed:
-        if not deletable(experiment.path, root):
+        if not deletable(experiment.path, root, args.include_unfinished):
             print(f"  skipped {experiment.name}: no longer a bitstream experiment")
             continue
+        if experiment.manifest is not None:
+            archive = root / ARCHIVE
+            archive.mkdir(exist_ok=True)
+            shutil.copy2(experiment.path / "result.json", archive / f"{experiment.name}.json")
         shutil.rmtree(experiment.path)
         freed += experiment.size
     print(f"\nFreed {freed} bytes ({human(freed)}).")
+    print(f"Manifests of the finished experiments removed are in {root / ARCHIVE}.")
     return 0
 
 

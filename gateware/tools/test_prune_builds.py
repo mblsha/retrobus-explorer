@@ -218,3 +218,109 @@ class DeletionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def unfinished(root: Path, name: str, size: int = 4096) -> Path:
+    """A build that started and never published a manifest: it failed timing or
+    was interrupted, which is how most of the space in a build tree is lost."""
+    directory = root / name
+    directory.mkdir(parents=True)
+    (directory / "board.v").write_text("module board; endmodule\n")
+    (directory / "design.json").write_bytes(b"\0" * size)
+    return directory
+
+
+class UnfinishedBuildTests(unittest.TestCase):
+    def test_an_unfinished_build_is_left_alone_unless_asked_for(self):
+        with build_tree() as root:
+            experiment(root, "microsd-ddr-ethernet-h700")
+            failed = unfinished(root, "microsd-ddr-ethernet-h700-early-command")
+            code, printed = run(root, "--keep", "microsd-ddr-ethernet-h700", "--delete")
+            self.assertEqual(code, 0)
+            self.assertNotIn("early-command", printed)
+            self.assertTrue(failed.is_dir())
+
+    def test_asked_for_it_is_listed_as_unfinished_and_removed(self):
+        with build_tree() as root:
+            experiment(root, "microsd-ddr-ethernet-h700")
+            failed = unfinished(root, "microsd-ddr-ethernet-h700-early-command")
+            code, printed = run(
+                root, "--keep", "microsd-ddr-ethernet-h700", "--include-unfinished"
+            )
+            rows = table(printed, 2)
+            self.assertEqual(rows[failed.name][0], "prune")
+            self.assertEqual(rows[failed.name][2], "unfinished")
+            self.assertTrue(failed.is_dir(), "a dry run removed something")
+            run(root, "--keep", "microsd-ddr-ethernet-h700", "--include-unfinished", "--delete")
+            self.assertFalse(failed.exists())
+            self.assertTrue((root / "microsd-ddr-ethernet-h700").is_dir())
+
+    def test_an_unfinished_build_can_be_kept_by_name(self):
+        """The default output of a supported profile is worth keeping even when
+        its last build failed, so --keep has to reach these too."""
+        with build_tree() as root:
+            canonical = unfinished(root, "microsd-ddr-ethernet")
+            doomed = unfinished(root, "microsd-ddr-ethernet-h700-wide")
+            run(root, "--keep", canonical.name, "--include-unfinished", "--delete")
+            self.assertTrue(canonical.is_dir())
+            self.assertFalse(doomed.exists())
+
+    def test_a_truncated_manifest_beside_the_marker_counts_as_unfinished(self):
+        with build_tree() as root:
+            experiment(root, "keeper")
+            interrupted = unfinished(root, "microsd-ddr-interrupted")
+            (interrupted / "result.json").write_text("{ truncated")
+            run(root, "--keep", "keeper", "--include-unfinished", "--delete")
+            self.assertFalse(interrupted.exists())
+
+    def test_the_option_never_widens_to_anything_but_bitstream_builds(self):
+        """The marker admits a directory; it does not outrank the protections,
+        and a directory without it stays refused whatever it is called."""
+        with build_tree() as root:
+            experiment(root, "keeper")
+            guarded = [
+                unfinished(root, name)
+                for name in ("openxc7-macos", "litedram-py311", "rg35xx-kernel", "pruned-manifests")
+            ]
+            plain = root / "rocknix-download"
+            plain.mkdir()
+            (plain / "image.img").write_bytes(b"\0" * 4096)
+            code, printed = run(root, "--keep", "keeper", "--include-unfinished", "--delete")
+            self.assertEqual(code, 0)
+            for directory in (*guarded, plain):
+                self.assertTrue(directory.is_dir(), directory.name)
+                self.assertNotIn(f" {directory.name} ", printed)
+
+
+class ManifestArchiveTests(unittest.TestCase):
+    def test_a_removed_experiment_leaves_its_manifest_behind(self):
+        """The netlists are reproducible from the seed and the options, and the
+        manifest is the only place both are written down."""
+        with build_tree() as root:
+            experiment(root, "keeper")
+            doomed = experiment(root, "microsd-ddr-ethernet-h700-scr", placement_seed=8)
+            original = (doomed / "result.json").read_text()
+            run(root, "--keep", "keeper", "--delete")
+            self.assertFalse(doomed.exists())
+            archived = root / "pruned-manifests" / "microsd-ddr-ethernet-h700-scr.json"
+            self.assertEqual(archived.read_text(), original)
+
+    def test_the_archive_is_never_a_candidate_and_survives_the_next_run(self):
+        with build_tree() as root:
+            experiment(root, "keeper")
+            experiment(root, "first")
+            run(root, "--keep", "keeper", "--delete")
+            experiment(root, "second")
+            code, printed = run(root, "--keep", "keeper", "--include-unfinished", "--delete")
+            self.assertNotIn("pruned-manifests ", printed)
+            archive = root / "pruned-manifests"
+            self.assertEqual(
+                sorted(path.name for path in archive.iterdir()), ["first.json", "second.json"]
+            )
+
+    def test_an_unfinished_build_has_no_manifest_to_archive(self):
+        with build_tree() as root:
+            experiment(root, "keeper")
+            unfinished(root, "microsd-ddr-ethernet-h700-wide")
+            run(root, "--keep", "keeper", "--include-unfinished", "--delete")
+            self.assertFalse((root / "pruned-manifests").exists())
