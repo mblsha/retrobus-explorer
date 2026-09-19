@@ -132,3 +132,40 @@ class RunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FetchOptionTests(unittest.TestCase):
+    def test_fetch_populates_the_work_directory_before_anything_checks_it(self):
+        """The manifest could verify sources but not produce them, so a clean
+        checkout could not build the kernel it pins."""
+        from unittest.mock import patch
+
+        order = []
+
+        def fetch(work):
+            order.append("fetch")
+            (work / "patches").mkdir(parents=True)
+            (work / "base.config").write_text("CONFIG_X=y\n")
+            return ["base.config"]
+
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory) / "work"
+            with (
+                patch.object(builder.rocknix, "fetch_kernel_sources", side_effect=fetch),
+                patch.object(builder, "find_runner", return_value=["docker"]),
+                patch.object(builder, "run", side_effect=lambda command: order.append("build") or 0),
+                self.assertRaises(SystemExit) as finished,
+            ):
+                builder.main(["--work", str(work), "--fetch", "--allow-unpinned"])
+        self.assertEqual(finished.exception.code, 0)
+        self.assertEqual(order, ["fetch", "build"])
+
+    def test_an_empty_work_directory_says_how_to_fill_it(self):
+        import contextlib
+        import io
+
+        complaint = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stderr(complaint):
+            with self.assertRaises(SystemExit):
+                builder.main(["--work", str(Path(directory) / "empty")])
+        self.assertIn("--fetch", complaint.getvalue())

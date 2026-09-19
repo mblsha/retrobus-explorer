@@ -22,18 +22,19 @@ from rg35xx.containers import DEFAULT_IMAGE
 from rg35xx.containers import container_command as run_in_container
 from rg35xx.containers import find_runner
 from rg35xx.containers import run
+from rg35xx import rocknix
 
 HERE = Path(__file__).resolve().parent
 GATEWARE = HERE.parents[2]
 # Pinned by ROCKNIX's own package.mk for the H700 device.
 KERNEL_VERSION = "7.2"
 KERNEL_SHA256 = "f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3"
-# The patches and the configuration come from ROCKNIX's tree, which this build
-# does not fetch: they are prepared in the work directory out of band. Their
-# content is what decides whether the kernel that comes out is the kernel that
-# was measured, so the commit they came from and their hashes are recorded here
-# and checked before the build. A re-fetch that quietly picks up a newer branch
-# tip would otherwise produce a different kernel under the same name.
+# The patches and the configuration come from ROCKNIX's tree. Their content is
+# what decides whether the kernel that comes out is the kernel that was
+# measured, so the commit they came from and their hashes are recorded here,
+# --fetch downloads exactly those, and the work directory is checked against
+# them before every build however it was filled. A fetch that quietly followed
+# a branch tip would otherwise produce a different kernel under the same name.
 SOURCES = HERE / "rocknix-sources.json"
 
 # Nothing internal is behind USB: the device tree enables one port, the
@@ -234,11 +235,22 @@ def main(argv=None):
         help="Build from patches that do not match the recorded manifest. Use "
         "when deliberately moving to a newer ROCKNIX tree, and re-record it.",
     )
+    parser.add_argument(
+        "--fetch", action="store_true",
+        help="First download the pinned patches and configuration from ROCKNIX "
+        "into the work directory; each is written only if its hash matches",
+    )
     arguments = parser.parse_args(argv)
     work = arguments.work.resolve()
+    if arguments.fetch:
+        try:
+            written = rocknix.fetch_kernel_sources(work)
+        except (OSError, ValueError) as failure:
+            parser.error(f"fetch failed: {failure}")
+        print(f"fetched {len(written)} pinned files into {work}")
     for required in ("patches", "base.config"):
         if not (work / required).exists():
-            parser.error(f"{work / required} is missing")
+            parser.error(f"{work / required} is missing; --fetch downloads it")
     if not arguments.allow_unpinned:
         try:
             verify_sources(work)
