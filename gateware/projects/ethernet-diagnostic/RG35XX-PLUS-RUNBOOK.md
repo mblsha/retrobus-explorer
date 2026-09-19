@@ -3,13 +3,17 @@
 Everything needed to produce the delivered boot and measure it, in the order
 it has to happen. What the numbers mean is in
 [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md); how they were arrived at is
-in [RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md). Nothing below needs either.
+in [RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md). Nothing below needs
+either of them.
 
 Run every command from `gateware/`.
 
 Three steps need the bench and are marked as such: they were **not executed
-while this was written**, and a coordinator runs them. Everything else here was
-run as written.
+while this was written**, and a coordinator runs them. The kernel and rootfs
+builds were not re-run either; they take about an hour in a container and their
+outputs are already in `build/`, so those two sections are marked as well.
+Everything else here was run as written, and what is shown below a command is
+that run's own output.
 
 ## 0. Environment
 
@@ -57,8 +61,8 @@ Two rules are not optional:
   and the Cellar paths to try.
 - `./.venv/bin/python`, not `uv run`. macOS strips `DYLD_LIBRARY_PATH` when a
   process is re-executed through a signed launcher, so the pin above would be
-  gone by the time nextpnr starts. This is the only command in this file that
-  must avoid `uv run`.
+  gone by the time nextpnr starts. This and the seed search below are the only
+  commands in this file that must avoid `uv run`.
 
 `--profile` supplies defaults, so a flag given alongside it still wins and an
 experiment can start from the shipped build and change one thing.
@@ -83,9 +87,10 @@ expectations, which is what this profile is routed against.
 
 ## 2. Kernel
 
-The build runs in an arm64 container; it was not re-run while writing, because
-its output is already in `build/rg35xx-kernel-trim/out/Image` and rebuilding it
-costs about an hour. The manifest check below was run.
+**Not executed while writing.** The build runs in an arm64 container; its
+output is already in `build/rg35xx-kernel-trim/out/Image` and rebuilding it
+costs about an hour. The manifest check it starts with was run against that
+tree, and the gzip step at the end of this section was run.
 
 `build-kernel` does not fetch ROCKNIX's patches or configuration. They are
 prepared in the work directory out of band, as `patches/*.patch` and
@@ -123,14 +128,15 @@ cp -p build/rg35xx-kernel-trim/out/Image /tmp/Image
 gzip -9 /tmp/Image
 ```
 
-That leaves `/tmp/Image.gz`, 7,190,891 bytes. `cp -p` matters: gzip stores the source file's name and mtime in its header, so
-without the timestamp the payload's bytes differ from the delivered one even
-though the kernel inside is identical.
+That leaves `/tmp/Image.gz`, 7,190,891 bytes. `cp -p` matters: gzip stores the
+source file's name and mtime in its header, so without the timestamp the
+payload's bytes differ from the delivered one even though the kernel inside is
+identical.
 
 ## 3. Rootfs
 
-Also an arm64 container build; not re-run while writing, its output is in
-`build/rg35xx-bare/`.
+**Not executed while writing.** Also an arm64 container build; its output is
+already in `build/rg35xx-bare/`.
 
 ```sh
 uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
