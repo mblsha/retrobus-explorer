@@ -37,6 +37,7 @@ from pathlib import Path
 from rg35xx.debug_partition import DEBUG_SECTORS
 from rg35xx.debug_partition import JOB_LBA
 from rg35xx.debug_partition import JOB_SECTORS
+from rg35xx.debug_partition import PAGE_SECTORS
 from rg35xx.debug_partition import RESULT_SECTOR
 from rg35xx.debug_partition import RESULT_SECTORS
 from rg35xx.debug_partition import SECTOR_SIZE
@@ -63,6 +64,13 @@ DEFAULT_DEBUG_START = 114688
 # throw away what the first seconds of it show, and report the spread.
 MIN_DWELL_SECONDS = 20.0
 DISCARD_SECONDS = 3.0
+# How long a marked state is left alone before anything is taken for its end.
+# Entering a suspend, the kernel syncs filesystems, and that sync can put a
+# write on the card a fraction of a second after the target's own mark. Once
+# that has been read as the end of the state, the host no longer believes the
+# target is asleep and the whole sleep window is lost -- which happened on the
+# first exchange attempt on 2026-09-20 and not on the five runs around it.
+GRACE_SECONDS = 2.0
 # Every conversation with the supply goes through this. The CLI opens the one
 # serial port the modules are behind, and two of them open at once is not an
 # error: the bytes interleave and a command is silently lost. On 2026-09-19
@@ -151,7 +159,17 @@ def summarize(samples: list[Sample], start: float, end: float,
     reports zeroes, and a zero averaged into a current is a wrong answer
     rather than a missing one.
     """
-    inside = [s for s in samples if start + discard <= s.elapsed <= end]
+    # A reading counts only if the state held for the whole time the reading
+    # took. One costs a second or more -- a Node process starts and a serial
+    # exchange happens -- and a sample timestamped just inside a window can
+    # have been taken while the target was already waking. Those are what put
+    # a 264 mA maximum in a window whose quartiles were 241 to 250.
+    spans = list(zip(samples, [s.elapsed for s in samples[1:]] + [None]))
+    inside = [
+        sample for sample, finished in spans
+        if start + discard <= sample.elapsed <= end
+        and (end if finished is None else finished) <= end
+    ]
     usable = [s.amps for s in inside if s.online and s.amps is not None]
     offline = [s for s in inside if not s.online or s.amps is None]
     span = max(0.0, end - start)
@@ -290,6 +308,12 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
     """
     mark = read_reported_at(debug_start + SLEEP_MARK_SECTOR)
     job_region = read_reported_at(JOB_LBA)
+    # Where a read of the whole script ends. The runner reads the job's header
+    # and then its body without pausing, so a host polling every fifth of a
+    # second nearly always sees the second of the two: that read, and not the
+    # header's, is what says a job has been taken up.
+    script = range(JOB_LBA + JOB_SECTORS - PAGE_SECTORS,
+                   JOB_LBA + JOB_SECTORS + PAGE_SECTORS + 1)
     previous = None
     recorded = 0.0
     started = time.monotonic()
@@ -314,19 +338,27 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
                     if watch.job_started is not None and watch.job_finished is None:
                         watch.job_finished = now
                     watch.last_poll = now
-            if watch.inside_window and (read or wrote):
+                elif fields["read_lba"] in script and watch.job_started is None:
+                    watch.job_started = now
+            signalled = read and fields["read_lba"] in mark
+            settled = (watch.marks
+                       and now - watch.marks[-1]["elapsed"] >= GRACE_SECONDS)
+            if watch.inside_window and (signalled or (settled and (read or wrote))):
                 # Anything at all ends the state. The closing mark is a read
                 # like the opening one, but a poll that lands after the target
                 # has already gone on to its next card operation sees only the
                 # later one: on waking the runner marks, checks the card and
                 # writes a result inside a third of a second. So the window
-                # ends at the first sign of life, which is the same instant to
-                # within one poll and does not depend on catching the mark.
+                # ends on its closing mark, or failing that at the first sign
+                # of life once the state has had a moment to settle: the same
+                # instant to within one poll, without depending on the mark
+                # being caught, and without the kernel's own sync on the way
+                # into a suspend ending the suspend it is entering.
                 watch.marks.append({"elapsed": round(now, 2), "opening": False})
                 watch.windows.append(
                     {"start": watch.marks[-2]["elapsed"], "end": round(now, 2)}
                 )
-            elif read and fields["read_lba"] in mark:
+            elif signalled:
                 watch.marks.append({"elapsed": round(now, 2), "opening": True})
         if previous is None or now - recorded >= record_every:
             watch.samples.append({"elapsed": round(now, 2), **fields})
@@ -342,23 +374,29 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
 
 
 def job_is_done(quiet: float):
-    """A job has finished when the runner goes back to polling for the next.
+    """A job has finished once the runner is steadily polling for the next one.
 
-    The runner reads the job region once a second when it is idle and not at
-    all while a job runs, so the gap in those reads is the job, and the read
-    that ends the gap is the job's last act. Nothing else the host can see
-    says as much: a write's LBA does not survive in the trace, and silence on
-    its own is what a suspended target looks like.
+    The runner reads the job region once a second when it has nothing to run,
+    and not at all while a job runs. A job is always on the card before the
+    boot or the wake that finds it, so the runner's first poll takes it up
+    immediately and there is no steady polling until the job is over: two
+    polls are the job's epitaph.
+
+    Nothing simpler works. A write's LBA does not survive in the trace, so the
+    result being written cannot be seen; the runner reads the header and then
+    the script without pausing, so a host polling five times a second usually
+    sees only the second of the two; and silence, the other candidate, is
+    exactly what a suspended target looks like.
     """
 
     def done(watch: Watch, fields: dict, now: float) -> str | None:
-        if watch.last_poll is None:
-            return None
-        if watch.job_started is None:
+        if watch.polls >= 2:
+            watch.job_finished = watch.job_finished or now
+            return "job-done"
+        if watch.job_started is None and watch.last_poll is not None:
             if now - watch.last_poll >= quiet:
                 watch.job_started = watch.last_poll
-            return None
-        return "job-done" if watch.job_finished is not None else None
+        return None
 
     return done
 
@@ -602,10 +640,15 @@ def run_exchange(arguments, client, script: str) -> dict:
         )
         exchange["asleep"] = reason == "asleep"
         if reason != "asleep":
-            raise RuntimeError(
-                "the target never marked a sleep; an exchange needs a job that "
-                "ends in rtc_sleep"
+            # Not an exception: the trace of the attempt is the only account of
+            # why it did not work, and an exception here would throw it away
+            # along with the run that produced it.
+            print(
+                "the target never marked a sleep the host could see; no "
+                "exchange was attempted"
             )
+            return finish_exchange(arguments, client, channel, exchange, watch,
+                                   sampler)
         asleep_at = watch.marks[-1]["elapsed"]
         while time.monotonic() - zero < asleep_at + arguments.dwell:
             time.sleep(0.2)
@@ -627,18 +670,32 @@ def run_exchange(arguments, client, script: str) -> dict:
             }
         )
         # From here the target wakes, finishes the first job, finds the second
-        # and runs that. Both have to happen for the exchange to have worked.
+        # and runs that. Both have to happen for the exchange to have worked,
+        # and the poll count is zeroed so that the polling before the sleep
+        # cannot be read as the second job already being over.
         watch.job_started = watch.job_finished = None
+        watch.polls = 0
         reason = watch_trace(
             client, watch, zero, arguments.wait_seconds, arguments.interval,
             arguments.debug_start, done=job_is_done(arguments.quiet),
         )
         exchange["second_ran"] = reason == "job-done"
+        run = finish_exchange(arguments, client, channel, exchange, watch,
+                              sampler)
     finally:
-        sampler.stop()
-        powered_off = locked_power_off(arguments.psu_cli, channel)
-        time.sleep(2)
-        client.command(images.Opcode.DISARM)
+        if not exchange.get("finished"):
+            run = finish_exchange(arguments, client, channel, exchange, watch,
+                                  sampler)
+    return run
+
+
+def finish_exchange(arguments, client, channel, exchange, watch, sampler) -> dict:
+    """Put the bench back and read off whatever the attempt left behind."""
+    exchange["finished"] = True
+    sampler.stop()
+    powered_off = locked_power_off(arguments.psu_cli, channel)
+    time.sleep(2)
+    client.command(images.Opcode.DISARM)
     if not powered_off:
         print(f"WARNING: {channel} never confirmed its output off")
     return {

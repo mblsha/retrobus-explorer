@@ -5,6 +5,7 @@ import unittest
 from rg35xx import job
 from rg35xx.debug_partition import CARD_CHECK_SECTOR
 from rg35xx.debug_partition import JOB_LBA
+from rg35xx.debug_partition import JOB_SECTORS
 from rg35xx.debug_partition import PAGE_SECTORS
 from rg35xx.debug_partition import JOB_SECTORS
 from rg35xx.debug_partition import RESULT_SECTOR
@@ -54,6 +55,15 @@ class WindowSummaryTests(unittest.TestCase):
         readings = samples([(0.0, 0.5), (1.0, 0.4), (4.0, 0.2), (24.0, 0.2)])
         summary = job.summarize(readings, 0.0, 25.0)
         self.assertEqual(summary["n"], 2)
+
+    def test_a_reading_that_straddles_the_end_of_a_window_is_dropped(self):
+        """One reading costs a second or more, and a sample timestamped just
+        inside a window can have been taken while the target was waking."""
+        readings = samples([(4.0, 0.2), (8.0, 0.2), (12.0, 0.2), (16.0, 0.2),
+                            (24.0, 0.9), (27.0, 0.9)])
+        summary = job.summarize(readings, 0.0, 25.0)
+        self.assertEqual(summary["n"], 4)
+        self.assertEqual(summary["max_a"], 0.2)
         self.assertEqual(summary["median_a"], 0.2)
         self.assertEqual(summary["max_a"], 0.2)
 
@@ -303,33 +313,45 @@ class WatchTests(unittest.TestCase):
         """On waking the runner marks, checks the card and writes a result
         inside a third of a second, and a poll that lands after all of that
         sees only the last of them. The window has to end anyway."""
-        watch, _ = self.follow(
-            [trace(), self.marked(1), trace(reads=1, writes=1, read_lba=99)]
-        )
+        watch = job.Watch(marks=[{"elapsed": -60.0, "opening": True}])
+        client = FakeClient([trace(), trace(reads=1, writes=1, read_lba=99)])
+
+        def stop(watching, fields, now):
+            return "exhausted" if not client.traces else None
+
+        job.watch_trace(client, watch, zero=time.monotonic(), seconds=60.0,
+                        interval=0.0, debug_start=DEBUG_START, done=stop)
         self.assertEqual(len(watch.windows), 1)
         self.assertFalse(watch.inside_window)
 
-    def test_a_job_is_not_finished_while_the_target_is_polling_for_one(self):
-        """Before the job starts the runner is already reading the job region
-        once a second, and that is not a job that has been and gone."""
-        watch, reason = self.follow(
-            [trace(), self.polled(1), self.polled(2), self.polled(3)],
-            done=job.job_is_done(quiet=5.0),
+    def test_the_kernels_own_sync_does_not_end_the_state_it_is_entering(self):
+        """Going into a suspend the kernel syncs filesystems, and that write
+        lands a fraction of a second after the target's mark. Read as the end
+        of the state, it costs the whole sleep window."""
+        watch, _ = self.follow(
+            [trace(), self.marked(1), trace(reads=1, writes=1, read_lba=99)]
         )
-        self.assertEqual(reason, "exhausted")
-        self.assertIsNone(watch.job_started)
-        self.assertEqual(watch.polls, 3)
+        self.assertEqual(watch.windows, [])
+        self.assertTrue(watch.inside_window)
 
-    def test_the_poll_that_ends_the_gap_ends_the_job(self):
-        """The runner does not touch the job region while a job runs, so the
-        gap is the job and the read that ends it is the job's last act."""
+    def test_two_polls_mean_the_runner_has_nothing_left_to_run(self):
+        """A job is on the card before the boot that finds it, so the first
+        poll takes it up and steady polling only resumes once it is over."""
         watch, reason = self.follow(
-            [trace(), self.polled(1)] + [self.polled(1)] * 3 + [self.polled(2)],
-            done=job.job_is_done(quiet=0.0),
+            [trace(), self.polled(1),
+             trace(reads=2, read_lba=JOB_LBA + JOB_SECTORS),
+             self.polled(3), self.polled(4)],
+            done=job.job_is_done(quiet=30.0),
         )
         self.assertEqual(reason, "job-done")
         self.assertIsNotNone(watch.job_started)
         self.assertIsNotNone(watch.job_finished)
+
+    def test_one_poll_is_the_runner_taking_the_job_up(self):
+        watch, reason = self.follow(
+            [trace(), self.polled(1)], done=job.job_is_done(quiet=30.0)
+        )
+        self.assertEqual(reason, "exhausted")
 
     def test_a_suspended_target_is_not_a_finished_job(self):
         """Quiet is exactly what a sleeping target looks like, and cutting its
@@ -341,6 +363,7 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(reason, "exhausted")
         self.assertTrue(watch.inside_window)
         self.assertIsNone(watch.job_finished)
+        self.assertEqual(watch.polls, 1)
 
     def test_a_sleep_is_an_opening_mark_followed_by_silence(self):
         watch, reason = self.follow(
