@@ -1,16 +1,11 @@
 import hashlib
-import importlib.util
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-
-SCRIPT = Path(__file__).parents[1] / "rg35xx/build_kernel.py"
-SPEC = importlib.util.spec_from_file_location("build_kernel", SCRIPT)
-builder = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(builder)
+from rg35xx import build_kernel as builder
+from rg35xx.containers import find_runner
 
 
 class SourceManifestTests(unittest.TestCase):
@@ -83,6 +78,56 @@ class SourceManifestTests(unittest.TestCase):
         for name, digest in manifest["patches"].items():
             self.assertTrue(name.endswith(".patch"), name)
             self.assertEqual(len(digest), 64, name)
+
+
+class KernelContainerTests(unittest.TestCase):
+    def command(self, **overrides):
+        arguments = dict(
+            runner=["docker"], work=Path("/work"), patches=Path("/work/patches"),
+            config=Path("/work"), out=Path("/work/out"), image="alpine:3.20",
+        )
+        arguments.update(overrides)
+        return builder.container_command(**arguments)
+
+    def test_the_container_builds_natively_for_the_target(self):
+        built = self.command()
+        self.assertEqual(built[built.index("--platform") + 1], "linux/arm64")
+
+    def test_the_pinned_tarball_and_the_trim_lists_reach_the_build(self):
+        built = self.command(disable=["USB_SUPPORT"], enable=["EROFS_FS"])
+        self.assertIn(f"VERSION={builder.KERNEL_VERSION}", built)
+        self.assertIn(f"EXPECTED={builder.KERNEL_SHA256}", built)
+        self.assertIn("DISABLE_LIST=USB_SUPPORT", built)
+        self.assertIn("ENABLE_LIST=EROFS_FS", built)
+        self.assertIn("kernel tarball does not match the hash", builder.BUILD)
+
+    def test_the_sources_are_mounted_where_the_build_reads_them(self):
+        """The patches and the configuration are inputs the build must not be
+        able to rewrite, so they are mounted read-only."""
+        built = self.command()
+        self.assertIn("/work/patches:/patches:ro", built)
+        self.assertIn("/work:/config:ro", built)
+        self.assertIn("/work/out:/out", built)
+
+    def test_thin_lto_is_only_requested_with_the_llvm_toolchain(self):
+        self.assertIn("TOOLCHAIN=clang", self.command(toolchain="clang"))
+        self.assertIn("TOOLCHAIN=gcc", self.command())
+        self.assertIn("LTO_CLANG_THIN", builder.BUILD)
+
+
+class RunnerTests(unittest.TestCase):
+    """Both builders reach the same container runtime, so it is found once."""
+
+    def test_an_explicit_runner_is_used_verbatim(self):
+        self.assertEqual(
+            find_runner("colima nerdctl --"), ["colima", "nerdctl", "--"]
+        )
+
+    def test_both_builders_share_one_runner(self):
+        from rg35xx import build_rootfs
+
+        self.assertIs(builder.find_runner, find_runner)
+        self.assertIs(build_rootfs.find_runner, find_runner)
 
 
 if __name__ == "__main__":

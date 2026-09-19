@@ -15,17 +15,19 @@ boot time.
 import argparse
 import hashlib
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from rg35xx.containers import DEFAULT_IMAGE
+from rg35xx.containers import container_command as run_in_container
+from rg35xx.containers import find_runner
+from rg35xx.containers import run
 
 HERE = Path(__file__).resolve().parent
 GATEWARE = HERE.parents[2]
 # Pinned by ROCKNIX's own package.mk for the H700 device.
 KERNEL_VERSION = "7.2"
 KERNEL_SHA256 = "f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3"
-DEFAULT_IMAGE = "alpine:3.20"
 # The patches and the configuration come from ROCKNIX's tree, which this build
 # does not fetch: they are prepared in the work directory out of band. Their
 # content is what decides whether the kernel that comes out is the kernel that
@@ -156,17 +158,6 @@ ls -l /out/Image
 """
 
 
-def find_runner(explicit=None):
-    if explicit:
-        return explicit.split()
-    for candidate in ("docker", "nerdctl"):
-        if shutil.which(candidate):
-            return [candidate]
-    if shutil.which("colima"):
-        return ["colima", "nerdctl", "--"]
-    raise RuntimeError("need docker, nerdctl or colima to build the kernel")
-
-
 def verify_sources(work: Path, sources: Path = SOURCES) -> dict:
     """Check the work directory against the recorded ROCKNIX manifest.
 
@@ -204,19 +195,24 @@ def container_command(runner, work, patches, config, out, image,
                       disable=None, enable=None, toolchain="gcc"):
     disable = DISABLE if disable is None else disable
     enable = ENABLE if enable is None else enable
-    return [
-        *runner, "run", "--rm", "--platform", "linux/arm64",
-        "-v", f"{work}:/work",
-        "-v", f"{patches}:/patches:ro",
-        "-v", f"{config}:/config:ro",
-        "-v", f"{out}:/out",
-        "-e", f"VERSION={KERNEL_VERSION}",
-        "-e", f"EXPECTED={KERNEL_SHA256}",
-        "-e", f"DISABLE_LIST={' '.join(disable)}",
-        "-e", f"ENABLE_LIST={' '.join(enable)}",
-        "-e", f"TOOLCHAIN={toolchain}",
-        image, "sh", "-c", BUILD,
-    ]
+    return run_in_container(
+        runner,
+        image,
+        BUILD,
+        mounts=[
+            (work, "/work", False),
+            (patches, "/patches", True),
+            (config, "/config", True),
+            (out, "/out", False),
+        ],
+        environment={
+            "VERSION": KERNEL_VERSION,
+            "EXPECTED": KERNEL_SHA256,
+            "DISABLE_LIST": " ".join(disable),
+            "ENABLE_LIST": " ".join(enable),
+            "TOOLCHAIN": toolchain,
+        },
+    )
 
 
 def main():
@@ -257,7 +253,7 @@ def main():
         find_runner(arguments.runner), work, work / "patches", work,
         out, arguments.image, disable=disable, toolchain=arguments.toolchain,
     )
-    sys.exit(subprocess.run(command, check=False).returncode)
+    sys.exit(run(command))
 
 
 if __name__ == "__main__":

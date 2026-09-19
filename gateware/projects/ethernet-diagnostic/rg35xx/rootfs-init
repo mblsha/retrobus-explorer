@@ -15,12 +15,14 @@ $BB mount -t sysfs sysfs /sys 2>/dev/null || true
 $BB mount -t tmpfs tmpfs /tmp 2>/dev/null || true
 exec </dev/console >/dev/console 2>&1
 
-DEBUG_DEVICE=/dev/mmcblk0p2
-DATA_DEVICE=/dev/mmcblk0p7
-MAGIC=RG35DBG1
+# Filled in by build_rootfs.py from the image layout; an unrendered
+# placeholder is refused rather than shipped.
+DEBUG_DEVICE=@DEBUG_DEVICE@
+DATA_DEVICE=@DATA_DEVICE@
+MAGIC=@MAGIC@
 
-# U-Boot owns sectors 1..15; these start at 16 so both records survive a boot
-# and can be read back together.
+# U-Boot owns the sectors below @USERSPACE_BASE@; these start there so both
+# records survive a boot and can be read back together.
 write_stage() {
     stage="$1"
     detail="$2"
@@ -32,7 +34,7 @@ write_stage() {
         $BB printf 'detail=%s\n' "$detail"
         $BB printf 'uptime=%s\n' "$($BB cut -d' ' -f1 /proc/uptime 2>/dev/null)"
     } > "$record"
-    $BB dd if="$record" of="$DEBUG_DEVICE" bs=512 seek=$((16 + stage)) \
+    $BB dd if="$record" of="$DEBUG_DEVICE" bs=512 seek=$((@USERSPACE_BASE@ + stage)) \
         count=1 conv=sync,notrunc 2>/dev/null
     $BB sync
 }

@@ -20,10 +20,19 @@ known quantity and the only thing under test is where it is read from.
 """
 
 import argparse
-import shutil
-import subprocess
+import re
 import sys
+import tempfile
 from pathlib import Path
+
+from rg35xx.containers import DEFAULT_IMAGE
+from rg35xx.containers import container_command as run_in_container
+from rg35xx.containers import find_runner
+from rg35xx.containers import run
+from rg35xx.debug_partition import DEBUG_PARTITION
+from rg35xx.debug_partition import MAGIC
+from rg35xx.debug_partition import USERSPACE_BASE
+from rg35xx.image import DATA_PARTITION
 
 HERE = Path(__file__).resolve().parent
 GATEWARE = HERE.parents[2]
@@ -31,7 +40,49 @@ DEFAULT_BUSYBOX = "1.36.1"
 DEFAULT_BUSYBOX_SHA256 = (
     "b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314"
 )
-DEFAULT_IMAGE = "alpine:3.20"
+
+# PID 1 is a template rather than a script, because everything it needs to
+# know -- which partition carries the debug sectors, which carries the data
+# volume, the record magic and where userspace's milestones start -- is
+# decided by the image layout. A second copy of those values here is a second
+# place for them to drift out of agreement with the boot script.
+INIT_TEMPLATE = HERE / "rootfs-init"
+PLACEHOLDER = re.compile(r"@[A-Z0-9_]+@")
+
+
+def init_values() -> dict[str, str]:
+    return {
+        "DEBUG_DEVICE": f"/dev/mmcblk0p{DEBUG_PARTITION}",
+        "DATA_DEVICE": f"/dev/mmcblk0p{DATA_PARTITION}",
+        "MAGIC": MAGIC,
+        "USERSPACE_BASE": str(USERSPACE_BASE),
+    }
+
+
+def render_init(template: str | None = None) -> str:
+    """Fill the init template from the layout, or refuse to build.
+
+    An unrendered placeholder would reach the target as a shell word, and the
+    failure it produces is a boot that writes nothing at all: exactly the
+    silence this init exists to break.
+    """
+    text = INIT_TEMPLATE.read_text() if template is None else template
+    for name, value in init_values().items():
+        text = text.replace(f"@{name}@", value)
+    left = sorted(set(PLACEHOLDER.findall(text)))
+    if left:
+        raise ValueError(f"rootfs-init still carries {', '.join(left)}")
+    return text
+
+
+def write_payload(directory: Path) -> Path:
+    """Render init into a directory the container can mount as /payload."""
+    directory.mkdir(parents=True, exist_ok=True)
+    init = directory / INIT_TEMPLATE.name
+    init.write_text(render_init())
+    init.chmod(0o755)
+    return init
+
 
 BUILD = r"""
 set -eu
@@ -82,33 +133,23 @@ ls -l "/out/$DATA_NAME"
 """
 
 
-def find_runner(explicit: str | None = None) -> list[str]:
-    """Return the container command, preferring a plain docker or nerdctl."""
-    if explicit:
-        return explicit.split()
-    for candidate in ("docker", "nerdctl"):
-        if shutil.which(candidate):
-            return [candidate]
-    if shutil.which("colima"):
-        return ["colima", "nerdctl", "--"]
-    raise RuntimeError("need docker, nerdctl or colima to build the rootfs")
-
-
 def container_command(runner: list[str], payload: Path, out: Path, image: str,
                       busybox: str, sha256: str, cluster: int, system_name: str,
                       data_name: str, data_kib: int) -> list[str]:
-    return [
-        *runner, "run", "--rm", "--platform", "linux/arm64",
-        "-v", f"{payload}:/payload:ro",
-        "-v", f"{out}:/out",
-        "-e", f"BUSYBOX={busybox}",
-        "-e", f"BUSYBOX_SHA256={sha256}",
-        "-e", f"CLUSTER={cluster}",
-        "-e", f"SYSTEM_NAME={system_name}",
-        "-e", f"DATA_NAME={data_name}",
-        "-e", f"DATA_KIB={data_kib}",
-        image, "sh", "-c", BUILD,
-    ]
+    return run_in_container(
+        runner,
+        image,
+        BUILD,
+        mounts=[(payload, "/payload", True), (out, "/out", False)],
+        environment={
+            "BUSYBOX": busybox,
+            "BUSYBOX_SHA256": sha256,
+            "CLUSTER": cluster,
+            "SYSTEM_NAME": system_name,
+            "DATA_NAME": data_name,
+            "DATA_KIB": data_kib,
+        },
+    )
 
 
 def system_image_name(cluster: int) -> str:
@@ -139,14 +180,17 @@ def main() -> None:
     arguments.out.mkdir(parents=True, exist_ok=True)
     system_name = system_image_name(arguments.cluster)
     data_name = "data.ext2"
-    command = container_command(
-        find_runner(arguments.runner), HERE, arguments.out.resolve(),
-        arguments.image, arguments.busybox, arguments.busybox_sha256,
-        arguments.cluster, system_name, data_name, arguments.data_kib,
-    )
-    result = subprocess.run(command, check=False)
-    if result.returncode:
-        sys.exit(result.returncode)
+    with tempfile.TemporaryDirectory() as directory:
+        payload = Path(directory) / "payload"
+        write_payload(payload)
+        command = container_command(
+            find_runner(arguments.runner), payload, arguments.out.resolve(),
+            arguments.image, arguments.busybox, arguments.busybox_sha256,
+            arguments.cluster, system_name, data_name, arguments.data_kib,
+        )
+        returncode = run(command)
+    if returncode:
+        sys.exit(returncode)
     for name in (system_name, data_name):
         path = arguments.out / name
         print(f"wrote {path} ({path.stat().st_size} bytes)")
