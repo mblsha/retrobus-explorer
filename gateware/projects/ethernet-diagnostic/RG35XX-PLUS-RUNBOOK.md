@@ -342,18 +342,43 @@ seed and options each `result.json` records, and removes only what you do not
 name. Nothing is deleted without `--delete`:
 
 ```sh
-uv run --frozen python tools/prune_builds.py \
-  --keep microsd-ddr-ethernet-h700 --keep microsd-ddr-h700-15mhz
+uv run --frozen python tools/prune_builds.py --include-unfinished \
+  --keep microsd-ddr-ethernet-h700 microsd-ddr-h700-15mhz \
+         microsd-ddr-sd microsd-ddr-ethernet \
+         microsd-ddr-ethernet-slow-mmc microsd-ddr-ethernet-mmc-only \
+         ethernet-diagnostic microsd-edge-timing-check microsd-litedram-bios
 ```
 
 ```text
-ACTION  DIRECTORY                                    BITSTREAM     SEED  PROFILE  H700  IO MHz  CARD MHz  SIZE
-keep    microsd-ddr-ethernet-h700                    cf5fb75dadfd  19    -        yes   64      13        997.3 MiB
-keep    microsd-ddr-h700-15mhz                       fde8dbe0b519  7     -        yes   64      15        338.8 MiB
+ACTION  DIRECTORY                      BITSTREAM     SEED  PROFILE  H700  IO MHz  CARD MHz  SIZE
+keep    microsd-ddr-ethernet           unfinished    -     -        -     -       -         5.4 GiB
+keep    microsd-ddr-ethernet-slow-mmc  da2579b8f06d  5     -        yes   80      13        3.0 GiB
+keep    microsd-ddr-sd                 990544fb7d44  4     -        -     100     13        1.1 GiB
+keep    microsd-ddr-ethernet-h700      cf5fb75dadfd  19    -        yes   64      13        997.3 MiB
+keep    microsd-ddr-ethernet-mmc-only  2df4bdeff49e  4     -        no    80      13        399.8 MiB
+keep    microsd-ddr-h700-15mhz         fde8dbe0b519  7     -        yes   64      15        338.8 MiB
+keep    microsd-litedram-bios          d7e12b41c809  1     -        -     -       -         141.5 MiB
+keep    ethernet-diagnostic            056df268d31a  -     -        -     -       -         27.5 MiB
+keep    microsd-edge-timing-check      -             -     -        -     -       -         10.1 MiB
 ```
 
-The kernel trees, card images, the openxc7 toolchain and the pinned LiteX
-interpreter live in the same directory and are refused by name and by pattern,
-as is any directory whose `result.json` is missing or unreadable. Those
-refusals are not overridable: `--keep` chooses among the experiments, it never
-widens what may be deleted.
+That keep-set is the qualified H700 build, the measured 15 MHz build, the
+default output directories of the four supported profiles, and three small
+directories of unclear provenance. Run with `--delete` on 2026-09-19 it took the
+tree from 53 GB to 24 GB: 22 finished experiments and 25 unfinished builds,
+28.9 GiB, which is why the listing above has nothing left to prune. Naming only
+the first two would delete the other profiles' builds as well.
+
+`--include-unfinished` is what reaches most of the space. `build_ddr.py` deletes
+the previous manifest when a build starts and publishes a new one only on
+success, so every placement that missed timing leaves a gigabyte with no
+`result.json`, and by default such a directory is refused because it cannot say
+what it is. The option admits one only if it holds `board.v`, the first file a
+bitstream build writes, which nothing else in `build/` contains; `--keep`
+reaches these too, as `microsd-ddr-ethernet` above shows. The kernel trees, card
+images, the openxc7 toolchain and the pinned LiteX interpreter are refused by
+name and by pattern whatever is asked.
+
+Before a finished experiment is removed its `result.json` is copied to
+`build/pruned-manifests/`, so the seed and options to build it again outlive
+the netlists.
