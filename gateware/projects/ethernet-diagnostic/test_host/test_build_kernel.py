@@ -152,6 +152,8 @@ class FetchOptionTests(unittest.TestCase):
             work = Path(directory) / "work"
             with (
                 patch.object(builder.rocknix, "fetch_kernel_sources", side_effect=fetch),
+                patch.object(builder.rocknix, "fetch_firmware", return_value=[]),
+                patch.object(builder.rocknix, "verified_firmware", return_value={}),
                 patch.object(builder, "find_runner", return_value=["docker"]),
                 patch.object(builder, "run", side_effect=lambda command: order.append("build") or 0),
                 self.assertRaises(SystemExit) as finished,
@@ -169,3 +171,43 @@ class FetchOptionTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 builder.main(["--work", str(Path(directory) / "empty")])
         self.assertIn("--fetch", complaint.getvalue())
+
+
+class BuiltInFirmwareTests(unittest.TestCase):
+    """The display did not work on this kernel until the panel's init sequence
+    was compiled into it, the way ROCKNIX's shipped kernel carries it."""
+
+    def test_the_build_no_longer_clears_the_firmware_list(self):
+        """Clearing it dropped the Wi-Fi blobs, which was intended, and the
+        panel firmware with them, which left the screen dark: the built-in
+        driver probes before any filesystem exists and nothing retries it."""
+        self.assertNotIn('EXTRA_FIRMWARE ""', builder.BUILD)
+        self.assertIn('--set-str EXTRA_FIRMWARE "$EXTRA_FIRMWARE"', builder.BUILD)
+        self.assertIn("--set-str EXTRA_FIRMWARE_DIR /work/firmware", builder.BUILD)
+
+    def test_the_pinned_names_reach_the_kernel_configuration(self):
+        names = ["panels/anbernic,rg35xx-plus-panel.panel", "panels/anbernic,rg35xx-plus-rev6-panel.panel"]
+        command = builder.container_command(
+            ["docker"], Path("/w"), Path("/w/patches"), Path("/w"), Path("/w/out"),
+            "alpine:3.20", firmware=names,
+        )
+        self.assertIn("EXTRA_FIRMWARE=" + " ".join(names), command)
+
+    def test_missing_firmware_stops_the_build_before_the_container_starts(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+
+        complaint = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stderr(complaint):
+            work = Path(directory) / "work"
+            (work / "patches").mkdir(parents=True)
+            (work / "base.config").write_text("x")
+            with (
+                patch.object(builder, "run") as run,
+                self.assertRaises(SystemExit),
+            ):
+                builder.main(["--work", str(work), "--allow-unpinned",
+                              "--firmware-dir", str(Path(directory) / "none")])
+        run.assert_not_called()
+        self.assertIn("is missing", complaint.getvalue())

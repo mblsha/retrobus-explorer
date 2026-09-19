@@ -1,6 +1,10 @@
 {
   "commit": "5eb06fab68fa67dd3808cc8d1efec6cfb1d229a0",
   "config_sha256": "f971efbc32ee5cb4d4d90ef1bf38226e880fe9f2f393848ad53f3bc962dafa24",
+  "firmware": {
+    "panels/anbernic,rg35xx-plus-panel.panel": "9aaee6fe776a45cc83596bc8df76184c2f3fba8be1b551b2b8224b5bc347afaa",
+    "panels/anbernic,rg35xx-plus-rev6-panel.panel": "f7d3f0cd98be93c95e2af2361f8f309871ae6aea4f9374c1843ac1ca35a7f699"
+  },
   "patches": {
     "0002-rg35xx-enable-HDMI-LCD.patch": "3c368ef17a3632532da37c8a126fb82cdd6b21b83333abf2094914cce37a83db",
     "0003-Update-sun8i_tcon_top.c.patch": "4ae3ed690275570d8f3f67342140d60672f961d626b57dd092d2bbdc8a5273ec",

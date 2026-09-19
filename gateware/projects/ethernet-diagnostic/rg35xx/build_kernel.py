@@ -134,11 +134,16 @@ cp /config/base.config .config
 # ROCKNIX leaves a build-system placeholder here, and the target boots from
 # an EROFS rootfs on the card rather than an initramfs, so it is cleared.
 scripts/config --set-str INITRAMFS_SOURCE ""
-# ROCKNIX builds the RTL8821CS blobs into the kernel from a firmware tree its
-# own build system supplies. The rootfs carries /lib/firmware instead, which is
-# the normal mechanism and keeps the blobs out of the image the card must read
-# before anything can run.
-scripts/config --set-str EXTRA_FIRMWARE ""
+# ROCKNIX builds two kinds of firmware into its kernel. The RTL8821CS blobs are
+# left out here: a rootfs can carry them in /lib/firmware, which is the normal
+# mechanism and keeps them out of the image the card must read before anything
+# can run. The panel's init sequence cannot be left out. The panel driver is
+# built in and probes at 0.41 s, before any filesystem exists; without the file
+# that probe fails with -ENOENT and nothing retries it, which is why the screen
+# stayed dark. Built in, the display binds at the first probe, as it does under
+# ROCKNIX, whose shipped kernel carries these same files.
+scripts/config --set-str EXTRA_FIRMWARE "$EXTRA_FIRMWARE"
+scripts/config --set-str EXTRA_FIRMWARE_DIR /work/firmware
 for opt in $DISABLE_LIST; do scripts/config --disable "$opt"; done
 for opt in $ENABLE_LIST; do scripts/config --enable "$opt"; done
 if [ "$TOOLCHAIN" = "clang" ]; then
@@ -193,7 +198,7 @@ def verify_sources(work: Path, sources: Path = SOURCES) -> dict:
 
 
 def container_command(runner, work, patches, config, out, image,
-                      disable=None, enable=None, toolchain="gcc"):
+                      disable=None, enable=None, toolchain="gcc", firmware=()):
     disable = DISABLE if disable is None else disable
     enable = ENABLE if enable is None else enable
     return run_in_container(
@@ -212,6 +217,7 @@ def container_command(runner, work, patches, config, out, image,
             "DISABLE_LIST": " ".join(disable),
             "ENABLE_LIST": " ".join(enable),
             "TOOLCHAIN": toolchain,
+            "EXTRA_FIRMWARE": " ".join(firmware),
         },
     )
 
@@ -236,6 +242,10 @@ def main(argv=None):
         "when deliberately moving to a newer ROCKNIX tree, and re-record it.",
     )
     parser.add_argument(
+        "--firmware-dir", type=Path, default=GATEWARE / "build/rg35xx-firmware",
+        help="Where the pinned panel firmware is; it is built into the kernel",
+    )
+    parser.add_argument(
         "--fetch", action="store_true",
         help="First download the pinned patches and configuration from ROCKNIX "
         "into the work directory; each is written only if its hash matches",
@@ -245,6 +255,7 @@ def main(argv=None):
     if arguments.fetch:
         try:
             written = rocknix.fetch_kernel_sources(work)
+            written += rocknix.fetch_firmware(arguments.firmware_dir)
         except (OSError, ValueError) as failure:
             parser.error(f"fetch failed: {failure}")
         print(f"fetched {len(written)} pinned files into {work}")
@@ -256,6 +267,16 @@ def main(argv=None):
             verify_sources(work)
         except ValueError as failure:
             parser.error(str(failure))
+    # Staged inside the work directory, which the container already mounts, so
+    # the kernel's build sees exactly the verified bytes and nothing else.
+    try:
+        firmware = rocknix.verified_firmware(arguments.firmware_dir)
+    except ValueError as failure:
+        parser.error(str(failure))
+    for name, content in firmware.items():
+        target = work / "firmware" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
     out = work / "out"
     out.mkdir(parents=True, exist_ok=True)
     disable = list(DISABLE)
@@ -264,6 +285,7 @@ def main(argv=None):
     command = container_command(
         find_runner(arguments.runner), work, work / "patches", work,
         out, arguments.image, disable=disable, toolchain=arguments.toolchain,
+        firmware=sorted(firmware),
     )
     sys.exit(run(command))
 
