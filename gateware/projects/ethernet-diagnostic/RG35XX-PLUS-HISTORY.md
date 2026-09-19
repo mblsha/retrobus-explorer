@@ -1521,3 +1521,54 @@ the right checksum, no controller error in any kernel log, and the recorder
 still writing when each 15 s window closed. The cap costs the Linux part of the
 boot its faster reads: the userspace milestone was 5.66, 5.69, 5.71, 5.71 and
 5.76 s, against about 5.5 s for the same image at 12.5 MHz.
+
+### The sweep, run at last, and why 10 MHz is not a middle way
+
+At 6 MHz the link survives, so `display-sweep` could finally be run to its end.
+Its record, from the qualified bitstream:
+`display-sweep initial-1250 max-2499 asleep=w0r0/Off lit-0=w0r0/On
+lit-100=w0r0/On lit-50=w0r0/On asleep=w0r0/Off done`. No write error and no read
+error in any display state, DRM agreeing that the output was off when it was
+meant to be and on when it was not, and the kernel's own choice of backlight
+half way up, where the PWM switches.
+
+The same sweep with the cap at 10 MHz read the same, clean in every state, with
+4321 writes behind it and the userspace milestone back at 5.52 s, which is what
+12.5 MHz gives. One run is not a qualification, and this one showed why. Of five
+cold starts of the ordinary display image at 10 MHz, four were clean, at 5.49 to
+5.55 s, and the fifth died 0.2 s into userspace with the signature of every
+12.5 MHz failure: the last command a CMD25, a seven-edge status token on DAT0,
+the card idle in `tran`, and no clock after it. It had not seen one bad command
+frame first. So the failure thins out between 12.5 and 6 MHz rather than
+stopping at a threshold, one boot in six at 10 MHz against every boot at 12.5,
+and a rate that looks clean in one run has to be cold-started many times before
+it is believed.
+
+Ten more cold starts at 6 MHz followed for that reason: ten pictures with the
+right checksum and no controller error. With the five before them, the two long
+runs and the sweep, that is eighteen boots at 6 MHz without a failure, against
+one in six at 10 MHz and every one at 12.5.
+
+### The slow boots, caught by the recorder
+
+Two of those ten reached userspace at 6.88 and 6.90 s instead of about 5.7, the
+slow boot that has been in every batch since the EROFS root and was put down to
+`rootwait` retrying. The recorder had the kernel log of both, and it is not the
+emulated card at all:
+
+```text
+[    1.187723] sunxi-mmc 4022000.mmc: fatal err update clk timeout
+[    1.947722] sunxi-mmc 4022000.mmc: fatal err update clk timeout
+[    1.961071] sunxi-mmc 4022000.mmc: initialized, max. request size: 2048 KB, uses new timings mode
+[    1.964085] VFS: Mounted root (erofs filesystem) readonly on device 179:5.
+```
+
+`4022000.mmc` is the second card slot, which holds a real 119 GiB card. In the
+eight normal boots its controller logs no timeout, the card is announced as
+`mmc1: new high speed SDXC card`, and the root is mounted at 0.73 to 0.74 s. In
+the two slow ones the controller times out updating its clock, six times in the
+log at 0.75 s apiece, the card is never announced, and the root is mounted at
+1.95 and 1.96 s, the moment that controller's probe returns: the kernel waits
+for every probe in flight before it mounts the root, so a slot this boot does
+not use holds up a root that was ready a second earlier.
+

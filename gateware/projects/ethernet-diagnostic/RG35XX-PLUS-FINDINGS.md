@@ -319,9 +319,9 @@ Half the boot is one transfer.
 
 ## The slow boots
 
-Roughly one boot in ten takes about 1.4 s longer. It is not the card and not
-the measurement. Lining a slow run up against a normal one, every stage matches
-until the partition scan, and then:
+Roughly one boot in ten, two in the last ten, takes about 1.2 s longer. It is
+not the emulated card and not the measurement. Lining a slow run up against a
+normal one, every stage matches until the partition scan, and then:
 
 ```text
                               normal    slow
@@ -329,14 +329,20 @@ partition table scanned         4.93    4.83
 first read from system A        5.09    6.31
 ```
 
-The gap is between Linux finishing the partition scan and the root filesystem
-becoming mountable, so it is the root device not yet being there when the
-kernel first asks and `rootwait` sleeping before it asks again. It appears in
-both EROFS configurations and never appeared with the initramfs, which is what
-would be expected: an initramfs root is already in memory, while this root has
-to be discovered on a device that is still probing. It is not diagnosed further
-because the board has no console to watch the retry on, and the slow-boot rate,
-one and two in twenty, is not distinguishable at this sample size.
+The flight recorder caught two of them on 2026-09-19 and the cause is the other
+card slot. `sunxi-mmc 4022000.mmc`, the controller of the second slot, which
+holds a real card, logs `fatal err update clk timeout` every 0.75 s in a slow
+boot and never in a normal one, and in a slow boot that card is never detected.
+The kernel does not mount the root until the probes in flight have returned, so
+the root, ready at 0.73 s, is mounted at 1.95 s, when that probe gives up its
+first attempt. It appears in both EROFS configurations and never appeared with
+the initramfs because an initramfs root waits for no device.
+
+Nothing in this boot uses the second slot. Disabling `mmc@4022000` in the
+image's device tree would remove the slow boots; it has not been done, because
+it also takes the slot away from whatever runs afterwards, and that is a choice
+about the product and not about the boot. Why that controller's clock update
+times out in one boot in ten is not known.
 
 ## Why four seconds needed the interface
 
@@ -402,10 +408,12 @@ reaches the card. At 12.5 MHz without the display it never failed, and at 6 MHz
 with the display, backlight full, it carried 2855 writes in 31 s with no error
 and no bad frame, on the qualified bitstream unchanged.
 `image --make-erofs-image --card-max-hz 6000000` sets the cap in the image's
-device tree, which U-Boot's own clock does not read. Five cold starts of the
-image built that way all drew the picture, logged no controller error, and
-reached userspace in 5.66 to 5.76 s (median 5.71), against about 5.5 s at
-12.5 MHz.
+device tree, which U-Boot's own clock does not read. Eighteen cold starts at
+6 MHz, fifteen of them of the image built that way, all drew the picture and
+logged no controller error; leaving out two slow boots, they reached userspace
+in 5.64 to 5.78 s, against about 5.5 s at 12.5 MHz. 10 MHz is not a way to have
+both: it is as fast as 12.5 MHz and one cold start in six died exactly as they
+do at 12.5, after a sweep and four boots had looked clean.
 
 The card samples CMD and DAT up to 15.6 ns after the host's rising edge, one
 fabric cycle at 64 MHz, and the distance from there to the host's next change of
