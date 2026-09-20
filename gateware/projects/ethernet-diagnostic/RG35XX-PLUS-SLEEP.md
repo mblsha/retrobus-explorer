@@ -46,7 +46,7 @@ sector of the card so that the warm reset a failure causes cannot hide it --
 **eight of `sr-phy`'s forty-two sleeps did not come back**, every one of them
 the same failure: the PHY would not calibrate on the way back and the stub
 reset the board. The published implementation, `rocknix-deep`, did the same
-thing thirty-five times with no failure at all. So the rebuild is sound as an
+thing thirty-seven times with no failure at all. So the rebuild is sound as an
 idea and ours had a bug.
 [How often the rebuild does not come back](#how-often-the-rebuild-does-not-come-back-experiment-34)
 is the evidence and names the two writes that separate the two.
@@ -106,7 +106,7 @@ s2idle, as the image ships                     121-126 mA      --        --
 + PLL_VIDEO0, PLL_DE and the DE bus gate           ~62 mA      ~7 mA      three clocks the kernel
   stopped as well (ours, KEPT; 50 of 50)                                  leaves running
 ROCKNIX's suspend instead (theirs, not ours;      ~70 mA   ~51 vs s2idle  the same idea, theirs
-  35 of 35 resumes came back)
+  37 of 37 resumes came back)
 powered off, RTC alarm armed (not a sleep)         33 mA       --        a cold boot on waking
 supply output off                                   1 mA       --        --
 ```
@@ -366,8 +366,9 @@ counted: ten consecutive cycles read 65, 75, 72, 68, 74, 70, 71, 70, 75 and
 two short of readings to a link dropout -- ten wakes of ten, ten card checks
 and ten md5 checks unchanged; and one six-minute sleep read **70 mA** (50 to
 92, IQR 10, n=116) with the 256 MiB probe's md5 unchanged after 361 s by the
-RTC. Those eleven are the tail of thirty-five in a row that evening with no
-failure.
+RTC. Those eleven, and the two 40 s sleeps that checked the card after it was
+deployed for the last time, are the tail of thirty-seven in a row that evening
+with no failure.
 
 `--suspend sr` is the fallback if the whole rebuild is in doubt and the
 firmware has to be ours: 105 mA, sixteen proved sleeps, and a way back that
@@ -490,7 +491,7 @@ sr-phy-padhold   + the DRAM pads held while the PHY       69.7 / 79.4  -44.0 mA 
 sr-phy-padhold-nodisp  + PLL_VIDEO0, PLL_DE, DE gate off  63.0 / 79.3  -55.7 mA   YES
                    on top of the pad hold                               0 of 50 resumes failed
 rocknix-deep     theirs, the same idea, their code        68.3 / 79.7  -51.3 mA    reference
-                                                                        0 of 35 resumes failed
+                                                                        0 of 37 resumes failed
 ```
 
 Each "vs s2idle" is that rung's own boot, and the s2idle arms move between
@@ -833,7 +834,7 @@ firmware                   sleeps  did not come back   the shapes it was run in
 sr-phy (ours)                 42          8 (19%)     24x10 s watchdog, 12x10 s none, 6x40 s
 sr-phy-nodisp (ours)          12          0           12x10 s watchdog
 sr-phy-nodisp-late            30          4 (13%)     24x10 s watchdog, 6x40 s
-rocknix-deep (theirs)         35          0           24x10 s, 10x40 s, 1x360 s
+rocknix-deep (theirs)         37          0           24x10 s, 10x40 s, 1x360 s, 2x40 s after the last deploy
 sr-phy-padhold (ours)         48          0           48x10 s watchdog, four batches of twelve
 sr-phy-padhold-nodisp (ours)  36          0           36x10 s watchdog, three batches of twelve
 ```
@@ -888,8 +889,8 @@ What that rules out, each by a batch of its own:
 **What it leaves is the one write our stub does not make.** `rocknix-deep` is
 kailashrs' TF-A patch and SRAM stub built from source at the commits ROCKNIX
 pins, with none of ours; it shuts the same blocks down in the same order and
-rebuilds them with the same U-Boot driver, and 35 of 35 came back (against ours,
-Fisher, one-sided, p = 0.006). Their stub's suspend sequence differs from ours
+rebuilds them with the same U-Boot driver, and 37 of 37 came back (against ours,
+Fisher, one-sided, p = 0.005). Their stub's suspend sequence differs from ours
 in exactly two writes, and both are writes this work deliberately does not
 make:
 
