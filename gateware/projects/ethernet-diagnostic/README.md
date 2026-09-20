@@ -68,6 +68,8 @@ the commands, in the order they have to happen.
 [RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md) is the chronological record,
 superseded by the other two wherever they differ, and
 [RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) is the payload target.
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) is a self-contained report of what
+timed sleep costs on this board and how low it was taken.
 
 Tests for this project come in two sets. Host tests need neither hardware nor a
 simulator; the Cocotb testbenches need Verilator and a built design:
