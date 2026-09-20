@@ -720,7 +720,69 @@ uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
 ```
 
 `--verify-image` then reports the new SPL and its checksum (`f9c6a0ec` for
-both of ours, `a629138d` for the bootloader ROCKNIX ships), and the image is
-deployed by section 5 with no other change. A bad bootloader cannot brick the
-device: the firmware lives on the emulated card, so recovering is a power-off
-and another `deploy`.
+every one of ours, `a629138d` for the bootloader ROCKNIX ships), and the image
+is deployed by section 5 with no other change. A bad bootloader cannot brick
+the device: the firmware lives on the emulated card, so recovering is a
+power-off and another `deploy`.
+
+The SPL checksum does **not** tell our bootloaders apart, because BL31 rides
+inside the FIT behind it and the SPL is the same either way. What does is the
+`sha256` of `u-boot-sunxi-with-spl.bin`, which `build-firmware` prints and
+writes to `build.json` beside it. As built on 2026-09-20:
+
+```text
+--suspend   bl31.bin sha256   what it does while the core waits
+none        fb70c9a9...       nothing: the parity build
+wfi         03ca25d5...       PLL_CPUX stopped, DRAM left running
+sr          e232991c...       + LPDDR4 in self-refresh, from a stub in SRAM A1
+sr-gate     deada33f...       + the DRAM bus gate and the MBUS clock gate
+sr-pll      d8d584de...       + PLL_DDR0 stopped and relocked on the way back
+```
+
+### The self-refresh rungs
+
+`--suspend sr`, `sr-gate` and `sr-pll` apply the same two patches and differ
+only in `SUNXI_SUSPEND_DRAM_LEVEL`, which decides how much of the DRAM side of
+the SoC the SRAM stub puts away. Each is built, installed and imaged exactly
+like the one above, with its own name throughout:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-firmware --suspend sr
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --install-bootloader build/rg35xx-display/base-display-kernel.img \
+  --bootloader build/rg35xx-firmware-src/sr/u-boot-sunxi-with-spl.bin \
+  --output build/rg35xx-firmware-src/sr/base-ourboot.img
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --make-erofs-image build/rg35xx-firmware-src/sr/base-ourboot.img \
+  --system build/rg35xx-sleep/system-c65536.erofs \
+  --data build/rg35xx-sleep/data.ext2 --slot a --card-max-hz 6000000 \
+  --debug-command job-runner \
+  --output build/rg35xx-firmware-src/sr/rg35xx-plus-sleep-sr.img
+```
+
+Then section 5's `deploy` with that image, and jobs 22 to 26 of
+`jobs/sleep/` against it. 22 first and always: it does not sleep, it costs one
+boot, and it is what says the DRAM controller is where the stub expects it and
+that the watchdog's enable bit can still be cleared after being set.
+
+Two things about the stub that are easy to break and hard to notice:
+
+- **It must contain no literal pool and no absolute address of its own.** It
+  runs from `0x20000`, not from where it was linked, so a `ldr x0, =label`
+  would load an address in DRAM that is in self-refresh at the time. Every
+  constant in it is built with `movz`/`movk` and every label is reached with
+  `adr`. The check is to find the blob in `bl31.bin` -- it starts with
+  `0a 00 82 d2 0a 60 a0 f2`, which is `movz x10, #0x1000; movk x10,
+  #0x0300, lsl #16` -- and disassemble it:
+
+  ```sh
+  llvm-mc --disassemble --triple=aarch64 < blob.hex
+  ```
+
+- **It must not grow past SRAM A1's 32 KiB**, and the build cannot check that
+  for you: a `.if` on a difference of two labels in the same section is not a
+  constant as far as the assembler is concerned, and the guard was removed
+  again for that reason. It was 4224 bytes on 2026-09-20.
