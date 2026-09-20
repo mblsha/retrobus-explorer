@@ -765,7 +765,8 @@ Not a sleep, and worth more than every sleep knob put together.
 **33 mA** (33-35 mA, IQR 2, n=19 over 60 s in experiment 14; 33-35, IQR 2,
 n=62 over 190 s in experiment 15). That is the steadiest reading this bench
 has taken -- a 2 mA interquartile range against the 7 to 18 mA a sleeping
-target gives -- and it is 81 mA below the best sleep.
+target gives -- and it is 72 mA below the best sleep the firmware sections
+below reach, which was 81 before them.
 
 **And the RTC alarm powers it back on.** Experiment 14 armed
 `/sys/class/rtc/rtc0/wakealarm` sixty seconds out and powered off. The card
