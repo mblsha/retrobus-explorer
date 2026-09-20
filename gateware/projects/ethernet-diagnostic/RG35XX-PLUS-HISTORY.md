@@ -1980,9 +1980,9 @@ sr-pll    + PLL_DDR0 stopped                  does not resume              no
 ```
 
 `sr` is what the card was left carrying. It is the deepest rung that both pays
-and is fully proved -- eighteen sleeps, ten of them consecutive and one of them
-six minutes, every one with its memory checked -- and it is eleven and a half
-milliamps below where the day started. `sr-gate` is three and a half below that
+and is fully proved -- fifteen self-refresh sleeps, ten of them consecutive and
+one of them six minutes, every one with its memory checked -- and it is eleven
+and a half milliamps below where the day started. `sr-gate` is three and a half below that
 on a fifth of the evidence, which is not a difference this bench believes, and
 the rung above it does not come back at all.
 

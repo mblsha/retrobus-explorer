@@ -682,8 +682,8 @@ fully proved: eleven and a half milliamps against s2idle in its own boot, ten
 consecutive cycles, and a six-minute sleep with its memory intact.
 
 `sr-gate` is three and a half milliamps below it, which is less than half of
-what this bench calls a difference, and it has seven sleeps behind it rather
-than eighteen. It is built, it works, and it is not the recommendation. The
+what this bench calls a difference, and it has four self-refresh sleeps behind
+it rather than fifteen. It is built, it works, and it is not the recommendation. The
 ladder's own rule -- stop climbing when a rung stops paying -- stops here, and
 the rung above it stops harder.
 
