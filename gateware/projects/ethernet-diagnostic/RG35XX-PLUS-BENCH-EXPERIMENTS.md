@@ -13,16 +13,21 @@ input for now, so B7 to B9 and B13 are on the list but not scheduled, and
 nothing below should be read as waiting on them.
 
 Where we stand, in one paragraph: suspended with our own firmware (`--suspend
-sr-phy`, which puts the LPDDR4 into self-refresh and shuts the DRAM controller,
-its PHY and the whole DRAM clock path down, plus the `powersave` governor) the
-board draws about **76 mA** at 5.00 V by the median of the supply's readings,
-81 by their mean, and 75 over a six-minute sleep; with the published ROCKNIX
-firmware built from source, which does the same thing, about **68 mA** (80 by
-the mean, 72 over six minutes); powered off with USB attached it draws 33 mA.
-There is no battery fitted, so all of these include the AXP717's power path
-with nothing to charge. About **43 mA** lies between our best sleep and off,
-and about 35 between theirs and off; every rail is still up at full voltage,
-and no PMIC register has been written. The background is in
+sr-phy-padhold-nodisp`, which puts the LPDDR4 into self-refresh, shuts the DRAM
+controller, its PHY and the whole DRAM clock path down, holds the DRAM pads
+while the PHY is reset, and stops PLL_VIDEO0, PLL_DE and the DE bus gate, plus
+the `powersave` governor) the board draws about **62 mA** at 5.00 V by the
+median of the supply's readings, 79 by their mean, and 62 over a six-minute
+sleep; with the published ROCKNIX firmware built from source, which does the
+same thing without the display clocks, about **68 mA** (80 by the mean, 70 to
+72 over six minutes); powered off with USB attached it draws 33 mA. There is no
+battery fitted, so all of these include the AXP717's power path with nothing to
+charge. About **30 mA** lies between our best sleep and off, and about 35
+between theirs and off; every rail is still up at full voltage, and no PMIC
+register has been written. **Median and mean are further apart on these rungs
+than on any below them** -- by means ours and theirs are level -- which makes
+B9, a scope across a shunt, worth more than its position in the table
+suggests. The background is in
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) (every measurement),
 [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) (the suspend firmware)
 and [RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md) (the outside
@@ -38,7 +43,7 @@ which the existing harness does the measuring.
 | B1 | pull the card from slot 2 | does that card cost sleep/off current, and is it the slow boots? | fingers | 5 min, then hands-off | none |
 | B2 | photograph the board, read the chips | which DRAM, which PMIC wiring, where are the probe points and UART pads? | phone, magnifier | 20 min | none |
 | B3 | stock firmware on the same supply | what can this hardware actually reach in standby? | the stock SD card | 1 h | none |
-| B4 | ~~ROCKNIX's deep sleep on the same supply~~ **done, with nobody there** | is the controller/PHY shutdown we have not built worth anything? **Yes: 68 mA against the 105 ours reached then; ours does it now and reads 76** | -- | -- | -- |
+| B4 | ~~ROCKNIX's deep sleep on the same supply~~ **done, with nobody there** | is the controller/PHY shutdown we have not built worth anything? **Yes: 68 mA against the 105 ours reached then; ours does it now, reliably, and reads about 62** | -- | -- | -- |
 | B5 | unplug the FPGA card interface while off / asleep | is the rig itself feeding or loading the target? | fingers, a watch | 30 min | low |
 | B6 | rail voltages in awake / sleep / off | which rails are physically up, and is anything back-powered? | DMM, board open | 1 h | low |
 | B7 | battery with a shunt, USB disconnected | what is the real battery-side power, and how much of our figures is USB power-path? | the cell, shunt, DMM | half a day | low–medium |
@@ -78,7 +83,8 @@ back-powering the ROCKNIX work found on this slot and fixed by keeping the
 supply on. Unbinding the controller measured about 1 mA, but unbinding does
 not remove the card.
 **Do.** Power off, disarm, pull the card. Say so. The harness then re-runs the
-`sr-phy` alternation, the power-off reference and twenty cold starts unattended.
+kept rung's alternation, the power-off reference and twenty cold starts
+unattended.
 **Read it as.** A step in the off or sleep current is that card's standby plus
 back-power, and the fix is a device-tree decision about its supply. No slow
 boot in twenty would (weakly) tie the slow boots to the card rather than the
@@ -118,7 +124,7 @@ standby; then shut down and read the off current. Repeat later on battery
 (B7).
 **Read it as.** Stock off ≈ 33 mA confirms our off figure is the board and not
 our shutdown path. Stock Super ≪ 76 mA makes PMIC-assisted rail-off the
-project to do; stock Normal ≈ 76 mA says our `sr-phy` suspend is already at the
+project to do; stock Normal ≈ 62 mA says our suspend is already at the
 vendor's clock-level floor.
 
 ### B4. ROCKNIX's deep sleep on the same supply -- done, 2026-09-20
@@ -132,9 +138,13 @@ below our own self-refresh firmware. The controller, PHY and PLL_DDR0 shutdown
 is where most of the clock-level saving is, the next firmware rung was worth
 building, and the gap to powered off is about 35 mA rather than 72. **It was
 then built**: `--suspend sr-phy` does the same step and sleeps at 76 mA, three
-above theirs on a six-minute sleep. The measurements are the firmware ladder in
-[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) and the story is act two of
-[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md). What follows is the
+above theirs on a six-minute sleep. It also failed one resume in five until the
+DRAM pad hold was added on 2026-09-21, after which ours resumes every time and,
+with the display clocks stopped too, sleeps at about 62 mA -- below theirs by
+six to ten, which is at the edge of what this bench believes. The measurements
+are the firmware ladder in
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) and the story is acts two and five
+of [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md). What follows is the
 experiment as it was planned.
 
 
@@ -163,7 +173,7 @@ its lines when the host clock stops and the qualified bitstream has no
 pull-ups, but that is a design statement, not a measurement.
 **Do.** Off first: the harness runs the power-off job with a ten-minute window
 and logs the supply; at a noted time unplug the interface at the Pmod, at a
-later noted time plug it back. Then the same inside one long `sr-phy` sleep
+later noted time plug it back. Then the same inside one long deep sleep on the kept rung
 (`rtc_sleep 300`), replugging at least a minute before the alarm.
 **Read it as.** A step at the unplug time is the rig's contribution, and every
 figure in the reports shifts by it. No step: the rig is neutral and the
@@ -179,7 +189,7 @@ four cases for the 33 mA "off" state: the SoC rails really disappear; a
 switched rail stays up; a rail is back-powered through a signal pin; or the
 rails are gone and the current is upstream, in the PMIC or something on VSYS.
 **Do.** With B2's map, a DMM on each output while the harness holds each state
-for five minutes (awake idle, `sr-phy` sleep, off).
+for five minutes (awake idle, the kept deep sleep, off).
 **Read it as.** Rails up when "off" → a shutdown-path bug, fixable in software.
 Intermediate voltages → back-powering; find the pin. All rails gone and still
 33 mA → it is the PMIC/charger path, and only B7 can say what it is on a
@@ -188,11 +198,12 @@ battery.
 ### B7. A battery with a shunt, USB disconnected
 
 **Question.** What does the board draw from its cell, awake, in s2idle, in the
-`sr-phy` sleep, and off? How much of the 76 and of the 33 is the USB power path
+kept deep sleep, and off? How much of the 62 and of the 33 is the USB power
+path
 with no cell attached?
 **Why it matters.** It is the number the product cares about, and the expert's
-first priority. Our figures cannot be converted: the 0.38 W of the `sr-phy`
-sleep would be about 103 mA at 3.7 V before any change in losses, and removing
+first priority. Our figures cannot be converted: the 0.31 W of the kept deep
+sleep would be about 84 mA at 3.7 V before any change in losses, and removing
 USB may remove a load entirely.
 **Do.** The correct protected cell through an interposer with a Kelvin shunt
 (50 to 100 mΩ; size it for boot peaks, not for sleep), a floating DMM across
@@ -210,14 +221,14 @@ only way down.
 ### B8. RTC wake on battery alone
 
 **Question.** Does the RTC alarm still power the board on, and wake it from the
-`sr-phy` sleep, with no USB attached?
+kept deep sleep, with no USB attached?
 **Why it matters.** Power-off with the alarm armed is the best timed sleep we
 have (33 mA on USB, maybe far less on battery). On the bench it was proved
 with USB present, where the PMIC is never really unpowered.
 **Do.** With B7's setup: arm a 120 s alarm, power off, watch for the boot.
-Repeat for an `sr-phy` sleep.
+Repeat for a deep sleep on the kept rung.
 **Read it as.** Works → it is a product strategy; measure its break-even
-against the `sr-phy` sleep. Fails → the alarm path depends on VBUS and the strategy
+against the kept deep sleep. Fails → the alarm path depends on VBUS and the strategy
 is a bench artefact.
 
 ### B9. A scope across the shunt during sleep
@@ -239,7 +250,7 @@ means quote means from now on and ignore the outliers.
 does cutting its supply in suspend back-power it as slot 2's does?
 **Why it matters.** The product boots from a real card; the emulated one draws
 nothing from the target, so every figure we have is missing a consumer.
-**Do.** Write the `sr-phy` image to a real card (needs the fixed-schedule image
+**Do.** Write the kept rung's image to a real card (needs the fixed-schedule image
 below, because the job harness lives in the FPGA), boot from `psu2`, read the
 supply in the scheduled states.
 **Read it as.** The difference from the emulated-card figures is the card. If
@@ -283,9 +294,9 @@ current awake, asleep and off, and compare with today's battery-less figures.
 **Question.** How much of the sleeping current moves with temperature?
 **Why it matters.** Leakage rises steeply with temperature and clock power does
 not. If a 15 C swing moves the sleeping current by tens of milliamps, the
-remaining 43 mA is mostly leakage in powered domains, and only removing rails
+remaining 30 mA is mostly leakage in powered domains, and only removing rails
 will touch it.
-**Do.** The harness runs repeated `sr-phy` sleeps while the board is first at room
+**Do.** The harness runs repeated deep sleeps while the board is first at room
 temperature and then warmed (a closed box over a warm surface, not a heat
 gun); the SoC's sensors are logged between sleeps.
 
@@ -293,12 +304,13 @@ gun); the SoC's sensors are logged between sleeps.
 
 These make the visits above shorter, and are software only.
 
-- **State-holder jobs**: hold awake-idle, `sr-phy` sleep and off for a chosen
+- **State-holder jobs**: hold awake-idle, the kept deep sleep and off for a chosen
   number of minutes with a timestamped supply log, for B5 and B6.
 - **A harness mode that does not drive the supply**, for battery operation
   (B7–B9): deliver jobs and read results, leave power to the person.
 - **A fixed-schedule image** for a real card (B3's comparison runs, B10): init
-  cycles awake, s2idle, `sr-phy`, off on a fixed timetable, signals the state on
+  cycles awake, s2idle, the kept deep sleep, off on a fixed timetable, signals
+  the state on
   the power LED, and logs to the card for reading back on the Mac.
 - **Energy to ready**: integrate the supply over a cold boot and over a resume,
   to turn "33 mA against 76" into a break-even sleep length.
@@ -309,43 +321,58 @@ Listed so they are not mistaken for bench work, highest value first.
 
 **Still open, and none of them needs hands:**
 
-1. **Find out why our DRAM rebuild fails one resume in five when theirs fails
-   none**, and whether the DRAM pad hold is the answer. Experiment 34 counted
-   it: 8 of 42 for `sr-phy`, 4 of 30 for `sr-phy-nodisp-late`, 0 of 37 for
-   `rocknix-deep`, every failure the same read calibration giving up. Their
-   suspend sequence differs from ours in exactly two writes, and the one that
-   could plausibly do this is **RTC + 0x1F4 bit 0**, which they clear as soon as
-   self-refresh is confirmed -- "hold the DRAM pads (CKE low) while the PHY is
-   reset and unclocked" -- and set again before the controller leaves it.
-   `--suspend sr-phy-padhold` already builds exactly that. One batch of
-   experiment 34 prices it in six minutes and needs no hands, but it does need
-   a decision: this work has not written that register, on the grounds that the
-   manual frames it around a VDD_SYS that never goes off here. **It is now the
-   single highest-value thing left on this list**, because every other firmware
-   number below is worth less than a rung that resumes.
-2. **The PRCM register at `+0x244`**, written by the prior art with a key of
-   `0xa7` to take a PLL LDO down. It is the other of the two writes that
-   separate their suspend from ours, and it is a supply rather than a clock, so
-   it is outside what this work writes. It needs a decision and a ground for
-   the write, not a bench visit.
-3. **`opp-suspend` in the device tree** in place of the userspace governor, as
+1. **`PLL_PERI0`**, the last PLL left running in any sleep on this bench, ours
+   or theirs. It feeds the card controller among much else, so this is not one
+   register: its consumers have to be quiesced on the way down and put back on
+   the way up, and on this bench the card is the only channel the target has.
+   It needs **grounding in mainline sources first** -- what hangs off it on the
+   H616/H700 and how the vendor's standby parks those consumers -- and only
+   then the usual qualification: a batch of experiment 34, an alternation, ten
+   cycles and a six-minute sleep. That neither the prior art nor the vendor's
+   code stops it is a hint, not a ground.
+2. **An ablation that prices the pad hold's own current.** 69.7 mA against
+   76.0 in separate boots, and 44.0 mA of saving against 39.3 in each rung's
+   own s2idle anchor: the right direction, under this bench's eight-milliamp
+   threshold, and unpredicted. One deploy and one alternation.
+3. **The PRCM register at `+0x244`**, written by the prior art with a key of
+   `0xa7` to take a PLL LDO down. It is now the **only** write that separates
+   their suspend sequence from ours, and it is a supply rather than a clock, so
+   it is outside what this work writes. With the reliability question answered
+   elsewhere, all it could buy is current. It needs a ground for the write, not
+   a bench visit.
+4. **`opp-suspend` in the device tree** in place of the userspace governor, as
    ROCKNIX did: the same 11 mA without depending on a line of shell having been
    run this boot.
-4. **A retention qualification**: full-memory integrity rather than a 256 MiB
+5. **A retention qualification**: full-memory integrity rather than a 256 MiB
    probe, sleeps of an hour, and temperature. Six minutes is a milestone, not a
    qualification.
-5. **Energy to ready**, which turns "33 mA against 76" into a break-even sleep
+6. **Energy to ready**, which turns "33 mA against 62" into a break-even sleep
    length: integrate the supply over a shutdown and cold boot and over a suspend
-   and resume, to the actual ready state.
-6. **A read-only PMIC transaction from the SRAM stub** at suspend entry and
+   and resume, to the actual ready state. The margin is narrower than it was --
+   about 0.15 W against the kept sleep, where it was 0.36 W against `sr`.
+7. **A read-only PMIC transaction from the SRAM stub** at suspend entry and
    exit, all rails kept: the first proof that firmware can talk to the AXP717
    before anything asks it to change a rail. **Gated** on B7 and on a decision;
    it is the first step of the rail-off project in
    [RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md).
 
-The DRAM pad hold at RTC + 0x1F4 used not to be on that list, on the grounds
-that not making the write cost nothing in correctness. Experiment 34 says it
-may cost one resume in five, which is why it is now item 1.
+**Answered on 2026-09-21, and it was item 1 the day before:**
+
+- ~~Why our DRAM rebuild fails one resume in five when theirs fails none, and
+  whether the DRAM pad hold is the answer.~~ **It is the answer.** Experiment
+  34 had counted the failure: 8 of 42 for `sr-phy`, 4 of 30 for
+  `sr-phy-nodisp-late`, 0 of 37 for `rocknix-deep`, every failure the same read
+  calibration giving up. The one plausible write among the two that separated
+  the sequences was **RTC + 0x1F4 bit 0**, which they clear as soon as
+  self-refresh is confirmed -- "hold the DRAM pads (CKE low) while the PHY is
+  reset and unclocked" -- and set again before the controller leaves it.
+  `--suspend sr-phy-padhold` already built exactly that and had never been run,
+  because this work had not written that register. The decision it needed was
+  the owner's, and the owner gave it: **48 of 48 and, with the display clocks
+  stopped as well, 36 of 36**, no failures, every md5 unchanged.
+- ~~The eight milliamps the display clocks are worth, which no rung could
+  carry.~~ Collected: `--suspend sr-phy-padhold-nodisp` is the kept
+  configuration at about 62 mA, fifty deep sleeps and no failure.
 
 **Answered on 2026-09-20, after B4 priced the rung at 37 mA:**
 
@@ -373,10 +400,12 @@ may cost one resume in five, which is why it is now item 1.
   above is built on.
 
 **Where the remaining gap probably is.** A sleeping board now draws about
-76 mA and a powered-off one 33, so about 43 mA is unaccounted for, and almost
-none of it can be a clock: every PLL that can be stopped has been, the CPU and
-both APBs are on 32 kHz, the whole DRAM clock path is in reset, and the one PLL
-whose stopping was expected to matter, PLL_DDR0, measured nothing. What is left
+62 mA and a powered-off one 33, so about 30 mA is unaccounted for, and almost
+none of it can be a clock: every PLL that can be stopped has been except
+PLL_PERI0, the CPU and both APBs are on 32 kHz, the whole DRAM clock path is in
+reset, the one PLL whose stopping was expected to matter, PLL_DDR0, measured
+nothing, and the three display clocks that were running have since been
+stopped for about seven milliamps. What is left
 is `vdd-dram` holding a gigabyte in self-refresh, the other core rails at full
 voltage, and the AXP717's own conversion and charger path with no cell on it.
 That last is the one worth suspecting first -- 33 mA for a board that is off is

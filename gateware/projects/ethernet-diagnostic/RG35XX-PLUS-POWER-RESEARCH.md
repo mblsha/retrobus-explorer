@@ -38,14 +38,17 @@ that brings out the LCD pins, so the H616 datasheet and user manual
 - **It documents the DRAM pad hold.** 3.13.6.17, `VDDOFF_GATING_SOF_REG` at
   RTC + 0x1F4, bit 0 `DRAM_CH_PAD_HOLD`, "1: hold dram pad", to be set before
   VDD_SYS is powered off and cleared after it comes back. That is the opposite
-  sense to the write the prior art makes, which is why our firmware leaves the
-  register alone -- and the prior art's own comment gives a second reason for
-  the write that the manual does not mention and that has nothing to do with
-  VDD_SYS: holding CKE low while the PHY is reset and unclocked. On
-  2026-09-20 that stopped being a curiosity. Ours fails one resume in five at
-  read calibration and theirs, which makes the write, failed none in
-  thirty-seven; see
+  sense to the write the prior art makes -- and the prior art's own comment
+  gives a second reason for the write that the manual does not mention and that
+  has nothing to do with VDD_SYS: holding CKE low while the PHY is reset and
+  unclocked. On 2026-09-20 that stopped being a curiosity, because ours failed
+  one resume in five at read calibration and theirs, which makes the write,
+  failed none in thirty-seven. On 2026-09-21 our firmware made the write, in
+  the prior art's sense, and stopped failing: 48 of 48 and 36 of 36. See
   [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md#how-often-the-rebuild-does-not-come-back-experiment-34).
+  The manual's polarity is still unreconciled with the working code's, and
+  **mainline U-Boot's H616 DRAM driver never touches this register at all**
+  (checked in the pinned v2026.01 tarball), so there is no third opinion.
 - **The PRCM is undocumented.** It is in the memory map at `0x07010000` and its
   registers are not described anywhere public. The PLL LDO gate the prior art
   writes at `+0x244` with a key of `0xa7` is in that block, which is why our
@@ -120,7 +123,7 @@ projects.
 
 | # | their point | status |
 | --- | --- | --- |
-| 1 | 0.5 W with every rail up is plausible; "clocks, PLLs, idle cores and DRAM activity are not where the current is" claims too much. Self-refresh is not the same as powering down the controller and PHY, which the published implementation does and ours did not. | **Done, and they were right.** Their firmware on our card: 68 mA. Ours with the controller and PHY shut down and rebuilt (`sr-phy`): 76 mA. The step was worth about 29 mA. |
+| 1 | 0.5 W with every rail up is plausible; "clocks, PLLs, idle cores and DRAM activity are not where the current is" claims too much. Self-refresh is not the same as powering down the controller and PHY, which the published implementation does and ours did not. | **Done, and they were right.** Their firmware on our card: 68 mA. Ours with the controller and PHY shut down and rebuilt (`sr-phy`): 76 mA. The step was worth about 29 mA. With the pad hold and the display clocks on top of it (`sr-phy-padhold-nodisp`), ours is about 62 mA by medians. |
 | 2 | The `powersave` result changes voltage and frequency together, so it does not partition the saving into leakage, switching and conversion loss. | Open. The OPP table ties the two; separating them needs a device-tree OPP at 480 MHz and 1.1 V. |
 | 3 | First rail to measure: DCDC2, `vdd-gpu-sys`, shared by the system and the GPU and always on, so unbinding panfrost does not power that domain down. Then the DRAM supply group, then analog and I/O. A prioritisation, not a diagnosis. | Open; needs hands (bench list B6, B11). |
 | 4 | No numerical floor can be promised. For a genuinely CPU/system-off design the target is tens of milliwatts. The honest budget is the DRAM's self-refresh current on each of its supplies, plus always-on, plus pad retention, plus conversion, which needs the actual memory part. | Open; needs the DRAM part number (B2). |
@@ -130,7 +133,7 @@ projects.
 | 8 | ALDO3 is labelled unused upstream and is a fair candidate once the cleanup race is removed. DCDC4 is different: on an AXP717 configured as a charger it is not an independent output, and the regulator framework's 1.0 V entry is a descriptor, not a rail. | **Done:** experiment 27, ALDO3 really off, worth nothing. DCDC4 left alone. |
 | 9 | With the SRAM/WFI architecture the executing CPU's supply and the shared system supply cannot be removed. Keep DCDC1 at the low OPP, DCDC2, DCDC3, BLDO2 `vcc-pll`, ALDO4 `avcc` (it also feeds GPIO bank G and the Wi-Fi I/O, so it is not audio-only) and CPUSLDO (the board file says its function is uncertain and that disabling it made GPIO reads inconsistent in the bootloader). Dedicated peripheral supplies are fair game if their pins are put in a safe state first. | Stands. Nothing here removes a rail. |
 | 10 | Real rail-off standby is reset-based: quiesce and enter confirmed self-refresh with valid pad retention; arm a hardware wake and run the PMIC sequence; on wake detect a retention marker in early SPL before any destructive DRAM initialisation; rebuild the memory interface without resetting the memory, restore what training overwrote, re-enter TF-A's warm path. The hazards are SPL's memory tests, sizing probes, training writes, and loading images over retained state, with BL31 at `0x40000000`. No proprietary boot0 is required. | Open; the largest remaining project. The stub's PHY rebuild is the hard half of step 4, already working from SRAM. |
-| 11 | Pad hold: the published stub writes RTC+0x1F4 bit 0 and its own pull request lists the write as ungrounded; the standby flag registers at 0x1F8/0x1FC are not proof of electrical retention; resumes with all rails up do not prove the hold survives rail removal. Repeat the RTC wake on battery, and establish the RTC's clock source before stopping the 24 MHz oscillator. | Partly done: the H616 manual documents the register (`DRAM_CH_PAD_HOLD`, 1 = hold, "set before VDD_SYS power off"), which is the opposite sense to the published write. `sr-phy` never touches it and resumes. Untestable while VDD_SYS stays up. |
+| 11 | Pad hold: the published stub writes RTC+0x1F4 bit 0 and its own pull request lists the write as ungrounded; the standby flag registers at 0x1F8/0x1FC are not proof of electrical retention; resumes with all rails up do not prove the hold survives rail removal. Repeat the RTC wake on battery, and establish the RTC's clock source before stopping the 24 MHz oscillator. | **Done for the rails-up case, and they were right that it matters.** The H616 manual documents the register (`DRAM_CH_PAD_HOLD`, 1 = hold, "set before VDD_SYS power off"), which is the opposite sense to the published write; mainline U-Boot never touches it. Written in the published sense on 2026-09-21, ours went from 8 failures in 42 to 0 in 48 and 0 in 36, so with every rail up the write is **required**, not ungrounded. What stays open is exactly their point: this proves nothing about whether the hold survives rail removal, and the polarity disagreement is unresolved. The RTC-wake-on-battery half (B8) and the RTC's clock source are still open. |
 | 12 | "I2C bus locked" is a transfer timeout in `mv64xxx`, not a measured stuck bus: an ordering bug. For PMIC access from firmware: Linux prepares policy while its adapter works; the stub does only the final transaction with a private polled R-I2C, explicit ownership handoff, bounded polling, everything it needs out of DRAM. First test a read-only transaction with all rails kept. | Open, and gated on a decision: nothing here writes the PMIC. |
 | 13 | The AXP717 has the feature: sleep/wake control at `0x25`, auto-sleep masks at `0x28` to `0x2a`; sleep captures the output enables and wake restores them. The OEM mask bytes `03 40 00` select DCDC1, DCDC2 and CLDO3, consistent with CPU, system/GPU and main I/O. Do not copy the OEM's `0x2d`/`0x6d` writes to `0x25`: they set bit 3, which the public register table marks reserved. Power-key and RTC wake must be shown to restore switched-off supplies. Green mode (keeps CPUSLDO, DCDC3, BLDO2, RTCLDO at 10, 10, 5, 5 mA limits) is not the next experiment. | Open; this is the map for the rail-off project. |
 | 14 | The failed PLL-off rung: add persistent progress markers at each step, bound every poll, record the failing register, make sure the watchdog really covers the interval; a missing reset does not distinguish "never woke" from "watchdog unavailable". The published stub preserves 320 bytes at the DRAM base and 320 at half the memory, because training may overwrite them. | **Done** in the `sr-phy` work: markers, a watchdog across short debug sleeps, and the one failure since (`sr-phy-nodisp`) named its own failing stage. |
@@ -138,7 +141,7 @@ projects.
 | 16 | No cpuidle driver does not mean busy-spinning: arm64's default idle is WFI. Offlining cores measuring nothing makes per-core idle states unlikely to pay; last-core and cluster idle is a separate firmware project. Encode the suspend OPP in the device tree (`opp-suspend`, as ROCKNIX did) instead of relying on a userspace governor. | Open; `opp-suspend` is a small device-tree change. |
 | 17 | The per-cycle drift: separate elapsed time from the number of transitions; add a run with the same awake work and no suspend; use balanced ABBA and BAAB groups; treat whole cycles or boots as the experimental unit. | **Done:** no climb inside the six-minute sleep (104, 102, 107 by thirds), none in experiment 28's awake control; it goes with the transitions. Balanced BAAB groups not yet used. |
 | 18 | A median of sparse readings is not average current; use mean power for energy comparisons and a scope across a shunt to see whether there are bursts. | Half done: means run 5 to 8 mA above medians and are now reported beside them. The scope needs hands (B9). |
-| 19 | Power-off with the alarm stays useful. The break-even sleep length is the extra energy of a shutdown and cold boot over a suspend and resume, divided by the difference in sleeping power, measured to the actual ready state. | Open; hands-off. The difference was 0.36 W against the 105 mA sleep and is about 0.22 W against `sr-phy`. |
+| 19 | Power-off with the alarm stays useful. The break-even sleep length is the extra energy of a shutdown and cold boot over a suspend and resume, divided by the difference in sleeping power, measured to the actual ready state. | Open; hands-off. The difference was 0.36 W against the 105 mA sleep, about 0.22 W against `sr-phy`, and is about 0.15 W against the kept 62 mA rung -- so the break-even sleep gets longer each time the sleep gets cheaper. |
 
 **Their order of work**, and where it stands: remove the known confounders
 (done); one productive bench visit for battery power, rail voltages and the
@@ -181,9 +184,10 @@ which only a physical disconnect settles (B5).
 
 ## Where the remaining current probably is
 
-A sleeping board draws about 76 mA and a powered-off one 33, so about 43 mA is
-unaccounted for, and about 35 mA if the published implementation's 68 is taken
-as the target. The hypotheses, in the order the evidence supports them:
+A sleeping board draws about 62 mA and a powered-off one 33, so about 30 mA is
+unaccounted for. It was 43 before the DRAM pad hold made our rebuild reliable
+and the three display clocks could be stopped on a rung that resumes. The
+hypotheses, in the order the evidence supports them:
 
 1. **The AXP717's own conversion and charger path, with no cell on it.** 33 mA
    for a board that is off is a lot, the expert's reading is that it is not the
@@ -204,10 +208,18 @@ as the target. The hypotheses, in the order the evidence supports them:
    temperature and clock power does not, so a cold-against-warm sleep (B14)
    would separate them, and experiment 28 has already shown that a 2 C warming
    over six windows does not move the awake current measurably.
-5. **Three clocks, and only three.** The stub's snapshot says `PLL_VIDEO0`,
-   `PLL_DE` and the DE bus clock are still running while the board sleeps.
-   Stopping them is worth about eight milliamps and currently costs the
-   reliability of the DRAM rebuild, which is the first candidate project below.
+5. **One clock, now that three of them have gone.** The stub's snapshot said
+   `PLL_VIDEO0`, `PLL_DE` and the DE bus clock were still running while the
+   board slept; stopping them turned out to be worth about seven milliamps and
+   is done, on the kept rung. What the snapshot still shows running, in every
+   sleep this bench has taken and in the prior art's as well, is **`PLL_PERI0`**.
+   It feeds the card controller among much else, so stopping it is not one
+   write: its consumers have to be quiesced and put back, and on this bench the
+   card is also the only channel the target has. Evidence needed before
+   anything is written: a mainline source for what hangs off PLL_PERI0 on this
+   SoC and how the vendor's standby parks those consumers. The fact that
+   neither the prior art nor the vendor's code stops it is a hint and not a
+   ground.
 
 ## Two candidate projects
 
@@ -216,31 +228,41 @@ them as separate projects rather than as two more rungs of one ladder.
 
 ### Finish the clock-level work
 
-**What.** Make our DRAM rebuild as reliable as theirs, and only then collect
-the eight milliamps the display clocks are worth. Restarting `PLL_VIDEO0` and
-`PLL_DE` after the rebuild rather than before it was tried on 2026-09-20
-(`--suspend sr-phy-nodisp-late`) and fixed nothing, because the control fails
-at the same rate: ours does not come back one resume in five, always at read
-calibration, on every rung that rebuilds the PHY. Of the two writes that
-separate their suspend sequence from ours, the DRAM pad hold at RTC + 0x1F4 is
-the one that could plausibly cause it and `--suspend sr-phy-padhold` already
-builds it. The PRCM PLL LDO at `+0x244` is the other, and it is a supply.
+**Most of this one is done.** The reliability half and the display half both
+closed on 2026-09-21. Restarting `PLL_VIDEO0` and `PLL_DE` after the rebuild
+rather than before it (`--suspend sr-phy-nodisp-late`) had fixed nothing, and
+the reason was that the rebuild's failure had nothing to do with the display
+clocks at all: it was the missing DRAM pad hold. With that write made,
+`sr-phy-padhold` resumed 48 of 48, and `sr-phy-padhold-nodisp` collected the
+display clocks on a rung that comes back -- 36 of 36, about seven milliamps,
+and a kept configuration. The counts and currents are
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md)'s.
 
-**Evidence it would need.** For the pad hold: a decision to write the register
-at all, and then one batch of experiment 34 -- thirty-odd short sleeps with the
-md5 check, against the control's eight failures in forty-two. For the display
-half, once something resumes every time: an A-B-B-A-A-B alternation, ten
-consecutive cycles and a six-minute sleep with the marker channel clean. For
-the PRCM half: a ground for the write. It is in the one block
-the manual does not document and the prior art's own comment marks it inferred;
-either a document, or a datasheet for the LDO it gates, or a decision to accept
-an inferred supply write. Nothing in this work has written a supply, and that
-rule is worth breaking only deliberately.
+**What is left of it, in order.**
 
-**Risk.** Low for the reordering (the worst case is another reset that leaves
-its stage code), open for the PRCM write (a supply that does not come back is a
-board that does not come back, and the only recovery on this bench is a power
-cycle and another deploy).
+1. **`PLL_PERI0`**, the last PLL running in any sleep on this bench. *Evidence
+   it would need*: a mainline source for what it clocks on the H616/H700 and
+   how those consumers are parked, before a single register is written. Then
+   the usual qualification -- a batch of experiment 34 for reliability, an
+   A-B-B-A-A-B alternation, ten cycles and a six-minute sleep. *Risk*: higher
+   than the display clocks, because the card controller is downstream of it and
+   the card is this bench's only channel to the target; a rung that stops it
+   badly is a board that says nothing.
+2. **An ablation for the pad hold's own current.** 69.7 mA against 76.0 in
+   separate boots is under this bench's threshold and nobody predicted the
+   saving. One deploy and one alternation would price it properly.
+3. **The PRCM PLL LDO at `+0x244`.** Still a supply, still in the one block the
+   manual does not document, still marked inferred by the prior art's own
+   comment -- and now with no reliability difference left for it to explain, so
+   the only thing it could buy is current. *Evidence it would need*: a ground
+   for the write. Either a document, or a datasheet for the LDO it gates, or a
+   deliberate decision to accept an inferred supply write. The pad hold is the
+   precedent for how such a decision is taken -- the register was documented,
+   the risk was bounded, the rule was the orchestrator's own and the owner
+   lifted it -- and it is a precedent for examining a prohibition, not for
+   ignoring one. This write has none of the pad hold's grounds. *Risk*: open. A
+   supply that does not come back is a board that does not come back, and the
+   only recovery on this bench is a power cycle and another deploy.
 
 ### PMIC-assisted rail-off with an SPL resume
 
@@ -254,19 +276,25 @@ without resetting the memory; restore what training overwrote; re-enter TF-A's
 warm path. This is the only route that changes the power class rather than the
 number.
 
-**What is already in hand.** The hard half of the rebuild works and works from
-SRAM: `sr-phy` shuts the controller and PHY down and builds them again with
-U-Boot's driver, saves and restores what training writes over, and has eighteen
-proved sleeps behind it. The AXP717's registers are mapped in the review's point
-13. The wake path exists in one form already: the RTC alarm powers a
-fully-powered-off board back on, twice out of twice.
+**What is already in hand.** The hard half of the rebuild works, works from
+SRAM and now works every time: `sr-phy-padhold-nodisp` shuts the controller and
+PHY down and builds them again with U-Boot's driver, saves and restores what
+training writes over, holds the DRAM pads while the PHY is reset, and has fifty
+proved sleeps behind it with no failure. The pad-hold write this project
+depends on is therefore already made and already exercised, which it was not
+before. The AXP717's registers are mapped in the review's point 13. The wake
+path exists in one form already: the RTC alarm powers a fully-powered-off board
+back on, twice out of twice.
 
 **Evidence it would need, before anything is written.** A mapped retention
 supply set, which means B2 (read the chips) and B6 (rail voltages in each
 state). A proven wake path on the actual retention configuration, which means
 B7 and B8 on a battery. A demonstration that the pad hold does what it is
-supposed to when VDD_SYS actually goes away, which cannot be shown while it
-stays up. A read-only PMIC transaction from the stub first, with every rail
+supposed to when VDD_SYS actually goes away -- which is still unshown, and is
+the one part of the pad-hold question that fifty resumes with every rail up
+cannot answer; it is also where the manual's polarity and the working code's
+would finally have to be reconciled. A read-only PMIC transaction from the stub
+first, with every rail
 kept, to prove that firmware can talk to the AXP717 at all at that point in the
 suspend. And a UART (B12), because a board that does not come back from a rail
 that did not come back leaves nothing at all.

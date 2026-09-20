@@ -5,7 +5,7 @@
 > The expert's assessment, point by point, and what was checked after it are in
 > [RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md); the current
 > results are [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), where the best sleep
-> is now 76 mA rather than the 105 quoted below. Two statements here were
+> is now about 62 mA rather than the 105 quoted below. Two statements here were
 > corrected there: the conclusion in section 6 that "clocks, PLLs, idle cores
 > and DRAM activity are not where the current is" claims more than the
 > experiments show -- shutting the DRAM controller and PHY down was later worth

@@ -2278,3 +2278,71 @@ The card is left carrying `rocknix-deep`, which is theirs. `--suspend sr-phy`
 stays in the tree, stays built and stays measured at about 76 mA, and is a rung
 rather than a configuration until it resumes every time. If what is wanted is
 ours and reliable, `--suspend sr` is 105 mA and never touches the PHY.
+
+## 2026-09-21 The write that was not allowed, and the rung that came back
+
+The evening before had left one sentence to act on: their suspend sequence
+differs from ours in two writes, and only one of them could plausibly cause an
+intermittent failure of the first step that reads the memory. That one is the
+DRAM pad hold, RTC + 0x1F4 bit 0. `sr-phy-padhold` had been built the day
+before and never run, because this work's standing rule was never to write a
+register it could not ground, and the pad hold had been filed under that rule
+beside the PRCM PLL LDO and the PMIC.
+
+**The filing was wrong and the rule was right.** The register is documented --
+H616 User Manual 3.13.6.17, `VDDOFF_GATING_SOF_REG`, bit 0 `DRAM_CH_PAD_HOLD`,
+"1: hold dram pad", to be set before VDD_SYS is powered off. It is in the RTC
+block and not the PMIC. No rail and no voltage is involved. The worst case of a
+wrong write is a resume that does not happen, which is precisely the failure
+that *not* writing it was already causing, one time in five. Three of those
+four facts had been in the notes all along; what had not happened was anybody
+putting them together against the prohibition. When the orchestrator tried to
+lift its own rule, the session's permission system refused the run as a
+weakening of a safety guard, which is the right behaviour -- an agent does not
+widen its own authority. **The owner was asked and said yes.** That is the only
+reason the write exists, and it is worth writing down beside the result.
+
+The result was immediate. `sr-phy-padhold`, on four batches of twelve
+watchdog-covered ten-second sleeps each followed by the 256 MiB md5 check,
+resumed **forty-eight times of forty-eight** where its control had lost eight
+of forty-two. Alternated against s2idle it read 67, 67 and 75 mA against 115,
+119 and 107 -- 69.7 against 113.7, forty-four milliamps -- and a six-minute
+sleep read 72 mA with the memory intact, in a window the supply's link made
+unsound. The pad hold turns out to be worth about six milliamps as well as the
+reliability, which nobody predicted and which is under this bench's
+eight-milliamp threshold, so it is recorded as suggestive.
+
+**With a rung that comes back, the display clocks could finally be collected.**
+The stub's own snapshot had said since act three that `PLL_VIDEO0`, `PLL_DE`
+and the DE bus clock were still running with the panel long asleep, and every
+rung that stopped them had been one that failed one resume in five.
+`sr-phy-padhold-nodisp` is the pad-hold rung with all three stopped, restored
+in the ordinary place before the rebuild, since the late restore had already
+measured no different: **thirty-six of thirty-six**, alternation 57, 65 and
+67 mA against 113, 119 and 124, ten consecutive forty-second cycles with all
+ten windows sound at 60 to 67, and a six-minute sleep at 62 mA with the memory
+intact. Fifty deep sleeps in all on the kept rung, no failure, every md5
+unchanged.
+
+So the card carries ours again, `--suspend sr-phy-padhold-nodisp`, and
+`rocknix-deep` becomes the reference and the fallback rather than the kept
+configuration. By medians ours is six to ten milliamps below theirs, which is
+at the edge of the eight this bench believes -- and **by the means of the same
+readings the two are level**, 79.3 against 79.7, because the readings inside a
+sleep window on these rungs are burstier than on anything below them. Both
+numbers are in the report and the report says which is which. What would settle
+it is a scope across a shunt, which is bench experiment B9 and needs hands.
+
+Two things stay open that the fifty resumes cannot close. The polarity
+disagreement is one: the manual says 1 holds and the prior art's working
+sequence clears the bit on the way down, mainline U-Boot's H616 driver never
+touches the register at all, and this board reads it as 1 at rest; ours mirrors
+the prior art because the prior art resumes, and only a standby in which
+VDD_SYS actually goes away could tell the two readings apart. The other is
+`PLL_PERI0`, now the last PLL running in any sleep on this bench, ours or
+theirs. It feeds the card controller, which is the only channel the target has,
+so stopping it is not one write and it needs grounding in mainline sources
+before anything is attempted -- the same test the pad hold eventually passed.
+
+The gap to a powered-off board is now about thirty milliamps rather than
+forty-three, and every bit of what is left is in rails.

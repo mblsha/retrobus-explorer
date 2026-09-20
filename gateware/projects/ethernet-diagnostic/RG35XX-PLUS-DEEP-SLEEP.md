@@ -3,8 +3,9 @@
 What it is, how it works, and how it got there. The Anbernic RG35XX Plus
 (Allwinner H700) ships with a firmware that offers Linux no sleep state deeper
 than s2idle; this is the firmware we built to give it one, from source, in
-three stages, each priced on the bench -- and a fourth that counted how often
-the deepest of them actually comes back.
+three stages, each priced on the bench -- a fourth that counted how often the
+deepest of them actually comes back, and a fifth that made it come back every
+time.
 
 Every current is in [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), which is the
 results reference and the one home for measurements; this page is the design
@@ -15,18 +16,23 @@ are section 12 of [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md).
 
 ## Verdict
 
-**Ours saves about forty milliamps, which is within three of the published
-implementation it was modelled on, and it does not come back one resume in
-five.** It took three attempts to get to the current: the first two saved
-almost nothing, and the third -- switching the DRAM controller, its PHY and the
-DRAM clock path off and building them again on the way back -- is where all of
-it was. Then the resumes were counted rather than assumed, and eight of
-forty-two were not there: the PHY would not calibrate, always at the same step.
-The same experiment ran the published implementation thirty-seven times with no
-failure, so the design is sound and this implementation of it has a bug. The
-card is left carrying theirs, `sr-phy` is a rung and not a configuration, and
-the evidence and the leading suspect -- the one write in their suspend sequence
-that ours deliberately does not make -- are in
+**Ours saves about fifty-three milliamps, comes back every time, and by
+medians now sleeps below the published implementation it was modelled on.** It
+took three attempts to get to the current: the first two saved almost nothing,
+and the third -- switching the DRAM controller, its PHY and the DRAM clock path
+off and building them again on the way back -- is where all of it was. Then the
+resumes were counted rather than assumed, and eight of forty-two were not
+there: the PHY would not calibrate, always at the same step. The same
+experiment ran the published implementation thirty-seven times with no failure,
+so the design was sound and this implementation of it had a bug. **The bug was
+one register.** Their suspend sequence held the DRAM pads while the PHY was
+reset and unclocked and ours did not, because this work had a standing rule
+against writing a register it could not ground and that rule had been applied
+too widely. The owner lifted it for this one write; with the pads held, ours
+resumed 48 of 48, and with the three display clocks stopped as well, 36 of 36
+and about seven milliamps lower again. The card carries ours,
+`--suspend sr-phy-padhold-nodisp`, with theirs as the reference and the
+fallback. Every current and every count is in
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md).
 
 ```text
@@ -38,16 +44,20 @@ s2idle as the image ships                         ~124 mA            --     --
 + controller, PHY and clock path off, rebuilt      ~76 mA          ~29 mA   a C stub in SRAM that
   on resume from U-Boot's DRAM driver                                       links U-Boot's driver,
   (8 of 42 resumes did not happen)                                          and a bug
++ the DRAM pads held while the PHY is              ~70 mA          ~6 mA    one register write, and
+  reset (52 of 52 resumes happened)                              (in doubt) a rule lifted to make it
++ PLL_VIDEO0, PLL_DE and the DE bus gate           ~62 mA          ~7 mA    three clocks the kernel
+  stopped too (KEPT; 50 of 50 happened)                                     leaves running
 ROCKNIX's suspend instead (`rocknix-deep`)         ~70 mA      ~51 vs s2idle  the same idea, theirs,
-  (0 of 37 resumes did not happen)                                          and it works
+  (0 of 37 resumes did not happen)                                          and it worked first
 powered off, RTC alarm armed (not a sleep)          33 mA            --     a cold boot on waking
 ```
 
-All of it together takes a sleeping board from about 124 mA to about 76, forty
-percent, and the firmware is about forty of those milliamps. About 43 mA
-separates the best sleep from a board that is powered off, and that is rails:
-every one is still up at full voltage and the PMIC was deliberately never
-written.
+All of it together takes a sleeping board from about 124 mA to about 62, half,
+and the firmware is about fifty of those milliamps. About 30 mA separates the
+best sleep from a board that is powered off, and that is rails: every one is
+still up at full voltage and the PMIC was deliberately never written. The one
+clock still running in any sleep here, ours or theirs, is `PLL_PERI0`.
 
 The experiment's shape is worth keeping as well as its number. Two rungs in a
 row measured nothing and the report said so; the third, which an outside
@@ -62,6 +72,16 @@ failed once in three and the obvious explanation had to be checked against its
 own control. It was not the explanation, and the control was as broken as the
 variant. Anything a note calls proven should say how many times it was tried
 and what would have shown a failure.
+
+The third lesson is about the rule that caused the bug. "Never write a register
+that cannot be grounded" is a good rule and it was applied to a register that
+*is* grounded: the H616 manual documents it, it is in the RTC block and not the
+PMIC, no rail and no voltage is involved, and the worst case is a resume that
+does not happen -- which is the failure the rule's absence was already causing.
+The forbidding was written down in one place and read as settled everywhere
+else, so nobody re-examined it for a day. A standing prohibition should carry
+its own reason next to it, so that the reason can be checked when the evidence
+changes.
 
 What it produced, besides the number: current figures nobody had published for
 this design; a reproducible from-source bootloader; a `deep` state whose
@@ -106,12 +126,22 @@ sr-c            0001 0003     SUNXI_SUSPEND_BLOB, STUB_LEVEL=1   C stub: self-re
 sr-phy          0001 0003     SUNXI_SUSPEND_BLOB, STUB_LEVEL=2   C stub: the whole DRAM side
 sr-phy-pllon    0001 0003     + STUB_DDR_PLL_OFF=0            ablation: PLL_DDR0 left running
 sr-phy-fastapb  0001 0003     + STUB_APB_32K=0 STUB_CPU_32K=0 ablation: everything on OSC24M
-sr-phy-padhold  0001 0003     + STUB_PAD_HOLD=1               + the prior art's pad-hold write
+sr-phy-padhold  0001 0003     + STUB_PAD_HOLD=1               + the DRAM pads held while the PHY
+                                                              is reset: what makes ours reliable
+sr-phy-padhold-nodisp 0001 0003 + STUB_PAD_HOLD=1             + the two display PLLs and DE gate
+                                + STUB_DISPLAY_OFF=1          as well. THE KEPT CONFIGURATION
 sr-phy-nodisp   0001 0003     + STUB_DISPLAY_OFF=1            + the two display PLLs and DE gate
 sr-phy-nodisp-late 0001 0003  + STUB_DISPLAY_LATE=1           the same three, put back after the
                                                               rebuild instead of before it
 rocknix-deep    none of ours  their TF-A patches, their stub  theirs, at the commit ROCKNIX pins
 ```
+
+**Five of these rungs rebuild the PHY without holding the pads** -- `sr-phy`,
+its two ablations, `sr-phy-nodisp` and `sr-phy-nodisp-late` -- and each of them
+fails about one resume in five to eight. They are kept, built and measured
+because each prices a sub-step and a ladder is only readable if every rung goes
+on building what it was measured as; none of them is a configuration anybody
+should deploy.
 
 Every switch is off by default, so a build that does not ask for one is
 byte-for-byte the build that came before: `none` and `sr` were both rebuilt
@@ -304,8 +334,11 @@ tree with the firmware it belongs to.
 
 ## The suspend sequence, step by step
 
-This is `sr-phy`, the kept rung; `sr-c` is the same code with `STUB_LEVEL=1`,
-which stops after self-refresh and comes back by clearing the request.
+This is `sr-phy-padhold-nodisp`, the kept rung, which is `STUB_LEVEL=2` with
+both `STUB_PAD_HOLD` and `STUB_DISPLAY_OFF`; the steps those two add are marked
+`[padhold]` and `[nodisp]`, and `sr-phy` is the same sequence with neither.
+`sr-c` is the same code with `STUB_LEVEL=1`, which stops after self-refresh and
+comes back by clearing the request.
 
 ```text
 clear the debug registers, stage ENTER
@@ -333,6 +366,14 @@ set PWRCTL bits 5 and 0, wait STAT mode 3     software self-refresh, and the
                                               lose its clock. A controller that
                                               refuses rolls back to mode 1 and the
                                               suspend does not happen
+[padhold] clear RTC + 0x1F4 bit 0,            the DRAM pad hold. It happens here
+  stage PAD_HELD                              and nowhere else: after the memory
+                                              is confirmed holding itself and
+                                              before the DFI goes, so the pads
+                                              are held for the whole of the
+                                              window in which the PHY is reset
+                                              and unclocked. Without it the
+                                              rebuild fails one time in five
 SWCTL=0, DFIMISC = (x & ~1) | 0x1f20,         shut the DFI interface down; bit 0
   SWCTL=1, wait DFISTAT bit 0 clear           is the DFI init-complete enable
 CLKEN = 0                                     the controller's own clock enables
@@ -355,13 +396,15 @@ WFI                                           interrupts routed to EL3 for the
                                               wait, SCR_EL3 put back after
 ```
 
-Three writes in the descent are in neither the manual nor U-Boot and are the
-prior art's reading of the vendor's standby code: the `0x1f20` into `DFIMISC`,
-the `PWRCTL` bit 0 beside bit 5, and the pad-hold bit, which is off here. The
-H616 manual documents no DRAM controller registers at all, so U-Boot's own
-driver -- `mctl_ctrl_init()` to go in, `mctl_phy_init()` to come out -- is the
-only honest source for the rest; everything in the CCU, the watchdog and the
-RTC is from the manual and cited where it is used.
+Two writes in the descent are in neither the manual nor U-Boot and are the
+prior art's reading of the vendor's standby code: the `0x1f20` into `DFIMISC`
+and the `PWRCTL` bit 0 beside bit 5. The pad-hold register *is* in the manual;
+what is the prior art's and not the manual's is the *sense* in which it is
+written, which is the next section. The H616 manual documents no DRAM
+controller registers at all, so U-Boot's own driver -- `mctl_ctrl_init()` to go
+in, `mctl_phy_init()` to come out -- is the only honest source for the rest;
+everything in the CCU, the watchdog and the RTC is from the manual and cited
+where it is used.
 
 ## The resume sequence
 
@@ -376,7 +419,13 @@ cluster onto OSC24M, PLL_CPUX back and        the cluster stays on OSC24M: a
 [nodisp] PLL_VIDEO0, PLL_DE, then the DE gate as whole words, so the kernel's
                                               clock framework finds what it wrote
 U-Boot's DRAM driver, resume path             17 bounded waits, the last on
-                                              SWSTAT; see below
+  [padhold] and, from inside it, RTC +        SWSTAT; see below. The release is
+  0x1F4 bit 0 set again -- the release --     made from inside the driver rather
+  immediately before the controller is        than from the stub because only the
+  told to leave self-refresh                  driver knows when the controller is
+                                              about to be let out, and everything
+                                              before that moment still needs the
+                                              pads held
 put the 160 saved words back
 [nodisp-late] read those 160 words back and   the display restore moved to here
   then PLL_VIDEO0, PLL_DE, the DE gate        instead, so that nothing restarts
@@ -418,26 +467,65 @@ reached, which is how a rebuild that fails says where.
 - **The PMIC, over any bus.** No rail, no I2C, no RSB, anywhere in any of this.
   Real rail-off standby is a separate project, and it is
   [RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md)'s.
-- **RTC + 0x1F4 bit 0, the DRAM pad hold.** The H616 manual's 3.13.6.17 calls
-  the register `VDDOFF_GATING_SOF_REG` and bit 0 `DRAM_CH_PAD_HOLD`, "1: hold
-  dram pad", to be set before VDD_SYS is powered off and cleared after it comes
-  back; the prior art clears it on the way down with a comment saying that is
-  what holds CKE low while the PHY is reset and unclocked, and sets it again in
-  its resume path before the controller leaves self-refresh. VDD_SYS never goes
-  off in this work, so the manual's framing does not apply, and the register is
-  left alone. **That is now the leading explanation for why our rebuild fails
-  one resume in five and theirs fails none**: it is one of only two writes that
-  differ between the two suspend sequences, and the other is a supply.
-  `STUB_PAD_HOLD=1` uses the prior art's polarity so that it can be measured as
-  a rung of its own; `sr-phy-padhold` is built and was not run.
 - **PRCM + 0x244, the PLL LDO**, which the prior art writes with a key of
   `0xa7`. Their own comment marks it inferred, it is in the one block of this
   SoC the manual does not document, and it is a supply and not a clock. Nothing
-  here writes a register it cannot cite.
+  here writes a register it cannot cite. It is now the **only** write that
+  separates their suspend sequence from ours, and there is no longer a
+  reliability difference for it to explain.
 - **PLL_PERI0 and the 24 MHz oscillator** are left running on purpose: the
   first feeds the card controller among much else, and the second clocks the
   architected counter and the watchdog, which are the only two ways this code
-  can tell the time.
+  can tell the time. PLL_PERI0 is the last clock-level item on the list, and
+  stopping it needs a mainline source for what depends on it and how those
+  consumers are parked -- not an inference from the fact that theirs leaves it
+  running too.
+
+### RTC + 0x1F4, the DRAM pad hold: the one that moved off this list
+
+It used to be the second item here and it is now in the suspend sequence, on
+the kept rung. The whole story, because the shape of the mistake is worth more
+than the register:
+
+- **What the manual says.** H616 User Manual 3.13.6.17 calls the register
+  `VDDOFF_GATING_SOF_REG` and bit 0 `DRAM_CH_PAD_HOLD`, "1: hold dram pad", to
+  be set before VDD_SYS is powered off and cleared after it comes back.
+- **What the working code does.** kailashrs' stub *clears* bit 0 on the way
+  down, as soon as self-refresh is confirmed and before the DFI is shut down,
+  with a comment saying that is what holds CKE low while the PHY is reset and
+  unclocked, and *sets* it again in its resume path before the controller is
+  told to leave self-refresh. That is the opposite sense to the manual's, and
+  it is the sense that resumes thirty-seven times of thirty-seven.
+- **What this board does at rest.** The register reads 1 before and after every
+  sleep, on a board that has never suspended and on one that has.
+- **What mainline does.** U-Boot's H616 DRAM driver never touches this
+  register -- checked in the pinned v2026.01 tarball -- so there is no third
+  opinion to break the tie.
+- **Why it was forbidden.** This work's own rule was never to write a register
+  it could not ground, and the pad hold was filed under it along with the PRCM
+  PLL LDO and the PMIC. That was too wide. The register is documented, it is in
+  the RTC block and not the PMIC, no rail and no voltage is involved, and the
+  worst case of a wrong write is a resume that does not happen -- which is the
+  failure that *not* writing it was already causing, one time in five. The rule
+  was right and its application was not, and it had been written down in one
+  place and read as settled everywhere else.
+- **How it came to be written.** When the orchestrator tried to lift its own
+  rule, the session's permission system refused the run as a weakening of a
+  safety guard, which is the correct behaviour: an agent does not get to widen
+  its own authority. **The owner was asked and said yes**, and that is the only
+  reason the write exists.
+- **What it bought.** `sr-phy-padhold` resumed 48 of 48 against its control's
+  8 failures in 42, `sr-phy-padhold-nodisp` 36 of 36, and both are a few
+  milliamps lower as well. The counts and currents are
+  [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md)'s.
+- **What is still not known.** Which polarity is *correct*. Ours mirrors the
+  prior art because the prior art works; nothing here distinguishes "the hold
+  is doing what the comment says" from "writing this register at this moment
+  perturbs something else helpfully". Only a standby in which VDD_SYS actually
+  goes away can tell them apart, and that is the rail-off project.
+- `STUB_PAD_HOLD` stays **0 by default**, so every rung measured without it
+  goes on building exactly what it was measured as; the two rungs that want it
+  ask for it by name.
 
 ## Debugging it blind: the markers and the watchdog
 
@@ -520,7 +608,7 @@ public document, the comment beside it says so.
 
 # How it got there
 
-Three acts, in a day. The numbers are all
+Five acts, in two days. The numbers are all
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md)'s; this is the shape.
 
 **Act one: the minimal version, and it was worth nothing.** The sysfs
@@ -584,15 +672,36 @@ calibration giving up at marker `0x35`. It is not the display clocks, not the
 length of the sleep and not the debug watchdog, each ruled out by a batch of
 its own. The published implementation, run through the same batch, resumed
 thirty-seven times out of thirty-seven. What separates the two suspend
-sequences is two writes, the DRAM pad hold and the PLL LDO, and this work makes
+sequences is two writes, the DRAM pad hold and the PLL LDO, and this work made
 neither.
+
+**Act five: the write that was not allowed, and the rung that came back.** Of
+those two writes only one could plausibly cause an intermittent failure of the
+first step that reads the array, and it was the documented one. Lifting the
+prohibition took the owner, because the session's permission system correctly
+refused to let the orchestrator weaken its own safety rule; the owner said yes,
+and `sr-phy-padhold` -- built the day before and never run -- resumed
+**forty-eight times of forty-eight**, with the memory's md5 unchanged after
+every one. The pad hold is what our rebuild was missing. It is also worth a few
+milliamps, 69.7 against 76.0, which nobody predicted and which is under this
+bench's threshold. And with a rung that resumes every time, the eight
+milliamps of display clocks that had been sitting unreachable since act three
+could finally be collected: `sr-phy-padhold-nodisp`, **thirty-six of
+thirty-six**, ten consecutive cycles with all ten windows sound, and 62 mA over
+six minutes -- below the published implementation's 70 to 72 by medians,
+level with it by means. The card carries it. Theirs is the reference and the
+fallback, and the rungs without the pad hold are measurements that must not be
+deployed. The whole of it is in
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md).
 
 ## Running it again
 
 ```sh
 uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
-  build-firmware --suspend rocknix-deep --fetch   # the kept one; runbook 12
-  build-firmware --suspend sr-phy                 # ours, the rung, not kept
+  build-firmware --suspend sr-phy-padhold-nodisp  # the kept one; runbook 12
+  build-firmware --suspend rocknix-deep --fetch   # theirs, the fallback
+  build-firmware --suspend sr-phy                 # ours without the pad hold:
+                                                  # a rung, and not deployable
 
 MDP_CLI=/path/to/miniware-mdp-m01/cli \
   uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py job \
@@ -612,7 +721,8 @@ the checks that followed the outside review, and 29 to 34 the PHY rebuild --
 29 its facts, 30 one sleep, 31 the watchdog-covered short sleeps that make a
 hang leave evidence, 32 the alternation, 33 a register dump that can be
 diffed against theirs, and 34 how often the rebuild comes back at all, which is
-act four and the one that decided what the card carries. Each firmware rung needs its own card image and its own
+acts four and five and the one that decided what the card carries -- twice.
+Each firmware rung needs its own card image and its own
 eight-minute `deploy`, because the bootloader is part of the image. `psu2` is
 the RG35XX; `psu1` carries another machine on this bench and must never be
 switched.

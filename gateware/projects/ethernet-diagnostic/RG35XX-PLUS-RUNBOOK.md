@@ -778,7 +778,11 @@ sr-phy           b084eb68...      + DFI off, CLKEN 0, clock path gated and reset
                                   the controller and PHY rebuilt on resume
 sr-phy-pllon     77e37f6a...      sr-phy with PLL_DDR0 left running
 sr-phy-fastapb   56f6bffb...      sr-phy with the CPU and APBs left on OSC24M
-sr-phy-padhold   cd6f5391...      sr-phy plus the prior art's DRAM pad-hold write
+sr-phy-padhold   cd6f5391...      sr-phy plus the DRAM pad hold, held while the
+                                  PHY is reset: what makes our rebuild reliable
+sr-phy-padhold-nodisp ...         that plus PLL_VIDEO0, PLL_DE and the DE gate
+                                  stopped. THE KEPT CONFIGURATION; card image
+                                  sha256 4389c576...
 sr-phy-nodisp    c8b423fb...      sr-phy with PLL_VIDEO0, PLL_DE and the DE gate
                                   stopped for the sleep and put back before the
                                   DRAM rebuild
@@ -786,6 +790,12 @@ sr-phy-nodisp-late c1e550f3...    the same three put back after the rebuild and
                                   after a deliberate read of the memory
 rocknix-deep     bca96e13...      not ours: kailashrs' TF-A patch and SRAM stub
 ```
+
+**Five of those rungs rebuild the PHY without holding the pads and fail about
+one resume in five to eight**: `sr-phy`, `sr-phy-pllon`, `sr-phy-fastapb`,
+`sr-phy-nodisp` and `sr-phy-nodisp-late`. They are built and kept because each
+prices a sub-step, and none of them is a configuration to deploy. Deploy
+`sr-phy-padhold-nodisp`, or `rocknix-deep` as the fallback.
 
 `none` and `sr` were rebuilt after the `sr-phy` work went in and are byte for
 byte what they were: `fb70c9a9` and `e232991c`, with the same
@@ -843,7 +853,7 @@ Two things about the stub that are easy to break and hard to notice:
 
 ### The PHY-rebuild rungs
 
-`--suspend sr-c`, `sr-phy` and the three `sr-phy-*` ablations apply patches
+`--suspend sr-c`, `sr-phy` and the six `sr-phy-*` variants apply patches
 0001 and **0003** -- never 0002, because 0002's assembly stub and 0003's C one
 are two answers to the same question. The C stub is a separate program in
 `rg35xx/firmware/stub/`, GPL-2.0-or-later because it is compiled against
@@ -877,6 +887,32 @@ because a suspend that does not come back looks exactly like a target that
 stopped answering. 32 is the alternation, 25 the ten cycles and 26 the
 six-minute sleep; those two are the self-refresh jobs unchanged, because they
 only ask for `mem` resolved to `deep` and check the memory afterwards.
+
+**The kept configuration is `sr-phy-padhold-nodisp`**, which is the same three
+commands with that name throughout and no `--fetch`:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-firmware --suspend sr-phy-padhold-nodisp
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --install-bootloader build/rg35xx-display/base-display-kernel.img \
+  --bootloader build/rg35xx-firmware-src/sr-phy-padhold-nodisp/u-boot-sunxi-with-spl.bin \
+  --output build/rg35xx-firmware-src/sr-phy-padhold-nodisp/base-ourboot.img
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --make-erofs-image build/rg35xx-firmware-src/sr-phy-padhold-nodisp/base-ourboot.img \
+  --system build/rg35xx-sleep/system-c65536.erofs \
+  --data build/rg35xx-sleep/data.ext2 --slot a --card-max-hz 6000000 \
+  --debug-command job-runner \
+  --output build/rg35xx-firmware-src/sr-phy-padhold-nodisp/rg35xx-plus-sleep-sr-phy-padhold-nodisp.img
+```
+
+That image, sha256 `4389c576...`, is what the card was left carrying on
+2026-09-21. It was qualified with job 34 (36 of 36), job 24, job 25 (ten
+cycles, all ten windows sound) and job 26 (six minutes at 62 mA). `sr-phy` and
+the other rungs that rebuild the PHY without the pad hold fail about one resume
+in five to eight and are measurements, not configurations.
 
 ```sh
 MDP_CLI=/path/to/miniware-mdp-m01/cli \
