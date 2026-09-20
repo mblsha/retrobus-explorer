@@ -18,6 +18,12 @@
 # times, and only the three B checks say anything about self-refresh.
 #
 # Six labels in this order: A1 B1 B2 A2 A3 B3.
+#
+# Expect more windows than labels. Checking the probe's md5 takes about four
+# seconds, so the gap between one wake and the next suspend is long enough for
+# the harness to call it a state of its own: those windows are 9 or 10 seconds
+# long and read 160 to 180 mA, which is the target awake. Read the windows by
+# their dwell and their median, not by the label that landed on them.
 
 markers() {
     echo "el3 stage=$($BB devmem 0x07000130 2>/dev/null) entered=$($BB devmem 0x07000134 2>/dev/null) resumed=$($BB devmem 0x07000138 2>/dev/null) wake_irq=$($BB devmem 0x0700013c 2>/dev/null)"

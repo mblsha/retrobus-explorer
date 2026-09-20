@@ -605,7 +605,30 @@ experiment 23 first -- one sleep on its own -- before anything was measured
 with it, because a rung that cannot come out of self-refresh looks exactly like
 a target that stopped answering.
 
-<!-- LADDER-RESULTS -->
+```text
+ #  rung                                  s2idle    the rung    wake  card  DRAM
+23  sr-gate, one sleep, first of its kind    --      99/10/11    yes   ok    ok
+24  sr-gate against s2idle, ABBAAB        116 mean  101 mean     6/6   ok    6/6
+```
+
+**`sr-gate` works and is not worth anything on top of `sr`.** Its s2idle arms
+read 116, 116 and 116 mA and its gated arms 102, 104 and 98, a mean of 101.3
+against 116.0. Against `sr`'s 104.7 with an s2idle anchor of 116.3 in its own
+boot, that is about 3.4 mA better -- the right direction, and less than half of
+what this bench calls a difference. Six wakes of six, six md5 checks unchanged,
+`success` 0 to 6 with `fail` 0, EL3's counters at 3 and 3, and every CCU
+register the stub touched read back afterwards exactly as it was found:
+`MBUS_CFG` `0xc1000002`, `DRAM_BGR` `0x00010001`.
+
+Two things to know about reading that table. The first s2idle window lost one
+reading to the supply's link dropping and is marked unsound, though its median
+is the same 116 as the other two. And the harness opened eight windows for six
+sleeps: the two extra are 9.7 s long and read 166 and 176 mA, which is the
+target awake between cycles, not a sleep -- the DRAM probe's md5 is checked
+after each wake and that check takes long enough to look like a state.
+
+<!-- LADDER-PLL -->
+
 
 
 ## Powered off is a third of the best sleep
