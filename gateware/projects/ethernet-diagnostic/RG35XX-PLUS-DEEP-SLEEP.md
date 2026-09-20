@@ -3,7 +3,7 @@
 A lab report of one experiment, run on 2026-09-20: give the Anbernic RG35XX
 Plus (Allwinner H700) a real suspend-to-RAM with a firmware of our own, built
 from source, and measure what it is worth at the wall. The measurements, all
-twenty-six job scripts and the long-form evidence are in
+twenty-eight job scripts and the long-form evidence are in
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md); the commands are section 12 of
 [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md). This is the short version:
 why it was tried, what was built, what it measured, and whether it was worth
@@ -244,13 +244,12 @@ checked without anyone at the bench was checked the same day:
   back-powering the ROCKNIX work found on the second card slot, and only a
   physical disconnect settles it.
 
-**For the next visit to the bench**, in the expert's order: a battery with a
-shunt interposer and USB disconnected (awake, `sr` sleep and off, plus the RTC
-wake on battery alone); the PMIC's output voltages with a meter in all three
-states, looking for rails that stay up or sit at an intermediate voltage when
-"off"; the off-state current with the FPGA card interface unplugged; then a
-shunt in DCDC2's load side, then DCDC3's. A scope across the shunt for a few
-sleep windows would settle the median question.
+**For the next visit to the bench**, in the expert's order: the battery with a
+shunt, the rail voltages in each state, the card interface unplugged for the
+off measurement, then DCDC2. The list itself, with what each experiment would
+answer and what it needs,
+is [RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md), so
+that it lives in one place.
 
 ## What would move the number
 
@@ -290,8 +289,10 @@ MDP_CLI=/path/to/miniware-mdp-m01/cli \
 
 The md5 check between sleeps opens an extra short window at about 170 mA, so
 read the windows by their dwell (a sleep is 40 s) and not by their labels.
-Jobs 18 to 21 are stage 1, 22 to 26 stage 2. `psu2` is the RG35XX; `psu1`
-carries another machine on this bench and must never be switched.
+Of the twenty-eight job scripts, 1 to 17 are the sysfs experiments, 18 to 21
+stage 1, 22 to 26 stage 2, and 27 and 28 the checks that followed this review.
+`psu2` is the RG35XX; `psu1` carries another machine on this bench and must
+never be switched.
 
 ## Sources
 

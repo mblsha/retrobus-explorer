@@ -580,11 +580,24 @@ and what it does not.
 ### Re-running the sleep experiments
 
 The scripts are in `projects/ethernet-diagnostic/jobs/sleep/`, one per row of
-the findings' experiment table, numbered in the order they were run. They are
-job scripts, not host scripts: each is passed to `rg35xx.py job --script`.
-Nothing has to be rebuilt or redeployed to run any of them -- the image on the
-card already carries the `job-runner` debug command -- so the only thing that
-changes between rows is the path and the labels.
+the experiment tables in
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), numbered in the order they were
+run. They are job scripts, not host scripts: each is passed to
+`rg35xx.py job --script`. There are twenty-eight of them:
+
+```text
+ 1-17  the sysfs experiments, on any image
+18-21  firmware stage 1, the CPU PLL stopped; needs the --suspend wfi image
+22-26  firmware stage 2, the LPDDR4 in self-refresh; needs a self-refresh image
+27-28  the checks that followed the outside review; 27 needs --suspend sr,
+       28 never suspends and runs on any image
+```
+
+Rows 1 to 17 and 28 need nothing rebuilt or redeployed -- the image on the card
+already carries the `job-runner` debug command -- so the only thing that
+changes between them is the path and the labels. The firmware rows each need
+their own image and their own eight-minute `deploy`, because the bootloader is
+part of the card image: section 12 builds them.
 
 ```sh
 MDP_CLI=/Users/mblsha/src/miniware-mdp-m01/cli \
@@ -603,6 +616,21 @@ roughly twelve seconds of boot plus forty-three per sleep plus the gaps: 360
 for the six-sleep alternations, 540 for the ten-cycle run, 150 for a single
 sleep. A job that overruns is cut off at `--run-seconds` with its power, which
 costs a power cycle and nothing else.
+
+The two review checks mark windows that are not all sleeps, so they have their
+own label lists:
+
+```text
+27-regulator-cleanup-step.sh  --run-seconds 260 \
+    --label before --label after --label deep1 --label deep2
+28-drift-control-awake.sh     --run-seconds 400 \
+    --label w1 --label w2 --label w3 --label w4 --label w5 --label w6
+```
+
+In both, and in the self-refresh rows, read the windows by their dwell rather
+than by their labels: the 256 MiB md5 check between cycles is long enough to
+open a short window of its own at about 170 mA, which shifts everything after
+it.
 
 Two things that are easy to get wrong:
 
@@ -633,9 +661,10 @@ done
 ```
 
 It is policy rather than device state, so one write per boot is enough and it
-survives every resume. Nothing else measured above the noise: see the findings
-for the twenty-five devices that can be unbound for nothing, the one that
-costs the wake, and the powered-off reference point at 33 mA.
+survives every resume. Nothing else measured above the noise: see
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) for the twenty-five devices that
+can be unbound for nothing, the one that costs the wake, and the powered-off
+reference point at 33 mA.
 
 ## 12. The bootloader from source
 
@@ -764,9 +793,10 @@ uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
 ```
 
 Then section 5's `deploy` with that image, and jobs 22 to 26 of
-`jobs/sleep/` against it. 22 first and always: it does not sleep, it costs one
-boot, and it is what says the DRAM controller is where the stub expects it and
-that the watchdog's enable bit can still be cleared after being set.
+`jobs/sleep/` against it, and job 27 as well. 22 first and always: it does not
+sleep, it costs one boot, and it is what says the DRAM controller is where the
+stub expects it and that the watchdog's enable bit can still be cleared after
+being set.
 
 Two things about the stub that are easy to break and hard to notice:
 
