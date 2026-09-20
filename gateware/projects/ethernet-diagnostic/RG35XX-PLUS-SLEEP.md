@@ -687,9 +687,6 @@ than eighteen. It is built, it works, and it is not the recommendation. The
 ladder's own rule -- stop climbing when a rung stops paying -- stops here, and
 the rung above it stops harder.
 
-
-
-
 ## Powered off is a third of the best sleep
 
 `poweroff -f` with 5 V still on the port draws **33 mA** (33 to 35, IQR 2,
