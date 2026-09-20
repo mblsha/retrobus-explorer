@@ -1,10 +1,16 @@
 # RG35XX Plus: what timed sleep costs, and how low it goes
 
-A report of the sleep-current work of 2026-09-20. It stands on its own; the
-long-form evidence for every figure is the "Sleep" section of
-[RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md), the commands are sections 11
-and 12 of [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md), and the story, dead
-ends included, is the 2026-09-20 entries of
+A report of the sleep-current work of 2026-09-20, and the one long-form home for
+everything about power and sleep on this board: every measurement, register
+fact, dmesg quote and caveat lives here. The `## Sleep` section of
+[RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) is a summary of this page and
+points back to it. The commands are sections 11 and 12 of
+[RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md); the verdict of the firmware
+experiment, and the outside review of it, are
+[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md); what still needs a
+person at the bench, and what each of those experiments would answer, is
+[RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md); and the
+story, dead ends included, is the 2026-09-20 entries of
 [RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md).
 
 The question was how little current the board can draw in a timed sleep, one it
@@ -46,7 +52,10 @@ armed still draws a third of the best sleep.
 
 All currents are at the USB-C port at 5.00 V with **no battery fitted**, so they
 include the PMIC's conversion and charger path and are not battery-life
-figures. The supply reads to 1 mA, about once every two and a half seconds.
+figures. The supply reads to 1 mA, about once every two and a half seconds, and
+every figure here is a median of those readings; the mean of the same readings
+runs 5 to 8 mA higher in every sleep window, which the next section explains
+and which the differences between arms survive.
 
 ## How it was measured
 
@@ -61,6 +70,15 @@ figures. The supply reads to 1 mA, about once every two and a half seconds.
   20 s (40 to 45 s in practice), with the range, the interquartile range and
   the count reported. A window in which the supply's wireless link dropped is
   marked UNSOUND and is not a measurement.
+- **A median is not an average, and the difference is not small.** Recomputed
+  from the stored readings after the outside review, the mean runs 5 to 8 mA
+  above the median in every sleep window, and single readings of 166 to 220 mA
+  turn up inside windows whose median is 105. Every figure quoted in this
+  report is a median, so the comparisons between arms survive the recomputation
+  -- the first self-refresh alternation is 11.0 mA by means against 11.6 by
+  medians -- but the absolute sleeping power is nearer 110 to 112 mA than 105.
+  Whether those high readings are real bursts or an artefact of the supply's
+  sampling needs a shunt and a scope, which needs a person at the bench.
 - **Noise.** Two cold boots of the same state differ by about 7 mA. Two
   identical sleeps inside one boot differ by about 3 mA, but the current also
   climbs about 1.5 mA per cycle through a boot (six identical sleeps: 121,
@@ -75,41 +93,106 @@ figures. The supply reads to 1 mA, about once every two and a half seconds.
 ## What the target offers
 
 - `/sys/power/state` is `freeze mem`; `/sys/power/mem_sleep` is `[s2idle]` and
-  nothing else, and writing `deep` to it returns EINVAL. `mem` and `freeze`
-  are the same state. That is the firmware the device ships with; the last
-  section of this report replaces it and `deep` appears.
+  nothing else, and writing `deep` or `shallow` to it returns EINVAL. `mem` and
+  `freeze` are the same state. That is the firmware the device ships with; the
+  last section of this report replaces it and `deep` appears.
 - There is no cpuidle driver (`current_driver` reads `none`) and no
-  `cpus/idle-states` in the device tree; the device tree says `arm,psci-0.2`.
-  A sleeping CPU only waits for an interrupt, the DRAM is not in self-refresh
-  and no power domain collapses. The device-tree half of that is still true at
-  the end of this report; the firmware half is not.
+  `cpus/idle-states` in the device tree, though there is a `psci` node with
+  method `smc` and `cpus/cpu@0` has `enable-method = "psci"`; the device tree
+  says `arm,psci-0.2`. Nothing tells the kernel what the idle or suspend states
+  of this SoC are, so a sleeping CPU only waits for an interrupt, the DRAM is
+  not in self-refresh and no power domain collapses. Giving the kernel a deeper
+  state is a device-tree and firmware question, not a configuration one. The
+  device-tree half of that is still true at the end of this report; the
+  firmware half is not.
 - The RTC is `7000000.rtc` with a working `wakealarm`; BusyBox has `rtcwake`.
   The kernel has `CONFIG_SUSPEND` and `CONFIG_RTC_DRV_SUN6I`; it does not have
   `DEBUG_FS` or `PM_DEBUG`, so there is no regulator summary and no suspend
   timing breakdown.
-- One sleep and one RTC wake, proved: 46 s by the RTC for a requested 45,
-  `success` 0 to 1, card check good before and after. Six of six in Phase 0,
-  and every sleep since.
-- While the target sleeps the card's clock stops dead: the FPGA counts exactly
-  zero edges a second, where a powered-off target's floating pin still gives
-  about fifty.
+- One sleep and one RTC wake, proved. `rtc_sleep 45 freeze`: the alarm was set
+  to RTC 86450 at 86405, the RTC read 86451 on waking, 46 s for a requested 45;
+  `/proc/uptime` went 1.83 to 47.62, so the clock keeps running in s2idle and
+  uptime is not evidence of anything here; `suspend_stats/success` went 0 to 1
+  with `fail` 0 and `last_failed_dev` empty; and the card check passed both
+  before and after. The same with `mem` in place of `freeze`, and the same with
+  a 70 s sleep. Six sleeps, six wakes, no failure in Phase 0, and none in any
+  sleep since.
+- While the target sleeps the card's clock stops dead. In the FPGA's passive
+  trace it runs at 6.0 MHz through the boot, and from the target's mark to its
+  wake it counts exactly zero edges a second for the whole 45 or 70 seconds,
+  then resumes. That is not the floating-pin case a powered-off target shows,
+  which still counts about fifty edges a second: the H700 gates the clock off
+  and holds the line.
 
 ## Baselines
 
-Two cold boots of each state, 45 s dwell.
+Median of the readings taken wholly inside the state, first three seconds
+discarded, dwell 45 s, at 5.00 V into the USB-C port with no battery fitted.
+Two runs of each, each run a cold boot.
 
 ```text
-state                                       median       IQR
-supply output off                              1 mA        -
-asleep, s2idle                           121, 126 mA   7-21 mA
-awake and idle, panel asleep             151, 144 mA  10-15 mA
-awake and idle, panel lit, kernel level  176, 183 mA   9-11 mA
-awake and idle, panel lit, full          246, 252 mA   9-11 mA
+state                                      median      range        IQR   n
+supply output off                             1 mA          -          -   -
+asleep, s2idle                          121, 126 mA   107-153 mA   7-21 mA  12-17
+asleep, s2idle, entered through `mem`       124 mA    116-131 mA     8 mA   10
+awake and idle, panel asleep            151, 144 mA   124-168 mA  10-15 mA  15-18
+awake and idle, panel lit, kernel level 176, 183 mA   161-200 mA   9-11 mA  12-20
+awake and idle, panel lit, full         246, 252 mA   139-267 mA   9-11 mA  15-16
 ```
 
-The suspend is worth about 22 mA on a target whose panel is already asleep. The
-backlight at full costs about 100 mA more than a sleeping panel, four times
-what the suspend saves.
+The kernel's own backlight level is 1250 of a maximum of 2499, and the panel is
+a 640x480 DSI unit on `card1-DSI-1`. "Panel asleep" is `echo 4 >
+/sys/class/graphics/fb0/blank`, which is how init leaves the display in
+job-runner mode, and which takes `dpms` to `Off`.
+
+**The noise figure is about 7 mA**, and this is where it comes from. Two runs
+of the same state a few minutes apart differ by 5.5 to 7.5 mA (121 against 126,
+144 against 151, 176 against 183, 246 against 252), which is more than the
+interquartile range inside a single run, 7 to 21 mA, would suggest. That is
+why nothing below is decided between boots, and why the threshold above is
+about 8 mA.
+
+So the suspend is worth about 22 mA on a target whose panel is already asleep,
+roughly 15 percent, and the backlight at full costs about 100 mA more than a
+sleeping panel -- four times what the suspend saves. The largest single item on
+this supply is the backlight and the second is whatever keeps an idle awake
+target at 145 mA.
+
+## What is still holding power up
+
+From the discovery job, with the target awake and idle:
+
+- **`performance` at 1416 MHz.** `cpufreq-dt` is bound with the `performance`
+  governor and `scaling_cur_freq` 1416000, the top of a ladder that goes down
+  to 480000. `conservative ondemand userspace powersave schedutil` are all
+  available. What a lower governor is worth is measured further down.
+- **No cpuidle driver**, as above. All four CPUs are online.
+- **Regulators enabled with the display asleep**: `vcc-pll` 1.8 V,
+  `vcc-spkr-amp` 3.3 V, `vcc-io` 3.3 V, `vcc-wifi` 3.3 V, `cpusldo` 0.9 V,
+  `vdd-cpu` 1.1 V, `vcc3v3-mmc2` 3.3 V, `vdd-gpu-sys` 0.9 V, `vdd-dram` 1.1 V,
+  `dcdc4` 1.0 V, `aldo3` 1.8 V, `avcc` 1.8 V. Disabled: `bldo1`, `bldo3`,
+  `bldo4`, `cldo2`, `vdd-lcd`, `boost`, `usb0-vbus`, `aldo1`, `aldo2`.
+  `dcdc4` is enabled with zero users. `vcc-wifi` is enabled although there is
+  no rfkill device and no wireless driver bound -- the RTW88 firmware is not in
+  this kernel. `vcc3v3-mmc2` powers the second card slot, the one whose
+  controller causes the slow boots.
+- **Bound platform drivers**: `panfrost` on `1800000.gpu`, `sun4i-codec`,
+  `sun50i-de2-bus`, `sunxi-de2-clks`, `sun6i-dma`, `sunxi-mmc` on all three
+  slots, `axp20x-usb-power-supply`, and the HDMI audio codecs. There are no USB
+  devices.
+- **Wakeup sources**: `7000000.rtc`, `alarmtimer.0.auto`, `axp20x-pek` (the
+  power key), `axp20x-usb`, `battery`, and `mmc0`, `mmc1`, `mmc2`. No IRQ under
+  `/sys/kernel/irq` has wakeup enabled.
+- **The PMIC's I2C bus is unusable during the suspend.** The kernel log from
+  every sleep shows the regulator core trying to disable `aldo3` thirty seconds
+  in and getting `mv64xxx: I2C bus locked` and `-ETIMEDOUT`, repeated every two
+  seconds until the wake. Whatever a deeper sleep would want to do to the PMIC,
+  it cannot be done from there as things stand.
+
+`DEBUG_FS` and `PM_DEBUG` are not set in this kernel, so there is no
+`suspend_stats` timing breakdown, no `pm_print_times`, no `wakeup_sources`
+debugfs file and no regulator summary. What is above is everything sysfs will
+say; the rest needs a kernel rebuild.
 
 ## The harness
 
@@ -124,11 +207,19 @@ the host, not a rootfs, an image, or an FPGA load.
 - Jobs may call `rtc_sleep SECONDS [STATE [MEM_SLEEP]]`, `card_check`,
   `mark_sector LABEL` and `rtc_now`. Each `rtc_sleep` is its own measured
   window, so one boot can hold several.
-- **The target's sleep can be the exchange window.** While it is suspended the
-  host disarms the card, reads the result the job flushed on its way down,
-  writes the next job and re-arms, in about 3 s; on waking Linux
-  re-initialises the card by itself and the next job runs within a fifth of a
-  second. Proved for two jobs in one boot, not for more.
+- **The target's sleep can be the exchange window.** While it is suspended --
+  issuing no card command at all -- the host disarms the card frontend, reads
+  the result the job flushed on its way down, writes the next job into the card
+  and re-arms, and the target wakes onto a card that was withdrawn and put back
+  while it was not looking. Done twice on the qualified bitstream: the exchange
+  took 3.43 s and 3.02 s of a 70 s sleep. After the wake the card
+  re-initialised on its own -- the trace shows the card state going from 0 back
+  to 4 -- the second job ran within a fifth of a second of the resume, its card
+  check passed, and the controller logged no error. The count of command frames
+  failing their checksum stayed at the 5 the power edge and the SPL contribute,
+  with none after. This makes a two-job cycle cost one boot instead of two. It
+  has not been run for more than two jobs in a row, and nothing here says how a
+  target that is disarmed twice in one boot behaves.
 - Four things the bench taught it: the gateware takes writes only as an
   ascending run from sector zero, so a job is delivered by replaying the
   image's first 2112 sectors (3 s) and lives at LBA 2048; a write's LBA does
@@ -142,12 +233,14 @@ the host, not a rootfs, an image, or an FPGA load.
 
 ## The experiments
 
-One script each in [`jobs/sleep/`](jobs/sleep); the first seventeen are below,
-18 to 21 are in the deep-sleep section and 22 to 26 in the self-refresh
-section after it. Cells are median / IQR / readings in mA over a
-40 s sleep; `!` is an UNSOUND window; "mean" is the mean of three medians in an
-A B B A A B run; "to N" means row N decided it properly; "ref." is a reference
-point and not a sleep.
+Twenty-eight experiments, one script each in [`jobs/sleep/`](jobs/sleep), so
+every row can be run again: the first seventeen are below, 18 to 21 are in the
+deep-sleep section, 22 to 26 in the self-refresh section after it, and 27 and
+28 in "After an outside review" at the end. The firmware rows need their own
+card images, because the bootloader is part of one. Cells are median / IQR /
+readings in mA over a 40 s sleep; `!` is an UNSOUND window; "mean" is the mean
+of three medians in an A B B A A B run; "to N" means row N decided it properly;
+"ref." is a reference point and not a sleep.
 
 ```text
  #  knob                                before      after        wake  card kept
@@ -174,6 +267,22 @@ point and not a sleep.
 16  awake and idle, kept configuration  --          139/5/8      --    ok   --
 17  ten consecutive cycles, kept cfg.   --          110-119      10/10 ok   --
 ```
+
+The alternating runs in full, A first:
+
+```text
+  7  A 121, 125, 126      B 125, 128, 129 !
+  8  A 125, 125 !, 126    B 124 !, 126 !, 129
+  9  A 122, 121, 125      B 110, 113 !, 114
+ 10  A 124, 131, 124      B 114, 116, 116
+ 11  A 112, 116, 109      B 114 !, 116, 119
+ 13  A 112                B 109, 113 !, 109
+```
+
+Every row's wake was checked the same way: the RTC's own account of the sleep
+(41 s for a requested 40, every time), `suspend_stats/success` up by one with
+`fail` unchanged and `last_failed_dev` empty, and a `card_check` after the
+resume.
 
 The ladders of rows 5 and 6 measured each knob once, after its own reference,
 and the drift through a boot made them disagree with each other; the
@@ -204,12 +313,19 @@ a real SD card as on the emulated one. It is
   Run a third time from the committed script by someone who had not written it:
   124 (unsound), 129, 125 against 114, 116, 115, the same means to the
   milliamp, six wakes of six, `vdd-cpu` read back at both voltages.
-- Awake and idle, panel asleep: about 8 mA, 139 mA against 144 to 151.
+- Awake and idle, panel asleep: about 8 mA, 139 mA (IQR 5, n=8) against the 144
+  and 151 mA the same state measured under `performance`.
 
-**Ten consecutive cycles, twice.** The governor set once, then ten
-`rtc_sleep 40 freeze` in one boot: ten wakes of ten and twelve card checks of
-twelve in both runs, 41 s by the RTC for a requested 40 on all twenty,
-`success` 0 to 10, `fail` 0.
+So in the kept configuration the target draws 139 mA awake and idle and about
+114 mA asleep, and the suspend itself is worth about 25 mA of that.
+
+**Ten consecutive cycles, twice.** Experiment 17, each run in one boot: the
+governor set once, then ten `rtc_sleep 40 freeze` in a row with three seconds
+of quiet between them, each suspend its own measured window. Both runs: ten
+wakes of ten, 41 s by the RTC for a requested 40 on all twenty,
+`suspend_stats/success` 0 to 10 with `fail` 0 and `last_failed_dev` empty, and
+twelve card checks each -- one before, one inside each cycle, one at the end --
+all `card-check ok`.
 
 ```text
 cycle       1    2    3    4    5    6    7    8    9   10
@@ -218,36 +334,75 @@ run B     114  115  114  116!  117!  114  110  116  113  119
 ```
 
 Sixteen of the twenty windows are sound, 110 to 119 mA. The four marked `!`
-lost two or three readings to the supply's link dropping, a hole in the
-measurement and not in the sleep.
+lost two or three readings each to the supply's link dropping, which is a hole
+in the measurement and not in the sleep -- the target's own account of those
+four cycles is identical to the other sixteen. A third run was not attempted:
+the link drops for a minute or two about once per eight-minute run, so a clean
+ten in a row is a matter of luck rather than of the configuration.
 
 ## What is blocked, and the measurement that says so
 
 - **Nothing else sysfs reaches is worth anything.** Row 13 unbound twenty-five
-  devices at once, the whole display pipeline, the GPU, three audio codecs,
-  both card controllers that are not the root, the backlight PWM, the watchdog,
-  the PMIC's ADC, battery and USB drivers and the SoC's ADC, and put the LEDs
-  out: 112 mA before, 109, 113 and 109 after. Still up afterwards: `vcc-pll`,
-  `vcc-spkr-amp`, `vcc-io`, `cpusldo`, `vdd-cpu`, `vdd-gpu-sys`, `vdd-dram`,
-  `dcdc4`, `aldo3`, `avcc`. Only `vcc-wifi` and `vcc3v3-mmc2` ever go away,
-  and row 8 prices the two together at about a milliamp.
-- **Offlining cores buys nothing** (row 7, 124 against 127). PSCI CPU_OFF works
-  and survives a suspend; the rail the cores share does not drop.
+  devices at once on top of the kept governor -- the DRM master, the panel,
+  both TCONs, both mixers, the HDMI controller and its PHY, the TCON top, the
+  planes, the DE2 bus, the GPU, the audio codec, the HDMI audio codecs, the
+  display connector, both card controllers that are not the root device, the
+  backlight PWM and its PWM controller, the watchdog, the eFuse, the spare
+  UART, the PMIC's ADC and its battery and USB power-supply drivers, and the
+  SoC's own ADC -- and turned both LEDs off: 112 mA before, 109, 113 and 109
+  after. The drift runs the other way, so if anything that is an over-estimate
+  of the gain. The rails that were still up afterwards are the answer:
+  `vcc-pll` 1.8 V, `vcc-spkr-amp` 3.3 V, `vcc-io` 3.3 V, `cpusldo` 0.9 V,
+  `vdd-cpu` 0.9 V, `vdd-gpu-sys` 0.9 V, `vdd-dram` 1.1 V, `dcdc4` 1.0 V,
+  `aldo3` 1.8 V and `avcc` 1.8 V. Only `vcc-wifi` and `vcc3v3-mmc2` ever went
+  away, and row 8 prices those two together at about a milliamp: three sleeps
+  with them on read 125, 125 and 126 mA and three with them off read 124, 126
+  and 129. Whatever the remaining 110 mA is, it is on rails no consumer in this
+  kernel will release. Setting `status = "disabled"` on the same nodes in the
+  device tree would stop them being probed at all, which is tidier than
+  unbinding and, on this evidence, worth about the same, namely nothing.
+- **Offlining cores buys nothing on its own** (row 7, three alternations at
+  `performance`: 124 mA mean with four cores, 127 mean with one). The cores do
+  go offline through PSCI CPU_OFF, they stay offline across a suspend and the
+  wake is unaffected -- `online` still read `0` after the sleep in row 6 -- but
+  an idle core in s2idle is in WFI on a rail shared with the one that stays,
+  and taking it away does not lower the rail. Row 9's saving is the governor's,
+  which row 10 then measured on its own at the same 11 mA.
 - **Unbinding `panel-mipi` while the DRM master holds it costs the wake**,
-  twice (rows 4 and 5). It is ordering and not the panel: with
-  `display-engine` unbound first the same unbind is harmless (row 12), and
-  worth nothing.
-- **`aldo3` and `dcdc4` have no users and cannot be turned off.** The regulator
-  core tries once, at 32 s of uptime, which lands inside the first suspend
-  where the PMIC's I2C bus is down: `mv64xxx: I2C bus locked`, `aldo3:
-  couldn't disable: -ETIMEDOUT`. It is never retried, and it costs nothing
-  measurable either way (row 2).
-- **The I2C traffic during a suspend is not the cost.** About 270 interrupts
-  per 40 s cycle, about 128 with the pollers unbound, the current unchanged
-  (row 11).
-- **The state itself is the limit,** for anything sysfs can reach. Something
-  deeper needs a firmware that implements it, which is the last section of
-  this report: it was implemented, it works, and it is worth four milliamps.
+  twice (rows 4 and 5): every unbind reported success, the job set its alarm,
+  wrote its result to the card and suspended, and nothing happened again for
+  the rest of the run -- no card command, no resume, no counter. It is ordering
+  and not the panel: with `display-engine` unbound from `sun4i-drm` first, the
+  same `panel-mipi` unbind and nine more underneath it are harmless and the
+  target woke three more times with its card checks passing (row 12). That row
+  also shows there is nothing to be had by doing it: 114, 118, 113 and 109 mA
+  across the ladder, and not one regulator changed state.
+- **`aldo3` and `dcdc4` are enabled with nobody using them.** The regulator
+  core's delayed cleanup runs at 32 s of uptime and is the only thing that ever
+  tries to take them down. The job harness starts a job at about two seconds,
+  so the attempt lands inside the first suspend, where the PMIC's I2C
+  controller is suspended: `aldo3: disabling` at 32.05 s, then `mv64xxx: I2C
+  bus locked, block: 1, time_left: 0` and `aldo3: couldn't disable:
+  -ETIMEDOUT` at 34.08 s, and the bus timing out again every two seconds until
+  the wake. It is attempted once and never again -- `aldo3` reads `enabled`
+  with `num_users` 0 for the rest of the boot, and so does `dcdc4`. It costs
+  nothing measurable either way: row 2's sleeps with the cleanup inside and
+  after it read 125 (unsound), 126 and 129 mA. There is no sysfs write that
+  enables or disables a regulator, so short of being awake at 32 s of uptime
+  these two rails stay up -- which is what row 27 later arranged, and it was
+  worth nothing either.
+- **The I2C traffic during a suspend is not where the current goes.**
+  `mv64xxx_i2c` is the only interrupt that counts up appreciably across a
+  sleep, about 270 per 40 s cycle. Unbinding the PMIC's ADC, its battery and
+  USB power-supply drivers and the SoC's ADC takes it to about 128 and changes
+  the current not at all (row 11: 112 mA mean with them, 116 mean without).
+- **The state itself is the limit,** for anything sysfs can reach. There is one
+  sleep state, s2idle, for the reasons above: no `cpus/idle-states` in the
+  device tree and no cpuidle driver bound. In s2idle the DRAM is not in
+  self-refresh, no power domain is collapsed, and the CPUs only WFI. Sysfs
+  cannot change any of that. Something deeper needs a firmware that implements
+  it, which is the rest of this report: it was implemented, it works, and the
+  CPU-clock half of it is worth four milliamps.
 
 ## Deep sleep: our own PSCI SYSTEM_SUSPEND
 
@@ -690,16 +845,25 @@ takes and this stub is built to avoid.
 
 ### Where the ladder stopped, and what is kept
 
+Taking s2idle as the anchor in each boot, and counting from the state the
+device ships in:
+
 ```text
 rung      what it adds                        asleep      against s2idle   kept
-sr        LPDDR4 in self-refresh              104.7 mean     -11.6 mA      YES
+wfi       PLL_CPUX stopped                    112.5 mean      -4.5 mA      no
+sr        + LPDDR4 in self-refresh            104.7 mean     -11.6 mA      YES
 sr-gate   + DRAM bus and MBUS clock gates     101.3 mean     -14.7 mA      no
 sr-pll    + PLL_DDR0 stopped                  does not resume              no
 ```
 
+Each "against s2idle" is that rung's own boot. `sr`'s was measured three times
+in all -- 11.6, 4.7 and 10.3 mA, about 9 mA pooled -- and the steady number in
+it is the state the board ends up in, about 105 mA every time, rather than the
+saving.
+
 `sr` is the kept configuration, and it is what the card was left carrying. It
-is the deepest rung that both pays and is fully proved: eleven and a half
-milliamps against s2idle in its own boot, ten consecutive cycles, and a
+is the deepest rung that both pays and is fully proved: about nine milliamps
+against s2idle pooled over three boots, ten consecutive cycles, and a
 six-minute sleep with its memory intact. Put back on the card after the two
 rungs above it had been tried and taken off again, it slept once more at
 104 mA with its probe unchanged, which is the sixteenth self-refresh sleep and
@@ -707,52 +871,114 @@ the state the bench was left in.
 
 `sr-gate` is three and a half milliamps below it, which is less than half of
 what this bench calls a difference, and it has four self-refresh sleeps behind
-it rather than fifteen. It is built, it works, and it is not the recommendation. The
+it rather than sixteen. It is built, it works, and it is not the recommendation. The
 ladder's own rule -- stop climbing when a rung stops paying -- stops here, and
 the rung above it stops harder.
 
 ## Powered off is a third of the best sleep
 
-`poweroff -f` with 5 V still on the port draws **33 mA** (33 to 35, IQR 2,
-n=19 over 60 s and n=62 over 190 s), the steadiest reading this bench has
-taken. An RTC alarm armed beforehand powers the board back on: twice of twice,
-61.0 s and 60.6 s after a 60 s alarm. With the alarm cleared it stayed dark for
-the remaining 193 s of the run, so the board does not simply restart on USB
-power; the alarm is what brings it back. The price is a cold boot, about 5 s
-to the first card command and about 12 s to userspace after power comes up, and
-nothing survives it. Against the 105 mA the self-refresh firmware now sleeps
-at, that is a third rather than the quarter it was before this section's
-neighbours were written; the gap has closed by eight milliamps and the
-remaining 72 are not in the SoC's clock trees.
+`poweroff -f` with 5 V still on the USB-C port draws **33 mA** (33 to 35,
+IQR 2, n=19 over 60 s in row 14; 33 to 35, IQR 2, n=62 over 190 s in row 15),
+the steadiest reading this bench has taken -- a 2 mA interquartile range
+against the 7 to 18 mA a sleeping target gives.
+
+**And the RTC alarm powers it back on.** Row 14 armed
+`/sys/class/rtc/rtc0/wakealarm` sixty seconds out and powered off. The card
+went silent at 8.4 s and the FPGA's trace shows a fresh boot reading the root
+filesystem at 69.4 s, 61.0 s later; the runner took the same job up again,
+armed the alarm again and powered off again at 74.5 s, and the board came back
+at 135.1 s, 60.6 s later. Two for two, both within a second of the alarm. Row
+15 is the control: the same job with the alarm explicitly cleared powered off
+at 15.7 s and the card saw nothing for the remaining 193 seconds of the run, at
+33 mA throughout. So the board does not simply restart when it is powered off
+on USB -- the alarm is what brings it back.
+
+The price is a cold boot, about 5 s to the first card command and about 12 s to
+userspace after power comes up, and nothing survives it. Against the 105 mA the
+self-refresh firmware now sleeps at, that is a third rather than the quarter it
+was before this section's neighbours were written; the gap has closed by eight
+milliamps, and the remaining 72 are not in any of the clocks this work was able
+to stop.
+
+## After an outside review
+
+The brief that went to a power expert is
+[RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md](RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md), as it
+was sent; their assessment and what it changed is the "After an outside review"
+section of [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md). Their main
+correction is to the conclusion and not to the measurements, and it is applied
+throughout this report: **what these experiments show is that the particular
+CPU-clock, core-offline, peripheral-unbind and DRAM-clock-gating changes tried
+do not explain most of the input power** -- not that the floor has been reached,
+and not that none of the current is in a clock. The controller and PHY shutdown
+the prior art performs (DFI shutdown, controller clocks off, pad retention,
+reconstruction on resume) is more than this stub's `sr` rung does and is the one
+clock-level step still unpriced. Every rail is up at full voltage, the DRAM
+controller and its PHY are powered and mostly clocked, and the PMIC was
+deliberately never written.
+
+What of their points could be checked the same day with nobody at the bench was
+checked, and that is experiments 27 and 28.
+
+```text
+ #  what was run                            awake before  awake after   asleep
+27  stay awake past the 32 s reg. cleanup      141 mA        142 mA    107, 104
+28  six awake windows, no suspend at all    142, 140, 139, 144, 134, 145 mA
+```
+
+- **The regulator-cleanup race is closed, and it was worth nothing.**
+  Experiment 27 stays awake past the kernel's one cleanup instead of sleeping
+  through it: `aldo3: disabling` at 32.05 s, and `aldo3` reads `disabled`
+  afterwards rather than `enabled` with no users. The same awake idle state
+  read 141 mA before it and 142 mA after, and two self-refresh sleeps taken
+  with `aldo3` off read 107 and 104 mA against the 105 every self-refresh sleep
+  has read with it on. The upstream board file calls ALDO3 unused, and an
+  output with nothing on it saves nothing. Every earlier figure in this report
+  was taken with the cleanup still pending, and this is the measurement that
+  says that does not matter.
+- **`dcdc4` is not a rail to chase.** It stays `enabled` with no users right
+  through the cleanup. On an AXP717 configured as a charger DCDC4 is not an
+  independent output at all; the regulator framework's 1.0 V entry is a
+  descriptor and not evidence of a supply. It is left alone.
+- **The drift goes with the transitions, which is suggestive and not
+  established.** Inside the one six-minute self-refresh sleep the current does
+  not climb: 104, 102 and 107 mA taken by thirds of the window. Experiment 28
+  is the other half of the control -- the alternations' awake work, a 256 MiB
+  md5, at the same dwell, six times in one boot with no suspend at all: 142,
+  140, 139, 144, 134 and 145 mA while the SoC warmed from 36.0 to 37.9 C, which
+  is no climb that a 10 mA spread can show. So the 1.5 mA per cycle is not time
+  asleep and not the awake work between cycles; what is left is the suspend and
+  resume transitions themselves, and nothing here has measured that directly.
+- **Charging cannot be switched off through the driver in this kernel.** The
+  battery supply reports `present=0` and `Not charging`, and there is no
+  charge-enable attribute anywhere under `/sys/class/power_supply`, so that
+  experiment needs a driver change or a person with a battery.
+- **A median is not an average**, and the recomputation that says so -- means 5
+  to 8 mA above medians in every sleep window, differences between arms
+  unchanged -- is in "How it was measured" at the top of this report, because it
+  applies to every figure in it and not only to these two rows.
+- **Not testable hands-off:** whether the FPGA card interface is electrically
+  neutral when the target is off or asleep. The gateware releases its lines
+  when the host clock stops and the qualified bitstream has no pull-ups, but a
+  powered FPGA on a target's pulled-up lines is exactly the back-powering the
+  ROCKNIX work found on its second card slot, and only a physical disconnect
+  settles it.
 
 ## Recommendations
 
-None of these was done; the first two need a person at the bench.
+Keep both of the things that paid: the `powersave` cpufreq governor, one line
+of shell per boot, and the `--suspend sr` firmware, runbook section 12. Between
+them they are the 105 mA sleep, they need no kernel or device-tree change, and
+they resume reliably -- not `sr-gate`, which is three milliamps lower on a
+quarter of the evidence, and not `sr-pll`, which does not come back. If the
+application can stand a cold boot on waking, `poweroff -f` with the RTC alarm
+armed is 33 mA instead of 105.
 
-1. Measure the same states on the battery. Everything here includes the
-   AXP717's conversion and charger path with no cell fitted, and 33 mA is
-   suspiciously large for a board that is off.
-2. Put a meter in series with the battery terminals, or read the PMIC's
-   coulomb counter, to separate what the SoC draws from what the PMIC costs.
-3. If a cold boot on waking is acceptable, use poweroff and the RTC alarm:
-   33 mA against 105, the wake proved twice and the stay-off once.
-4. The next real saving is in the device tree and the firmware:
-   `cpus/idle-states` for a cpuidle driver and a `mem` that is not s2idle, and
-   a suspend that collapses the domains behind `vdd-dram`, `vdd-gpu-sys`,
-   `vcc-pll` and `avcc`. The firmware half of this was then done twice over and
-   is the two sections above: a `mem` that is not s2idle is four milliamps,
-   putting the DRAM into self-refresh in it is eight more, and the domains are
-   still where the remaining seventy-two are.
-5. **Use the self-refresh firmware.** `--suspend sr`, runbook section 12. It is
-   the lowest sleep this bench has measured that keeps the machine's state, it
-   resumes reliably, and it needs no kernel or device-tree change at all. Not
-   `sr-gate`, which is three milliamps lower and has a fifth of the evidence,
-   and not `sr-pll`, which does not come back.
-6. The rails are a PMIC question now, and nothing here writes a PMIC register
-   on purpose. That is the next thing to decide, not to do by accident.
-7. A kernel with `PM_DEBUG` and `DEBUG_FS` for `pm_print_times`, the suspend
-   timing breakdown and the regulator summary. Nothing here needed it; the
-   next question probably will.
+Everything else that would move the number needs a person at the bench, a
+kernel rebuilt with `PM_DEBUG` and `DEBUG_FS`, or a decision about writing the
+PMIC -- and the list of those, in the order the outside review put them and
+with what each one would answer, is
+[RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md).
 
 ## Running it again
 
@@ -770,13 +996,15 @@ MDP_CLI=/path/to/miniware-mdp-m01/cli \
   --output /tmp/powersave.json
 ```
 
-Rows 1 to 17 run on any of the images. Rows 18 to 21 need the card image built
-with the `--suspend wfi` bootloader,
-`build/rg35xx-firmware-src/wfi/rg35xx-plus-sleep-wfi.img`; rows 22 to 26 need
-one of the self-refresh ones, `…/sr/rg35xx-plus-sleep-sr.img` and its
-`sr-gate` and `sr-pll` siblings. Runbook section 12 builds all of them, and
-each needs its own eight-minute `deploy` because the bootloader is part of the
-card image.
+Rows 1 to 17 run on any of the images, and so does row 28, which never
+suspends. Rows 18 to 21 need the card image built with the `--suspend wfi`
+bootloader, `build/rg35xx-firmware-src/wfi/rg35xx-plus-sleep-wfi.img`; rows 22
+to 26 and row 27 need one of the self-refresh ones,
+`…/sr/rg35xx-plus-sleep-sr.img` and its `sr-gate` and `sr-pll` siblings.
+Runbook section 12 builds all of them, and each needs its own eight-minute
+`deploy` because the bootloader is part of the card image. Runbook section 11
+has the `--label` lists and run lengths for every row, including 27 and 28,
+whose windows are read by their dwell rather than by their labels.
 
 Every run ends with the supply's output read back OFF and the card disarmed.
 `psu2` is the RG35XX; `psu1` carries another machine on this bench and must
