@@ -35,7 +35,10 @@ def _manifest(directory: Path, files) -> Path:
         },
         "defconfig": "a_defconfig",
         "tf_a_platform": "sun50i_h616",
-        "our_patches": {"0001-suspend.patch": {"applies_to": "tf-a", "suspend": ["wfi", "wfi32"]}},
+        "our_patches": {
+            "0001-suspend.patch": {"applies_to": "tf-a", "suspend": ["wfi", "wfi32", "sr"]},
+            "0002-dram.patch": {"applies_to": "tf-a", "suspend": ["sr"]},
+        },
     }
     sources = directory / "sources.json"
     sources.write_text(json.dumps(recorded))
@@ -139,6 +142,33 @@ class SuspendModeTests(unittest.TestCase):
             builder.SUSPEND_MODES["wfi32"],
             {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_CPU_32K": "1"},
         )
+
+    def test_the_self_refresh_builds_add_the_stub_patch_on_top(self):
+        """The stub patch applies over the DRAM-less one, so the two earlier
+        bootloaders stay the bootloaders they were measured as."""
+        for mode in ("sr", "sr-gate", "sr-pll"):
+            self.assertEqual(
+                builder.patches_for(mode),
+                [
+                    "0001-allwinner-h616-minimal-psci-system-suspend.patch",
+                    "0002-allwinner-h616-dram-self-refresh-from-an-sram-stub.patch",
+                ],
+                mode,
+            )
+
+    def test_each_rung_of_the_dram_ladder_asks_for_its_own_level(self):
+        """One patch, three builds: the level is the whole difference between
+        a card that only self-refreshes and one that also stops PLL_DDR0."""
+        levels = {
+            mode: builder.SUSPEND_MODES[mode]["SUNXI_SUSPEND_DRAM_LEVEL"]
+            for mode in ("sr", "sr-gate", "sr-pll")
+        }
+        self.assertEqual(levels, {"sr": "1", "sr-gate": "2", "sr-pll": "3"})
+        for mode, options in builder.SUSPEND_MODES.items():
+            if mode.startswith("sr"):
+                self.assertEqual(options["SUNXI_SYSTEM_SUSPEND"], "1", mode)
+            else:
+                self.assertNotIn("SUNXI_SUSPEND_DRAM_LEVEL", options, mode)
 
     def test_an_unknown_mode_is_refused(self):
         with self.assertRaises(ValueError):

@@ -30,7 +30,21 @@
   "our_patches": {
     "0001-allwinner-h616-minimal-psci-system-suspend.patch": {
       "applies_to": "tf-a",
-      "suspend": ["wfi", "wfi32"]
+      "suspend": [
+        "wfi",
+        "wfi32",
+        "sr",
+        "sr-gate",
+        "sr-pll"
+      ]
+    },
+    "0002-allwinner-h616-dram-self-refresh-from-an-sram-stub.patch": {
+      "applies_to": "tf-a",
+      "suspend": [
+        "sr",
+        "sr-gate",
+        "sr-pll"
+      ]
     }
   }
 }

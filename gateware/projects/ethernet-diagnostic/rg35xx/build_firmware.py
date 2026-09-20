@@ -11,6 +11,8 @@ is one this bench can account for byte by byte.
 `--suspend none` is the parity build: the same two upstream trees ROCKNIX
 builds, nothing of ours added. `--suspend wfi` adds our TF-A patch, which
 implements PSCI SYSTEM_SUSPEND by stopping the CPU PLL and waiting in WFI.
+The `sr` modes add a second patch that moves the wait into a stub in SRAM A1
+with DRAM in self-refresh around it, one rung of the ladder each.
 """
 
 import argparse
@@ -36,6 +38,9 @@ SUSPEND_MODES = {
     "none": {},
     "wfi": {"SUNXI_SYSTEM_SUSPEND": "1"},
     "wfi32": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_CPU_32K": "1"},
+    "sr": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "1"},
+    "sr-gate": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "2"},
+    "sr-pll": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "3"},
 }
 
 # U-Boot stamps its version string and its FIT with the moment it was built,
@@ -241,7 +246,9 @@ def main(argv=None):
     parser.add_argument("--suspend", choices=sorted(SUSPEND_MODES), default="none",
                         help="none is the upstream bootloader ROCKNIX builds; wfi "
                              "adds our PSCI SYSTEM_SUSPEND patch; wfi32 also parks "
-                             "the cluster on the 32 kHz clock")
+                             "the cluster on the 32 kHz clock; sr puts DRAM into "
+                             "self-refresh from a stub in SRAM; sr-gate also gates "
+                             "the DRAM and MBUS clocks; sr-pll also stops PLL_DDR0")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--runner")
     parser.add_argument(

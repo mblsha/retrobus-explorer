@@ -1,0 +1,754 @@
+Subject: [PATCH] allwinner: h616: DRAM self-refresh from a stub in SRAM A1
+
+Applies on top of the minimal PSCI SYSTEM_SUSPEND patch, which leaves DRAM
+running because BL31 is linked into DRAM on this platform and there is
+nowhere else for the waiting core to execute. This adds that somewhere: a
+small position-independent blob in BL31's read-only data, copied into SRAM A1
+on the way into every suspend and called with the MMU off, which asks the
+DRAM controller for software self-refresh, waits in WFI, and asks it to come
+out again before returning to BL31.
+
+It is assembly on purpose. It must not touch the stack, call anything or load
+an address from a literal pool that a compiler decided to place in DRAM, and
+those are easier to guarantee by writing the twenty-odd register accesses out
+than by persuading a compiler of them.
+
+SUNXI_SUSPEND_DRAM_LEVEL says how far down it goes, so each rung can be built,
+put on a card and measured on its own:
+
+  0  unchanged: DRAM left running, the whole suspend stays in BL31
+  1  self-refresh only; controller, PHY and PLL_DDR0 stay clocked
+  2  + the DRAM bus gate and the MBUS clock gate -- gates only, never the
+     resets beside them, because a controller that has been reset cannot be
+     talked out of self-refresh without re-running a whole DRAM driver
+  3  + PLL_DDR0 stopped, relocked before anything downstream is ungated
+
+Unset, the build is byte-for-byte what it was.
+
+The controller sequences are the ones mainline U-Boot's own driver for this
+part uses -- arch/arm/mach-sunxi/dram_sun50i_h616.c, mctl_ctrl_init() to go
+in and mctl_phy_init() to come out -- because the H616 manual documents no
+DRAM controller registers at all. Everything in the CCU, the watchdog and the
+RTC is from the manual and is cited where it is used.
+
+The idea of doing this from SRAM, and the return through TF-A's warm boot
+entry, are kailashrs' work for ROCKNIX:
+https://github.com/kailashrs/H700_rocknix_enhancement and
+https://github.com/ROCKNIX/distribution/pull/3316, merged 2026-09-19. Their
+stub re-runs U-Boot's DRAM driver on the way back and is therefore GPL; this
+one never re-initialises anything, so it needs no DRAM driver and no code
+from one.
+
+--- a/plat/allwinner/sun50i_h616/platform.mk	2026-09-20 12:41:44
++++ b/plat/allwinner/sun50i_h616/platform.mk	2026-09-20 12:45:45
+@@ -36,6 +36,16 @@
+ $(eval $(call add_define,SUNXI_SYSTEM_SUSPEND))
+ $(eval $(call add_define,SUNXI_SUSPEND_CPU_32K))
+ 
++# How far down the DRAM goes while the core waits. 0 leaves it running and the
++# whole suspend stays in BL31; 1 asks the controller for self-refresh from a
++# stub in SRAM A1; 2 also gates the DRAM bus and MBUS clocks; 3 also stops
++# PLL_DDR0. Only meaningful with SUNXI_SYSTEM_SUSPEND=1.
++SUNXI_SUSPEND_DRAM_LEVEL	?=	0
++$(eval $(call add_define,SUNXI_SUSPEND_DRAM_LEVEL))
++
+ ifeq (${SUNXI_SYSTEM_SUSPEND},1)
+ BL31_SOURCES		+=	${AW_PLAT}/${PLAT}/sunxi_system_suspend.c
++ifneq (${SUNXI_SUSPEND_DRAM_LEVEL},0)
++BL31_SOURCES		+=	${AW_PLAT}/${PLAT}/sunxi_suspend_stub.S
+ endif
++endif
+--- a/plat/allwinner/sun50i_h616/sunxi_suspend_stub.S	1970-01-01 10:00:00
++++ b/plat/allwinner/sun50i_h616/sunxi_suspend_stub.S	2026-09-20 12:48:50
+@@ -0,0 +1,559 @@
++/*
++ * Copyright (c) 2026, Contributors to the Trusted Firmware-A project.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * The part of the H616/H700 system suspend that cannot live in DRAM.
++ *
++ * BL31 is linked into DRAM on this platform (SUNXI_BL31_IN_DRAM), so the
++ * moment DRAM goes into self-refresh there is no code left to execute and no
++ * stack left to use. What follows is copied into SRAM A1 and called from
++ * there with the MMU off. It is written in assembly and it is the whole
++ * reason this file exists in this form:
++ *
++ *   - it is position independent by construction. Every constant is built
++ *     with movz/movk rather than loaded from a literal pool, and every branch
++ *     is to a label in this one section, so the copy at 0x20000 behaves
++ *     exactly as the original in BL31's read-only data;
++ *   - it uses no stack. The stack is in DRAM. Everything it has to remember
++ *     across the sleep lives in a save area inside the copy, in SRAM;
++ *   - it calls nothing. No BL31 function, no libc, no delay timer.
++ *
++ * The idea -- a PSCI SYSTEM_SUSPEND whose inner sequence runs from SRAM so
++ * that LPDDR4 can be put into self-refresh -- is kailashrs' work for ROCKNIX:
++ *   https://github.com/kailashrs/H700_rocknix_enhancement
++ *   https://github.com/ROCKNIX/distribution/pull/3316 (merged 2026-09-19)
++ * Their stub is C compiled against U-Boot's headers and re-runs U-Boot's DRAM
++ * driver on the way back. This one is ours, is much smaller, and deliberately
++ * never re-initialises the controller: it asks for self-refresh, waits, and
++ * asks to come out again, so it needs no DRAM driver at all.
++ *
++ * SUNXI_SUSPEND_DRAM_LEVEL says how far down it goes:
++ *   1  self-refresh only; controller, PHY, PLL_DDR0 all left clocked
++ *   2  + the DRAM bus gate and the MBUS clock gate (gates, never resets)
++ *   3  + PLL_DDR0 stopped, and relocked before anything is ungated
++ */
++
++#include <sunxi_mmap.h>
++
++/*
++ * H616 User Manual rev 1.0, 3.3.5: the CCU registers this touches.
++ *  3.3.5.1  0x0000 PLL_CPUX control      3.3.5.2  0x0010 PLL_DDR0 control
++ *  3.3.5.45 0x0500 CPUX_AXI config       3.3.5.50 0x0540 MBUS config
++ *  3.3.5.71 0x0800 DRAM clock            3.3.5.73 0x080C DRAM bus gating
++ */
++#define CCU_PLL_CPUX_REG		0x0000
++#define CCU_PLL_DDR0_REG		0x0010
++#define CCU_CPUX_AXI_CFG_REG		0x0500
++#define CCU_MBUS_CFG_REG		0x0540
++#define CCU_DRAM_BGR_REG		0x080c
++
++#define PLL_ENABLE			(1 << 31)
++#define PLL_LOCK_ENABLE			(1 << 29)
++#define PLL_LOCK			(1 << 28)
++
++/* CPUX_AXI 26:24 selects the cluster clock; 000 is OSC24M. */
++#define CPUX_CLK_SRC_MASK		(7 << 24)
++
++/* MBUS_CFG bit 31 gates the MBUS clock. Bit 30 is a reset and is left alone. */
++#define MBUS_CLK_GATING			(1 << 31)
++/* DRAM_BGR bit 0 gates the DRAM bus clock. Bit 16 is a reset and is left alone. */
++#define DRAM_BUS_GATING			(1 << 0)
++
++/*
++ * The DRAM controller. The H616 manual's DRAMC chapter has no register
++ * descriptions, so these come from mainline U-Boot's driver for this exact
++ * part -- arch/arm/include/asm/arch-sunxi/dram_sun50i_h616.h for the layout
++ * and arch/arm/mach-sunxi/dram_sun50i_h616.c for the sequences -- which is a
++ * Synopsys uMCTL2 with an Allwinner PHY.
++ *
++ * mctl_phy_init() leaves self-refresh exactly the way this file does: clear
++ * PWRCTL bit 5 inside a SWCTL commit, wait for SWSTAT, then wait for STAT to
++ * report normal operating mode. mctl_ctrl_init() enters it the same way,
++ * after zeroing the three MBUS master-enable registers.
++ */
++#define MCTL_COM_BASE			0x047fa000
++#define MCTL_CTL_BASE			0x047fb000
++
++#define COM_MAER0			0x0020
++#define COM_MAER1			0x0024
++#define COM_MAER2			0x0028
++
++#define CTL_STAT			0x0004
++#define CTL_PWRCTL			0x0030
++#define CTL_SWCTL			0x0320
++#define CTL_SWSTAT			0x0324
++
++#define PWRCTL_SELFREF_SW		(1 << 5)
++#define STAT_MODE_MASK			0x7
++#define STAT_MODE_NORMAL		0x1
++#define STAT_MODE_SELFREF		0x3
++#define SWSTAT_DONE			0x1
++
++/*
++ * H616 User Manual rev 1.0, 3.13.6.12: sixteen general purpose registers at
++ * RTC + 0x100 + 4N that do nothing but hold what is written to them, in the
++ * always-on domain. There is no serial console on this board, so four of them
++ * are the only thing this code can say.
++ */
++#define SUNXI_RTC_BASE			0x07000000
++#define RTC_GP_REG(n)			(0x0100 + ((n) * 4))
++#define RTC_GP_STAGE			12
++#define RTC_GP_RESUMES			14
++#define RTC_GP_WAKE_IRQ			15
++
++#define SUSPEND_STAGE_TAG		0xa5d50000
++#define STAGE_IN_SRAM			0x10
++#define STAGE_SELFREF			0x11
++#define STAGE_CPU_PLL_OFF		0x12
++#define STAGE_DRAM_GATED		0x13
++#define STAGE_DDR_PLL_OFF		0x14
++#define STAGE_WFI			0x15
++#define STAGE_WOKE			0x16
++#define STAGE_CLOCKS_UP			0x17
++#define STAGE_DRAM_BACK			0x18
++#define STAGE_STUB_DONE			0x19
++/* Failures. Each says which wait ran out, so a warm reset is still evidence. */
++#define STAGE_SELFREF_REFUSED		0xe1
++#define STAGE_SELFREF_STUCK		0xe2
++#define STAGE_SWSTAT_STUCK		0xe3
++#define STAGE_DDR_PLL_STUCK		0xe4
++#define STAGE_EXCEPTION			0xee
++
++/*
++ * H616 User Manual rev 1.0, 3.6.6.11 to 3.6.6.13: the watchdog, clocked from
++ * OSC24M/750, which this sequence never stops. WDOG_CFG 01 resets the whole
++ * system; WDOG_MODE 7:4 is the interval and bit 0 the enable.
++ */
++#define WDOG_CTRL_REG			0x10
++#define WDOG_CFG_REG			0x14
++#define WDOG_MODE_REG			0x18
++#define WDOG_RELOAD			((0xa57 << 1) | 1)
++#define WDOG_CFG_WHOLE_SYSTEM		1
++#define WDOG_MODE_2S			((2 << 4) | 1)
++#define WDOG_MODE_HALF_SECOND		((0 << 4) | 1)
++
++/* SCR_EL3.IRQ and SCR_EL3.FIQ, so a pending interrupt is certain to end WFI. */
++#define SCR_ROUTE_TO_EL3		0x6
++
++/* GICv2 distributor, Arm GIC Architecture Specification v2 section 4.3. */
++#define GICD_TYPER			0x0004
++#define GICD_ISENABLER0			0x0100
++#define GICD_ISPENDR0			0x0200
++#define GIC_SPURIOUS_INTERRUPT		1023
++
++/*
++ * What the stub remembers across the sleep, in SRAM beside itself. x12 points
++ * at it, put there with ADR: a PC-relative address, so it is the address of
++ * the running copy and not of the one in BL31's read-only data. Every label
++ * in this file is reached the same way, which is what makes the blob
++ * relocatable without a single relocation at run time.
++ */
++#define SAVE_VBAR	0x00
++#define SAVE_SCR	0x08
++#define SAVE_PWRCTL	0x10
++#define SAVE_MAER0	0x14
++#define SAVE_MAER1	0x18
++#define SAVE_MAER2	0x1c
++#define SAVE_CPUX_AXI	0x20
++#define SAVE_WDOG_MODE	0x24
++#define SAVE_WDOG_CFG	0x28
++#define SAVE_AREA_BYTES	0x30
++
++	/* A 32-bit constant, built rather than fetched from a literal pool. */
++	.macro	MOV32 reg, value
++	movz	\reg, #((\value) & 0xffff)
++	movk	\reg, #(((\value) >> 16) & 0xffff), lsl #16
++	.endm
++
++	/* Report where we got to. Clobbers x16; x13 is the RTC. */
++	.macro	STAGE code
++	MOV32	x16, (SUSPEND_STAGE_TAG | (\code))
++	str	w16, [x13, #RTC_GP_REG(RTC_GP_STAGE)]
++	.endm
++
++	/* Busy-wait on the 24 MHz architected counter. Clobbers x16, x17. */
++	.macro	DELAY_US usecs
++	MOV32	x16, ((\usecs) * 24)
++	mrs	x17, cntpct_el0
++	add	x16, x16, x17
++79:	mrs	x17, cntpct_el0
++	cmp	x17, x16
++	b.lo	79b
++	.endm
++
++	/*
++	 * Wait for (*(base + off) & mask) == val, or branch to fail.
++	 * Clobbers x9, x15, x16, x17.
++	 */
++	.macro	WAIT_REG base, off, mask, val, usecs, fail
++	MOV32	x9, ((\usecs) * 24)
++	mrs	x15, cntpct_el0
++	add	x9, x9, x15
++	MOV32	x17, (\mask)
++	MOV32	x16, (\val)
++77:	ldr	w15, [\base, #(\off)]
++	and	w15, w15, w17
++	cmp	w15, w16
++	b.eq	78f
++	mrs	x15, cntpct_el0
++	cmp	x15, x9
++	b.ls	77b
++	b	\fail
++78:
++	.endm
++
++	/* Turn a hang into a warm reset. Clobbers x16; x14 is the watchdog. */
++	.macro	WDOG_ARM interval
++	mov	w16, #WDOG_CFG_WHOLE_SYSTEM
++	str	w16, [x14, #WDOG_CFG_REG]
++	mov	w16, #(\interval)
++	str	w16, [x14, #WDOG_MODE_REG]
++	MOV32	x16, WDOG_RELOAD
++	str	w16, [x14, #WDOG_CTRL_REG]
++	.endm
++
++	.macro	WDOG_OFF
++	str	wzr, [x14, #WDOG_MODE_REG]
++	.endm
++
++	.section .rodata.sunxi_suspend_stub, "a"
++	.balign	2048
++	.global	sunxi_suspend_stub
++	.global	sunxi_suspend_stub_end
++
++/*
++ * Entered with the MMU and the data cache off, on the last core standing,
++ * with interrupts masked in PSTATE. Returns to BL31 in DRAM with DRAM usable
++ * again. Uses x0-x17 only, so the caller's callee-saved registers and its
++ * stack pointer come back untouched.
++ */
++sunxi_suspend_stub:
++	MOV32	x10, SUNXI_CCU_BASE
++	MOV32	x11, MCTL_CTL_BASE
++	adr	x12, sunxi_suspend_stub_save
++	MOV32	x13, SUNXI_RTC_BASE
++	MOV32	x14, SUNXI_WDOG_BASE
++
++	/*
++	 * BL31's exception vectors are in DRAM, which is about to become
++	 * unreadable, so take exceptions here instead: the handler records
++	 * ESR and ELR and resets, which on a board with no console is the
++	 * difference between a clue and a power cycle.
++	 */
++	mrs	x16, vbar_el3
++	str	x16, [x12, #SAVE_VBAR]
++	adr	x16, sunxi_suspend_stub_vectors
++	msr	vbar_el3, x16
++	isb
++
++	STAGE	STAGE_IN_SRAM
++
++	/* Whatever the OS had the watchdog doing, it must not fire mid-sleep. */
++	ldr	w16, [x14, #WDOG_MODE_REG]
++	str	w16, [x12, #SAVE_WDOG_MODE]
++	ldr	w16, [x14, #WDOG_CFG_REG]
++	str	w16, [x12, #SAVE_WDOG_CFG]
++	WDOG_OFF
++
++	/*
++	 * No more bus masters, as U-Boot's mctl_ctrl_init() does before it
++	 * asks for self-refresh. Nothing should be issuing transactions this
++	 * late in a suspend, but a blocked master is a deadlock and a stopped
++	 * one is not.
++	 */
++	MOV32	x15, MCTL_COM_BASE
++	ldr	w16, [x15, #COM_MAER0]
++	str	w16, [x12, #SAVE_MAER0]
++	ldr	w16, [x15, #COM_MAER1]
++	str	w16, [x12, #SAVE_MAER1]
++	ldr	w16, [x15, #COM_MAER2]
++	str	w16, [x12, #SAVE_MAER2]
++	str	wzr, [x15, #COM_MAER0]
++	str	wzr, [x15, #COM_MAER1]
++	str	wzr, [x15, #COM_MAER2]
++	dsb	sy
++
++	/* From here until the wait, a hang is a warm reset rather than a wedge. */
++	WDOG_ARM WDOG_MODE_2S
++
++	/* Software self-refresh: uMCTL2 PWRCTL bit 5, then STAT says so. */
++	ldr	w16, [x11, #CTL_PWRCTL]
++	str	w16, [x12, #SAVE_PWRCTL]
++	orr	w16, w16, #PWRCTL_SELFREF_SW
++	str	w16, [x11, #CTL_PWRCTL]
++	WAIT_REG x11, CTL_STAT, STAT_MODE_MASK, STAT_MODE_SELFREF, 100000, \
++		 .Lselfref_refused
++	STAGE	STAGE_SELFREF
++
++	/* The wait is minutes long and the watchdog's longest interval is 16 s. */
++	WDOG_OFF
++
++	/*
++	 * The CPU clock tree, as the DRAM-less suspend already did it: the
++	 * cluster onto the 24 MHz oscillator first, because it is the one
++	 * source that is certainly running and is not about to be stopped,
++	 * and only then stop PLL_CPUX (manual 3.3.3.1).
++	 */
++	ldr	w6, [x10, #CCU_CPUX_AXI_CFG_REG]
++	str	w6, [x12, #SAVE_CPUX_AXI]
++	bic	w16, w6, #CPUX_CLK_SRC_MASK
++	str	w16, [x10, #CCU_CPUX_AXI_CFG_REG]
++	DELAY_US 100
++	ldr	w16, [x10, #CCU_PLL_CPUX_REG]
++	MOV32	x17, (PLL_ENABLE | PLL_LOCK_ENABLE)
++	bic	w16, w16, w17
++	str	w16, [x10, #CCU_PLL_CPUX_REG]
++	STAGE	STAGE_CPU_PLL_OFF
++
++#if SUNXI_SUSPEND_DRAM_LEVEL >= 2
++	/*
++	 * Gates only. MBUS_CFG bit 30 and DRAM_BGR bit 16 are resets, and a
++	 * controller that has been reset cannot be talked out of self-refresh
++	 * without re-running the whole DRAM driver, which is the one thing
++	 * this stub is built not to need.
++	 */
++	ldr	w16, [x10, #CCU_MBUS_CFG_REG]
++	MOV32	x17, MBUS_CLK_GATING
++	bic	w16, w16, w17
++	str	w16, [x10, #CCU_MBUS_CFG_REG]
++	ldr	w16, [x10, #CCU_DRAM_BGR_REG]
++	bic	w16, w16, #DRAM_BUS_GATING
++	str	w16, [x10, #CCU_DRAM_BGR_REG]
++	STAGE	STAGE_DRAM_GATED
++#endif
++
++#if SUNXI_SUSPEND_DRAM_LEVEL >= 3
++	/*
++	 * LPDDR4 in self-refresh keeps its own time and needs no clock from
++	 * the SoC, so PLL_DDR0 can stop. It has to be locked again before
++	 * anything downstream of it is ungated.
++	 */
++	ldr	w16, [x10, #CCU_PLL_DDR0_REG]
++	MOV32	x17, (PLL_ENABLE | PLL_LOCK_ENABLE)
++	bic	w16, w16, w17
++	str	w16, [x10, #CCU_PLL_DDR0_REG]
++	STAGE	STAGE_DDR_PLL_OFF
++#endif
++
++	/*
++	 * Interrupts are masked in PSTATE, which does not stop one ending a
++	 * WFI, but route them to EL3 for the wait so the core is certain to
++	 * see the one the OS left unmasked at the GIC.
++	 */
++	STAGE	STAGE_WFI
++	mrs	x5, scr_el3
++	str	x5, [x12, #SAVE_SCR]
++	orr	x16, x5, #SCR_ROUTE_TO_EL3
++	msr	scr_el3, x16
++	isb
++	dsb	sy
++	wfi
++	ldr	x16, [x12, #SAVE_SCR]
++	msr	scr_el3, x16
++	isb
++	STAGE	STAGE_WOKE
++
++	/* Name the interrupt that ended the wait: lowest enabled and pending. */
++	MOV32	x15, SUNXI_GICD_BASE
++	ldr	w2, [x15, #GICD_TYPER]
++	and	w2, w2, #0x1f
++	add	w2, w2, #1			/* words of 32 interrupts */
++	mov	w3, #0				/* word index */
++	MOV32	x0, GIC_SPURIOUS_INTERRUPT
++.Lgic_word:
++	cmp	w3, w2
++	b.hs	.Lgic_done
++	lsl	x4, x3, #2
++	add	x4, x15, x4
++	ldr	w16, [x4, #GICD_ISPENDR0]
++	ldr	w17, [x4, #GICD_ISENABLER0]
++	ands	w16, w16, w17
++	b.eq	.Lgic_next
++	rbit	w16, w16
++	clz	w16, w16			/* lowest set bit */
++	lsl	w0, w3, #5
++	add	w0, w0, w16
++	b	.Lgic_done
++.Lgic_next:
++	add	w3, w3, #1
++	b	.Lgic_word
++.Lgic_done:
++	str	w0, [x13, #RTC_GP_REG(RTC_GP_WAKE_IRQ)]
++
++	/* Everything below either touches DRAM or is on the way to it. */
++	WDOG_ARM WDOG_MODE_2S
++
++#if SUNXI_SUSPEND_DRAM_LEVEL >= 3
++	ldr	w16, [x10, #CCU_PLL_DDR0_REG]
++	MOV32	x17, (PLL_ENABLE | PLL_LOCK_ENABLE)
++	orr	w16, w16, w17
++	str	w16, [x10, #CCU_PLL_DDR0_REG]
++	WAIT_REG x10, CCU_PLL_DDR0_REG, PLL_LOCK, PLL_LOCK, 2000, \
++		 .Lddr_pll_stuck
++#endif
++
++#if SUNXI_SUSPEND_DRAM_LEVEL >= 2
++	ldr	w16, [x10, #CCU_DRAM_BGR_REG]
++	orr	w16, w16, #DRAM_BUS_GATING
++	str	w16, [x10, #CCU_DRAM_BGR_REG]
++	ldr	w16, [x10, #CCU_MBUS_CFG_REG]
++	MOV32	x17, MBUS_CLK_GATING
++	orr	w16, w16, w17
++	str	w16, [x10, #CCU_MBUS_CFG_REG]
++	DELAY_US 10
++#endif
++
++	/* PLL_CPUX locked before the cluster is put back on it. */
++	ldr	w16, [x10, #CCU_PLL_CPUX_REG]
++	MOV32	x17, (PLL_ENABLE | PLL_LOCK_ENABLE)
++	orr	w16, w16, w17
++	str	w16, [x10, #CCU_PLL_CPUX_REG]
++	WAIT_REG x10, CCU_PLL_CPUX_REG, PLL_LOCK, PLL_LOCK, 2000, \
++		 .Lcpu_pll_slow
++	ldr	w16, [x12, #SAVE_CPUX_AXI]
++	str	w16, [x10, #CCU_CPUX_AXI_CFG_REG]
++	DELAY_US 100
++.Lcpu_pll_slow:
++	/*
++	 * No branch to a failure here on purpose: a cluster left on the 24 MHz
++	 * oscillator is slow but alive, and the DRAM still has to come back.
++	 */
++	STAGE	STAGE_CLOCKS_UP
++
++	/*
++	 * Out of self-refresh, the way U-Boot's mctl_phy_init() does it:
++	 * clear PWRCTL bit 5 inside a SWCTL commit, wait for the commit, then
++	 * wait for the controller to report normal operating mode.
++	 */
++	str	wzr, [x11, #CTL_SWCTL]
++	ldr	w16, [x12, #SAVE_PWRCTL]
++	str	w16, [x11, #CTL_PWRCTL]
++	mov	w16, #1
++	str	w16, [x11, #CTL_SWCTL]
++	WAIT_REG x11, CTL_SWSTAT, SWSTAT_DONE, SWSTAT_DONE, 100000, \
++		 .Lswstat_stuck
++	WAIT_REG x11, CTL_STAT, STAT_MODE_MASK, STAT_MODE_NORMAL, 100000, \
++		 .Lselfref_stuck
++	STAGE	STAGE_DRAM_BACK
++
++	/* Masters back on. DRAM is readable from the next instruction. */
++	MOV32	x15, MCTL_COM_BASE
++	ldr	w16, [x12, #SAVE_MAER0]
++	str	w16, [x15, #COM_MAER0]
++	ldr	w16, [x12, #SAVE_MAER1]
++	str	w16, [x15, #COM_MAER1]
++	ldr	w16, [x12, #SAVE_MAER2]
++	str	w16, [x15, #COM_MAER2]
++	dsb	sy
++	isb
++
++	/* One more resume, counted where a battery-less board can still read it. */
++	ldr	w16, [x13, #RTC_GP_REG(RTC_GP_RESUMES)]
++	add	w16, w16, #1
++	str	w16, [x13, #RTC_GP_REG(RTC_GP_RESUMES)]
++
++	/* The watchdog back to the OS, exactly as it was. */
++	WDOG_OFF
++	ldr	w16, [x12, #SAVE_WDOG_CFG]
++	str	w16, [x14, #WDOG_CFG_REG]
++	MOV32	x16, WDOG_RELOAD
++	str	w16, [x14, #WDOG_CTRL_REG]
++	ldr	w16, [x12, #SAVE_WDOG_MODE]
++	str	w16, [x14, #WDOG_MODE_REG]
++
++	STAGE	STAGE_STUB_DONE
++
++	ldr	x16, [x12, #SAVE_VBAR]
++	msr	vbar_el3, x16
++	isb
++	ret
++
++/*
++ * The controller would not take the self-refresh request. Put back what was
++ * asked for, make sure it is running normally again, reopen the masters and
++ * return without sleeping: the RTC alarm is still armed, so the OS gets a
++ * suspend that lasted no time and a stage code that says why.
++ */
++.Lselfref_refused:
++	ldr	w16, [x12, #SAVE_PWRCTL]
++	str	w16, [x11, #CTL_PWRCTL]
++	WAIT_REG x11, CTL_STAT, STAT_MODE_MASK, STAT_MODE_NORMAL, 100000, \
++		 .Lselfref_stuck
++	MOV32	x15, MCTL_COM_BASE
++	ldr	w16, [x12, #SAVE_MAER0]
++	str	w16, [x15, #COM_MAER0]
++	ldr	w16, [x12, #SAVE_MAER1]
++	str	w16, [x15, #COM_MAER1]
++	ldr	w16, [x12, #SAVE_MAER2]
++	str	w16, [x15, #COM_MAER2]
++	dsb	sy
++	isb
++	WDOG_OFF
++	ldr	w16, [x12, #SAVE_WDOG_CFG]
++	str	w16, [x14, #WDOG_CFG_REG]
++	ldr	w16, [x12, #SAVE_WDOG_MODE]
++	str	w16, [x14, #WDOG_MODE_REG]
++	STAGE	STAGE_SELFREF_REFUSED
++	ldr	x16, [x12, #SAVE_VBAR]
++	msr	vbar_el3, x16
++	isb
++	ret
++
++/*
++ * The three ways this can end with DRAM unusable. There is nowhere to return
++ * to, so record which one it was and let the watchdog reset the board: the
++ * RTC registers survive a warm reset, and the next boot's job reads them.
++ */
++.Lselfref_stuck:
++	STAGE	STAGE_SELFREF_STUCK
++	b	.Lreset
++.Lswstat_stuck:
++	STAGE	STAGE_SWSTAT_STUCK
++	b	.Lreset
++#if SUNXI_SUSPEND_DRAM_LEVEL >= 3
++.Lddr_pll_stuck:
++	STAGE	STAGE_DDR_PLL_STUCK
++	b	.Lreset
++#endif
++.Lreset:
++	WDOG_ARM WDOG_MODE_HALF_SECOND
++80:	wfi
++	b	80b
++
++	.balign	2048
++sunxi_suspend_stub_vectors:
++	.rept	16
++	b	.Lexception
++	.balign	0x80
++	.endr
++
++/*
++ * Any exception at all while the stub runs. It cannot use the stack and must
++ * not assume any register still holds what it did, so it rebuilds the two
++ * addresses it needs. ESR and ELR go where the wake interrupt and the resume
++ * count would have gone; on this path neither of those means anything.
++ */
++.Lexception:
++	MOV32	x1, SUNXI_RTC_BASE
++	mrs	x0, esr_el3
++	str	w0, [x1, #RTC_GP_REG(RTC_GP_RESUMES)]
++	mrs	x0, elr_el3
++	str	w0, [x1, #RTC_GP_REG(RTC_GP_WAKE_IRQ)]
++	MOV32	x0, (SUSPEND_STAGE_TAG | STAGE_EXCEPTION)
++	str	w0, [x1, #RTC_GP_REG(RTC_GP_STAGE)]
++	MOV32	x1, SUNXI_WDOG_BASE
++	mov	w0, #WDOG_CFG_WHOLE_SYSTEM
++	str	w0, [x1, #WDOG_CFG_REG]
++	mov	w0, #WDOG_MODE_HALF_SECOND
++	str	w0, [x1, #WDOG_MODE_REG]
++	MOV32	x0, WDOG_RELOAD
++	str	w0, [x1, #WDOG_CTRL_REG]
++81:	wfi
++	b	81b
++
++	.balign	8
++sunxi_suspend_stub_save:
++	.space	SAVE_AREA_BYTES, 0
++sunxi_suspend_stub_end:
++
+--- a/plat/allwinner/sun50i_h616/sunxi_system_suspend.c	2026-09-20 12:41:44
++++ b/plat/allwinner/sun50i_h616/sunxi_system_suspend.c	2026-09-20 12:46:10
+@@ -26,15 +26,22 @@
+  * can go into self-refresh:
+  *   https://github.com/kailashrs/H700_rocknix_enhancement
+  *   https://github.com/ROCKNIX/distribution/pull/3316
+- * The code here is not theirs and does no DRAM work. suspend_sequence() is
+- * deliberately self-contained -- memory-mapped I/O, the architected counter
+- * and WFI, no call back into the rest of BL31 -- because the next step is to
+- * relocate exactly that function into SRAM A1 and put DRAM into self-refresh
+- * around it, and nothing in DRAM may be called once that happens.
++ * The code here is not theirs.
++ *
++ * SUNXI_SUSPEND_DRAM_LEVEL chooses which of two inner sequences runs while
++ * the core waits. At level 0 it is suspend_sequence() below: DRAM is left
++ * running, so the wait can happen from BL31 in DRAM like any other code. At
++ * any higher level it is sunxi_suspend_stub.S, copied into SRAM A1 and called
++ * with the MMU off, which puts DRAM into self-refresh first -- and therefore
++ * cannot be a function in this file at all, because this file is in DRAM.
++ * Everything outside that choice is the same either way.
+  */
+ 
++#include <assert.h>
+ #include <stdbool.h>
++#include <stddef.h>
+ #include <stdint.h>
++#include <string.h>
+ 
+ #include <platform_def.h>
+ 
+@@ -126,6 +133,7 @@
+ 	mmio_write_32(RTC_GP_DATA_REG(RTC_GP_STAGE), SUSPEND_STAGE_TAG | code);
+ }
+ 
++#if SUNXI_SUSPEND_DRAM_LEVEL == 0
+ /*
+  * The architected counter runs from the 24 MHz oscillator, which this
+  * sequence deliberately leaves alone, so it keeps time while PLL_CPUX is
+@@ -241,12 +249,51 @@
+ 		 */
+ 		stage(STAGE_PLL_TIMEOUT);
+ 	}
++}
++#else /* SUNXI_SUSPEND_DRAM_LEVEL != 0 */
++/*
++ * The stub is a blob of position-independent instructions sitting in BL31's
++ * read-only data, with a save area of its own on the end. It is put into SRAM
++ * on the way into every suspend rather than once at boot, because nothing
++ * here owns that SRAM: U-Boot's SPL ran from it, and anything at all could
++ * have been left in it since. The copy costs a few microseconds.
++ */
++extern const uint8_t sunxi_suspend_stub[];
++extern const uint8_t sunxi_suspend_stub_end[];
++
++static size_t suspend_stub_bytes(void)
++{
++	return (size_t)(sunxi_suspend_stub_end - sunxi_suspend_stub);
++}
++
++static void place_suspend_stub(void)
++{
++	(void)memcpy((void *)SUNXI_SRAM_A1_BASE, sunxi_suspend_stub,
++		     suspend_stub_bytes());
++
++	/*
++	 * SRAM is mapped as device memory and the data cache is already off,
++	 * so the bytes are in memory; the instruction side may still hold the
++	 * previous suspend's copy of them.
++	 */
++	dsbsy();
++	__asm__ volatile ("ic iallu" ::: "memory");
++	dsbsy();
++	isb();
+ }
++#endif /* SUNXI_SUSPEND_DRAM_LEVEL */
+ 
+ void sunxi_system_suspend_init(uintptr_t entrypoint)
+ {
+ 	warm_entrypoint = entrypoint;
+ 
++#if SUNXI_SUSPEND_DRAM_LEVEL != 0
++	assert(suspend_stub_bytes() <= SUNXI_SRAM_A1_SIZE);
++	INFO("PSCI: DRAM suspend level %u, %u byte stub for SRAM A1\n",
++	     (unsigned int)SUNXI_SUSPEND_DRAM_LEVEL,
++	     (unsigned int)suspend_stub_bytes());
++#endif
++
+ 	/*
+ 	 * The suspend runs with the data cache off, having been through the
+ 	 * CPU's power-down cache maintenance, and reads this. Put it in memory
+@@ -263,6 +310,7 @@
+ 	mmio_write_32(RTC_GP_DATA_REG(RTC_GP_SUSPENDS), suspend_count);
+ 	stage(STAGE_ENTERED);
+ 
++#if SUNXI_SUSPEND_DRAM_LEVEL == 0
+ 	suspend_sequence();
+ 
+ 	resume_count++;
+@@ -275,6 +323,22 @@
+ 	 * carries on at the same address with translation off.
+ 	 */
+ 	disable_mmu_el3();
++#else
++	place_suspend_stub();
++
++	/*
++	 * The MMU goes off here and stays off until the warm boot entry, for
++	 * two reasons: SRAM is mapped execute-never, and BL31's page tables
++	 * are in DRAM, which the stub is about to make unreadable. Between
++	 * these two lines nothing may touch memory. stage() writes one RTC
++	 * register and nothing else, warm_boot is already in a register or on
++	 * a stack the stub leaves alone, and the stub counts its own resumes
++	 * straight into the RTC.
++	 */
++	disable_mmu_el3();
++	((void (*)(void))SUNXI_SRAM_A1_BASE)();
++	stage(STAGE_WARM_BOOT);
++#endif
+ 	warm_boot();
+ 
+ 	/* Not reached: the warm boot path returns to the non-secure world. */
+@@ -283,6 +347,10 @@
+ 
+ void sunxi_system_suspend_finish(void)
+ {
++#if SUNXI_SUSPEND_DRAM_LEVEL != 0
++	/* The stub counted the resume; take its word for the log line. */
++	resume_count = mmio_read_32(RTC_GP_DATA_REG(RTC_GP_RESUMES));
++#endif
+ 	stage(STAGE_RESUMED);
+ 	INFO("PSCI: Resumed from system suspend (%u of %u)\n",
+ 	     resume_count, suspend_count);
