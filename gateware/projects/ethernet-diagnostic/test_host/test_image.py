@@ -26,6 +26,7 @@ from rg35xx.image import SYSTEM_B_PARTITION
 from rg35xx.image import compress_kernel
 from rg35xx.image import describe_lba
 from rg35xx.image import erofs_layout
+from rg35xx.image import install_bootloader
 from rg35xx.image import logical_partitions
 from rg35xx.image import make_erofs_image
 from rg35xx.image import make_spl_entry_loop
@@ -63,6 +64,77 @@ class SplTests(unittest.TestCase):
             word[0] for word in struct.iter_unpack("<I", patched)
         ) & 0xFFFFFFFF
         self.assertEqual(stored, calculated)
+
+
+class InstallBootloaderTests(unittest.TestCase):
+    """The bootloader is the one part of the card the boot ROM reads before
+    anything this bench wrote can check it, so the checks happen here."""
+
+    def bootloader(self, length=1024, tail=b""):
+        spl = bytearray(length)
+        spl[4:12] = b"eGON.BT0"
+        spl[16:20] = length.to_bytes(4, "little")
+        spl[12:16] = SPL_CHECKSUM_STAMP.to_bytes(4, "little")
+        checksum = sum(word[0] for word in struct.iter_unpack("<I", spl)) & 0xFFFFFFFF
+        spl[12:16] = checksum.to_bytes(4, "little")
+        return bytes(spl) + tail
+
+    def image(self, sectors=256, first_partition=128):
+        blob = bytearray(sectors * SECTOR_SIZE)
+        blob[510:512] = b"\x55\xaa"
+        blob[446 + 4] = 0x0E
+        blob[446 + 8 : 446 + 12] = first_partition.to_bytes(4, "little")
+        blob[446 + 12 : 446 + 16] = (64).to_bytes(4, "little")
+        return bytes(blob)
+
+    def test_the_bootloader_lands_at_byte_8192(self):
+        bootloader = self.bootloader(tail=b"FIT" * 100)
+        built = install_bootloader(self.image(), bootloader, 96)
+        self.assertEqual(built[SPL_OFFSET : SPL_OFFSET + len(bootloader)], bootloader)
+        self.assertEqual(len(built), len(self.image()))
+
+    def test_a_longer_predecessor_leaves_nothing_behind(self):
+        """A shorter bootloader over a longer one would leave the old tail
+        where the SPL would go on reading it as part of the FIT."""
+        base = bytearray(self.image())
+        base[SPL_OFFSET : SPL_OFFSET + 40000] = b"\xa5" * 40000
+        built = install_bootloader(bytes(base), self.bootloader(), 96)
+        self.assertEqual(set(built[SPL_OFFSET + 1024 : 96 * SECTOR_SIZE]), {0})
+
+    def test_a_bootloader_that_would_reach_the_job_sector_is_refused(self):
+        """The job runner replays the sectors in front of the first partition,
+        so a bootloader that grew into them would be overwritten every run."""
+        with self.assertRaisesRegex(ValueError, "past the 96"):
+            install_bootloader(self.image(), self.bootloader(tail=bytes(48000)), 96)
+
+    def test_a_bootloader_that_would_reach_the_first_partition_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "past the 32"):
+            install_bootloader(
+                self.image(first_partition=32), self.bootloader(tail=bytes(48000)), 2048
+            )
+
+    def test_something_that_is_not_an_egon_spl_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "eGON"):
+            install_bootloader(self.image(), b"\x00" * 1024, 96)
+
+    def test_a_corrupt_checksum_is_refused(self):
+        broken = bytearray(self.bootloader())
+        broken[64] ^= 0xFF
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            install_bootloader(self.image(), bytes(broken), 96)
+
+    def test_the_result_still_verifies_as_a_boot_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "card.img"
+            boot_image_fixture(path)
+            original = verify_boot_image(path)["spl"]
+            replacement = self.bootloader(length=SECTOR_SIZE, tail=b"more")
+            path.write_bytes(
+                install_bootloader(path.read_bytes(), replacement, BOOT_START)
+            )
+            report = verify_boot_image(path)
+            self.assertEqual(report["spl"]["length"], original["length"])
+            self.assertEqual(report["boot_files"].keys(), {"BOOT.SCR", "BOOTMARK", "KERNEL", "DTB.IMG"})
 
 
 class VerifierTests(unittest.TestCase):

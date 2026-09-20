@@ -26,6 +26,7 @@ SUBCOMMANDS = {
     "report": "rg35xx.report",
     "deploy": "rg35xx.deploy",
     "build-kernel": "rg35xx.build_kernel",
+    "build-firmware": "rg35xx.build_firmware",
     "build-rootfs": "rg35xx.build_rootfs",
 }
 

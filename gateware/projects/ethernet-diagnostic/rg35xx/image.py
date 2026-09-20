@@ -123,6 +123,56 @@ def _verify_spl(stream, first_partition_lba: int) -> dict[str, int | str]:
     return {"offset": SPL_OFFSET, "length": length, "checksum": f"{stored:08x}"}
 
 
+def _spl_length(blob: bytes, what: str) -> int:
+    """The declared length of an eGON SPL, checked against its own checksum."""
+    if len(blob) < 32 or blob[4:12] != b"eGON.BT0":
+        raise ValueError(f"{what} does not start with an H700 eGON.BT0 SPL")
+    length = int.from_bytes(blob[16:20], "little")
+    if length < 32 or length % 4 or length > len(blob):
+        raise ValueError(f"{what} declares an invalid SPL length")
+    spl = bytearray(blob[:length])
+    stored = int.from_bytes(spl[12:16], "little")
+    spl[12:16] = SPL_CHECKSUM_STAMP.to_bytes(4, "little")
+    calculated = sum(word[0] for word in struct.iter_unpack("<I", spl)) & 0xFFFFFFFF
+    if calculated != stored:
+        raise ValueError(f"{what} fails the H700 SPL checksum")
+    return length
+
+
+def install_bootloader(image: bytes, bootloader: bytes, reserved_lba: int) -> bytes:
+    """Return the image with its bootloader replaced by `bootloader`.
+
+    `u-boot-sunxi-with-spl.bin` is the SPL the boot ROM reads and the FIT the
+    SPL loads, and the whole thing lives at byte 8192 of the card, in front of
+    every partition. Nothing else is in that region, so it is cleared before
+    the new one is written: a shorter bootloader must not leave the tail of a
+    longer one behind it, where the SPL would happily go on reading.
+
+    `reserved_lba` is the first sector the bootloader may not reach. On this
+    bench that is the job sector, which is well in front of the first
+    partition, so the check that matters is the nearer of the two.
+    """
+    _spl_length(bootloader, "the bootloader")
+    with io.BytesIO(image) as stream:
+        mbr = read_at(stream, 0, SECTOR_SIZE)
+    starts = [
+        entry["start_lba"]
+        for entry in (_partition(mbr[446 + i * 16 : 462 + i * 16]) for i in range(4))
+        if entry["sectors"]
+    ]
+    limit = min([reserved_lba, *starts]) * SECTOR_SIZE
+    if SPL_OFFSET + len(bootloader) > limit:
+        raise ValueError(
+            f"a {len(bootloader)} byte bootloader at {SPL_OFFSET} would reach "
+            f"sector {(SPL_OFFSET + len(bootloader) + SECTOR_SIZE - 1) // SECTOR_SIZE}, "
+            f"past the {limit // SECTOR_SIZE} this image reserves for it"
+        )
+    built = bytearray(image)
+    built[SPL_OFFSET:limit] = bytes(limit - SPL_OFFSET)
+    built[SPL_OFFSET : SPL_OFFSET + len(bootloader)] = bootloader
+    return bytes(built)
+
+
 def compress_kernel(image: bytes, method: str = "gzip") -> bytes:
     """Store KERNEL compressed, leaving the boot script alone.
 

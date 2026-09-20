@@ -1,0 +1,36 @@
+{
+  "repository": "ROCKNIX/distribution",
+  "commit": "7f1b3abece2c7d263cebd16b5a2ba4268d6ddaa5",
+  "tarballs": {
+    "u-boot": {
+      "version": "v2026.01",
+      "url": "https://github.com/u-boot/u-boot/archive/v2026.01.tar.gz",
+      "directory": "u-boot-2026.01",
+      "sha256": "03bb43c58d2343ee48dd191e0f181f0108425b179d84519add3a977071c3f654"
+    },
+    "tf-a": {
+      "version": "v2.12.0",
+      "url": "https://github.com/ARM-software/arm-trusted-firmware/archive/v2.12.0.tar.gz",
+      "directory": "arm-trusted-firmware-2.12.0",
+      "sha256": "30abf4da07418ad0f840369c3e64dc6a0bc6a936d53a213ce10783f3d1a3430f"
+    }
+  },
+  "rocknix_files": {
+    "patches/0001-Update-dram_sun50i_h616.c.patch": {
+      "path": "projects/ROCKNIX/devices/H700/packages/u-boot-DDR4/patches/0001-Update-dram_sun50i_h616.c.patch",
+      "sha256": "596674be315fbb74f670cf04639f10ea2b5629fd9eb72d944084a04cd0e5fab5"
+    },
+    "configs/anbernic_rg35xx_h700_lpddr4_defconfig": {
+      "path": "projects/ROCKNIX/devices/H700/packages/u-boot-DDR4/sources/configs/anbernic_rg35xx_h700_lpddr4_defconfig",
+      "sha256": "24013855fefbe911cf664301940e8b6b514e4961ed414f324dae491f56d6bfe4"
+    }
+  },
+  "defconfig": "anbernic_rg35xx_h700_lpddr4_defconfig",
+  "tf_a_platform": "sun50i_h616",
+  "our_patches": {
+    "0001-allwinner-h616-minimal-psci-system-suspend.patch": {
+      "applies_to": "tf-a",
+      "suspend": ["wfi", "wfi32"]
+    }
+  }
+}

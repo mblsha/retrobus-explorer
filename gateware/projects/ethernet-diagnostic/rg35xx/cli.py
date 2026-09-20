@@ -13,15 +13,18 @@ import io
 import json
 from pathlib import Path
 
+from rg35xx.debug_partition import JOB_LBA
 from rg35xx.debug_partition import SECTOR_SIZE
 from rg35xx.debug_partition import decode_records
 from rg35xx.debug_partition import kernel_log
 from rg35xx.debug_partition import encode_command
 from rg35xx.fat16 import read_at
 from rg35xx.fat16 import replace_file
+from rg35xx.image import SPL_OFFSET
 from rg35xx.image import SYSTEM_A_PARTITION
 from rg35xx.image import SYSTEM_B_PARTITION
 from rg35xx.image import describe_lba
+from rg35xx.image import install_bootloader
 from rg35xx.image import logical_partitions
 from rg35xx.image import make_erofs_image
 from rg35xx.image import make_spl_entry_loop
@@ -39,7 +42,11 @@ def main(argv: list[str] | None = None) -> None:
     group.add_argument("--make-spl-loop", type=Path, metavar="IMAGE")
     group.add_argument("--describe", type=Path, metavar="IMAGE")
     group.add_argument("--replace-file", type=Path, metavar="IMAGE")
+    group.add_argument("--install-bootloader", type=Path, metavar="IMAGE",
+                       help="Replace the bootloader at byte 8192 of a base image")
     group.add_argument("--make-erofs-image", type=Path, metavar="IMAGE")
+    parser.add_argument("--bootloader", type=Path,
+                        help="u-boot-sunxi-with-spl.bin to install")
     parser.add_argument("--system", type=Path, help="EROFS system image")
     parser.add_argument("--data", type=Path, help="ext2 data image")
     parser.add_argument(
@@ -102,6 +109,30 @@ def main(argv: list[str] | None = None) -> None:
                     "sha256": hashlib.sha256(built).hexdigest(),
                     "root": f"/dev/mmcblk0p{root}",
                     "logical_partitions": chain,
+                },
+                indent=2,
+            )
+        )
+        return
+
+    if args.install_bootloader is not None:
+        if args.output is None or args.bootloader is None:
+            parser.error("--install-bootloader requires --bootloader and --output")
+        bootloader = args.bootloader.read_bytes()
+        built = install_bootloader(
+            args.install_bootloader.read_bytes(), bootloader, JOB_LBA
+        )
+        args.output.write_bytes(built)
+        print(
+            json.dumps(
+                {
+                    "output": str(args.output),
+                    "bootloader": str(args.bootloader),
+                    "bootloader_bytes": len(bootloader),
+                    "bootloader_sha256": hashlib.sha256(bootloader).hexdigest(),
+                    "last_lba": (SPL_OFFSET + len(bootloader) - 1) // SECTOR_SIZE,
+                    "reserved_lba": JOB_LBA,
+                    "sha256": hashlib.sha256(built).hexdigest(),
                 },
                 indent=2,
             )
