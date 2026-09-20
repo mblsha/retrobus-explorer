@@ -89,14 +89,26 @@
 #endif
 
 /*
- * Touch RTC + 0x1F4 bit 0 around the sleep. Off by default and deliberately:
- * the H616 manual (3.13.6.17, VDDOFF_GATING_SOF_REG) calls bit 0
- * DRAM_CH_PAD_HOLD and says to set it before VDD_SYS is powered off and clear
- * it after VDD_SYS comes back, while the prior art clears it on the way down
- * with a comment saying that is what holds the pads. VDD_SYS never goes off in
- * this work, so neither reading applies and the register is left alone. When
- * this is 1 the prior art's polarity is used, so that its cost can be measured
- * as a rung of its own.
+ * Touch RTC + 0x1F4 bit 0 around the sleep: clear it once self-refresh holds,
+ * set it again just before the controller is let out. This is what makes our
+ * DRAM rebuild reliable. Without it the PHY fails read calibration about one
+ * resume in five (8 of 42); with it, 48 of 48 and, on the rung that also stops
+ * the display clocks, 36 of 36, measured 2026-09-21.
+ *
+ * The polarity is still an open question and the working code wins it. The
+ * H616 manual (3.13.6.17, VDDOFF_GATING_SOF_REG) calls bit 0 DRAM_CH_PAD_HOLD,
+ * "1: hold dram pad", and says to set it before VDD_SYS is powered off and
+ * clear it after VDD_SYS comes back; the prior art clears it on the way down
+ * with a comment saying that is what holds the pads (CKE low) while the PHY is
+ * reset and unclocked, and sets it on the way back. Those are opposite senses,
+ * mainline U-Boot's H616 driver never touches the register at all, and this
+ * board reads it as 1 at rest. We follow the prior art, because that is the
+ * sequence that resumes. VDD_SYS never goes off here, so nothing in this work
+ * can tell the two readings apart; only a rail-off standby could.
+ *
+ * Still 0 by default, so that every rung measured without it goes on building
+ * exactly the binary it was measured as. The rungs that want it ask by name:
+ * sr-phy-padhold and sr-phy-padhold-nodisp, the latter being the kept one.
  */
 #ifndef STUB_PAD_HOLD
 #define STUB_PAD_HOLD		0

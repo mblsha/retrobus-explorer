@@ -60,7 +60,11 @@ OUR_STUB_MODES = {
     "sr-phy-pllon": "-DSTUB_LEVEL=2 -DSTUB_DDR_PLL_OFF=0",
     "sr-phy-fastapb": "-DSTUB_LEVEL=2 -DSTUB_APB_32K=0 -DSTUB_CPU_32K=0",
     # And one sub-step of theirs that level 2 does not do: the DRAM pad hold,
-    # whose polarity the manual and the prior art disagree about.
+    # whose polarity the manual and the prior art disagree about. It is not an
+    # ablation -- it is the fix. Level 2 without it loses about one resume in
+    # five to read calibration (8 of 42); this rung resumed 48 of 48. Ours
+    # follows the prior art's polarity because that is the sequence that comes
+    # back; see STUB_PAD_HOLD in firmware/stub/src/stub.h.
     "sr-phy-padhold": "-DSTUB_LEVEL=2 -DSTUB_PAD_HOLD=1",
     # The pad hold turned out to be what makes the rebuild reliable: 48 short
     # sleeps without a failure against 8 lost in 42 without it. This is that
