@@ -380,7 +380,7 @@ def watch_trace(client, watch: Watch, zero: float, seconds: float,
     return "time"
 
 
-def job_is_done(quiet: float):
+def job_is_done(quiet: float, reboots: int = 0):
     """A job has finished once the runner is steadily polling for the next one.
 
     The runner reads the job region once a second when it has nothing to run,
@@ -394,10 +394,20 @@ def job_is_done(quiet: float):
     the script without pausing, so a host polling five times a second usually
     sees only the second of the two; and silence, the other candidate, is
     exactly what a suspended target looks like.
+
+    A firmware experiment breaks that count on purpose. The suspend stub arms
+    the watchdog across a short sleep so that a hang is a warm reset rather
+    than a wedge, and the runner that comes back up polls once before it takes
+    the same job again -- which reads exactly like the second poll that ends a
+    run. Ending there costs the evidence: the failure's markers are in RTC
+    registers that the next pass of the job is what prints, and a target that
+    is powered off loses them. `reboots` is how many warm resets the caller is
+    willing to sit through, and each one is one more poll before the epitaph.
     """
+    threshold = 2 + max(0, int(reboots))
 
     def done(watch: Watch, fields: dict, now: float) -> str | None:
-        if watch.polls >= 2:
+        if watch.polls >= threshold:
             watch.job_finished = watch.job_finished or now
             return "job-done"
         if watch.job_started is None and watch.last_poll is not None:
@@ -603,7 +613,8 @@ def run_reboot(arguments, client, script: str) -> dict:
         locked_power(arguments.psu_cli, channel, "on")
         reason = watch_trace(
             client, watch, zero, arguments.run_seconds, arguments.interval,
-            arguments.debug_start, done=job_is_done(arguments.quiet),
+            arguments.debug_start,
+            done=job_is_done(arguments.quiet, arguments.expect_reboots),
         )
     finally:
         finished = time.monotonic() - zero
@@ -768,6 +779,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--quiet", type=float, default=3.0,
         help="Seconds of no card write that end a job or confirm a sleep",
+    )
+    parser.add_argument(
+        "--expect-reboots", type=int, default=0,
+        help="How many warm resets this job may cause and carry on from. A "
+             "suspend that hangs with the debug watchdog armed resets the "
+             "board; the runner then polls for a job before running it again, "
+             "and without this that poll is read as the job being over and the "
+             "power goes off before the next pass can report what happened",
     )
     parser.add_argument("--interval", type=float, default=0.2)
     parser.add_argument(

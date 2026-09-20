@@ -367,6 +367,42 @@ class WatchTests(unittest.TestCase):
         self.assertIsNotNone(watch.job_started)
         self.assertIsNotNone(watch.job_finished)
 
+    def test_a_warm_reset_the_caller_expected_is_not_the_job_finishing(self):
+        """A short sleep with the debug watchdog armed resets the board when it
+        hangs, and the runner polls once more on the way back up. Read as the
+        epitaph, that poll costs the evidence: the failure's markers are in RTC
+        registers, the next pass of the job is what prints them, and a target
+        whose power has been cut has none left to read."""
+        watch, reason = self.follow(
+            [trace(), self.polled(1),
+             trace(reads=2, read_lba=JOB_LBA + JOB_SECTORS),
+             self.polled(3)],
+            done=job.job_is_done(quiet=30.0, reboots=1),
+        )
+        self.assertEqual(reason, "exhausted")
+        self.assertEqual(watch.polls, 2)
+
+    def test_the_epitaph_moves_by_one_poll_for_each_expected_reset(self):
+        watch, reason = self.follow(
+            [trace(), self.polled(1),
+             trace(reads=2, read_lba=JOB_LBA + JOB_SECTORS),
+             self.polled(3), self.polled(4)],
+            done=job.job_is_done(quiet=30.0, reboots=1),
+        )
+        self.assertEqual(reason, "job-done")
+        self.assertEqual(watch.polls, 3)
+
+    def test_expecting_no_reset_is_what_every_earlier_run_was_watched_with(self):
+        for reboots in (0, -1):
+            watch, reason = self.follow(
+                [trace(), self.polled(1),
+                 trace(reads=2, read_lba=JOB_LBA + JOB_SECTORS),
+                 self.polled(3), self.polled(4)],
+                done=job.job_is_done(quiet=30.0, reboots=reboots),
+            )
+            self.assertEqual(reason, "job-done")
+            self.assertEqual(watch.polls, 2, reboots)
+
     def test_one_poll_is_the_runner_taking_the_job_up(self):
         watch, reason = self.follow(
             [trace(), self.polled(1)], done=job.job_is_done(quiet=30.0)
