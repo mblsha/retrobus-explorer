@@ -181,6 +181,24 @@ void stub_main(void)
 #endif
 
 	/* DRAM is readable again from here, and so is the rest of BL31. */
+#if STUB_DISPLAY_LATE
+	/*
+	 * The display clocks, last of all and only once the memory has been
+	 * read back. Whatever a relocking PLL does to a PHY that is training,
+	 * it cannot do it here: the training is over and the controller has
+	 * answered. They are still back before this returns, because the
+	 * kernel's clock framework expects to find the registers it wrote.
+	 *
+	 * A readback that does not match is recorded and not acted on. There
+	 * is nothing better to do with it -- the memory the OS is about to run
+	 * from is already wrong -- and a marker a job can read is worth more
+	 * than a reset that says nothing.
+	 */
+	if (!dram_readback_ok())
+		fail(CFG_SYS_SDRAM_BASE, FAIL_DRAM_READBACK);
+	display_late_up();
+	stage(STAGE_DISPLAY_UP);
+#endif
 	cpu_clock_restore();
 	wdog_restore();
 

@@ -66,6 +66,13 @@ OUR_STUB_MODES = {
     # snapshot says so: PLL_VIDEO0, PLL_DE and the DE bus gate are still on at
     # the instruction before WFI, with the panel long asleep.
     "sr-phy-nodisp": "-DSTUB_LEVEL=2 -DSTUB_DISPLAY_OFF=1",
+    # The same three clocks stopped, and put back after the DRAM controller
+    # and its PHY have been rebuilt rather than before: one of the first three
+    # sleeps of the rung above failed read calibration, and two PLLs relocking
+    # while the PHY trains is the difference between it and every rung that
+    # has always resumed.
+    "sr-phy-nodisp-late":
+        "-DSTUB_LEVEL=2 -DSTUB_DISPLAY_OFF=1 -DSTUB_DISPLAY_LATE=1",
 }
 
 # What each mode asks the two builds for. The patch list is the subset of our

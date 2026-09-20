@@ -323,3 +323,32 @@ bool dram_rebuild(const struct dram_config *config)
 #endif
 	return true;
 }
+
+#if STUB_DRAM_READBACK
+/*
+ * A deliberate read of the memory that has just been rebuilt, before anything
+ * else is allowed to depend on it. The words at the base and at the half-way
+ * point went back from SRAM a moment ago, so reading them and finding them
+ * changed is a controller that answers but does not carry data -- which a
+ * resume that merely returned would not have noticed, and which is exactly
+ * what "the DRAM is back" has to mean before the resume restarts a PLL on the
+ * strength of it.
+ *
+ * It is a comparison against SRAM rather than a pattern write, because the
+ * suspend exists to keep what is in the memory and this is the one region it
+ * is already licensed to touch.
+ */
+bool dram_readback_ok(void)
+{
+	unsigned int i;
+
+	for (i = 0; i < SAVED_WORDS; i++) {
+		if (readl(CFG_SYS_SDRAM_BASE + 4UL * i) != saved_low[i])
+			return false;
+		if (readl(saved_high_address + 4UL * i) != saved_high[i])
+			return false;
+	}
+
+	return true;
+}
+#endif

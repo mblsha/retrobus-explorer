@@ -66,6 +66,10 @@ static struct {
  * PLL is clocked while that PLL is off; the registers are written back as
  * whole words, so whatever the kernel's clock framework had set is what it
  * finds when it runs again.
+ *
+ * When the restore happens is STUB_DISPLAY_LATE's question and not this
+ * function's: either at the end of clocks_up(), which is where it began, or
+ * through display_late_up() once the memory is back.
  */
 static void display_down(void)
 {
@@ -106,6 +110,20 @@ static void display_up(void)
 	writel(saved.de_bgr, CCU(CCU_DE_BGR));
 #endif
 }
+
+#if STUB_DISPLAY_LATE
+/*
+ * The same restore, held back until main() has the memory answering again.
+ * Two PLLs relocking while the PHY is being re-trained is the one difference
+ * between the rung that has never failed to resume and the rung that failed
+ * read calibration once in three sleeps, and this is the cheapest way to find
+ * out whether that is what it was.
+ */
+void display_late_up(void)
+{
+	display_up();
+}
+#endif
 
 void clocks_down(void)
 {
@@ -163,7 +181,9 @@ void clocks_up(void)
 	writel(saved.apb1, CCU(CCU_H6_APB1_CFG));
 	udelay(100);
 
+#if !STUB_DISPLAY_LATE
 	display_up();
+#endif
 	stage(STAGE_CPU_CLK_UP);
 }
 

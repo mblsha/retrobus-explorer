@@ -60,6 +60,35 @@
 #endif
 
 /*
+ * When the display clocks come back. With this off they are restored inside
+ * clocks_up(), before the DRAM controller and its PHY are rebuilt, which is
+ * where they were first put and where one of the first three sleeps of
+ * STUB_DISPLAY_OFF failed its read calibration. With it on, nothing is
+ * restarted until the rebuild has finished and the memory has answered a
+ * deliberate read, so that the PHY re-trains against the same clock tree it
+ * trained against at boot and the two PLLs are still back before Linux runs.
+ * It decides only the moment; STUB_DISPLAY_OFF decides whether the display
+ * clocks are stopped at all.
+ */
+#ifndef STUB_DISPLAY_LATE
+#define STUB_DISPLAY_LATE	0
+#endif
+
+#if STUB_DISPLAY_LATE && !STUB_DISPLAY_OFF
+#error "STUB_DISPLAY_LATE says when the display clocks come back and needs STUB_DISPLAY_OFF to have taken them away"
+#endif
+
+/*
+ * Read the rebuilt memory back before the resume goes any further. Only the
+ * late restore has anything waiting on that answer, so it is compiled in with
+ * that rung and nowhere else: every earlier rung then still builds the binary
+ * it was measured as.
+ */
+#ifndef STUB_DRAM_READBACK
+#define STUB_DRAM_READBACK	STUB_DISPLAY_LATE
+#endif
+
+/*
  * Touch RTC + 0x1F4 bit 0 around the sleep. Off by default and deliberately:
  * the H616 manual (3.13.6.17, VDDOFF_GATING_SOF_REG) calls bit 0
  * DRAM_CH_PAD_HOLD and says to set it before VDD_SYS is powered off and clear
@@ -99,6 +128,7 @@
 #define STAGE_DRAM_BACK		0x40U
 #define STAGE_MEM_RESTORED	0x41U
 #define STAGE_STUB_DONE		0x42U
+#define STAGE_DISPLAY_UP	0x43U	/* the late restore, after the memory */
 /* Failures. Each says which wait ran out, so a warm reset is still evidence. */
 #define STAGE_SELFREF_REFUSED	0xe1U
 #define STAGE_SELFREF_STUCK	0xe2U
@@ -116,6 +146,7 @@
 #define FAIL_PHY_POLL		6U
 #define FAIL_REBUILD_FALSE	7U
 #define FAIL_DISPLAY_PLL_LOCK	8U
+#define FAIL_DRAM_READBACK	9U
 
 /*
  * H616 User Manual rev 1.0, 3.13.6.12: sixteen general purpose registers at
@@ -170,6 +201,7 @@ void wdog_restore(void);
 /* clock.c */
 void clocks_down(void);
 void clocks_up(void);
+void display_late_up(void);
 void cpu_clock_restore(void);
 void snapshot_clocks(void);
 
@@ -181,6 +213,7 @@ bool dram_enter_selfrefresh(void);
 void dram_shutdown(void);
 bool dram_leave_selfrefresh(void);
 bool dram_rebuild(const struct dram_config *config);
+bool dram_readback_ok(void);
 
 /* U-Boot's driver, with uboot-dram-resume.patch applied to our copy. */
 extern bool sunxi_dram_resume;

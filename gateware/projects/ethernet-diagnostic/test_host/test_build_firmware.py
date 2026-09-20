@@ -215,6 +215,39 @@ class PhyRebuildModeTests(unittest.TestCase):
             "two rungs that compile the same stub would measure the same thing",
         )
 
+    def test_only_the_new_rung_moves_the_display_restore_after_the_rebuild(self):
+        """`sr-phy-nodisp` is the rung that failed a PHY rebuild and is the
+        thing the new one is measured against, so it has to go on building
+        exactly what it built when that happened."""
+        self.assertEqual(
+            builder.OUR_STUB_MODES["sr-phy-nodisp-late"],
+            "-DSTUB_LEVEL=2 -DSTUB_DISPLAY_OFF=1 -DSTUB_DISPLAY_LATE=1",
+        )
+        for mode, defines in builder.OUR_STUB_MODES.items():
+            if mode != "sr-phy-nodisp-late":
+                self.assertNotIn("STUB_DISPLAY_LATE", defines, mode)
+
+    def test_the_stub_puts_the_display_clocks_back_in_one_place_or_the_other(self):
+        """Never both and never neither: the switch chooses between the
+        restore inside clocks_up() and the one main() makes after the memory
+        has answered."""
+        clock = (builder.PATCHES / "stub" / "src" / "clock.c").read_text()
+        main = (builder.PATCHES / "stub" / "src" / "main.c").read_text()
+        header = (builder.PATCHES / "stub" / "src" / "stub.h").read_text()
+        self.assertTrue(
+            "#if !STUB_DISPLAY_LATE\n\tdisplay_up();\n#endif" in clock,
+            "clocks_up() must hold the early restore behind the switch",
+        )
+        self.assertTrue("void display_late_up(void)" in clock)
+        self.assertTrue("display_late_up();" in main)
+        # Off by default, so every rung measured before this one still builds
+        # the binary it was measured as.
+        self.assertTrue("#define STUB_DISPLAY_LATE\t0" in header)
+        # And meaningless without the switch that stops the clocks at all.
+        self.assertTrue(
+            "#if STUB_DISPLAY_LATE && !STUB_DISPLAY_OFF\n#error" in header
+        )
+
     def test_the_stub_sources_are_in_the_repository_and_say_they_are_gpl(self):
         stub = builder.PATCHES / "stub"
         for name in ("Makefile", "stub.lds", "uboot-dram-resume.patch",
