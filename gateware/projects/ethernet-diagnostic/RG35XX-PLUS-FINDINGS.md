@@ -569,7 +569,8 @@ disarmed twice in one boot behaves.
 Seventeen experiments on 2026-09-20, all on the qualified bitstream and the
 same image built with `--card-max-hz 6000000`, all through `rg35xx.py job`.
 One shell script per row, in `projects/ethernet-diagnostic/jobs/sleep/`, so
-every row can be run again.
+every row can be run again. The firmware sections below add nine more, 18 to
+26, which need their own card images because the bootloader is part of one.
 
 **How a comparison is made here, and why it is not a before and an after.**
 Between-boot noise is about 7 mA, so every comparison is inside one boot. Two
