@@ -1933,3 +1933,37 @@ found them. 101.3 mA mean against an s2idle anchor of 116.0 in its own boot,
 where self-refresh alone had read 104.7 against 116.3 in its: about three and a
 half milliamps, the right direction and less than half of what this bench
 believes.
+
+**The top rung suspends and does not come back**, twice out of twice.
+`--suspend sr-pll` stops PLL_DDR0 as well, and the board goes quiet at the
+suspend and stays quiet: zero card clock edges a second for the rest of the
+run, the read counter frozen at the value it had going in, nothing at the
+forty-second alarm, the card still selected five minutes later.
+
+What makes that a finding rather than a dead end is what did not happen. There
+was no warm reset -- a reboot is thousands of low-LBA reads in the card's trace
+and there are none -- so the watchdog never fired, so the hang is in neither of
+the two windows the stub arms it for. Those two windows are the self-refresh
+entry and the self-refresh exit, and both are byte-for-byte what `sr-gate`
+does, which works. What is left between them is two register writes and their
+undo: PLL_DDR0's enable and lock-enable bits going away, the WFI, and the same
+two bits coming back with a wait for lock.
+
+And the stage code that would say which of the three it was died with the five
+volts. The RTC scratch registers are in the always-on domain, which on a board
+with no battery fitted means "while the USB-C port is powering it": a hang the
+watchdog turns into a warm reset keeps its evidence, and a hang the watchdog
+does not cover ends with the harness cutting the power at `--run-seconds` and
+takes the evidence with it. That is the one gap in the blind-debugging scheme
+and it is exactly where the failure landed. Closing it means arming the
+watchdog across the wait too and waking on its reset rather than on the alarm,
+which is a different experiment.
+
+The likeliest answer, on the evidence that everything short of PLL_DDR0 works,
+is that the Allwinner PHY does not survive its clock stopping and needs
+re-initialising and re-training to come back -- which is the step the prior art
+takes, by re-running U-Boot's DRAM driver with the destructive parts removed,
+and the step this stub was built to avoid. Whether it is worth taking is now a
+priced question rather than an open one: the two clock gates below it were
+worth three and a half milliamps, so PLL_DDR0 is unlikely to be worth more than
+a handful, against 72 mA still sitting in rails the PMIC controls.

@@ -873,7 +873,23 @@ half the threshold, so the kept configuration does not move. Six wakes of six,
 six md5 checks, and `MBUS_CFG` and `DRAM_BGR` read back after the resume
 exactly as the stub found them.
 
-<!-- FINDINGS-PLL -->
+**The top rung, `sr-pll`, suspends and does not come back.** Stopping PLL_DDR0
+as well leaves the board silent from the moment the job marks the sleep: zero
+card clock edges a second for the whole run, the read counter frozen, and
+nothing at the forty-second alarm. No warm reset either -- a reboot would be
+thousands of low-LBA reads in the trace and there are none -- so the watchdog
+never fired, so the hang is in neither of the two windows the stub arms it for.
+Those two windows are the self-refresh entry and exit, which are byte-for-byte
+what `sr-gate` does; the hang is in what is left, which is two register writes
+and their undo.
+
+The stage code that would name which of them died with the 5 V: the RTC scratch
+registers are always-on only while the USB-C port powers the board, and a hang
+the watchdog does not cover ends in the harness cutting the power. The likely
+answer, given that everything short of PLL_DDR0 works, is that the Allwinner
+PHY needs re-initialising after its clock stops -- the step this stub exists to
+avoid. Settling it needs the watchdog armed across the wait and a wake on its
+reset instead of on the alarm.
 
 Taking s2idle as the anchor in each boot, the firmware ladder is: stopping the
 CPU PLL about 4 mA, and the LPDDR4 in self-refresh about 8 mA more.
