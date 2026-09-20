@@ -1849,3 +1849,68 @@ the ROCKNIX work writes with a key of `0xa7` to gate the PLL LDO is untouched:
 their own comment marks it inferred, it is in the one block of this SoC the
 manual does not document, and the review thread on the pull request asks the
 same question about a neighbouring write.
+
+## 2026-09-20 The DRAM asleep, from a stub that is not in the DRAM
+
+The suspend above stopped one step short of the DRAM, and said why: BL31 on the
+H616 is linked into DRAM at `0x40000000`, so the code that stops the DRAM stops
+with it. The only memory left on this SoC is SRAM A1, 32 KiB at `0x20000`,
+which U-Boot's SPL ran from at boot and nothing has owned since. This is the
+day the inner sequence moved there.
+
+**Assembly, and not reluctantly.** The first sketch was C, following the prior
+art, and the list of things it must not do kept growing: no stack, because the
+stack is in DRAM; no call, because everything callable is in DRAM; no global,
+because BL31's data is in DRAM; and no literal pool, because a blob that runs
+from `0x20000` rather than from where it was linked would fetch its own
+constants out of a DRAM that is in self-refresh at the time. Each of those is a
+thing a compiler may do quietly and correctly and still break. They are all
+guaranteed by construction in twenty-odd instructions of assembly: every
+constant built with `movz`/`movk`, every label reached with `adr`, which is
+PC-relative and therefore gives the address of the running copy. The built
+blob was disassembled and read through before it went anywhere near the bench,
+which caught nothing and was still the right thing to do.
+
+Two small things the assembler decided. A `.if` on the difference of two labels
+in the same section is not a constant as far as GAS is concerned, so the guards
+that were going to check the blob's size and the vector table's reach had to
+come out -- and that turned out for the better, because replacing the one
+arithmetic that needed the guard (`base + (vectors - start)`) with a plain
+`adr` made the blob relocatable to any address rather than only to `0x20000`.
+
+**One job before any sleeping, and it earned its boot.** Experiment 22 reads
+all sixteen RTC general purpose registers -- all sixteen are zero, so the four
+the stub reports through are free and so are the twelve it does not use -- the
+DRAM controller's `STAT`, `PWRCTL`, `SWCTL`, `SWSTAT` and the three master
+enable registers, which are exactly where and what the stub expects
+(`STAT` 1, normal mode; `MAER` `0xffffffff`, `0x7ff`, `0xffff`), and the
+watchdog. That last one mattered: the manual calls `WDOG_MODE`'s enable bit
+R/W1S, and the stub has to be able to clear it again before a wait that is far
+longer than the longest watchdog interval. Configured for interrupt only, so
+that a failure to disable could not reset the board, it went `0xb1` armed and
+`0x00000000` cleared. It also priced the DRAM probe: 64 MiB of `/dev/urandom`
+and its md5 in about a second each, with 1010700 kB of RAM and a 493 MiB tmpfs,
+which is what set the probe at 256 MiB.
+
+**It worked first time.** The first `rtc_sleep 40 mem deep` on the self-refresh
+firmware came back with 41 seconds by the RTC, `success` 0 to 1, three card
+checks good, EL3 stage `0xa5d50008`, one suspend entered and one resume
+counted by the stub itself, wake interrupt 136, and the 256 MiB probe's md5
+unchanged. 105.5 mA against the 112 to 114 the DRAM-less suspend had been
+giving.
+
+**And it is worth eleven and a half milliamps**, which is the first thing in
+this whole sleep investigation above the bench's own eight-milliamp threshold
+since the cpufreq governor. Alternated against s2idle A B B A A B with
+`powersave` in both arms: 119, 114 and 116 mA in s2idle against 103, 107 and
+104 in self-refresh, 116.3 mean against 104.7. EL3's counters went 0, 1, 2, 2,
+2, 3 across the six sleeps -- up on each deep arm and untouched on each s2idle
+one -- which is what makes the s2idle arms a control rather than a comparison.
+Ten consecutive cycles in one boot read 103 to 112 mA, ten wakes of ten, ten
+md5 checks of ten, `success` 0 to 10 with `fail` 0.
+
+Taking s2idle as the anchor in each boot, the ladder now reads: stopping the
+CPU PLL is about 4 mA, and putting the LPDDR4 into self-refresh on top of it is
+about 8 mA more. Which is the right shape -- a core in WFI is already
+clock-gated, and a DRAM that is being refreshed by its own controller at full
+rate is not.

@@ -819,9 +819,48 @@ A core in WFI is already clock-gated, so what the CPU clock tree had left to
 give was PLL_CPUX's own bias, and that is what four milliamps looks like. The
 rest is in the rails listed above, which need power domains to collapse, which
 needs DRAM in self-refresh, which needs the sequence to run from SRAM because
-BL31 on this platform is linked into DRAM. The full write-up, with what is
-measured and what is assumed, is the deep-sleep section of
-[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md).
+BL31 on this platform is linked into DRAM. That was then done, and is the next
+heading. The full write-up, with what is measured and what is assumed, is the
+deep-sleep section of [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md).
+
+### Deeper still: the LPDDR4 in self-refresh, from a stub in SRAM
+
+The inner sequence moved into SRAM A1: a 4224-byte blob of position-independent
+assembly in BL31's read-only data, copied to `0x20000` on the way into every
+suspend and called with the MMU off. No stack, no call and no literal pool --
+the stack is in DRAM, everything callable is in DRAM, and a literal pool would
+be in DRAM. Every constant is `movz`/`movk`, every label is `adr`, and the
+built blob was disassembled to confirm it. Its own exception vectors are
+installed for the duration, so a fault in it leaves `ESR_EL3` and `ELR_EL3` in
+RTC registers and resets through the watchdog instead of wedging.
+
+Three rungs, one `--suspend` mode each, built from one patch with different
+`SUNXI_SUSPEND_DRAM_LEVEL`: `sr` is software self-refresh alone, `sr-gate`
+also gates the DRAM bus and MBUS clocks, `sr-pll` also stops PLL_DDR0. Gates
+only, never the resets beside them. The controller sequences are mainline
+U-Boot's, from `mctl_ctrl_init()` and `mctl_phy_init()` in
+`arch/arm/mach-sunxi/dram_sun50i_h616.c`, because the H616 manual documents no
+DRAM controller registers at all; everything else is cited to the manual.
+
+**A resume that works is not proof.** A DRAM cell holds its charge for a good
+fraction of a second unrefreshed, so every sleep from here fills 256 MiB of
+tmpfs with random bytes, records its md5 and checks it on the other side, with
+one six-minute sleep per kept rung as well as the short ones. In the
+alternation the s2idle arms are the control: s2idle does not touch the DRAM,
+so if those pass and the deep ones do not, the difference is the self-refresh.
+
+**Self-refresh is worth 11.6 mA**, the first thing above this bench's
+eight-milliamp threshold since the cpufreq governor. Alternated against s2idle
+A B B A A B with `powersave` in both arms: 119, 114 and 116 mA in s2idle
+against 103, 107 and 104 in self-refresh, 116.3 mean against 104.7. All six
+windows sound, six wakes of six, six md5 checks unchanged, and EL3's counters
+up by one on each deep arm and untouched on each s2idle one. Ten consecutive
+cycles in one boot read 103 to 112 mA over ten sound windows, ten wakes, ten
+md5 checks, `success` 0 to 10 with `fail` 0, and the card's clock at exactly
+zero edges a second throughout every sleep.
+
+Taking s2idle as the anchor in each boot, the firmware ladder is: stopping the
+CPU PLL about 4 mA, and the LPDDR4 in self-refresh about 8 mA more.
 
 ### Recommendations
 

@@ -17,18 +17,26 @@ the emulated card and from the bench supply.
 | | at the 5 V input |
 | --- | --- |
 | asleep as the image ships, s2idle | 121 to 126 mA |
-| asleep in the best configuration found | about 114 mA (110 to 119 over twenty cycles) |
+| asleep, s2idle, the best sysfs can reach | about 114 mA (110 to 119 over twenty cycles) |
 | asleep, our firmware suspend, the CPU PLL off | about 113 mA (110 to 117 over ten) |
+| asleep, our firmware suspend, the LPDDR4 in self-refresh | about 105 mA (103 to 112 over ten) |
 | powered off with an RTC alarm armed, which does bring it back | 33 mA |
 | supply output off | 1 mA |
 
 s2idle was the only sleep state this kernel and firmware offered, and one knob
 is worth keeping in it: the `powersave` cpufreq governor, 11 mA. Nothing else
-that sysfs can reach is worth a milliamp. A firmware of our own gives the board
-a real `deep` state, and it works -- seventeen suspends, seventeen resumes --
-but with DRAM still running it is worth about 4 mA, which is less than this
-bench calls a difference. If the application can stand a cold boot on waking,
-powering off with the alarm armed draws a quarter of the best sleep.
+that sysfs can reach is worth a milliamp.
+
+A firmware of our own gives the board a real `deep` state. Two things were
+built into it and each was priced on its own. Stopping the CPU PLL and waiting
+in WFI works -- seventeen suspends, seventeen resumes -- and is worth about
+4 mA, less than this bench calls a difference. Putting the LPDDR4 into
+self-refresh as well, from a stub in SRAM because BL31 itself lives in the
+DRAM, is worth **another 8 mA**: 11.6 mA against s2idle in the same boot, which
+is the first thing above the noise since the governor.
+
+If the application can stand a cold boot on waking, powering off with the alarm
+armed still draws a third of the best sleep.
 
 All currents are at the USB-C port at 5.00 V with **no battery fitted**, so they
 include the PMIC's conversion and charger path and are not battery-life
@@ -126,9 +134,9 @@ the host, not a rootfs, an image, or an FPGA load.
 
 ## The experiments
 
-Twenty-one, one script each in
-[`jobs/sleep/`](jobs/sleep); the first seventeen are below and the last four
-are in the deep-sleep section. Cells are median / IQR / readings in mA over a
+One script each in [`jobs/sleep/`](jobs/sleep); the first seventeen are below,
+18 to 21 are in the deep-sleep section and 22 to 26 in the self-refresh
+section after it. Cells are median / IQR / readings in mA over a
 40 s sleep; `!` is an UNSOUND window; "mean" is the mean of three medians in an
 A B B A A B run; "to N" means row N decided it properly; "ref." is a reference
 point and not a sleep.
@@ -165,7 +173,10 @@ alternations of rows 7 to 10 supersede them. The experiments stopped where the
 goal said they should: rows 11, 12 and 13 are three in a row with no gain above
 the noise.
 
-## The best configuration
+## The best configuration sysfs can reach
+
+It is still worth its eleven milliamps under the firmware suspends below, which
+change what the SoC does and not what the governor does.
 
 ```sh
 for p in /sys/devices/system/cpu/cpufreq/policy*; do
@@ -368,7 +379,7 @@ a CPU-clock suspend does not reach.
   and the review thread on the pull request asks the same question about a
   neighbouring write. Nothing here writes a register it cannot cite.
 
-### What Stage 2 -- DRAM self-refresh from SRAM -- needs from this
+### What the next step -- DRAM self-refresh from SRAM -- needed from this
 
 - **The warm-boot return works.** Turning the MMU off and branching to
   `bl31_warm_entrypoint` brings Linux back through PSCI's resume path,
@@ -396,7 +407,182 @@ a CPU-clock suspend does not reach.
   idle; everything the CPU clock tree had to give has now been given, and it
   was four milliamps.
 
-## Powered off is a quarter of the best sleep
+All five of those held, and the next section is what was built on them.
+
+## Deeper still: the DRAM asleep, from a stub that is not in the DRAM
+
+The section above ends by saying what the next step needs. This is that step
+taken, and unlike the one before it, it is worth something.
+
+### The shape of it, and why it is assembly
+
+BL31 on this platform is linked into DRAM, so the moment the LPDDR4 stops
+answering, the code that stopped it has stopped too. The only memory left is
+SRAM A1: 32 KiB at `0x00020000`, which U-Boot's SPL ran from at boot and
+nothing has owned since.
+
+So the inner sequence moved there. A blob of position-independent instructions
+lives in BL31's read-only data, is copied into SRAM A1 on the way into every
+suspend, and is called with the MMU off -- off because TF-A maps the whole
+SRAM region execute-never, and because BL31's page tables are themselves in
+the DRAM that is about to go away. The jump with the MMU off was already
+proved by the rung below; this only adds a destination.
+
+It is written in assembly, and the reason is the whole design:
+
+- **No stack.** The stack is in DRAM. Everything the stub remembers across the
+  sleep -- the saved `PWRCTL`, the three MBUS master-enable words, `CPUX_AXI`,
+  `SCR_EL3`, `VBAR_EL3` and the watchdog's two registers -- lives in a save
+  area inside the copy, in SRAM.
+- **No call.** Everything callable is in DRAM.
+- **No literal pool.** A compiler puts one where it likes, and a
+  `ldr x0, =label` in a blob that runs from `0x20000` rather than from where
+  it was linked would fetch from DRAM in self-refresh. Every constant is built
+  with `movz`/`movk` and every label is reached with `adr`, which is
+  PC-relative and so gives the address of the running copy. The built blob was
+  disassembled to confirm it: 4224 bytes, no literal loads, two `adr`s.
+
+Its own exception vectors are installed for the duration, because BL31's are
+in DRAM: a fault inside the stub records `ESR_EL3` and `ELR_EL3` in RTC
+scratch registers and resets through the watchdog, which on a board with no
+console is the difference between a clue and a power cycle.
+
+### What it does, in order
+
+```text
+save the watchdog and stop it              it must not fire during the wait
+zero MAER0/1/2                             no more MBUS masters
+arm a 2 s watchdog
+set PWRCTL bit 5, wait for STAT mode 3     software self-refresh
+disarm the watchdog                        the wait outlasts any interval
+cluster onto OSC24M, stop PLL_CPUX         as the rung below already did
+[sr-gate]  clear MBUS_CFG bit 31 and DRAM_BGR bit 0
+[sr-pll]   clear PLL_DDR0 bits 31 and 29
+WFI
+[sr-pll]   PLL_DDR0 back, wait for lock
+[sr-gate]  DRAM_BGR bit 0 and MBUS_CFG bit 31 back
+PLL_CPUX back, wait for lock, cluster back on it
+arm a 2 s watchdog
+SWCTL=0, restore PWRCTL, SWCTL=1, wait SWSTAT, wait for STAT mode 1
+restore MAER0/1/2 and the watchdog, return to BL31 in DRAM
+```
+
+The two controller sequences are mainline U-Boot's own, from
+`arch/arm/mach-sunxi/dram_sun50i_h616.c`: `mctl_ctrl_init()` zeroes the master
+enables and writes `PWRCTL` `0x20` to go in, and `mctl_phy_init()` clears the
+same bit inside a `SWCTL` commit and waits for `STAT & 3 == 1` to come out.
+The H616 manual documents no DRAM controller registers at all, so there was no
+other honest source. Everything in the CCU, the watchdog and the RTC is from
+the manual and cited where it is used.
+
+Gates only, never the resets beside them: `MBUS_CFG` bit 30 and `DRAM_BGR`
+bit 16 are resets, and a controller that has been reset cannot be talked out
+of self-refresh without re-running a whole DRAM driver -- which is what the
+prior art does, and what this is built not to need.
+
+### Proving the DRAM kept anything
+
+A resume that works is not proof. A DRAM cell holds its charge for a good
+fraction of a second with nobody refreshing it, so a controller that quietly
+never entered self-refresh would still come back looking healthy from a
+forty-second sleep. Every sleep from here on therefore fills 256 MiB of tmpfs
+with random bytes, records its md5 and checks it on the other side, and each
+kept rung gets one sleep of six minutes as well as the short ones.
+
+The s2idle arms of the alternation are the control: s2idle does not touch the
+DRAM at all, so if those checks pass and the deep ones do not, the difference
+is the self-refresh and not the probe.
+
+### What it is worth: eleven milliamps, which is a difference
+
+```text
+ #  what was run                          s2idle      self-refr.  wake  card  DRAM
+22  the firmware's own account, no sleep     --          --        --    ok    --
+23  one self-refresh sleep, first of kind    --      106/5/14      yes   ok    ok
+24  self-refresh against s2idle, ABBAAB   116 mean    105 mean     6/6   ok    6/6
+25  ten consecutive self-refresh cycles      --       103-112     10/10  ok  10/10
+```
+
+Cells are median / IQR / readings in mA over a 40 s sleep; "mean" is the mean
+of three medians in an A B B A A B run, A being `mem` resolved to s2idle and B
+`mem` resolved to `deep`, with the `powersave` governor set once at the top and
+in force in both arms.
+
+- **The alternation:** 119, 114 and 116 mA in s2idle against 103, 107 and 104
+  in self-refresh. 116.3 mean against 104.7, **11.6 mA**, against a threshold
+  of about eight. All six windows sound, all six wakes, all six card checks,
+  all six md5 checks unchanged.
+- **The counters say which arm was which.** EL3's suspend and resume counters
+  went 0, 1, 2, 2, 2, 3 across the six sleeps -- up by one on each of the three
+  deep arms and untouched on each of the three s2idle ones -- with the stage
+  reading `0xa5d50008` and the wake interrupt 136 every time. The s2idle arms
+  are running the same kernel through the same `rtc_sleep` and are not going
+  through EL3 at all, which is what makes them a control rather than a
+  comparison.
+- **Against the rung below.** The DRAM-less suspend measured 112.5 and 113.8
+  mean in the same experiment against s2idle means of 117.0 both times; this
+  one measures 104.7 against 116.3. Taking s2idle as the anchor in each boot,
+  self-refresh is worth about 8 mA more than stopping the CPU PLL alone, and
+  about 11.6 mA against doing nothing.
+- **Ten consecutive cycles in one boot:** 103, 104, 107, 104, 104, 106, 112,
+  109, 106 and 107 mA, ten sound windows between 103 and 112. Ten wakes of ten,
+  41 s by the RTC for a requested 40 on all ten, `success` 0 to 10 with `fail`
+  0, twelve card checks of twelve, ten md5 checks unchanged, and EL3's counters
+  reaching 10 and 10. The harness opened an eleventh window over the awake gap
+  between cycles 3 and 4 and marked it unsound, which is what a 9.7 s window
+  reading 181 mA is: the target awake, not a sleep.
+
+### What is measured here and what is assumed
+
+- **Measured:** every current above; every wake, with the RTC's own account of
+  each sleep, `suspend_stats`, a card check either side and the 256 MiB md5;
+  EL3's stage and counter registers, where the counters are incremented by the
+  stub itself after it has DRAM back, so they cannot read high on a sleep that
+  did not complete; the wake interrupt, 136 on every one; and the card's clock,
+  which the FPGA counts at exactly zero edges a second for the whole sleep.
+- **Measured, and worth saying separately:** that the controller is back in
+  normal operating mode and its three master-enable registers are back to
+  `0xffffffff`, `0x7ff` and `0xffff` after the resume, read through `/dev/mem`;
+  and that the watchdog is back to `CFG=1 MODE=0`, which is how the stub found
+  it.
+- **Assumed, because nothing here can look:** that the DRAM is in self-refresh
+  *for the whole* of the wait rather than only at the moment `STAT` was read.
+  The stub reads `STAT` back as mode 3 before it stops waiting, and reads it
+  back as mode 1 after, but nothing can read a register while the core is in
+  WFI. The six-minute sleep is the argument: a DRAM that was not being
+  refreshed would not survive it, and a controller that had fallen out of
+  self-refresh would not be drawing eleven milliamps less.
+- **Not touched, still:** the PRCM register at `+0x244` that the ROCKNIX work
+  writes with a key of `0xa7`. Same reason as before -- their own comment marks
+  it inferred and the manual does not document that block.
+
+### What else is still running, and where the rest of the current is
+
+Experiment 22 reads the CCU's eleven PLL control registers through `/dev/mem`.
+Awake and idle with the panel asleep, five of them have their enable bit set:
+
+```text
+enabled   PLL_CPUX  PLL_DDR0  PLL_PERI0  PLL_VIDEO0  PLL_DE
+disabled  PLL_DDR1  PLL_PERI1  PLL_GPU0  PLL_VIDEO1  PLL_VIDEO2  PLL_VE
+```
+
+This is the awake state, not the sleeping one: nothing here can read a CCU
+register while the core is in WFI, and the kernel's own clock framework may
+take some of them down on the way into a suspend. Two of the five,
+`PLL_VIDEO0` and `PLL_DE`, are the display pipeline, and experiment 13 already
+priced the whole of that pipeline at nothing measurable, so they are unlikely
+to be where the milliamps are. `PLL_PERI0` feeds the card controller among
+much else and stays. That leaves the two the firmware now stops itself.
+
+So the account of a sleep, at the end of all this, is: about 105 mA in the best
+firmware configuration, 33 mA powered off with the alarm armed, and therefore
+about 72 mA in rails that are still up while the SoC's CPU and DRAM clock trees
+are both stopped -- `vdd-dram`, `vdd-gpu-sys`, `vcc-pll`, `vcc-io`, `avcc`,
+`cpusldo`, `vcc-spkr-amp`, `aldo3` and `dcdc4`, plus whatever the AXP717's own
+conversion and charger path costs with no battery fitted. Reaching those is a
+PMIC question, and this stage deliberately writes no PMIC register at all.
+
+## Powered off is a third of the best sleep
 
 `poweroff -f` with 5 V still on the port draws **33 mA** (33 to 35, IQR 2,
 n=19 over 60 s and n=62 over 190 s), the steadiest reading this bench has
@@ -405,7 +591,10 @@ taken. An RTC alarm armed beforehand powers the board back on: twice of twice,
 the remaining 193 s of the run, so the board does not simply restart on USB
 power; the alarm is what brings it back. The price is a cold boot, about 5 s
 to the first card command and about 12 s to userspace after power comes up, and
-nothing survives it.
+nothing survives it. Against the 105 mA the self-refresh firmware now sleeps
+at, that is a third rather than the quarter it was before this section's
+neighbours were written; the gap has closed by eight milliamps and the
+remaining 72 are not in the SoC's clock trees.
 
 ## Recommendations
 
@@ -417,14 +606,20 @@ None of these was done; the first two need a person at the bench.
 2. Put a meter in series with the battery terminals, or read the PMIC's
    coulomb counter, to separate what the SoC draws from what the PMIC costs.
 3. If a cold boot on waking is acceptable, use poweroff and the RTC alarm:
-   33 mA against 114, the wake proved twice and the stay-off once.
+   33 mA against 105, the wake proved twice and the stay-off once.
 4. The next real saving is in the device tree and the firmware:
    `cpus/idle-states` for a cpuidle driver and a `mem` that is not s2idle, and
    a suspend that collapses the domains behind `vdd-dram`, `vdd-gpu-sys`,
-   `vcc-pll` and `avcc`. The firmware half of this was then done and is the
-   deep-sleep section above: a `mem` that is not s2idle is four milliamps, and
-   the domains are where the rest is.
-5. A kernel with `PM_DEBUG` and `DEBUG_FS` for `pm_print_times`, the suspend
+   `vcc-pll` and `avcc`. The firmware half of this was then done twice over and
+   is the two sections above: a `mem` that is not s2idle is four milliamps,
+   putting the DRAM into self-refresh in it is eight more, and the domains are
+   still where the remaining seventy-two are.
+5. **Use the self-refresh firmware.** `--suspend sr`, runbook section 12. It is
+   the lowest sleep this bench has measured that keeps the machine's state, it
+   resumes reliably, and it needs no kernel or device-tree change at all.
+6. The rails are a PMIC question now, and nothing here writes a PMIC register
+   on purpose. That is the next thing to decide, not to do by accident.
+7. A kernel with `PM_DEBUG` and `DEBUG_FS` for `pm_print_times`, the suspend
    timing breakdown and the regulator summary. Nothing here needed it; the
    next question probably will.
 
@@ -444,9 +639,13 @@ MDP_CLI=/path/to/miniware-mdp-m01/cli \
   --output /tmp/powersave.json
 ```
 
-The four deep-sleep rows need the card image built with the `--suspend wfi`
-bootloader, `build/rg35xx-firmware-src/wfi/rg35xx-plus-sleep-wfi.img`, which
-runbook section 12 builds; everything else runs on either.
+Rows 1 to 17 run on any of the images. Rows 18 to 21 need the card image built
+with the `--suspend wfi` bootloader,
+`build/rg35xx-firmware-src/wfi/rg35xx-plus-sleep-wfi.img`; rows 22 to 26 need
+one of the self-refresh ones, `…/sr/rg35xx-plus-sleep-sr.img` and its
+`sr-gate` and `sr-pll` siblings. Runbook section 12 builds all of them, and
+each needs its own eight-minute `deploy` because the bootloader is part of the
+card image.
 
 Every run ends with the supply's output read back OFF and the card disarmed.
 `psu2` is the RG35XX; `psu1` carries another machine on this bench and must
