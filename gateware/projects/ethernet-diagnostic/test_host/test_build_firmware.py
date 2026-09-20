@@ -227,6 +227,27 @@ class PhyRebuildModeTests(unittest.TestCase):
             if mode != "sr-phy-nodisp-late":
                 self.assertNotIn("STUB_DISPLAY_LATE", defines, mode)
 
+    def test_the_reliable_rung_is_the_pad_hold_and_the_cheapest_adds_the_display(self):
+        """Without the pad hold the rebuild lost 8 resumes in 42; with it, none
+        in 48. The display clocks are stopped on top of that rung and not on
+        top of the one that fails, and the rungs already measured go on
+        building what they built."""
+        self.assertEqual(
+            builder.OUR_STUB_MODES["sr-phy-padhold"],
+            "-DSTUB_LEVEL=2 -DSTUB_PAD_HOLD=1",
+        )
+        self.assertEqual(
+            builder.OUR_STUB_MODES["sr-phy-padhold-nodisp"],
+            "-DSTUB_LEVEL=2 -DSTUB_PAD_HOLD=1 -DSTUB_DISPLAY_OFF=1",
+        )
+        for mode, defines in builder.OUR_STUB_MODES.items():
+            if not mode.startswith("sr-phy-padhold"):
+                self.assertNotIn("STUB_PAD_HOLD", defines, mode)
+        self.assertEqual(
+            builder.patches_for("sr-phy-padhold-nodisp"),
+            builder.patches_for("sr-phy-padhold"),
+        )
+
     def test_the_stub_puts_the_display_clocks_back_in_one_place_or_the_other(self):
         """Never both and never neither: the switch chooses between the
         restore inside clocks_up() and the one main() makes after the memory

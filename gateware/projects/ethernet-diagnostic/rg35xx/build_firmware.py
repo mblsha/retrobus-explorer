@@ -62,6 +62,12 @@ OUR_STUB_MODES = {
     # And one sub-step of theirs that level 2 does not do: the DRAM pad hold,
     # whose polarity the manual and the prior art disagree about.
     "sr-phy-padhold": "-DSTUB_LEVEL=2 -DSTUB_PAD_HOLD=1",
+    # The pad hold turned out to be what makes the rebuild reliable: 48 short
+    # sleeps without a failure against 8 lost in 42 without it. This is that
+    # rung with the three display clocks stopped as well, which is the saving
+    # the unreliable rungs below could only hint at.
+    "sr-phy-padhold-nodisp":
+        "-DSTUB_LEVEL=2 -DSTUB_PAD_HOLD=1 -DSTUB_DISPLAY_OFF=1",
     # Past anything the prior art does, and only because the stub's own
     # snapshot says so: PLL_VIDEO0, PLL_DE and the DE bus gate are still on at
     # the instruction before WFI, with the panel long asleep.

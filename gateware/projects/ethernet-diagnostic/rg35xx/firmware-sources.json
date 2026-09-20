@@ -52,6 +52,7 @@
         "sr-phy-pllon",
         "sr-phy-fastapb",
         "sr-phy-padhold",
+        "sr-phy-padhold-nodisp",
         "sr-phy-nodisp",
         "sr-phy-nodisp-late"
       ]
@@ -73,6 +74,7 @@
         "sr-phy-pllon",
         "sr-phy-fastapb",
         "sr-phy-padhold",
+        "sr-phy-padhold-nodisp",
         "sr-phy-nodisp",
         "sr-phy-nodisp-late"
       ]
