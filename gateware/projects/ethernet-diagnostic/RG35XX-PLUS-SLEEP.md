@@ -495,7 +495,7 @@ The s2idle arms of the alternation are the control: s2idle does not touch the
 DRAM at all, so if those checks pass and the deep ones do not, the difference
 is the self-refresh and not the probe.
 
-### What it is worth: eleven milliamps, which is a difference
+### What it is worth: nine to twelve milliamps, which is a difference
 
 ```text
  #  what was run                          s2idle      self-refr.  wake  card  DRAM
@@ -522,6 +522,18 @@ in force in both arms.
   are running the same kernel through the same `rtc_sleep` and are not going
   through EL3 at all, which is what makes them a control rather than a
   comparison.
+- **The alternation again, twice, by someone who had not written it.** From
+  the committed script and image, a cold boot each, windows read by their
+  dwell because the md5 check shifts the labels: 112, 108 and 109 mA in s2idle
+  against 104 (unsound, seven readings), 104 and 107 in self-refresh, 109.7
+  mean against 105.0; then 114, 112 and 119 against 104, 108 and 102, 115.0
+  against 104.7. Twelve wakes of twelve, twelve card checks, twelve md5 checks
+  unchanged, EL3's counters up on the deep arms only. The self-refresh arm is
+  the steady one, 104.7, 105.0 and 104.7 mean in the three runs; the s2idle arm
+  moves between boots, 116.3, 109.7 and 115.0, and the saving moves with it:
+  11.6, 4.7 and 10.3 mA, **about 9 mA pooled**. What the three runs agree on is
+  the state the board ends up in, about 105 mA, more than what it is compared
+  with.
 - **Against the rung below.** The DRAM-less suspend measured 112.5 and 113.8
   mean in the same experiment against s2idle means of 117.0 both times; this
   one measures 104.7 against 116.3. Taking s2idle as the anchor in each boot,
