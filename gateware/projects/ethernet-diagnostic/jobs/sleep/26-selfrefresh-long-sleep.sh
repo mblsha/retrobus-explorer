@@ -17,7 +17,7 @@ markers() {
     echo "el3 stage=$($BB devmem 0x07000130 2>/dev/null) entered=$($BB devmem 0x07000134 2>/dev/null) resumed=$($BB devmem 0x07000138 2>/dev/null) wake_irq=$($BB devmem 0x0700013c 2>/dev/null)"
 }
 
-dram_probe_mb=192
+dram_probe_mb=256
 
 for p in /sys/devices/system/cpu/cpufreq/policy*; do
     [ -e "$p/scaling_governor" ] && echo powersave > "$p/scaling_governor" 2>/dev/null
