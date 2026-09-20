@@ -1921,3 +1921,15 @@ window, and the 256 MiB probe's md5 unchanged. Forty seconds of unrefreshed
 DRAM is within a cell's retention time for pages that were read recently, so a
 short sleep coming back intact is consistent with self-refresh and also
 consistent with luck. Six minutes is not.
+
+**The middle rung of the ladder works and is not worth anything.**
+`--suspend sr-gate` clears the DRAM bus gate and the MBUS clock gate on top of
+the self-refresh -- the gates only, never the resets beside them, because a
+controller that has been reset cannot be talked out of self-refresh without
+re-running the whole of U-Boot's DRAM driver, which is the one thing this stub
+is built not to need. It resumes, six wakes of six with the memory probe intact
+each time, and both registers read back after the resume exactly as the stub
+found them. 101.3 mA mean against an s2idle anchor of 116.0 in its own boot,
+where self-refresh alone had read 104.7 against 116.3 in its: about three and a
+half milliamps, the right direction and less than half of what this bench
+believes.

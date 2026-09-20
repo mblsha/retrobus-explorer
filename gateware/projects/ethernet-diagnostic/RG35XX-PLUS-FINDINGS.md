@@ -865,6 +865,16 @@ zero edges a second throughout every sleep.
 refreshed at all: 361 s by the RTC for a requested 360, 105.5 mA median over
 112 readings in one unbroken sound window, and the probe's md5 unchanged.
 
+**The rung above it, `sr-gate`, works and adds nothing measurable.** Gating the
+DRAM bus clock and the MBUS clock on top of self-refresh reads 101.3 mean
+against an s2idle anchor of 116.0 in its own boot, where self-refresh alone
+read 104.7 against 116.3 in its. About 3.4 mA: the right direction, less than
+half the threshold, so the kept configuration does not move. Six wakes of six,
+six md5 checks, and `MBUS_CFG` and `DRAM_BGR` read back after the resume
+exactly as the stub found them.
+
+<!-- FINDINGS-PLL -->
+
 Taking s2idle as the anchor in each boot, the firmware ladder is: stopping the
 CPU PLL about 4 mA, and the LPDDR4 in self-refresh about 8 mA more.
 
