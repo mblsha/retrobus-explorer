@@ -859,6 +859,10 @@ cycles in one boot read 103 to 112 mA over ten sound windows, ten wakes, ten
 md5 checks, `success` 0 to 10 with `fail` 0, and the card's clock at exactly
 zero edges a second throughout every sleep.
 
+**One sleep of six minutes** is what settles whether anything is being
+refreshed at all: 361 s by the RTC for a requested 360, 105.5 mA median over
+112 readings in one unbroken sound window, and the probe's md5 unchanged.
+
 Taking s2idle as the anchor in each boot, the firmware ladder is: stopping the
 CPU PLL about 4 mA, and the LPDDR4 in self-refresh about 8 mA more.
 

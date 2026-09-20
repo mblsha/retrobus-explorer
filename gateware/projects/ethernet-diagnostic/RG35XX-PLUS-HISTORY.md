@@ -1914,3 +1914,10 @@ CPU PLL is about 4 mA, and putting the LPDDR4 into self-refresh on top of it is
 about 8 mA more. Which is the right shape -- a core in WFI is already
 clock-gated, and a DRAM that is being refreshed by its own controller at full
 rate is not.
+
+The measurement that actually settles it is the six-minute one: 361 seconds by
+the RTC for a requested 360, 105.5 mA median over 112 readings in one unbroken
+window, and the 256 MiB probe's md5 unchanged. Forty seconds of unrefreshed
+DRAM is within a cell's retention time for pages that were read recently, so a
+short sleep coming back intact is consistent with self-refresh and also
+consistent with luck. Six minutes is not.

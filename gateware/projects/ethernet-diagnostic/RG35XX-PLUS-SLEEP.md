@@ -501,6 +501,7 @@ is the self-refresh and not the probe.
 23  one self-refresh sleep, first of kind    --      106/5/14      yes   ok    ok
 24  self-refresh against s2idle, ABBAAB   116 mean    105 mean     6/6   ok    6/6
 25  ten consecutive self-refresh cycles      --       103-112     10/10  ok  10/10
+26  one six-minute self-refresh sleep        --      106/13/112    yes   ok    ok
 ```
 
 Cells are median / IQR / readings in mA over a 40 s sleep; "mean" is the mean
@@ -531,6 +532,13 @@ in force in both arms.
   reaching 10 and 10. The harness opened an eleventh window over the awake gap
   between cycles 3 and 4 and marked it unsound, which is what a 9.7 s window
   reading 181 mA is: the target awake, not a sleep.
+- **One sleep of six minutes**, which is the measurement that actually settles
+  whether anything is being refreshed: 361 s by the RTC for a requested 360,
+  105.5 mA median over 112 readings in one unbroken sound window, IQR 13, and
+  the 256 MiB probe's md5 unchanged. A DRAM that nobody was refreshing would
+  not survive six minutes; a forty-second sleep cannot tell the difference. It
+  is also the cleanest single current this rung produces, because the harness's
+  own overheads are a rounding error against a dwell that long.
 
 ### What is measured here and what is assumed
 
