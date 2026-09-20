@@ -583,7 +583,7 @@ The scripts are in `projects/ethernet-diagnostic/jobs/sleep/`, one per row of
 the experiment tables in
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), numbered in the order they were
 run. They are job scripts, not host scripts: each is passed to
-`rg35xx.py job --script`. There are thirty-three of them, plus
+`rg35xx.py job --script`. There are thirty-four of them, plus
 `apply-best.sh`:
 
 ```text
@@ -594,6 +594,8 @@ run. They are job scripts, not host scripts: each is passed to
        28 never suspends and runs on any image
 29-33  firmware stage 3, the DRAM controller and PHY rebuilt on resume; needs
        one of the --suspend sr-phy images
+   34  how often a deep sleep comes back at all; runs on any firmware that
+       offers `deep`, ours or theirs, and needs --expect-reboots
 ```
 
 Rows 1 to 17 and 28 need nothing rebuilt or redeployed -- the image on the card
@@ -777,6 +779,11 @@ sr-phy           b084eb68...      + DFI off, CLKEN 0, clock path gated and reset
 sr-phy-pllon     77e37f6a...      sr-phy with PLL_DDR0 left running
 sr-phy-fastapb   56f6bffb...      sr-phy with the CPU and APBs left on OSC24M
 sr-phy-padhold   cd6f5391...      sr-phy plus the prior art's DRAM pad-hold write
+sr-phy-nodisp    c8b423fb...      sr-phy with PLL_VIDEO0, PLL_DE and the DE gate
+                                  stopped for the sleep and put back before the
+                                  DRAM rebuild
+sr-phy-nodisp-late c1e550f3...    the same three put back after the rebuild and
+                                  after a deliberate read of the memory
 rocknix-deep     bca96e13...      not ours: kailashrs' TF-A patch and SRAM stub
 ```
 
@@ -901,7 +908,36 @@ Three things about this stub that are easy to break:
   tree, never to the bootloader's own copy. Re-pinning U-Boot means re-checking
   that patch applies.
 
-Debugging it blind is job 31: it writes `0x57440001` into RTC general purpose
+**How often it comes back is job 34, and it is the one that decided what the
+card carries.** It runs a batch of short deep sleeps, each followed by the
+256 MiB md5 check, and keeps its count in a sector of the debug partition
+tagged with the job's sequence number, so that the warm reset a failed rebuild
+causes -- which restarts the job, empties tmpfs and rewrites the result region
+-- cannot hide a failure or a sleep. The shape comes out of the job's name:
+`-s10w1c12-` is twelve ten-second sleeps with the debug watchdog asked for,
+`-s40w0c6-` is six of forty seconds without it, and a name that says neither
+gets the first. The host has to be told to sit through the resets, or the
+runner's first poll on the way back up ends the run before the next pass can
+report what happened:
+
+```sh
+MDP_CLI=/path/to/miniware-mdp-m01/cli \
+  uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py job \
+  --state /private/tmp/rg35xx-sleep-session.json \
+  --image build/rg35xx-firmware-src/sr-phy/rg35xx-plus-sleep-sr-phy.img \
+  --script projects/ethernet-diagnostic/jobs/sleep/34-reliability-short-sleeps.sh \
+  --name rel-sr-phy-s10w1c12-1 --run-seconds 480 --expect-reboots 2 \
+  --min-window-seconds 30 --output /tmp/rel-1.json --print-output
+```
+
+The last two lines it prints are the whole result: `RELIABILITY ... attempted=
+completed= fails= passes=` and `RELIABILITY evidence=`, which carries the
+stage, the register and the `fail_info` of every failure in the batch. Several
+invocations in a shell loop are a batch of batches; each is its own power
+cycle, so each starts with a clean RTC. Nothing it prints is a current
+measurement: ten-second windows are shorter than the measurement rule.
+
+Debugging one hang is job 31: it writes `0x57440001` into RTC general purpose
 register 11 before a ten-second sleep, which asks the stub to keep the watchdog
 armed across the wait as well as around it. A hang then becomes a warm reset
 and the next boot's job reads the stage code out of register 12. The watchdog's

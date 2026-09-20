@@ -39,7 +39,13 @@ that brings out the LCD pins, so the H616 datasheet and user manual
   RTC + 0x1F4, bit 0 `DRAM_CH_PAD_HOLD`, "1: hold dram pad", to be set before
   VDD_SYS is powered off and cleared after it comes back. That is the opposite
   sense to the write the prior art makes, which is why our firmware leaves the
-  register alone.
+  register alone -- and the prior art's own comment gives a second reason for
+  the write that the manual does not mention and that has nothing to do with
+  VDD_SYS: holding CKE low while the PHY is reset and unclocked. On
+  2026-09-20 that stopped being a curiosity. Ours fails one resume in five at
+  read calibration and theirs, which makes the write, failed none in
+  thirty-seven; see
+  [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md#how-often-the-rebuild-does-not-come-back-experiment-34).
 - **The PRCM is undocumented.** It is in the memory map at `0x07010000` and its
   registers are not described anywhere public. The PLL LDO gate the prior art
   writes at `+0x244` with a key of `0xa7` is in that block, which is why our
@@ -210,19 +216,22 @@ them as separate projects rather than as two more rungs of one ladder.
 
 ### Finish the clock-level work
 
-**What.** Restart `PLL_VIDEO0` and `PLL_DE` and re-enable the DE bus gate
-**after** the DRAM rebuild rather than before it, which is one line in the
-stub's resume path, and then re-run the `sr-phy-nodisp` alternation. If the
-rebuild is reliable with the display PLLs left off across the wait, this is
-about eight milliamps and closes most of the remaining gap to the published
-implementation without writing a supply. After that, the PRCM PLL LDO at
-`+0x244`: theirs writes it, ours does not, and it is the likeliest remaining
-difference between their 68 and our 76.
+**What.** Make our DRAM rebuild as reliable as theirs, and only then collect
+the eight milliamps the display clocks are worth. Restarting `PLL_VIDEO0` and
+`PLL_DE` after the rebuild rather than before it was tried on 2026-09-20
+(`--suspend sr-phy-nodisp-late`) and fixed nothing, because the control fails
+at the same rate: ours does not come back one resume in five, always at read
+calibration, on every rung that rebuilds the PHY. Of the two writes that
+separate their suspend sequence from ours, the DRAM pad hold at RTC + 0x1F4 is
+the one that could plausibly cause it and `--suspend sr-phy-padhold` already
+builds it. The PRCM PLL LDO at `+0x244` is the other, and it is a supply.
 
-**Evidence it would need.** For the display half: ten consecutive cycles and a
-six-minute sleep with no rebuild failure, plus the marker channel clean, before
-any current is believed -- one failure in three is what disqualified it the
-first time. For the PRCM half: a ground for the write. It is in the one block
+**Evidence it would need.** For the pad hold: a decision to write the register
+at all, and then one batch of experiment 34 -- thirty-odd short sleeps with the
+md5 check, against the control's eight failures in forty-two. For the display
+half, once something resumes every time: an A-B-B-A-A-B alternation, ten
+consecutive cycles and a six-minute sleep with the marker channel clean. For
+the PRCM half: a ground for the write. It is in the one block
 the manual does not document and the prior art's own comment marks it inferred;
 either a document, or a datasheet for the LDO it gates, or a decision to accept
 an inferred supply write. Nothing in this work has written a supply, and that

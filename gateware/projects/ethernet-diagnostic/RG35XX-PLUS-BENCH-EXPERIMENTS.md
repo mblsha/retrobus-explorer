@@ -309,23 +309,25 @@ Listed so they are not mistaken for bench work, highest value first.
 
 **Still open, and none of them needs hands:**
 
-1. **Re-enable the display clocks *after* the DRAM rebuild, not before it.**
-   The stub's own snapshot says `PLL_VIDEO0`, `PLL_DE` and the DE bus clock are
-   still running while the board sleeps, with the panel long asleep.
-   `--suspend sr-phy-nodisp` stops all three and reads about eight milliamps
-   lower, and it is not kept, because one of its first three sleeps failed its
-   PHY rebuild at read calibration and warm-reset the board -- two PLLs
-   relocking immediately before the PHY is re-trained is the likeliest cause.
-   Moving that restore to after the rebuild is one line in `clocks_up()`.
-   **This is the single highest-value thing left on this list**: if it holds
-   through ten cycles and a six-minute sleep with no rebuild failure, it closes
-   most of the remaining gap to the published implementation without writing a
-   supply.
+1. **Find out why our DRAM rebuild fails one resume in five when theirs fails
+   none**, and whether the DRAM pad hold is the answer. Experiment 34 counted
+   it: 8 of 42 for `sr-phy`, 4 of 30 for `sr-phy-nodisp-late`, 0 of 37 for
+   `rocknix-deep`, every failure the same read calibration giving up. Their
+   suspend sequence differs from ours in exactly two writes, and the one that
+   could plausibly do this is **RTC + 0x1F4 bit 0**, which they clear as soon as
+   self-refresh is confirmed -- "hold the DRAM pads (CKE low) while the PHY is
+   reset and unclocked" -- and set again before the controller leaves it.
+   `--suspend sr-phy-padhold` already builds exactly that. One batch of
+   experiment 34 prices it in six minutes and needs no hands, but it does need
+   a decision: this work has not written that register, on the grounds that the
+   manual frames it around a VDD_SYS that never goes off here. **It is now the
+   single highest-value thing left on this list**, because every other firmware
+   number below is worth less than a rung that resumes.
 2. **The PRCM register at `+0x244`**, written by the prior art with a key of
-   `0xa7` to take a PLL LDO down. It is the likeliest remaining difference
-   between their 68 mA and our 76, and it is a supply rather than a clock, so it
-   is outside what this work writes. It needs a decision and a ground for the
-   write, not a bench visit.
+   `0xa7` to take a PLL LDO down. It is the other of the two writes that
+   separate their suspend from ours, and it is a supply rather than a clock, so
+   it is outside what this work writes. It needs a decision and a ground for
+   the write, not a bench visit.
 3. **`opp-suspend` in the device tree** in place of the userspace governor, as
    ROCKNIX did: the same 11 mA without depending on a line of shell having been
    run this boot.
@@ -341,11 +343,9 @@ Listed so they are not mistaken for bench work, highest value first.
    it is the first step of the rail-off project in
    [RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md).
 
-The DRAM pad hold at RTC + 0x1F4 is *not* on that list.
-`--suspend sr-phy-padhold` is built and unrun; not making the write costs
-nothing in correctness, and whether it costs current is unmeasured -- but the
-manual's polarity and the prior art's disagree and VDD_SYS never goes off here,
-so the experiment answers less than it looks like it does.
+The DRAM pad hold at RTC + 0x1F4 used not to be on that list, on the grounds
+that not making the write cost nothing in correctness. Experiment 34 says it
+may cost one resume in five, which is why it is now item 1.
 
 **Answered on 2026-09-20, after B4 priced the rung at 37 mA:**
 
@@ -356,8 +356,14 @@ so the experiment answers less than it looks like it does.
 - ~~Progress markers and a watchdog armed across the wait, to find where
   `sr-pll` dies.~~ Done: job 31 asks the stub, through an RTC register, to keep
   the watchdog armed across a ten-second wait, so a hang becomes a warm reset
-  and the next boot reads the stage code. It was not needed for `sr-phy`, which
-  worked first time, and it is exactly what caught `sr-phy-nodisp`'s failure.
+  and the next boot reads the stage code. It is what caught `sr-phy-nodisp`'s
+  failure, and job 34 turned it into a rate.
+- ~~Re-enable the display clocks *after* the DRAM rebuild, not before it.~~
+  Built (`--suspend sr-phy-nodisp-late`, `STUB_DISPLAY_LATE=1`, the restore
+  moved to after the rebuild and after a deliberate read of the restored
+  memory) and measured: **it fixes nothing**, because the premise was wrong.
+  The control fails as often as the variant, and item 1 above is what the
+  measurement turned up instead.
 - ~~The vendor's 32 kHz CPU/APB step (`--suspend wfi32`, built, never run).~~
   Run: 6 to 7 mA for the CPU alone, and the APB half of it is priced by
   `sr-phy-fastapb` at nothing.

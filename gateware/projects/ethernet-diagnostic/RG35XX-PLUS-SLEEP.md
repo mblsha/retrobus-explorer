@@ -30,10 +30,25 @@ the emulated card and from the bench supply.
 | asleep, s2idle, the best sysfs can reach | about 114 mA (110 to 119 over twenty cycles) |
 | asleep, our firmware suspend, the CPU PLL off (`wfi`) | about 113 mA (110 to 117 over ten) |
 | asleep, our firmware suspend, the LPDDR4 in self-refresh (`sr`) | about 105 mA (103 to 112 over ten) |
-| asleep, our firmware suspend, DRAM controller, PHY and clock path off and rebuilt on resume (`sr-phy`) | **about 76 mA** (68.5 to 79 over ten; 75 over a six-minute sleep) |
-| asleep, ROCKNIX's firmware suspend, built from source, which does the same (`rocknix-deep`) | about 68 mA (67 to 72; 72 over a six-minute sleep) |
+| asleep, our firmware suspend, DRAM controller, PHY and clock path off and rebuilt on resume (`sr-phy`) | about 76 mA -- but **one resume in five does not happen**, see below |
+| asleep, ROCKNIX's firmware suspend, built from source, which does the same (`rocknix-deep`) | **about 70 mA** (65 to 75 over ten; 70 over a six-minute sleep), and thirty-five sleeps of it in a row all came back |
 | powered off with an RTC alarm armed, which does bring it back | 33 mA |
 | supply output off | 1 mA |
+
+**The sr-phy row is not a configuration anybody can keep, and finding that out
+is the whole of 2026-09-20's second evening.** Until then that rung had
+eighteen deep sleeps and no failure, which is how it came to be the kept one.
+Counted properly -- ninety-nine deep sleeps across four firmwares in one
+evening, each followed by a 256 MiB md5 check, with the failures counted in a
+sector of the card so that the warm reset a failure causes cannot hide it --
+**eight of `sr-phy`'s forty-two sleeps did not come back**, every one of them
+the same failure: the PHY would not calibrate on the way back and the stub
+reset the board. The published implementation, `rocknix-deep`, did the same
+thing thirty-five times with no failure at all. So the rebuild is sound as an
+idea and ours has a bug, the ladder's 76 mA still stands as a current but not
+as a shipped configuration, and the card is left carrying `rocknix-deep`.
+[How often the rebuild does not come back](#how-often-the-rebuild-does-not-come-back-experiment-34)
+is the evidence and names the one write that separates the two.
 
 **The story in one paragraph.** s2idle was the only sleep state this kernel and
 firmware offered, and exactly one knob inside it is worth keeping: the
@@ -62,8 +77,10 @@ s2idle, as the image ships                     121-126 mA      --        --
 + our PSCI SYSTEM_SUSPEND, CPU PLL stopped       ~113 mA      ~4 mA      a 420-line TF-A patch
 + LPDDR4 in self-refresh, from an SRAM stub      ~105 mA      ~9 mA      4224 bytes of assembly
 + controller, PHY and clock path off and          ~76 mA      ~29 mA     a C stub in SRAM that links
-  rebuilt on resume                                                      U-Boot's DRAM driver
-ROCKNIX's suspend instead (theirs, not ours)      ~68 mA   ~51 vs s2idle  the same idea, theirs
+  rebuilt on resume (ours; 8 of 42 resumes                               U-Boot's DRAM driver
+  failed, so it is not kept)
+ROCKNIX's suspend instead (theirs, not ours;      ~70 mA   ~51 vs s2idle  the same idea, theirs
+  35 of 35 resumes came back)
 powered off, RTC alarm armed (not a sleep)         33 mA       --        a cold boot on waking
 supply output off                                   1 mA       --        --
 ```
@@ -213,10 +230,21 @@ awake target at 145 mA.
 
 ## The kept configuration, and how to apply it
 
-Two things paid, and together they are the 76 mA sleep: the `powersave` cpufreq
-governor, and the `--suspend sr-phy` firmware. They are independent -- the
-governor is policy, the firmware is what the SoC does while the core waits --
-and the governor is worth its eleven milliamps under every firmware rung below.
+Two things pay, and together they are a sleep of about 70 mA: the `powersave`
+cpufreq governor, and a firmware that shuts the DRAM controller and its PHY
+down and rebuilds them on resume. They are independent -- the governor is
+policy, the firmware is what the SoC does while the core waits -- and the
+governor is worth its eleven milliamps under every firmware rung below.
+
+**The firmware that is kept is `rocknix-deep`, which is theirs and not ours.**
+Ours does the same thing for the same current and fails one resume in five;
+theirs did not fail once in thirty-five. That is measured, in one evening, on
+one card, with one harness, and it is
+[below](#how-often-the-rebuild-does-not-come-back-experiment-34). `--suspend
+sr-phy` stays in the tree, stays built and stays measured, and it is a rung and
+not a configuration until the failure is understood. If what is wanted is ours
+and reliable rather than lowest, that is `--suspend sr`: 105 mA, sixteen proved
+sleeps, and a way back that never touches the PHY.
 
 ```sh
 for p in /sys/devices/system/cpu/cpufreq/policy*; do
@@ -241,10 +269,10 @@ a real SD card as on the emulated one. It is
   and 151 mA the same state measured under `performance`.
 
 The firmware is built and installed by runbook section 12:
-`build-firmware --suspend sr-phy`, then `image --install-bootloader`, then a
-`deploy`. The card was left carrying
-`build/rg35xx-firmware-src/sr-phy/rg35xx-plus-sleep-sr-phy.img`. What the stub
-does, and why it is two programs under two licences, is
+`build-firmware --suspend rocknix-deep --fetch`, then `image
+--install-bootloader`, then a `deploy`. The card was left carrying
+`build/rg35xx-firmware-src/rocknix-deep/rg35xx-plus-sleep-rocknix-deep.img`.
+What our own stub does, and why it is two programs under two licences, is
 [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md).
 
 **Both halves are qualified the same way: ten consecutive cycles in one boot,
@@ -271,23 +299,26 @@ four cycles is identical to the other sixteen. A third run was not attempted:
 the link drops for a minute or two about once per eight-minute run, so a clean
 ten in a row is a matter of luck rather than of the configuration.
 
-Under `sr-phy`, ten consecutive cycles read 68.5 to 79 mA and a six-minute
-sleep read 75 mA with its memory proved intact; the detail is in the ladder
-below. Eighteen deep sleeps in all, with the 256 MiB probe's md5 unchanged
-after every one of them.
+Under `rocknix-deep`, on the evening its reliability was counted: ten
+consecutive cycles read 65, 75, 72, 68, 74, 70, 71, 70, 75 and 74 mA -- median
+of medians 71.5, mean 71.4, eight of the ten windows sound and two short of
+readings to a link dropout -- ten wakes of ten, ten card checks and ten md5
+checks unchanged; and one six-minute sleep read **70 mA** (50 to 92, IQR 10,
+n=116) with the 256 MiB probe's md5 unchanged after 361 s by the RTC. Those
+eleven are the tail of thirty-five in a row that evening with no failure.
 
-`--suspend sr` is the fallback if the rebuild is ever in doubt: 105 mA, sixteen
-proved sleeps, and a way back that needs no DRAM driver at all. Not `sr-gate`
-or `sr-pll`, which `sr-phy` supersedes, and not the ablations, which exist to
-be measured rather than shipped.
+`--suspend sr` is the fallback if the rebuild is in doubt and the firmware has
+to be ours: 105 mA, sixteen proved sleeps, and a way back that needs no DRAM
+driver at all. Not `sr-gate` or `sr-pll`, which the rebuild supersedes, and not
+the ablations, which exist to be measured rather than shipped.
 
 ## What each step is worth
 
 ### The sysfs experiments, 1 to 17
 
-Thirty-three experiments in all, one script each in [`jobs/sleep/`](jobs/sleep)
+Thirty-four experiments in all, one script each in [`jobs/sleep/`](jobs/sleep)
 so every row can be run again, plus `apply-best.sh`: the first seventeen are
-below, 18 to 26 and 29 to 33 are the firmware ladder in the next section, and
+below, 18 to 26 and 29 to 34 are the firmware ladder in the next section, and
 27 and 28 are the two checks that came out of the outside review, after that.
 The firmware rows need their own card images, because the bootloader is part of
 one. Cells are median / IQR / readings in mA over a 40 s sleep; `!` is an
@@ -382,14 +413,17 @@ sr               + LPDDR4 in self-refresh (assembly)     104.7 mean    -11.6 mA 
 sr-gate          + DRAM bus and MBUS clock gates         101.3 mean    -14.7 mA    no
 sr-pll           + PLL_DDR0 stopped, nothing rebuilt     does not resume           no
 sr-c             sr again, from the C stub               104.5 mean    -13.8 mA    no
-sr-phy           + DFI off, CLKEN 0, the DRAM clock       76.0 mean    -39.3 mA   YES
-                   path in reset, PLL_DDR0 off, 32 kHz
+sr-phy           + DFI off, CLKEN 0, the DRAM clock       76.0 mean    -39.3 mA    no
+                   path in reset, PLL_DDR0 off, 32 kHz                  8 of 42 resumes failed
                    APBs, controller and PHY rebuilt
 sr-phy-pllon     ablation: PLL_DDR0 left running          74.8 mean    -40.0 mA    no
 sr-phy-fastapb   ablation: CPU and APBs on OSC24M         73.0 mean    -39.7 mA    no
-sr-phy-nodisp    + PLL_VIDEO0, PLL_DE, DE gate off       66-71, one rebuild failed no
+sr-phy-nodisp    + PLL_VIDEO0, PLL_DE, DE gate off        66-71        not priced  no
+sr-phy-nodisp-late  the same three, put back after the    66.0 median  not priced  no
+                   rebuild instead of before it                        4 of 30 resumes failed
 sr-phy-padhold   + the prior art's pad-hold write        built, not run            no
-rocknix-deep     theirs, the same idea, their code        68.3 mean    -51.3 mA    --
+rocknix-deep     theirs, the same idea, their code        70-71       -51.3 mA    YES
+                                                          0 of 35 resumes failed
 ```
 
 Each "vs s2idle" is that rung's own boot, and the s2idle arms move between
@@ -400,8 +434,8 @@ and the steady number in it is the state the board ends up in, about 105 mA
 every time, rather than the saving.
 
 The experiment numbers are 18 to 21 for `wfi`, 22 to 26 for the self-refresh
-rungs and 29 to 33 for the PHY rebuild; 25 and 26, the ten-cycle and long-sleep
-scripts, are generic and were run again at each kept rung.
+rungs, 29 to 33 for the PHY rebuild and 34 for how often that rebuild comes
+back; 25, 26 and 34 are generic and were run again at each kept rung.
 
 ```text
  #  what was run                                        s2idle      the rung    wake  card  DRAM
@@ -420,6 +454,12 @@ scripts, are generic and were run again at each kept rung.
 32  sr-phy against s2idle, ABBAAB                     115.3 mean    76.0 mean    6/6   ok   6/6
 25  sr-phy, ten consecutive cycles                        --        68.5-79     10/10  ok  10/10
 26  sr-phy, one six-minute sleep                          --        75/9/114     yes   ok    ok
+34  sr-phy, how often it comes back                       --           --       34/42  ok  34/34
+34  sr-phy-nodisp, the same                               --           --       12/12  ok  12/12
+34  sr-phy-nodisp-late, the same                          --        66.0 median 26/30  ok  26/26
+34  rocknix-deep, the same                                --           --       24/24  ok  24/24
+25  rocknix-deep, ten consecutive cycles                  --         65-75      10/10  ok  10/10
+26  rocknix-deep, one six-minute sleep                    --        70/10/116    yes   ok    ok
 ```
 
 Cells are median / IQR / readings in mA over a 40 s sleep; "mean" is the mean
@@ -598,6 +638,116 @@ LDO down: that is a supply and not a clock, this work writes no supply of any
 kind, and it is the most likely place for the remaining difference. The DRAM
 pad-hold write is the other candidate; `sr-phy-padhold` is built and was not
 run, for the reason in "What does not work" below.
+
+### How often the rebuild does not come back (experiment 34)
+
+**Ours fails about one resume in five and theirs did not fail at all.** That is
+the evening of 2026-09-20, ninety-nine deep sleeps across four firmwares, and
+it overturns the rung the ladder above had kept.
+
+The question was meant to be narrower. `sr-phy` had eighteen sleeps and no
+failure, `sr-phy-nodisp` had three and one, and the obvious reading was that
+restarting two display PLLs immediately before the PHY is re-trained had broken
+the rebuild. Three sleeps cannot say that -- a rung that fails one in five
+comes out clean in three sleeps half the time -- so the rate was measured
+first, on the control as well as on the variant.
+[`jobs/sleep/34-reliability-short-sleeps.sh`](jobs/sleep/34-reliability-short-sleeps.sh)
+is how: a batch of short deep sleeps, each followed by the 256 MiB md5 check,
+with the running count kept in a sector of the debug partition and tagged with
+the job's sequence number, so that the warm reset a failed rebuild causes --
+which restarts the job, empties tmpfs and rewrites the result region -- cannot
+hide a failure or a sleep. The host allows the run to survive those resets with
+`--expect-reboots`.
+
+```text
+firmware              sleeps  did not come back   the shapes it was run in
+sr-phy (ours)            42          8 (19%)      24x10 s watchdog, 12x10 s none, 6x40 s
+sr-phy-nodisp (ours)     12          0            12x10 s watchdog
+sr-phy-nodisp-late       30          4 (13%)      24x10 s watchdog, 6x40 s
+rocknix-deep (theirs)    35          0            24x10 s, 10x40 s, 1x360 s
+```
+
+Every single failure left the same four words behind, on every firmware of ours
+that failed:
+
+```text
+el3 stage=0xA5D500E5   stub fail_reg=0x047FB004 fail_info=0x00350007 await=0x107FB010
+```
+
+Stage `0xe5` is the stub giving up and resetting; `fail_info` is stage `0x35`
+with reason 7, the marker immediately before read calibration and
+`mctl_phy_init()` returning false, so read calibration failed all five of its
+tries; and the await counter is unchanged from the sixteen bounded waits before
+it, so nothing hung and no poll timed out. **The PHY simply would not
+calibrate, and it is the same failure every time.** Every resume that did
+happen passed its md5 check: the failure mode is a board that resets, not
+memory that comes back wrong.
+
+What that rules out, each by a batch of its own:
+
+- **Not the display clocks.** The control fails at the same rate with the same
+  signature. 8 of 42 for `sr-phy` against 4 of 30 for the late-restore variant
+  is nothing (Fisher, one-sided, p = 0.38), and the premise that
+  `sr-phy-nodisp`'s one failure in three was caused by two PLLs relocking does
+  not survive its own control. `sr-phy-nodisp` itself, re-run as it stands,
+  went twelve for twelve -- which says nothing on its own, since twelve clean
+  sleeps happen one time in twelve at this rate, but it is not the behaviour of
+  a rung that is broken and its control is not.
+- **Not the change that was made to test it.** `sr-phy-nodisp-late` restores
+  `PLL_VIDEO0`, `PLL_DE` and the DE bus gate only after the controller and the
+  PHY have been rebuilt and a deliberate read of the restored memory has
+  matched. It fails as often as everything else of ours.
+- **Not the debug watchdog.** Twelve sleeps with it armed across the wait and
+  twelve without, in the same shape: 4 of 24 against 3 of 12. It could not have
+  been: a rebuild that gives up calls `stub_reset()`, which arms a half-second
+  watchdog of its own, so the failure resets the board and leaves its evidence
+  whether or not the debug request was made.
+- **Not the length of the sleep.** Six forty-second sleeps of `sr-phy` -- the
+  same length as every measurement in this note -- failed one. The eighteen
+  clean forty-second sleeps the rung was kept on were luck: at one in five,
+  eighteen in a row come out clean about twice in a hundred tries.
+
+**What it leaves is the one write our stub does not make.** `rocknix-deep` is
+kailashrs' TF-A patch and SRAM stub built from source at the commits ROCKNIX
+pins, with none of ours; it shuts the same blocks down in the same order and
+rebuilds them with the same U-Boot driver, and 35 of 35 came back (against ours,
+Fisher, one-sided, p = 0.006). Their stub's suspend sequence differs from ours
+in exactly two writes, and both are writes this work deliberately does not
+make:
+
+- **RTC + 0x1F4 bit 0, the DRAM pad hold**, which they clear immediately after
+  self-refresh is confirmed and before the DFI is shut down, with the comment
+  "Hold the DRAM pads (CKE low) while the PHY is reset and unclocked", and set
+  again in their resume path before the controller is told to leave
+  self-refresh. Ours does neither. That is a mechanism for exactly this
+  failure: if CKE is not held while the PHY is unclocked and in reset, what the
+  memory sees during the rebuild depends on what the pads do, which is not the
+  same on every cycle -- an intermittent failure of the first step that reads
+  the array is what it would look like. It is the leading candidate and it is
+  **unrun**, because this experiment is not allowed to write that register; the
+  build that does is `sr-phy-padhold`, and it exists.
+- **PRCM + 0x244 with a key of `0xa7`**, a PLL LDO, which is a supply and not a
+  clock and is not written here either.
+
+Their `udelay(1000)` after the APBs are restored, against our `udelay(100)`, is
+the only other difference in the resume path and is not obviously enough to
+matter; it has not been tried.
+
+**The eight milliamps the display clocks are worth are still there, and they
+were not priced properly.** The forty-second batches of experiment 34 hold six
+sound sleep windows each, same evening, same governor, same harness, and they
+read: `sr-phy` 73.5, 71, 75, 75, 77, 77 -- median of medians 75.0, mean 74.8;
+`sr-phy-nodisp-late` 67, 70, 65, 60, 73.5, 65 -- median 66.0, mean 66.8. Nine
+milliamps apart, in the same direction as the earlier reading of about eight,
+and above this bench's eight-milliamp threshold. It is **not** an A-B-B-A-A-B
+figure: the two arms are separate boots half an hour apart with no s2idle
+anchor inside either, which is exactly the comparison this note does not
+normally believe, and each arm contains a reset. It is recorded as what it is,
+and the alternation that would settle it is not worth running until a rung that
+can carry it resumes every time.
+
+So the ladder's 76 mA is a real current and `sr-phy` is not a configuration
+anybody can keep. The card is left carrying `rocknix-deep`.
 
 ### Two checks that came out of the outside review
 
@@ -836,42 +986,27 @@ hypotheses, and what evidence each would need, are
   that the Allwinner PHY does not survive its clock stopping -- which `sr-phy`
   then confirmed by rebuilding it, and which is why `sr-pll` is superseded
   rather than debugged.
-- **`sr-phy-nodisp` makes the DRAM rebuild unreliable.** Stopping `PLL_VIDEO0`,
-  `PLL_DE` and the DE bus gate during the sleep and putting all three back is
-  worth having on the current: its first sleep resumed with the memory intact
-  and read 70 mA, and its deep windows in the run after that read 66 to 71, about
-  eight below `sr-phy`. But one of the first three sleeps failed its rebuild, the
-  watchdog reset the board, and an arm whose boot contains a reset is not an arm,
-  so the alternation is not a measurement. It left its evidence, which is the
-  whole point of the marker channel; the next boot's job read, before it had
-  slept at all:
-
-```text
-el3 stage=0xA5D500E5 entered=0x00000002 resumed=0x00000001
-stub fail_reg=0x047FB004 fail_info=0x00350007 await=0x107FB010
-```
-
-  Two suspends entered and one resume finished; stage `0xe5` is the stub giving
-  up and resetting; `fail_info` is stage `0x35` with reason 7, which is
-  `mctl_phy_init()` returning false at the marker just before read calibration,
-  so read calibration failed all five of its tries; and no bounded poll timed
-  out, so nothing hung -- the PHY simply would not calibrate. `sr-phy` has
-  eighteen sleeps with no such failure. The likeliest cause is the order:
-  `clocks_up()` restarts both display PLLs and waits for them to lock, and then
-  the DRAM rebuild re-trains the PHY, so two PLLs are relocking during the most
-  timing-sensitive step on the chip. Moving the display restore to after the
-  rebuild is one line, needs no hands, and is the highest-value thing left;
-  it was not tried, because it needs another build, another eight-minute deploy
-  and another alternation.
-- **The pad-hold write is not needed for a resume, and its polarity is an open
-  question.** `sr-phy` never touches RTC + 0x1F4 and reads it back as 1 before
-  and after every sleep, and the memory survives ten cycles and six minutes.
-  Whether the write buys any current is unmeasured: `sr-phy-padhold` is built
-  and was not run, because the H616 manual's 3.13.6.17 says bit 0
-  (`DRAM_CH_PAD_HOLD`) set to 1 holds the pads and is to be set before VDD_SYS
-  is powered off, the prior art clears it on the way down saying that is what
-  holds them, and VDD_SYS never goes off here -- so neither statement applies to
-  this experiment.
+- **Our DRAM rebuild fails about one resume in five, on every rung that does
+  one.** Not the display clocks, not the sleep length, not the watchdog: the
+  rate, what it rules out and the one write that separates ours from theirs are
+  in
+  [How often the rebuild does not come back](#how-often-the-rebuild-does-not-come-back-experiment-34).
+  It is why `sr-phy` is no longer the kept configuration and why
+  `sr-phy-nodisp`'s eight milliamps cannot be collected yet: the rung that
+  would collect them is built, measured and unreliable in the same way as its
+  control.
+- **The pad-hold write is unrun, and it is now the leading suspect rather than
+  a curiosity.** `sr-phy` never touches RTC + 0x1F4 and reads it back as 1
+  before and after every sleep. The prior art clears bit 0 as soon as
+  self-refresh is confirmed, saying that is what holds CKE low while the PHY is
+  reset and unclocked, and sets it again before the controller leaves
+  self-refresh; the H616 manual's 3.13.6.17 calls the bit `DRAM_CH_PAD_HOLD`,
+  says 1 holds the pads, and frames the whole thing around VDD_SYS being
+  powered off, which never happens here. Their firmware resumed thirty-five
+  times out of thirty-five and ours did not, and this is one of the two writes
+  that differ. `sr-phy-padhold` is built and was **not** run, because this
+  experiment was not allowed to write that register; running it is the next
+  thing anybody should do.
 - **The PRCM register at `+0x244` is not written.** The prior art writes it with
   a key of `0xa7` to take a PLL LDO down. Their own comment marks it inferred,
   it is in the one block of this SoC the manual does not document, and it is a
@@ -950,11 +1085,12 @@ section 11.
 
 ## Open questions
 
-- Restarting the display PLLs **after** the DRAM rebuild rather than before it,
-  which is one line and would say whether `sr-phy-nodisp`'s eight milliamps can
-  be had reliably. It needs no hands and is the first thing on
-  [RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md)'s
-  hands-off list.
+- **Why our DRAM rebuild fails one resume in five when theirs fails none**, and
+  whether the DRAM pad hold is the answer. `sr-phy-padhold` is built and one
+  batch of experiment 34 would price it in six minutes. Everything else about
+  our suspend is worth less than this: eight milliamps of display clocks and
+  three of PLL LDO are both under the reliability of the rung that would carry
+  them.
 - Where the 43 mA between the best sleep and a powered-off board actually sits,
   and whether the 33 mA "off" is the board or the AXP717's power path with no
   cell on it. That needs rail voltages, a battery with a shunt and the card
@@ -989,8 +1125,9 @@ bootloader, `build/rg35xx-firmware-src/wfi/rg35xx-plus-sleep-wfi.img`; rows 22
 to 26 and row 27 need one of the self-refresh ones,
 `…/sr/rg35xx-plus-sleep-sr.img` and its `sr-gate` and `sr-pll` siblings; rows
 29 to 33 need one of the PHY-rebuild ones, `…/sr-phy/rg35xx-plus-sleep-sr-phy.img`
-and its four `sr-phy-*` siblings, and rows 25, 26 and 32 are what the kept one
-was qualified with. Runbook section 12 builds all of them, and each needs its
+and its five `sr-phy-*` siblings; row 34 runs on any firmware that offers
+`deep`, ours or theirs, and rows 25, 26 and 34 are what the kept one was
+qualified with. Runbook section 12 builds all of them, and each needs its
 own eight-minute `deploy` because the bootloader is part of the card image.
 Runbook section 11 has the `--label` lists and run lengths for every row,
 including 27 and 28, whose windows are read by their dwell.

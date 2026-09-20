@@ -2214,3 +2214,67 @@ hypotheses and two candidate projects for the current that is left.
 `## Sleep` section of [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) were
 brought up to date with the 76 mA sleep, and the stale counts and ratios left
 over from earlier rungs were corrected wherever they appeared.
+
+## 2026-09-20 Counting the resumes, which took the kept rung away
+
+The question at the start of the evening was narrow: `sr-phy-nodisp` stops the
+two display PLLs and the DE bus gate during the sleep, reads about eight
+milliamps lower, and one of its first three sleeps failed its PHY rebuild and
+warm-reset the board. Two PLLs relocking immediately before the PHY is
+re-trained was the obvious cause, and moving that restore to after the rebuild
+was one line. The instruction was to check the premise first, because eighteen
+sleeps with no failure and three with one do not separate a broken rung from a
+lucky one.
+
+They do not, and the premise was wrong. **`sr-phy`, the control, failed eight
+of forty-two sleeps** -- with the same four marker words every time, stage
+`0xa5d500e5`, `fail_reg 0x047FB004`, `fail_info 0x00350007`, `await
+0x107FB010`: read calibration giving up after five tries, no poll timing out,
+the rebuild returning false. Not the debug watchdog (12 sleeps with it, 24
+without, same rate), not the length of the sleep (a forty-second batch failed
+one of six), not the display clocks. The rung that had been kept on eighteen
+clean sleeps was failing one resume in five all along; at that rate eighteen
+clean sleeps in a row happen about twice in a hundred tries, which is what the
+evidence had been.
+
+The change that was asked for was made anyway and measured:
+`--suspend sr-phy-nodisp-late`, `STUB_DISPLAY_LATE=1`, which restores
+`PLL_VIDEO0`, `PLL_DE` and the DE bus gate only after the controller and the
+PHY have been rebuilt and a deliberate read of the restored memory has matched.
+It fails four of thirty, which is its control's rate. `sr-phy-nodisp` itself,
+re-run as it stands, went twelve for twelve. The three arms are
+indistinguishable from each other.
+
+**The published implementation is not.** `--suspend rocknix-deep` -- kailashrs'
+TF-A patch and SRAM stub, built from source at the commits ROCKNIX pins, on the
+same card, kernel, rootfs and harness -- resumed thirty-seven times out of
+thirty-seven, including ten consecutive forty-second cycles and a six-minute
+sleep at 70 mA with the 256 MiB probe's md5 unchanged. Against ours that is
+Fisher p = 0.006. So the design is sound and our implementation of it has a
+bug, and reading their stub beside ours says where to look: their suspend
+sequence differs from ours in exactly two writes, the DRAM pad hold at
+RTC + 0x1F4 bit 0 -- which they clear as soon as self-refresh is confirmed,
+"hold the DRAM pads (CKE low) while the PHY is reset and unclocked", and set
+again before the controller leaves self-refresh -- and the PRCM PLL LDO at
++0x244. This work writes neither, on purpose, and `sr-phy-padhold` builds the
+first of them and was not run: that was the standing instruction for this
+session and it stands until somebody decides otherwise. It is now the first
+item on the hands-off list.
+
+What was built to make the counting possible, and is the part worth keeping:
+[`jobs/sleep/34-reliability-short-sleeps.sh`](jobs/sleep/34-reliability-short-sleeps.sh),
+a batch of short deep sleeps each followed by the md5 check, whose running
+count lives in a sector of the debug partition tagged with the job's sequence
+number. A failed rebuild resets the board, and the reset restarts the job,
+empties tmpfs and rewrites the result region, so nothing in the target's own
+memory can carry a tally across it; the card can, and the host learns the whole
+history from the last pass's final line. `rg35xx.py job --expect-reboots N` is
+the other half: without it the poll the runner makes on its way back up is read
+as the job being over and the power goes off before the next pass can say what
+happened. The shape of a batch comes out of the job's name, so one script is
+the control and every variant of it.
+
+The card is left carrying `rocknix-deep`, which is theirs. `--suspend sr-phy`
+stays in the tree, stays built and stays measured at about 76 mA, and is a rung
+rather than a configuration until it resumes every time. If what is wanted is
+ours and reliable, `--suspend sr` is 105 mA and never touches the PHY.

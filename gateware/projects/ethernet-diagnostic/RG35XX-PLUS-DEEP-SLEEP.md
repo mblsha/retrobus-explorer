@@ -3,7 +3,8 @@
 What it is, how it works, and how it got there. The Anbernic RG35XX Plus
 (Allwinner H700) ships with a firmware that offers Linux no sleep state deeper
 than s2idle; this is the firmware we built to give it one, from source, in
-three stages, each priced on the bench.
+three stages, each priced on the bench -- and a fourth that counted how often
+the deepest of them actually comes back.
 
 Every current is in [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), which is the
 results reference and the one home for measurements; this page is the design
@@ -14,11 +15,19 @@ are section 12 of [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md).
 
 ## Verdict
 
-**Ours works and saves about forty milliamps, which is within three of the
-published implementation it was modelled on.** It took three attempts to get
-there: the first two saved almost nothing, and the third -- switching the DRAM
-controller, its PHY and the DRAM clock path off and building them again on the
-way back -- is where all of it was.
+**Ours saves about forty milliamps, which is within three of the published
+implementation it was modelled on, and it does not come back one resume in
+five.** It took three attempts to get to the current: the first two saved
+almost nothing, and the third -- switching the DRAM controller, its PHY and the
+DRAM clock path off and building them again on the way back -- is where all of
+it was. Then the resumes were counted rather than assumed, and eight of
+forty-two were not there: the PHY would not calibrate, always at the same step.
+The same experiment ran the published implementation thirty-seven times with no
+failure, so the design is sound and this implementation of it has a bug. The
+card is left carrying theirs, `sr-phy` is a rung and not a configuration, and
+the evidence and the leading suspect -- the one write in their suspend sequence
+that ours deliberately does not make -- are in
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md).
 
 ```text
 step                                          asleep, 5 V input   saved    cost
@@ -27,8 +36,10 @@ s2idle as the image ships                         ~124 mA            --     --
 + our PSCI SYSTEM_SUSPEND, CPU PLL stopped        ~113 mA          ~4 mA    a 420-line TF-A patch
 + LPDDR4 in self-refresh, from an SRAM stub       ~105 mA          ~9 mA    4224 bytes of assembly
 + controller, PHY and clock path off, rebuilt      ~76 mA          ~29 mA   a C stub in SRAM that
-  on resume from U-Boot's DRAM driver                                       links U-Boot's driver
-ROCKNIX's suspend instead (`rocknix-deep`)         ~68 mA      ~51 vs s2idle  the same idea, theirs
+  on resume from U-Boot's DRAM driver                                       links U-Boot's driver,
+  (8 of 42 resumes did not happen)                                          and a bug
+ROCKNIX's suspend instead (`rocknix-deep`)         ~70 mA      ~51 vs s2idle  the same idea, theirs,
+  (0 of 37 resumes did not happen)                                          and it works
 powered off, RTC alarm armed (not a sleep)          33 mA            --     a cold boot on waking
 ```
 
@@ -44,10 +55,18 @@ reviewer named as the one clock-level step still unpriced, was worth three
 times everything before it. A clock-level change that has not been tried is not
 a clock-level change that is worth nothing.
 
+The second lesson cost a rung. Eighteen resumes with no failure is not a
+reliability measurement, it is eighteen tries at something that fails one time
+in five; the only reason the rate was ever counted is that a *different* rung
+failed once in three and the obvious explanation had to be checked against its
+own control. It was not the explanation, and the control was as broken as the
+variant. Anything a note calls proven should say how many times it was tried
+and what would have shown a failure.
+
 What it produced, besides the number: current figures nobody had published for
-this design; a reproducible from-source bootloader; a `deep` state that resumes
-with its memory proved intact, which is the entry and exit any deeper scheme
-needs; and the knowledge of where not to look.
+this design; a reproducible from-source bootloader; a `deep` state whose
+resumes are counted and whose memory is proved intact, which is the entry and
+exit any deeper scheme needs; and the knowledge of where not to look.
 
 Currents are at the USB-C port at 5.00 V with no battery fitted, so they
 include the AXP717's conversion and charger path and are not battery-life
@@ -89,6 +108,8 @@ sr-phy-pllon    0001 0003     + STUB_DDR_PLL_OFF=0            ablation: PLL_DDR0
 sr-phy-fastapb  0001 0003     + STUB_APB_32K=0 STUB_CPU_32K=0 ablation: everything on OSC24M
 sr-phy-padhold  0001 0003     + STUB_PAD_HOLD=1               + the prior art's pad-hold write
 sr-phy-nodisp   0001 0003     + STUB_DISPLAY_OFF=1            + the two display PLLs and DE gate
+sr-phy-nodisp-late 0001 0003  + STUB_DISPLAY_LATE=1           the same three, put back after the
+                                                              rebuild instead of before it
 rocknix-deep    none of ours  their TF-A patches, their stub  theirs, at the commit ROCKNIX pins
 ```
 
@@ -357,6 +378,12 @@ cluster onto OSC24M, PLL_CPUX back and        the cluster stays on OSC24M: a
 U-Boot's DRAM driver, resume path             17 bounded waits, the last on
                                               SWSTAT; see below
 put the 160 saved words back
+[nodisp-late] read those 160 words back and   the display restore moved to here
+  then PLL_VIDEO0, PLL_DE, the DE gate        instead, so that nothing restarts
+                                              a PLL until the PHY has finished
+                                              training and the memory has
+                                              answered; a readback that does not
+                                              match is recorded and not acted on
 cluster back on PLL_CPUX (CPUX_AXI restored)
 watchdog restored exactly as it was found
 RTC resume counter + 1, status OK, stage STUB_DONE
@@ -395,10 +422,14 @@ reached, which is how a rebuild that fails says where.
   the register `VDDOFF_GATING_SOF_REG` and bit 0 `DRAM_CH_PAD_HOLD`, "1: hold
   dram pad", to be set before VDD_SYS is powered off and cleared after it comes
   back; the prior art clears it on the way down with a comment saying that is
-  what holds the pads. VDD_SYS never goes off in this work, so neither reading
-  applies, and the register is left alone. `STUB_PAD_HOLD=1` uses the prior
-  art's polarity so that its cost could be measured as a rung of its own;
-  `sr-phy-padhold` is built and was not run.
+  what holds CKE low while the PHY is reset and unclocked, and sets it again in
+  its resume path before the controller leaves self-refresh. VDD_SYS never goes
+  off in this work, so the manual's framing does not apply, and the register is
+  left alone. **That is now the leading explanation for why our rebuild fails
+  one resume in five and theirs fails none**: it is one of only two writes that
+  differ between the two suspend sequences, and the other is a supply.
+  `STUB_PAD_HOLD=1` uses the prior art's polarity so that it can be measured as
+  a rung of its own; `sr-phy-padhold` is built and was not run.
 - **PRCM + 0x244, the PLL LDO**, which the prior art writes with a key of
   `0xa7`. Their own comment marks it inferred, it is in the one block of this
   SoC the manual does not document, and it is a supply and not a clock. Nothing
@@ -534,20 +565,34 @@ rather than merely gated.
 The stub also took the first look anyone has had at what is running while this
 board sleeps, by reading 24 CCU registers at the instruction before WFI and
 leaving them in SRAM: `PLL_VIDEO0`, `PLL_DE` and the DE bus clock are still on
-with the panel long asleep. `sr-phy-nodisp` stops all three, reads about eight
-milliamps lower, and is not kept, because one of its first three sleeps failed
-its PHY rebuild and the watchdog reset the board -- caught exactly by the marker
-channel, stage `0xa5d500e5`, `fail_info` `0x00350007`, read calibration failing
-all five of its tries with no poll timing out. Restarting two PLLs immediately
-before the PHY is re-trained is the likeliest cause, moving that restore after
-the rebuild is one line, and a rung that cannot be trusted to resume is not a
-rung whatever it draws.
+with the panel long asleep. `sr-phy-nodisp` stops all three and reads about
+eight milliamps lower, and one of its first three sleeps failed its PHY rebuild
+-- caught exactly by the marker channel, stage `0xa5d500e5`, `fail_info`
+`0x00350007`, read calibration failing all five of its tries with no poll
+timing out.
+
+**Act four: counting the resumes, which took the rung away.** Restarting two
+PLLs immediately before the PHY is re-trained was the obvious cause, and moving
+that restore to after the rebuild is one line -- `STUB_DISPLAY_LATE`, and
+`sr-phy-nodisp-late` is the build. Before making it, the rate was measured, on
+the variant and on the control both, because one failure in three sleeps cannot
+tell a broken rung from a lucky one. **`sr-phy`, the control, failed eight of
+forty-two**, with `sr-phy-nodisp-late` at four of thirty and `sr-phy-nodisp`
+itself at none of twelve: the arms are indistinguishable, the late restore
+fixes nothing, and every failure of every build is the same one, read
+calibration giving up at marker `0x35`. It is not the display clocks, not the
+length of the sleep and not the debug watchdog, each ruled out by a batch of
+its own. The published implementation, run through the same batch, resumed
+thirty-seven times out of thirty-seven. What separates the two suspend
+sequences is two writes, the DRAM pad hold and the PLL LDO, and this work makes
+neither.
 
 ## Running it again
 
 ```sh
 uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
-  build-firmware --suspend sr-phy    # then runbook section 12: install, image, deploy
+  build-firmware --suspend rocknix-deep --fetch   # the kept one; runbook 12
+  build-firmware --suspend sr-phy                 # ours, the rung, not kept
 
 MDP_CLI=/path/to/miniware-mdp-m01/cli \
   uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py job \
@@ -561,12 +606,13 @@ MDP_CLI=/path/to/miniware-mdp-m01/cli \
 
 The md5 check between sleeps opens an extra short window at about 170 mA, so
 give any multi-sleep job `--min-window-seconds 30` and read the windows by
-their dwell. Of the thirty-three job scripts in `jobs/sleep/`, 1 to 17 are the
+their dwell. Of the thirty-four job scripts in `jobs/sleep/`, 1 to 17 are the
 sysfs experiments, 18 to 21 act one, 22 to 26 the self-refresh rungs, 27 and 28
-the checks that followed the outside review, and 29 to 33 the PHY rebuild --
+the checks that followed the outside review, and 29 to 34 the PHY rebuild --
 29 its facts, 30 one sleep, 31 the watchdog-covered short sleeps that make a
-hang leave evidence, 32 the alternation and 33 a register dump that can be
-diffed against theirs. Each firmware rung needs its own card image and its own
+hang leave evidence, 32 the alternation, 33 a register dump that can be
+diffed against theirs, and 34 how often the rebuild comes back at all, which is
+act four and the one that decided what the card carries. Each firmware rung needs its own card image and its own
 eight-minute `deploy`, because the bootloader is part of the image. `psu2` is
 the RG35XX; `psu1` carries another machine on this bench and must never be
 switched.
