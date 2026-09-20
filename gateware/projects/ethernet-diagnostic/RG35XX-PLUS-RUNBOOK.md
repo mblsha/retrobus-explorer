@@ -816,3 +816,40 @@ Two things about the stub that are easy to break and hard to notice:
   for you: a `.if` on a difference of two labels in the same section is not a
   constant as far as the assembler is concerned, and the guard was removed
   again for that reason. It was 4224 bytes on 2026-09-20.
+
+
+### Their firmware, for measuring beside ours
+
+`--suspend rocknix-deep` builds nothing of ours: kailashrs' TF-A patch at the
+pinned ROCKNIX commit and his SRAM stub at the commit ROCKNIX pins
+(`firmware-sources.json` has both hashes), with the stub compiled from the same
+patched U-Boot tree the bootloader is built from and embedded in BL31. `--fetch`
+is needed once after the manifest gained their patch. It is not called
+`rocknix` because the default output directory is `<work>/<mode>` and
+`<work>/rocknix` is where the pinned files live.
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-firmware --suspend rocknix-deep --fetch
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --install-bootloader build/rg35xx-display/base-display-kernel.img \
+  --bootloader build/rg35xx-firmware-src/rocknix-deep/u-boot-sunxi-with-spl.bin \
+  --output build/rg35xx-firmware-src/rocknix-deep/base-theirboot.img
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --make-erofs-image build/rg35xx-firmware-src/rocknix-deep/base-theirboot.img \
+  --system build/rg35xx-sleep/system-c65536.erofs \
+  --data build/rg35xx-sleep/data.ext2 --slot a --card-max-hz 6000000 \
+  --debug-command job-runner \
+  --output build/rg35xx-firmware-src/rocknix-deep/rg35xx-plus-sleep-rocknix-deep.img
+```
+
+As built on 2026-09-20: `bl31.bin` 65,641 bytes, sha256 `bca96e13...`;
+`u-boot-sunxi-with-spl.bin` 649,793 bytes, sha256 `baa2f493...`, last sector
+1285; card image sha256 `a212799d...`. Deploy it as in section 5 and run jobs
+23, 24 and 26 against it unchanged: they only ask for `mem` resolved to `deep`
+and check the memory afterwards, which is the same question whoever wrote the
+firmware. Their firmware keeps its own progress codes in the RTC registers, so
+the `el3` line those jobs print reads `stage=0x00000400`, a wake interrupt, and
+zero counters; that is theirs and not a fault.

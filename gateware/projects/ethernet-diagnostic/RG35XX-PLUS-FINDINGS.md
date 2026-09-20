@@ -465,6 +465,7 @@ person at the bench, and what each of those experiments would answer, is
 | asleep, s2idle, the best sysfs can reach | about 114 mA |
 | asleep, our firmware suspend, the CPU PLL off | about 113 mA |
 | asleep, our firmware suspend, the LPDDR4 in self-refresh | about 105 mA |
+| asleep, ROCKNIX's firmware suspend built from source (`--suspend rocknix-deep`): DRAM controller, PHY and PLL off too | **about 68 mA** |
 | awake and idle, panel asleep | 139 to 151 mA |
 | awake and idle, panel lit at full backlight | 246 to 252 mA |
 | powered off with an RTC alarm armed, which does bring it back | 33 mA |

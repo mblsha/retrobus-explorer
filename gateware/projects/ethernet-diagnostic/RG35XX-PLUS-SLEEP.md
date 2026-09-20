@@ -26,6 +26,7 @@ the emulated card and from the bench supply.
 | asleep, s2idle, the best sysfs can reach | about 114 mA (110 to 119 over twenty cycles) |
 | asleep, our firmware suspend, the CPU PLL off | about 113 mA (110 to 117 over ten) |
 | asleep, our firmware suspend, the LPDDR4 in self-refresh | about 105 mA (103 to 112 over ten) |
+| asleep, ROCKNIX's firmware suspend, built from source: DRAM controller, PHY and PLL off too | **about 68 mA** (67 to 72; means run about 80) |
 | powered off with an RTC alarm armed, which does bring it back | 33 mA |
 | supply output off | 1 mA |
 
@@ -56,6 +57,20 @@ figures. The supply reads to 1 mA, about once every two and a half seconds, and
 every figure here is a median of those readings; the mean of the same readings
 runs 5 to 8 mA higher in every sleep window, which the next section explains
 and which the differences between arms survive.
+
+**The published implementation, measured on the same card, is 37 mA below
+ours.** `build-firmware --suspend rocknix-deep` builds kailashrs' TF-A patch
+and SRAM stub from source exactly as ROCKNIX pins them, and nothing of ours.
+With the same kernel, rootfs and card: s2idle 121, 114 and 124 mA against
+**70, 67 and 68** in their deep sleep, alternated in one boot, six wakes of
+six, six md5 checks unchanged; a six-minute sleep at 72 mA over 115 readings
+with its memory intact. What theirs does and ours does not is shut down the
+DFI interface, the DRAM controller's clocks and PLL_DDR0 and rebuild the
+controller and PHY on resume. That is the step an outside reviewer said was
+still unpriced, it is the rung at which ours never resumes, and it is where
+most of the clock-level saving turned out to be. The vendor's 32 kHz CPU clock
+step, run for the first time the same day, is not it: 120 mA mean against 113.
+The account is in [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md).
 
 ## How it was measured
 

@@ -2055,3 +2055,41 @@ was also the day the sleep documents were rearranged so that each fact has one
 home: [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) is the long form,
 [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) keeps a summary of it, and
 the brief is kept as the dated snapshot it is.
+
+## 2026-09-20 Their firmware on our card, and the rung we stopped below
+
+The reviewer's objection that stuck was that the DRAM controller and PHY
+shutdown had never been priced. The bench list had that as an experiment for a
+person: flash a ROCKNIX nightly to a real card, press the power key, read the
+supply. The nightly that carries the merge did not exist yet, the merge having
+landed forty-six minutes after the last one was built, and it turned out not to
+need a person or a nightly. `build-firmware` gained a mode that builds none of
+ours: kailashrs' TF-A patch from ROCKNIX at the pinned commit and his stub at
+the commit ROCKNIX pins, both by hash, the stub compiled from the same patched
+U-Boot tree. It built first time. Its first name, `rocknix`, put its output in
+the directory the pinned ROCKNIX files are checked in, which would have made
+the next build refuse its own sources; it is `rocknix-deep`.
+
+On the card, under our kernel, rootfs and harness, so that only the firmware
+differed: one deep sleep at 65 mA; then s2idle 121, 114 and 124 mA against
+**70, 67 and 68**, six wakes of six, six md5 checks unchanged; then six minutes
+at 72 mA over 115 readings with the memory intact. About fifty milliamps below
+s2idle and thirty-seven below our own self-refresh firmware, on a 1 GiB board
+its authors had not run it on.
+
+`wfi32`, which had been built and never put on a card because a waiting core is
+clock-gated anyway, was run to see whether the 32 kHz clock was the difference:
+121, 119, 119 against 114, 112, 114. Six milliamps. It is not. What is left is
+what theirs does to the DRAM side and ours does not: DFI shut down, the
+controller's clocks cleared, the clock path gated and reset, PLL_DDR0 stopped,
+and the controller and PHY rebuilt on resume from U-Boot's own driver. Our
+`sr-pll` rung stopped that PLL without rebuilding anything and never came back.
+The current was on the far side of the rung that hung.
+
+So "clock-level suspend is a dead end on this SoC", written that morning and
+softened that afternoon on the reviewer's advice, was simply wrong. A minimal
+implementation proved the entry and the exit and then priced the wrong half.
+The supply's controller also dropped off USB for a moment during this; `deploy`
+refused to program a card it could not prove was unpowered, which is what it
+is for. The card was left carrying their firmware.
+

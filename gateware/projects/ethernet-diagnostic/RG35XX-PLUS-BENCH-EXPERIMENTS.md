@@ -11,9 +11,11 @@ differently depending on the answer.**
 Where we stand, in one paragraph: suspended with our own firmware (LPDDR4 in
 self-refresh, CPU PLL stopped, `powersave` governor) the board draws about
 105 mA at 5.00 V by the median of the supply's readings, 110 to 112 by their
-mean; powered off with USB attached it draws 33 mA; there is no battery
-fitted, so both include the AXP717's power path with nothing to charge. About
-72 mA lies between the two, every rail is still up at full voltage, and no
+mean; with the published ROCKNIX firmware built from source, which also shuts
+the DRAM controller, PHY and PLL down, about 68 mA (80 by the mean); powered
+off with USB attached it draws 33 mA. There is no battery fitted, so all of
+these include the AXP717's power path with nothing to charge. About 35 mA lies
+between the best sleep and off, every rail is still up at full voltage, and no
 PMIC register has been written. The background is in
 [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) (the verdict and the
 outside review) and [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) (every
@@ -29,7 +31,7 @@ which the existing harness does the measuring.
 | B1 | pull the card from slot 2 | does that card cost sleep/off current, and is it the slow boots? | fingers | 5 min, then hands-off | none |
 | B2 | photograph the board, read the chips | which DRAM, which PMIC wiring, where are the probe points and UART pads? | phone, magnifier | 20 min | none |
 | B3 | stock firmware on the same supply | what can this hardware actually reach in standby? | the stock SD card | 1 h | none |
-| B4 | ROCKNIX's deep sleep on the same supply | is the controller/PHY shutdown we have not built worth anything? | a real SD card, ROCKNIX nightly | 1 h | none |
+| B4 | ~~ROCKNIX's deep sleep on the same supply~~ **done, with nobody there** | is the controller/PHY shutdown we have not built worth anything? **Yes: 68 mA against our 105** | -- | -- | -- |
 | B5 | unplug the FPGA card interface while off / asleep | is the rig itself feeding or loading the target? | fingers, a watch | 30 min | low |
 | B6 | rail voltages in awake / sleep / off | which rails are physically up, and is anything back-powered? | DMM, board open | 1 h | low |
 | B7 | battery with a shunt, USB disconnected | what is the real battery-side power, and how much of our figures is USB power-path? | the cell, shunt, DMM | half a day | low–medium |
@@ -112,7 +114,20 @@ our shutdown path. Stock Super ≪ 105 mA makes PMIC-assisted rail-off the
 project to do; stock Normal ≈ 105 mA says our `sr` suspend is already at the
 vendor's clock-level floor.
 
-### B4. ROCKNIX's deep sleep on the same supply
+### B4. ROCKNIX's deep sleep on the same supply -- done, 2026-09-20
+
+**Answer.** It did not need a person. Their TF-A patch and SRAM stub were built
+from source (`build-firmware --suspend rocknix-deep`) and put on the emulated
+card under our own kernel and harness, so only the firmware differed: s2idle
+121, 114, 124 mA against **70, 67, 68** in their deep sleep, six wakes of six
+with the memory's md5 unchanged, and a six-minute sleep at 72 mA. About 37 mA
+below our own self-refresh firmware. The controller, PHY and PLL_DDR0 shutdown
+is where most of the clock-level saving is, the next firmware rung is worth
+building (or theirs worth adopting), and the gap to powered off is about
+35 mA rather than 72. See "Their firmware on the same card" in
+[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md). What follows is the
+experiment as it was planned.
+
 
 **Question.** Does the DRAM controller and PHY shutdown that the published
 implementation performs, and ours does not, lower the sleeping current?
@@ -284,7 +299,9 @@ These make the visits above shorter, and are software only.
 Listed so they are not mistaken for bench work; none should start before B3 and
 B4 say whether it is worth it.
 
-- The DRAM controller and PHY shutdown as its own rung (what B4 prices).
+- The DRAM controller and PHY shutdown as its own rung. B4 priced it at about
+  37 mA, so it is worth doing: either adopt their stub (GPL, reuses U-Boot's
+  DRAM driver) or teach ours to rebuild the PHY.
 - Progress markers and a watchdog armed across the wait, to find where `sr-pll`
   dies.
 - The vendor's 32 kHz CPU/APB step (`--suspend wfi32`, built, never run).

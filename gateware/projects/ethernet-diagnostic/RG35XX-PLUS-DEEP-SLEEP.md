@@ -11,7 +11,10 @@ doing.
 
 ## Verdict
 
-**It works, and it saves less than ten milliamps.**
+**Ours works and saves less than ten milliamps. The published implementation
+it was modelled on, built from source and measured on the same card, saves
+about fifty** -- so the idea was right and our minimal version of it stopped
+one rung short of where the current is.
 
 ```text
 step                                          asleep, 5 V input   saved    cost
@@ -19,6 +22,7 @@ s2idle as the image ships                         ~124 mA            --     --
 + powersave cpufreq governor                      ~115 mA         9-11 mA   one line of shell
 + our PSCI SYSTEM_SUSPEND, CPU PLL stopped        ~113 mA          ~3 mA    a 420-line TF-A patch
 + LPDDR4 in self-refresh, from an SRAM stub       ~105 mA          ~9 mA    4224 bytes of assembly
+ROCKNIX's suspend instead (`rocknix-deep`)         ~68 mA      ~50 vs s2idle  their stub: DRAM ctrl/PHY/PLL off, rebuilt on resume
 powered off, RTC alarm armed (not a sleep)          33 mA            --     a cold boot on waking
 ```
 
@@ -198,6 +202,55 @@ sr-pll    + PLL_DDR0 stopped                  --            --              neve
   design; a reproducible from-source bootloader; a `deep` state that resumes
   with its memory proved intact, which is the entry and exit any deeper scheme
   needs; and the knowledge of where not to look.
+
+## Their firmware on the same card
+
+The reviewer's main objection was that the DRAM controller and PHY shutdown the
+published implementation performs had never been priced. The bench-experiment
+list had it as B4, needing a real card and a person to press the power key. It
+did not: `build-firmware --suspend rocknix-deep` builds kailashrs' TF-A patch
+and SRAM stub from source at the commits ROCKNIX pins (patch sha256
+`6928fc3e...`, stub `712653d1...`), with none of our patches, beside the same
+U-Boot and TF-A trees, and the result goes on the emulated card under the same
+kernel, rootfs and job harness as everything else here. Only the firmware
+differs, which a whole ROCKNIX image on a real card would not have given.
+
+```text
+what was run (powersave in both arms, 40 s sleeps)   s2idle            deep             wake  card  DRAM
+one deep sleep, first of its kind                       --             65 mA             yes   ok    ok
+theirs against s2idle, ABBAAB, medians            121, 114, 124     70, 67, 68          6/6   ok   6/6
+   the same windows, means                        127, 131, 129     81, 79, 79
+one six-minute sleep                                    --        72 mA, n=115           yes   ok    ok
+ours with the 32 kHz CPU clock (wfi32), ABBAAB    121, 119, 119    114, 112, 114        6/6   ok    --
+```
+
+- **Theirs sleeps at about 68 mA by medians, 80 by means: about 50 mA below
+  s2idle in the same boot and about 37 below our `sr` firmware's 105.** 361 s
+  by the RTC for a requested 360 in the long sleep, the 256 MiB probe's md5
+  unchanged every time, on a 1 GiB LPDDR4 board their authors had not run.
+- **What theirs does that ours does not**: stops the MBUS masters, shuts down
+  the DFI interface, clears the controller's clock enables, gates and resets
+  the DRAM clock path, stops PLL_DDR0, moves APB1 and APB2 as well as the CPU
+  to the 32 kHz clock, and on resume rebuilds the controller and PHY with
+  U-Boot's own DRAM driver, cold initialisation skipped and the words training
+  overwrites saved and restored. Ours requests self-refresh and leaves the
+  controller, PHY and PLL_DDR0 running; our `sr-gate` rung gated two clocks for
+  3 mA, and our `sr-pll` rung stopped the PLL without rebuilding the PHY and
+  never came back. The prize was on the far side of the rung that hung.
+- **It is not the 32 kHz CPU clock.** `wfi32`, built earlier and never run on
+  the grounds that a core waiting for an interrupt is clock-gated anyway, was
+  run: 120 mA mean against 113, six or seven milliamps, two of the s2idle
+  windows unsound. Worth slightly more than stopping the PLL alone and nowhere
+  near forty.
+- **What this does to the verdict.** "Clock-level suspend is a dead end on this
+  SoC" was wrong, and was already softened on the reviewer's advice before
+  this was measured. The DDR PHY and its PLL are a large consumer, and
+  switching them off while the memory refreshes itself is worth more than
+  everything else in this report together. The gap to a powered-off board is
+  now about 35 mA, not 72.
+
+The card was left carrying this image,
+`build/rg35xx-firmware-src/rocknix-deep/rg35xx-plus-sleep-rocknix-deep.img`.
 
 ## After an outside review
 
