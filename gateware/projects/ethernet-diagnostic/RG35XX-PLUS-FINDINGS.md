@@ -902,9 +902,10 @@ sr-pll    + PLL_DDR0 stopped                  does not resume              no
 ```
 
 **`sr` is the kept configuration**: the deepest rung that both pays and is
-fully proved, with fifteen self-refresh sleeps behind it -- one alone, three in
-the alternation, ten consecutive and one of six minutes -- every one of them
-resumed with its 256 MiB probe unchanged. `sr-gate` is 3.4 mA below it, which
+fully proved, with sixteen self-refresh sleeps behind it -- one alone, three in
+the alternation, ten consecutive, one of six minutes and one more after it was
+put back on the card at the end -- every one of them resumed with its 256 MiB
+probe unchanged. `sr-gate` is 3.4 mA below it, which
 is less than half the threshold, on four. `sr-pll` does not come back.
 
 ### Recommendations

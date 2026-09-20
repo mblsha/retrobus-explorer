@@ -679,9 +679,13 @@ sr-gate   + DRAM bus and MBUS clock gates     101.3 mean     -14.7 mA      no
 sr-pll    + PLL_DDR0 stopped                  does not resume              no
 ```
 
-`sr` is the kept configuration. It is the deepest rung that both pays and is
-fully proved: eleven and a half milliamps against s2idle in its own boot, ten
-consecutive cycles, and a six-minute sleep with its memory intact.
+`sr` is the kept configuration, and it is what the card was left carrying. It
+is the deepest rung that both pays and is fully proved: eleven and a half
+milliamps against s2idle in its own boot, ten consecutive cycles, and a
+six-minute sleep with its memory intact. Put back on the card after the two
+rungs above it had been tried and taken off again, it slept once more at
+104 mA with its probe unchanged, which is the sixteenth self-refresh sleep and
+the state the bench was left in.
 
 `sr-gate` is three and a half milliamps below it, which is less than half of
 what this bench calls a difference, and it has four self-refresh sleeps behind
