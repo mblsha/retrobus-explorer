@@ -582,13 +582,18 @@ priced the whole of that pipeline at nothing measurable, so they are unlikely
 to be where the milliamps are. `PLL_PERI0` feeds the card controller among
 much else and stays. That leaves the two the firmware now stops itself.
 
-So the account of a sleep, at the end of all this, is: about 105 mA in the best
-firmware configuration, 33 mA powered off with the alarm armed, and therefore
-about 72 mA in rails that are still up while the SoC's CPU and DRAM clock trees
-are both stopped -- `vdd-dram`, `vdd-gpu-sys`, `vcc-pll`, `vcc-io`, `avcc`,
-`cpusldo`, `vcc-spkr-amp`, `aldo3` and `dcdc4`, plus whatever the AXP717's own
-conversion and charger path costs with no battery fitted. Reaching those is a
-PMIC question, and this stage deliberately writes no PMIC register at all.
+So the account of a sleep is: about 105 mA with the CPU PLL stopped and the
+LPDDR4 in self-refresh, 33 mA powered off with the alarm armed, and therefore
+about 72 mA in rails that are still up -- `vdd-dram`, `vdd-gpu-sys`,
+`vcc-pll`, `vcc-io`, `avcc`, `cpusldo`, `vcc-spkr-amp`, `aldo3` and `dcdc4`,
+plus whatever the AXP717's own conversion and charger path costs with no
+battery fitted. `vdd-dram` is still powering an array that is refreshing
+itself, which is the floor for a sleep that keeps its memory; reaching the rest
+is a PMIC question, and nothing here writes a PMIC register.
+
+At this rung the DRAM controller, its PHY and PLL_DDR0 are all still clocked,
+which is the next thing to try and is what `--suspend sr-gate` and `sr-pll`
+are for.
 
 ## Powered off is a third of the best sleep
 
