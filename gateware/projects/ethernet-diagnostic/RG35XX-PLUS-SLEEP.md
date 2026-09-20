@@ -32,8 +32,14 @@ built into it and each was priced on its own. Stopping the CPU PLL and waiting
 in WFI works -- seventeen suspends, seventeen resumes -- and is worth about
 4 mA, less than this bench calls a difference. Putting the LPDDR4 into
 self-refresh as well, from a stub in SRAM because BL31 itself lives in the
-DRAM, is worth **another 8 mA**: 11.6 mA against s2idle in the same boot, which
-is the first thing above the noise since the governor.
+DRAM, is the first thing above the noise since the governor: 11.6, 4.7 and
+10.3 mA against s2idle in three boots, **about 9 mA pooled**, with the sleeping
+board at 105 mA every time.
+
+Taken together, everything in this report moves a sleeping board from about
+124 mA to about 105, fifteen percent, and the firmware is about nine of those
+milliamps. [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) is the short
+account of that experiment and of whether it was worth doing.
 
 If the application can stand a cold boot on waking, powering off with the alarm
 armed still draws a third of the best sleep.

@@ -72,6 +72,9 @@ superseded by the other two wherever they differ, and
 [RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) is the payload target.
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) is a self-contained report of what
 timed sleep costs on this board and how low it was taken.
+[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) is the lab report of the
+firmware experiment inside it: our own suspend-to-RAM, what it measured, and
+the verdict.
 
 Tests for this project come in two sets. Host tests need neither hardware nor a
 simulator; the Cocotb testbenches need Verilator and a built design:
