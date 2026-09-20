@@ -542,14 +542,35 @@ def one_line(name: str, result: dict | None, windows: list[dict]) -> str:
 
 
 def measured_windows(watch: Watch, sampler: PsuSampler | None,
-                     labels: list[str] | None = None) -> list[dict]:
-    """Attach a current summary to every state the target marked off."""
+                     labels: list[str] | None = None,
+                     min_seconds: float = 0.0) -> list[dict]:
+    """Attach a current summary to every state the target marked off.
+
+    Labels are handed out in order, and that order is broken by anything the
+    job does between two states that looks like a state itself: checking a
+    256 MiB md5 after a wake takes about ten seconds, the harness opens a
+    window over it, and every label after it lands on the wrong sleep.
+
+    `min_seconds` is the dwell below which a window is not one of the states
+    being counted. Such a window is still reported -- it is what the target
+    drew while awake, which is worth seeing -- but it is named `short-N` and
+    the label it would have taken goes to the next real one instead. A sleep
+    here is forty seconds or more and the gaps are ten, so any threshold
+    between them separates them.
+    """
     windows = []
-    for index, window in enumerate(watch.windows):
-        label = (labels[index] if labels and index < len(labels)
-                 else f"window-{index + 1}")
+    counted = 0
+    short = 0
+    for window in watch.windows:
         summary = (summarize(sampler.samples, window["start"], window["end"])
                    if sampler else {"n": 0})
+        if window["end"] - window["start"] >= min_seconds:
+            counted += 1
+            label = (labels[counted - 1] if labels and counted <= len(labels)
+                     else f"window-{counted}")
+        else:
+            short += 1
+            label = f"short-{short}"
         windows.append({"label": label, **window, "current": summary})
     return windows
 
@@ -757,6 +778,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--label", action="append", default=[],
                         help="Name for each marked window, in order")
     parser.add_argument(
+        "--min-window-seconds", type=float, default=0.0,
+        help="Dwell below which a marked window is not one of the states being "
+             "labelled. A job that checks a large md5 between sleeps opens a "
+             "ten-second window over the check; without this the labels after "
+             "it land on the wrong sleep. Such windows are still reported, as "
+             "short-N",
+    )
+    parser.add_argument(
         "--psu-cli", type=Path, default=os.environ.get("MDP_CLI"),
         help="Miniware MDP CLI checkout (default: $MDP_CLI)",
     )
@@ -794,7 +823,8 @@ def main(argv: list[str] | None = None) -> None:
 
     watch: Watch = run.pop("watch")
     sampler: PsuSampler = run.pop("sampler")
-    windows = measured_windows(watch, sampler, arguments.label)
+    windows = measured_windows(watch, sampler, arguments.label,
+                               arguments.min_window_seconds)
     result = run.get("result")
     print(one_line(arguments.name, result, windows))
     if watch.first_command is not None:

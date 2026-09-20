@@ -415,5 +415,44 @@ class ReportTests(unittest.TestCase):
         self.assertIn("NO RESULT", job.one_line("x", None, []))
 
 
+class WindowLabellingTests(unittest.TestCase):
+    """Six sleeps and six labels, but the md5 check between them opens windows
+    of its own, so without a dwell rule the labels slide onto the wrong arms."""
+
+    SLEEPS_AND_GAPS = [
+        {"start": 10.0, "end": 51.0},    # a sleep
+        {"start": 52.0, "end": 61.7},    # the probe's md5, awake
+        {"start": 62.0, "end": 103.0},   # a sleep
+    ]
+
+    def windows(self, **extra):
+        watch = job.Watch(windows=list(self.SLEEPS_AND_GAPS))
+        return job.measured_windows(watch, None, ["A1", "B1"], **extra)
+
+    def test_without_a_rule_the_gap_takes_a_label(self):
+        self.assertEqual([w["label"] for w in self.windows()],
+                         ["A1", "B1", "window-3"])
+
+    def test_a_short_window_keeps_its_place_but_not_its_label(self):
+        labelled = self.windows(min_seconds=30.0)
+        self.assertEqual([w["label"] for w in labelled],
+                         ["A1", "short-1", "B1"])
+        self.assertEqual([w["start"] for w in labelled],
+                         [w["start"] for w in self.SLEEPS_AND_GAPS])
+
+    def test_more_windows_than_labels_still_get_names(self):
+        watch = job.Watch(windows=[{"start": 0.0, "end": 40.0},
+                                   {"start": 41.0, "end": 81.0}])
+        self.assertEqual(
+            [w["label"] for w in job.measured_windows(watch, None, ["only"], 30.0)],
+            ["only", "window-2"],
+        )
+
+    def test_the_default_is_what_every_earlier_run_was_read_with(self):
+        watch = job.Watch(windows=list(self.SLEEPS_AND_GAPS))
+        self.assertEqual(job.measured_windows(watch, None, ["A1", "B1"]),
+                         job.measured_windows(watch, None, ["A1", "B1"], 0.0))
+
+
 if __name__ == "__main__":
     unittest.main()
