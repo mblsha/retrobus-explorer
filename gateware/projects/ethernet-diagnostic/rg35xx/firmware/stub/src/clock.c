@@ -35,12 +35,77 @@
 /* 3.3.5.2: PLL_CPUX settles within 1.5 ms; two of patience, then give up. */
 #define PLL_LOCK_TIMEOUT_US		2000UL
 
+/*
+ * 3.3.5.8 and 3.3.5.12: PLL_VIDEO0 and PLL_DE, and 3.3.5.53 the DE bus gating
+ * register, whose bit 0 is the gate and bit 16 the reset. Only the gate is
+ * touched; a block that has been reset is a block a driver does not expect.
+ */
+#define CCU_PLL_VIDEO0_CFG		0x040
+#define CCU_PLL_DE_CFG			0x060
+#define CCU_DE_BGR			0x60c
+#define DE_BUS_GATING			BIT(0)
+
 static struct {
 	u32 pll_cpux;
 	u32 cpux_axi;
 	u32 apb1;
 	u32 apb2;
+	u32 pll_video0;
+	u32 pll_de;
+	u32 de_bgr;
 } saved;
+
+/*
+ * The display pipeline, stopped and put back exactly. The panel has been
+ * asleep since long before the suspend and the whole pipeline measured nothing
+ * through sysfs, but the snapshot below says both its PLLs and its bus clock
+ * are still running at the instruction before WFI, which is a different
+ * statement and is the one this rung is here to price.
+ *
+ * The gate goes first and comes back last, so that nothing downstream of a
+ * PLL is clocked while that PLL is off; the registers are written back as
+ * whole words, so whatever the kernel's clock framework had set is what it
+ * finds when it runs again.
+ */
+static void display_down(void)
+{
+#if STUB_DISPLAY_OFF
+	saved.pll_video0 = readl(CCU(CCU_PLL_VIDEO0_CFG));
+	saved.pll_de = readl(CCU(CCU_PLL_DE_CFG));
+	saved.de_bgr = readl(CCU(CCU_DE_BGR));
+
+	clrbits_le32(CCU(CCU_DE_BGR), DE_BUS_GATING);
+	clrbits_le32(CCU(CCU_PLL_DE_CFG), CCM_PLL_CTRL_EN | CCM_PLL_LOCK_EN);
+	clrbits_le32(CCU(CCU_PLL_VIDEO0_CFG), CCM_PLL_CTRL_EN | CCM_PLL_LOCK_EN);
+	stage(STAGE_DISPLAY_OFF);
+#endif
+}
+
+static void display_up(void)
+{
+#if STUB_DISPLAY_OFF
+	writel(saved.pll_video0, CCU(CCU_PLL_VIDEO0_CFG));
+	writel(saved.pll_de, CCU(CCU_PLL_DE_CFG));
+
+	/*
+	 * Not fatal if either is slow: the kernel's clock framework will find
+	 * the register it wrote, and the failure is recorded for the job to
+	 * read. Nothing between here and Linux touches the display.
+	 */
+	if (saved.pll_video0 & CCM_PLL_CTRL_EN) {
+		if (!wait_reg(CCU(CCU_PLL_VIDEO0_CFG), CCM_PLL_LOCK,
+			      CCM_PLL_LOCK, PLL_LOCK_TIMEOUT_US))
+			fail(CCU(CCU_PLL_VIDEO0_CFG), FAIL_DISPLAY_PLL_LOCK);
+	}
+	if (saved.pll_de & CCM_PLL_CTRL_EN) {
+		if (!wait_reg(CCU(CCU_PLL_DE_CFG), CCM_PLL_LOCK,
+			      CCM_PLL_LOCK, PLL_LOCK_TIMEOUT_US))
+			fail(CCU(CCU_PLL_DE_CFG), FAIL_DISPLAY_PLL_LOCK);
+	}
+
+	writel(saved.de_bgr, CCU(CCU_DE_BGR));
+#endif
+}
 
 void clocks_down(void)
 {
@@ -67,6 +132,8 @@ void clocks_down(void)
 
 	clrbits_le32(CCU(CCU_H6_PLL1_CFG), CCM_PLL_CTRL_EN | CCM_PLL_LOCK_EN);
 	stage(STAGE_CPU_CLK_DOWN);
+
+	display_down();
 }
 
 /*
@@ -95,6 +162,8 @@ void clocks_up(void)
 	writel(saved.apb2, CCU(CCU_H6_APB2_CFG));
 	writel(saved.apb1, CCU(CCU_H6_APB1_CFG));
 	udelay(100);
+
+	display_up();
 	stage(STAGE_CPU_CLK_UP);
 }
 

@@ -51,7 +51,8 @@
         "sr-phy",
         "sr-phy-pllon",
         "sr-phy-fastapb",
-        "sr-phy-padhold"
+        "sr-phy-padhold",
+        "sr-phy-nodisp"
       ]
     },
     "0002-allwinner-h616-dram-self-refresh-from-an-sram-stub.patch": {
@@ -70,7 +71,8 @@
         "sr-phy",
         "sr-phy-pllon",
         "sr-phy-fastapb",
-        "sr-phy-padhold"
+        "sr-phy-padhold",
+        "sr-phy-nodisp"
       ]
     }
   }

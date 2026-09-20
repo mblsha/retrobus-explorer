@@ -760,13 +760,27 @@ inside the FIT behind it and the SPL is the same either way. What does is the
 writes to `build.json` beside it. As built on 2026-09-20:
 
 ```text
---suspend   bl31.bin sha256   what it does while the core waits
-none        fb70c9a9...       nothing: the parity build
-wfi         03ca25d5...       PLL_CPUX stopped, DRAM left running
-sr          e232991c...       + LPDDR4 in self-refresh, from a stub in SRAM A1
-sr-gate     deada33f...       + the DRAM bus gate and the MBUS clock gate
-sr-pll      d8d584de...       + PLL_DDR0 stopped and relocked on the way back
+--suspend        bl31.bin sha256  what it does while the core waits
+none             fb70c9a9...      nothing: the parity build
+wfi              03ca25d5...      PLL_CPUX stopped, DRAM left running
+wfi32            ...              + the cluster parked on the 32 kHz clock
+sr               e232991c...      + LPDDR4 in self-refresh, from an assembly stub
+sr-gate          deada33f...      + the DRAM bus gate and the MBUS clock gate
+sr-pll           d8d584de...      + PLL_DDR0 stopped and relocked (does not resume)
+sr-c             da866b55...      sr again, from the C stub: proves the environment
+sr-phy           b084eb68...      + DFI off, CLKEN 0, clock path gated and reset,
+                                  PLL_DDR0 off, CPU and both APBs on 32 kHz, and
+                                  the controller and PHY rebuilt on resume
+sr-phy-pllon     77e37f6a...      sr-phy with PLL_DDR0 left running
+sr-phy-fastapb   56f6bffb...      sr-phy with the CPU and APBs left on OSC24M
+sr-phy-padhold   cd6f5391...      sr-phy plus the prior art's DRAM pad-hold write
+rocknix-deep     bca96e13...      not ours: kailashrs' TF-A patch and SRAM stub
 ```
+
+`none` and `sr` were rebuilt after the `sr-phy` work went in and are byte for
+byte what they were: `fb70c9a9` and `e232991c`, with the same
+`u-boot-sunxi-with-spl.bin` either side. Adding a mode does not move a card
+that was already measured.
 
 ### The self-refresh rungs
 
@@ -817,6 +831,80 @@ Two things about the stub that are easy to break and hard to notice:
   constant as far as the assembler is concerned, and the guard was removed
   again for that reason. It was 4224 bytes on 2026-09-20.
 
+### The PHY-rebuild rungs
+
+`--suspend sr-c`, `sr-phy` and the three `sr-phy-*` ablations apply patches
+0001 and **0003** -- never 0002, because 0002's assembly stub and 0003's C one
+are two answers to the same question. The C stub is a separate program in
+`rg35xx/firmware/stub/`, GPL-2.0-or-later because it is compiled against
+U-Boot's H616 DRAM driver, and `build-firmware` builds it inside the container
+from the patched U-Boot tree before TF-A embeds it. The commands are the ones
+above with the mode's own name throughout:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-firmware --suspend sr-phy
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --install-bootloader build/rg35xx-display/base-display-kernel.img \
+  --bootloader build/rg35xx-firmware-src/sr-phy/u-boot-sunxi-with-spl.bin \
+  --output build/rg35xx-firmware-src/sr-phy/base-ourboot.img
+
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --make-erofs-image build/rg35xx-firmware-src/sr-phy/base-ourboot.img \
+  --system build/rg35xx-sleep/system-c65536.erofs \
+  --data build/rg35xx-sleep/data.ext2 --slot a --card-max-hz 6000000 \
+  --debug-command job-runner \
+  --output build/rg35xx-firmware-src/sr-phy/rg35xx-plus-sleep-sr-phy.img
+```
+
+Then section 5's `deploy`, then jobs 29 to 34 of `jobs/sleep/`. **29 first and
+always**: it costs one boot, does not sleep, and says whether the controller is
+where the stub expects it, whether the watchdog's enable bit can still be
+cleared, and whether `/dev/mem` can reach SRAM A1 -- which is where everything
+the stub has to say after a resume is kept. Then 30, one sleep on its own,
+because a suspend that does not come back looks exactly like a target that
+stopped answering. 32 is the alternation, 25 the ten cycles and 26 the
+six-minute sleep; those two are the self-refresh jobs unchanged, because they
+only ask for `mem` resolved to `deep` and check the memory afterwards.
+
+```sh
+MDP_CLI=/path/to/miniware-mdp-m01/cli \
+  uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py job \
+  --state /private/tmp/rg35xx-sleep-session.json \
+  --image build/rg35xx-firmware-src/sr-phy/rg35xx-plus-sleep-sr-phy.img \
+  --script projects/ethernet-diagnostic/jobs/sleep/32-phy-vs-s2idle-abba.sh \
+  --name sr-phy-abba --run-seconds 480 \
+  --label A1 --label B1 --label B2 --label A2 --label A3 --label B3 \
+  --min-window-seconds 30 --output /tmp/sr-phy-abba.json --print-output
+```
+
+`--min-window-seconds 30` is what keeps the labels on the right arms: the md5
+check between sleeps opens a window of its own, about ten seconds at 170 mA,
+and without the rule every label after the first gap lands on the wrong sleep.
+Those windows are still printed, as `short-1`, `short-2` and so on.
+
+Three things about this stub that are easy to break:
+
+- **Everything it runs must be in SRAM A1**, including U-Boot's DRAM driver,
+  its `.bss` and its stack. `stub.lds` asserts that at link time, so a build
+  that does not fit fails rather than hanging on the bench. It was 18,544
+  bytes at `sr-phy` on 2026-09-20, against 8,776 at `sr-c`, where the linker
+  drops the driver because nothing calls it.
+- **It must not be built beside 0002.** The manifest lists which modes take
+  which patch and `test_build_firmware.py` checks the two sets do not overlap.
+- **Nothing of U-Boot is in this repository.** `stub/uboot-dram-resume.patch`
+  is applied in the container to a copy of the driver taken from the pinned
+  tree, never to the bootloader's own copy. Re-pinning U-Boot means re-checking
+  that patch applies.
+
+Debugging it blind is job 31: it writes `0x57440001` into RTC general purpose
+register 11 before a ten-second sleep, which asks the stub to keep the watchdog
+armed across the wait as well as around it. A hang then becomes a warm reset
+and the next boot's job reads the stage code out of register 12. The watchdog's
+longest interval is about sixteen seconds, so **a measured forty-second or
+six-minute sleep cannot be covered**, and a hang in one of those still ends
+with the harness cutting the power and taking the evidence with it.
 
 ### Their firmware, for measuring beside ours
 

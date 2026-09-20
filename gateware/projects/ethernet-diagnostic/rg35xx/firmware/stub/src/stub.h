@@ -46,6 +46,20 @@
 #endif
 
 /*
+ * Stop the two display PLLs and the DE bus clock while the board sleeps, and
+ * put all three back exactly as they were found. Off by default, because it
+ * goes beyond anything the prior art does and is only defensible on the
+ * evidence of the snapshot below: PLL_VIDEO0, PLL_DE and the DE bus gate are
+ * all still on at the instruction before WFI, with the panel long asleep and
+ * the display pipeline already priced at nothing measurable through sysfs.
+ * PLL_PERI0 and the 24 MHz oscillator stay whatever this is set to: the first
+ * feeds the card controller, the second the counter and the watchdog.
+ */
+#ifndef STUB_DISPLAY_OFF
+#define STUB_DISPLAY_OFF	0
+#endif
+
+/*
  * Touch RTC + 0x1F4 bit 0 around the sleep. Off by default and deliberately:
  * the H616 manual (3.13.6.17, VDDOFF_GATING_SOF_REG) calls bit 0
  * DRAM_CH_PAD_HOLD and says to set it before VDD_SYS is powered off and clear
@@ -75,6 +89,7 @@
 #define STAGE_DRAM_CLK_OFF	0x27U
 #define STAGE_DDR_PLL_OFF	0x28U
 #define STAGE_CPU_CLK_DOWN	0x29U
+#define STAGE_DISPLAY_OFF	0x2fU
 #define STAGE_SNAPSHOT		0x2aU
 #define STAGE_WFI		0x2bU
 #define STAGE_WOKE		0x2cU
@@ -100,6 +115,7 @@
 #define FAIL_AWAIT		5U
 #define FAIL_PHY_POLL		6U
 #define FAIL_REBUILD_FALSE	7U
+#define FAIL_DISPLAY_PLL_LOCK	8U
 
 /*
  * H616 User Manual rev 1.0, 3.13.6.12: sixteen general purpose registers at

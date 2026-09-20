@@ -62,6 +62,10 @@ OUR_STUB_MODES = {
     # And one sub-step of theirs that level 2 does not do: the DRAM pad hold,
     # whose polarity the manual and the prior art disagree about.
     "sr-phy-padhold": "-DSTUB_LEVEL=2 -DSTUB_PAD_HOLD=1",
+    # Past anything the prior art does, and only because the stub's own
+    # snapshot says so: PLL_VIDEO0, PLL_DE and the DE bus gate are still on at
+    # the instruction before WFI, with the panel long asleep.
+    "sr-phy-nodisp": "-DSTUB_LEVEL=2 -DSTUB_DISPLAY_OFF=1",
 }
 
 # What each mode asks the two builds for. The patch list is the subset of our
