@@ -59,8 +59,10 @@ uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py --help
 
 Its subcommands are `image` (build, patch, verify and describe a card image),
 `trial` (one standardized cold start), `report` (reduce a set of trials to a
-distribution), `deploy` (program, upload, verify, arm), `build-kernel` and
-`build-rootfs`.
+distribution), `job` (run one experiment on the target and bring back what it
+measured), `deploy` (program, upload, verify, arm), `build-kernel`,
+`build-rootfs` and `build-firmware` (the bootloader, U-Boot and TF-A, from
+pinned sources).
 
 Three documents cover it. [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md) is
 the commands, in the order they have to happen.

@@ -156,7 +156,8 @@ measured choice; see the findings for what it costs.
 
 Start from the base image, replace the kernel the boot partition carries, then
 append the system slots and the data volume. The two steps below were run as
-written and reproduce the delivered image byte for byte.
+written and reproduce the delivered image byte for byte. The base image also
+carries the bootloader, which section 12 builds from source and replaces.
 
 ```sh
 cp build/rg35xx-bare/rg35xx-plus-bare-64m-trimmed.img /tmp/base.img
@@ -333,7 +334,7 @@ uv run --frozen python -m unittest discover -t projects/ethernet-diagnostic \
 ```
 
 ```text
-Ran 163 tests in 0.399s
+Ran 301 tests in 0.763s
 OK
 ```
 
@@ -635,3 +636,91 @@ It is policy rather than device state, so one write per boot is enough and it
 survives every resume. Nothing else measured above the noise: see the findings
 for the twenty-five devices that can be unbound for nothing, the one that
 costs the wake, and the powered-off reference point at 33 mA.
+
+## 12. The bootloader from source
+
+**The two builds take about eight minutes each in an arm64 container.** Both
+were run as written on 2026-09-20 and what is shown below each command is that
+run's own output; their results are in `build/rg35xx-firmware-src/`.
+
+The bootloader is the one part of the card the boot ROM reads before anything
+here can check it, and PSCI -- which decides whether Linux can offer anything
+deeper than s2idle -- lives inside it. `build-firmware` builds it: mainline
+U-Boot v2026.01 with ROCKNIX's one patch to the H616 DRAM driver and their
+`anbernic_rg35xx_h700_lpddr4_defconfig`, carrying a BL31 from TF-A v2.12.0,
+which is exactly what ROCKNIX's `u-boot-DDR4` package builds for this device.
+
+`rg35xx/firmware-sources.json` pins all of it: a SHA-256 for each upstream
+tarball, and the ROCKNIX commit with a hash for each file taken from it.
+`--fetch` turns the ROCKNIX half of that manifest back into files through the
+GitHub API, writing each only if its hash matches; the build then checks the
+work directory against the manifest whether or not it fetched, and refuses a
+missing, extra or altered file.
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-firmware --suspend none --fetch
+```
+
+```text
+{
+  "suspend": "none",
+  "u_boot": "v2026.01",
+  "tf_a": "v2.12.0",
+  "rocknix_commit": "7f1b3abece2c7d263cebd16b5a2ba4268d6ddaa5",
+  "our_patches": {},
+  "built": {
+    "bl31.bin": {"bytes": 45161, "sha256": "fb70c9a9..."},
+    "u-boot-sunxi-with-spl.bin": {"bytes": 629313, "sha256": "44472766..."}
+  }
+}
+```
+
+The result is `build/rg35xx-firmware-src/none/u-boot-sunxi-with-spl.bin`, and
+the build is reproducible: U-Boot and TF-A are given a fixed build date rather
+than the clock, so a second run into another directory produced the same two
+files byte for byte. `--suspend wfi` is the same two trees with our TF-A patch
+applied and `SUNXI_SYSTEM_SUSPEND=1`, which is the deep sleep firmware; the
+SPL is identical either way, since BL31 rides inside the FIT.
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py \
+  build-firmware --suspend wfi
+```
+
+Put it into a base image, then make a card image from that as usual. The
+bootloader lives at byte 8192, in front of every partition; the region is
+cleared before the new one is written, so a shorter bootloader cannot leave
+the tail of a longer one where the SPL would go on reading it, and one that
+would grow into the job sector at LBA 2048 or the first partition is refused.
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --install-bootloader build/rg35xx-display/base-display-kernel.img \
+  --bootloader build/rg35xx-firmware-src/none/u-boot-sunxi-with-spl.bin \
+  --output build/rg35xx-firmware-src/none/base-ourboot.img
+```
+
+```text
+{
+  "bootloader_bytes": 629313,
+  "last_lba": 1245,
+  "reserved_lba": 2048,
+  "sha256": "a61bf8e6144ec1cde0212e7b02162db60f82c1a83290ce29ed5443476ad47d1c"
+}
+```
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py image \
+  --make-erofs-image build/rg35xx-firmware-src/none/base-ourboot.img \
+  --system build/rg35xx-sleep/system-c65536.erofs \
+  --data build/rg35xx-sleep/data.ext2 --slot a --card-max-hz 6000000 \
+  --debug-command job-runner \
+  --output build/rg35xx-firmware-src/none/rg35xx-plus-sleep-ourboot.img
+```
+
+`--verify-image` then reports the new SPL and its checksum (`f9c6a0ec` for
+both of ours, `a629138d` for the bootloader ROCKNIX ships), and the image is
+deployed by section 5 with no other change. A bad bootloader cannot brick the
+device: the firmware lives on the emulated card, so recovering is a power-off
+and another `deploy`.
