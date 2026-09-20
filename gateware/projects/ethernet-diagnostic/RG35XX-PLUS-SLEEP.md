@@ -580,7 +580,8 @@ take some of them down on the way into a suspend. Two of the five,
 `PLL_VIDEO0` and `PLL_DE`, are the display pipeline, and experiment 13 already
 priced the whole of that pipeline at nothing measurable, so they are unlikely
 to be where the milliamps are. `PLL_PERI0` feeds the card controller among
-much else and stays. That leaves the two the firmware now stops itself.
+much else and stays. That leaves PLL_CPUX, which the firmware already stops,
+and PLL_DDR0, which the last rung below stops.
 
 So the account of a sleep is: about 105 mA with the CPU PLL stopped and the
 LPDDR4 in self-refresh, 33 mA powered off with the alarm armed, and therefore
