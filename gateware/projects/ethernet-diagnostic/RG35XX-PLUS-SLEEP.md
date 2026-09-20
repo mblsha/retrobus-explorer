@@ -1031,6 +1031,12 @@ an A B B A A B run, `powersave` in both arms.
   75 in `sr-phy`. 115.3 mean against 76.0, **39.3 mA**, against a threshold of
   about eight. All six windows sound, all six wakes, all six md5 checks
   unchanged. By means of the same readings, 117.3 against 81.1.
+- **The alternation again, by someone who had not written it**, from the
+  committed script and the image left on the card, a cold boot, labels assigned
+  with `--min-window-seconds 30`: 115, 119 and 122 mA in s2idle against 77, 78
+  and 75 in `sr-phy`, 118.7 mean against 76.7, **42 mA**; by means 123.0
+  against 86.1, one deep window's mean pulled up to 95 by a single high
+  reading. Six windows sound, six wakes of six, six md5 checks unchanged.
 - **Ten consecutive cycles in one boot**: ten wakes of ten, 42 s by the RTC for
   a requested 40 on all ten, `success` 0 to 10 with `fail` 0, twelve card
   checks, ten md5 checks unchanged. The harness opened eleven forty-second
