@@ -3,7 +3,7 @@
 A lab report of one experiment, run on 2026-09-20: give the Anbernic RG35XX
 Plus (Allwinner H700) a real suspend-to-RAM with a firmware of our own, built
 from source, and measure what it is worth at the wall. The measurements, all
-twenty-eight job scripts and the long-form evidence are in
+thirty-three job scripts and the long-form evidence are in
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md); the commands are section 12 of
 [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md). This is the short version:
 why it was tried, what was built, what it measured, and whether it was worth
@@ -11,10 +11,11 @@ doing.
 
 ## Verdict
 
-**Ours works and saves less than ten milliamps. The published implementation
-it was modelled on, built from source and measured on the same card, saves
-about fifty** -- so the idea was right and our minimal version of it stopped
-one rung short of where the current is.
+**Ours works and saves about forty milliamps, which is within three of the
+published implementation it was modelled on.** It took three attempts to get
+there: the first two saved almost nothing, and the third -- switching the DRAM
+controller, its PHY and PLL_DDR0 off and building them again on the way back --
+is where all of it was.
 
 ```text
 step                                          asleep, 5 V input   saved    cost
@@ -22,19 +23,23 @@ s2idle as the image ships                         ~124 mA            --     --
 + powersave cpufreq governor                      ~115 mA         9-11 mA   one line of shell
 + our PSCI SYSTEM_SUSPEND, CPU PLL stopped        ~113 mA          ~3 mA    a 420-line TF-A patch
 + LPDDR4 in self-refresh, from an SRAM stub       ~105 mA          ~9 mA    4224 bytes of assembly
-ROCKNIX's suspend instead (`rocknix-deep`)         ~68 mA      ~50 vs s2idle  their stub: DRAM ctrl/PHY/PLL off, rebuilt on resume
++ controller, PHY and PLL_DDR0 off, rebuilt        ~75 mA          ~29 mA   a C stub in SRAM that
+  on resume from U-Boot's DRAM driver                                       links U-Boot's driver
+ROCKNIX's suspend instead (`rocknix-deep`)         ~68 mA      ~51 vs s2idle  the same idea, theirs
 powered off, RTC alarm armed (not a sleep)          33 mA            --     a cold boot on waking
 ```
 
-All of it together takes a sleeping board from about 124 mA to about 105 mA,
-fifteen percent. The firmware, which is nearly all of the work, is about 9 mA
-of that, and only the self-refresh half of it is above what this bench can
-tell from noise. About 72 mA separates the best sleep from a board that is
-powered off. What the experiment shows is that the particular CPU-clock,
-core-offline, peripheral-unbind and DRAM-clock-gating changes tried do not
-explain most of it; it does not show that the floor has been reached. Every
-rail is still up at full voltage, the DRAM controller and its PHY are still
-powered and mostly clocked, and the PMIC was deliberately never written.
+All of it together takes a sleeping board from about 124 mA to about 75, forty
+percent, and the firmware is about forty of those milliamps. About 42 mA
+separates the best sleep from a board that is powered off, and that is rails:
+every one is still up at full voltage and the PMIC was deliberately never
+written.
+
+The experiment's shape is worth keeping as well as its number. Two rungs in a
+row measured nothing and the report said so; the third, which an outside
+reviewer named as the one clock-level step still unpriced, was worth three
+times everything before it. A clock-level change that has not been tried is not
+a clock-level change that is worth nothing.
 
 Currents are at the USB-C port at 5.00 V with no battery fitted, so they
 include the AXP717's conversion and charger path and are not battery-life
@@ -92,8 +97,10 @@ one rung at a time, and put a number on each rung.
 
 ## What was built
 
-Our own code, their design credited; BSD-3-Clause like the TF-A it patches.
-No PMIC register, rail, or I2C/RSB access anywhere in it.
+Our own code, their design credited. The TF-A patches are BSD-3-Clause like
+the TF-A they patch; the C stub added later is GPL-2.0-or-later because it
+links U-Boot's DRAM driver, and lives apart from them for that reason. No PMIC
+register, rail, or I2C/RSB access anywhere in any of it.
 
 - **`rg35xx.py build-firmware --suspend {none,wfi,wfi32,sr,sr-gate,sr-pll}`**
   builds the bootloader ROCKNIX ships for this board from pinned sources in a
@@ -117,6 +124,12 @@ No PMIC register, rail, or I2C/RSB access anywhere in it.
   waits for the controller to report it, stops the CPU PLL, waits, and undoes
   it in reverse, with the watchdog armed around each step that touches the
   DRAM so that a hang becomes a warm reset.
+- **`firmware/stub/` and `firmware/0003-...-suspend-from-a-stub-built-outside-the-tree.patch`**
+  are the third stage, added after the published implementation was measured:
+  a C stub for the same SRAM, compiled in the container against U-Boot's H616
+  DRAM driver so that it can shut the controller and the PHY down completely
+  and build them again on the way back. 0003 is an alternative to 0002, never
+  applied beside it. Modes `sr-c`, `sr-phy` and three `sr-phy-*` ablations.
 
 No kernel or device-tree change was needed: with the firmware advertising the
 call, `/sys/power/mem_sleep` reads `s2idle [deep]`.
@@ -249,8 +262,67 @@ ours with the 32 kHz CPU clock (wfi32), ABBAAB    121, 119, 119    114, 112, 114
   everything else in this report together. The gap to a powered-off board is
   now about 35 mA, not 72.
 
-The card was left carrying this image,
-`build/rg35xx-firmware-src/rocknix-deep/rg35xx-plus-sleep-rocknix-deep.img`.
+## Ours does it too now
+
+The rung that hung is the rung that pays, and `--suspend sr-phy` is it: a C
+stub of ours in SRAM A1, compiled inside the build container against U-Boot's
+own H616 DRAM driver from the same pinned tree the bootloader is built from,
+which shuts the DFI interface down, clears the controller's clock enables,
+gates and resets the DRAM clock path, stops PLL_DDR0, parks the CPU and both
+APBs on 32 kHz -- and then builds the controller and the PHY again on the way
+back, with the cold SDRAM initialisation skipped and the words the training
+writes over saved and restored.
+
+```text
+what was run (powersave both arms, 40 s sleeps)   s2idle              sr-phy
+three short sleeps, watchdog across the wait        --            3/3, md5 ok
+sr-phy against s2idle, ABBAAB, medians        112, 117.5, 116.5   76, 77, 75
+ten consecutive cycles                              --          68.5-79, 10/10
+one six-minute sleep                                --          75 mA, n=114
+   theirs, the same job, the same day               --          72 mA, n=115
+```
+
+**On the six-minute sleep, which is the cleanest figure either firmware
+produces, ours is 75 mA against their 72 -- three apart, which this bench does
+not call a difference.** On the forty-second alternation ours reads about eight
+higher and saves about twelve less, and the two runs' s2idle arms differ by
+four, so some of that is the boot. The one thing theirs does that ours
+deliberately does not is write the PRCM register at `+0x244` with a key of
+`0xa7`, which takes a PLL LDO down; their own comment marks it inferred, it is
+a supply and not a clock, and this work writes no supply of any kind. That is
+the likeliest place for the rest of the difference.
+
+It is GPL-2.0-or-later and lives in `rg35xx/firmware/stub/` with its own
+licence note, because it is a derived work of U-Boot's driver; the TF-A patch
+that loads it (`0003-...`) is BSD-3-Clause like the rest of our TF-A work, and
+is an alternative to the assembly stub's patch rather than an addition. Nothing
+of U-Boot is copied into this repository.
+
+Two ablations say where the 29 mA is *not*. **Stopping PLL_DDR0 is worth
+nothing**: 74.8 mA with it left running against 76.0 with it stopped, in two
+boots whose s2idle arms agree to half a milliamp. **Nor is the 32 kHz clock
+step**: 73.0 mA with the cluster and both APBs left on the 24 MHz oscillator.
+Both are the wrong side of `sr-phy` by less than the noise, so by elimination
+the saving is the DFI shutdown, the controller's own clock enables, and holding
+the DRAM clock path in reset rather than merely gated -- `sr-gate` had already
+priced the gates alone at 3.4 mA. The long-form account, and the first look
+anyone has had at which PLLs are running while this board is asleep -- read by
+the stub itself at the instruction before WFI and left in SRAM for a job -- are
+in [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md).
+
+That snapshot says `PLL_VIDEO0`, `PLL_DE` and the DE bus clock are still on
+with the panel long asleep, and `--suspend sr-phy-nodisp` stops all three. Its
+sleeps read about eight milliamps lower, which would close the gap to theirs
+entirely -- **and it is not kept, because one of its first three sleeps failed
+its PHY rebuild** and the watchdog reset the board. The marker channel caught
+it exactly: stage `0xa5d500e5`, `fail_info` `0x00350007`, which is read
+calibration failing all five of its tries with no poll timing out. Restarting
+two PLLs and waiting for them to lock immediately before the PHY is re-trained
+is the likeliest cause and moving that restore after the rebuild is one line,
+but a rung that cannot be trusted to resume is not a rung whatever it draws.
+
+The card was left carrying
+`build/rg35xx-firmware-src/sr-phy/rg35xx-plus-sleep-sr-phy.img`.
 
 ## After an outside review
 
@@ -306,9 +378,12 @@ that it lives in one place.
 
 ## What would move the number
 
+0. **Done since this list was written**: the DRAM controller and PHY shutdown,
+   item 4 below, which turned out to be 29 mA rather than "a few milliamps at
+   most". See "Ours does it too now" above.
 1. **Power off with the RTC alarm armed**: 33 mA, the wake proved twice. It is
    a cold boot, about 5 s to the first card command. For long timed sleeps this
-   is the answer today.
+   is the answer today, though the gap is now 42 mA and not 72.
 2. **Cut the core rails through the PMIC during the suspend**, as the stock
    firmware's deepest standby does by the prior art's analysis, with a resume
    path in the first-stage loader that rebuilds the DRAM controller without
@@ -320,9 +395,13 @@ that it lives in one place.
 3. **Measure on a battery**, or with a meter in series with the cell. Both the
    105 and the 33 include a USB-fed PMIC with nothing to charge, and the ratio
    on a cell may be quite different.
-4. If `sr-pll` is wanted anyway: arm the watchdog across the wait so the hang
+4. ~~If `sr-pll` is wanted anyway: arm the watchdog across the wait so the hang
    leaves evidence, then re-initialise the PHY on resume. On the evidence of
-   `sr-gate` it is worth a few milliamps at most.
+   `sr-gate` it is worth a few milliamps at most.~~ **Done, and the estimate
+   was wrong by an order of magnitude: 29 mA.** Both halves of the suggestion
+   were needed and both worked -- job 31 arms the watchdog across a ten-second
+   wait so a hang leaves its stage code behind, and `sr-phy` re-initialises the
+   PHY with U-Boot's driver running out of SRAM.
 
 ## Running it again
 
@@ -342,8 +421,11 @@ MDP_CLI=/path/to/miniware-mdp-m01/cli \
 
 The md5 check between sleeps opens an extra short window at about 170 mA, so
 read the windows by their dwell (a sleep is 40 s) and not by their labels.
-Of the twenty-eight job scripts, 1 to 17 are the sysfs experiments, 18 to 21
-stage 1, 22 to 26 stage 2, and 27 and 28 the checks that followed this review.
+Of the thirty-three job scripts, 1 to 17 are the sysfs experiments, 18 to 21
+stage 1, 22 to 26 stage 2, 27 and 28 the checks that followed this review, and
+29 to 33 stage 3, the PHY rebuild -- 29 its facts, 30 one sleep, 31 the
+watchdog-covered short sleeps that make a hang leave evidence, 32 the
+alternation and 33 a register dump that can be diffed against theirs.
 `psu2` is the RG35XX; `psu1` carries another machine on this bench and must
 never be switched.
 

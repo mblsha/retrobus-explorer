@@ -2093,3 +2093,89 @@ The supply's controller also dropped off USB for a moment during this; `deploy`
 refused to program a card it could not prove was unpowered, which is what it
 is for. The card was left carrying their firmware.
 
+
+### 2026-09-20 Teaching our own stub to rebuild the PHY
+
+The rung that hung was the rung that paid. `sr-pll` stopped PLL_DDR0 and never
+resumed, and the guess -- that the Allwinner PHY does not survive its clock
+stopping -- was right; what was wrong was the estimate of what was on the other
+side of it, which the morning's report put at "a few milliamps at most" and
+which measured 29.
+
+The licensing decided the shape before any code was written. The only open
+initialisation for this PHY is U-Boot's `dram_sun50i_h616.c`, GPL-2.0-or-later,
+and TF-A is BSD-3-Clause, so the program that rebuilds the controller cannot be
+a file in TF-A. It is a separate C program in `rg35xx/firmware/stub/` with its
+own licence note, linked to run from SRAM A1 and compiled **inside the build
+container** against the same pinned U-Boot tree the bootloader is built from.
+Nothing of U-Boot is in the repository; `stub/uboot-dram-resume.patch` is
+applied there to a copy. `firmware/0003-...patch` is the TF-A side, BSD-3-Clause,
+and it is an alternative to the assembly stub's `0002` rather than an addition:
+`SUNXI_SUSPEND_BLOB` names a binary, BL31 carries it, checks its header, copies
+it into SRAM on the way into every suspend and branches to it with the MMU off.
+`none` and `sr` were rebuilt afterwards and are byte for byte what they were
+measured as.
+
+Two things were built before the rung itself, and both earned their place.
+`sr-c` is the register sequence `sr` already proves, written in C, so the new
+SRAM environment could be priced on its own: 104.5 mA against `sr`'s 104.7,
+which meant that when the next rung worked, nothing about it was the
+environment. And job 31 is the debugging channel whose absence lost `sr-pll`'s
+failure: a job writes a word into an RTC general purpose register, the stub
+reads it, clears it so the request cannot outlive its own sleep, and keeps the
+watchdog armed across a ten-second wait, so a hang becomes a warm reset and the
+next boot reads the stage code. `sr-phy` was tried with that first: three short
+sleeps, three resumes, three md5 checks.
+
+Then the measurements. 73.5 mA on the first forty-second sleep; 76, 77 and
+75 against an s2idle of 112, 117.5 and 116.5 in one boot; ten consecutive
+cycles between 68.5 and 79 with ten md5 checks; and six minutes at 75 mA over
+114 readings, 361 s by the RTC, with a 256 MiB probe intact -- a controller and
+a PHY switched off, built again by a driver running out of SRAM, and a gigabyte
+of memory that held itself throughout. Against the published implementation
+measured the same day: 75 against 72 on the six-minute sleep, which this bench
+does not call a difference, and about eight higher on the forty-second
+alternation.
+
+The ablations are where the surprise is. **Stopping PLL_DDR0 is worth
+nothing** -- 74.8 mA with it left running against 76.0 with it stopped, in two
+boots whose s2idle arms agree to half a milliamp -- which means the rung that
+hung for a year of this project's attention was hanging for a saving that is
+not in the thing it stopped. The 29 mA is in the DFI shutdown, the controller's
+clock enables and the DRAM clock path held in reset.
+
+And the stub can see something nobody could see before. Twenty-four CCU
+registers are read at the last instruction before WFI and left in the parameter
+block in SRAM, which keeps its contents; a job reads them afterwards. The
+kernel does take most of the display pipeline down on its way into a
+suspend -- `PLL_VIDEO1`, `PLL_VIDEO2`, `PLL_VE`, `PLL_GPU0`, `PLL_AUDIO`, the
+card and USB bus clocks -- but `PLL_VIDEO0`, `PLL_DE` and the DE bus clock are
+still running with the panel long asleep. `--suspend sr-phy-nodisp` was built
+on that evidence and goes past anything the prior art does.
+
+Dead ends and things left alone: the PRCM register at `+0x244` that the prior
+art writes with a key of `0xa7` is a supply and not a clock, so it is still not
+written, and it is the likeliest place for the last few milliamps between their
+68 and our 75. The DRAM pad hold at RTC + 0x1F4 reads 1 before and after every
+sleep and is never touched; `sr-phy-padhold` is built and was not run, because
+the manual says 1 holds the pads and the prior art clears it saying the same,
+and VDD_SYS never goes off in this work, so the experiment answers less than it
+looks like it does. Two stale shell wrappers from an earlier session sat in
+`until ! pgrep -f "rg35xx.py deploy"` loops that matched their own command
+lines and therefore never exited, which made every wait-for-the-deploy loop of
+the same shape hang; the fix is to match the python process and not the string.
+
+One more thing went wrong, and it went wrong usefully. `--suspend sr-phy-nodisp`,
+the rung built on the snapshot's evidence that the display pipeline is still
+clocked while the board sleeps, read about eight milliamps lower than `sr-phy`
+and then failed a PHY rebuild on one of its first three sleeps. Nothing hung:
+the stub's own watchdog, which is armed across the whole resume path, reset the
+board, the runner took the job up again, and the next boot read the reason out
+of the RTC before it had slept at all -- stage `0xa5d500e5`, `fail_info`
+`0x00350007`, which is `mctl_phy_init()` giving up at the marker before read
+calibration, so read calibration failed all five of its tries, with no bounded
+poll timing out. That is precisely the evidence `sr-pll`'s failure did not
+leave, from the channel built this session for the purpose, and it arrived
+without anyone asking for it. The rung is not kept; the likeliest cause is that
+two PLLs are relocking while the PHY is being re-trained, and moving the
+display restore to after the rebuild is one line that was not tried today.

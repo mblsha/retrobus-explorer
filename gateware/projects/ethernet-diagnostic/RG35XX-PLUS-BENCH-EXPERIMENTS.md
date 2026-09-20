@@ -296,18 +296,57 @@ These make the visits above shorter, and are software only.
 
 ## Firmware questions that need no hands
 
-Listed so they are not mistaken for bench work; none should start before B3 and
-B4 say whether it is worth it.
+Listed so they are not mistaken for bench work.
 
-- The DRAM controller and PHY shutdown as its own rung. B4 priced it at about
-  37 mA, so it is worth doing: either adopt their stub (GPL, reuses U-Boot's
-  DRAM driver) or teach ours to rebuild the PHY.
-- Progress markers and a watchdog armed across the wait, to find where `sr-pll`
-  dies.
-- The vendor's 32 kHz CPU/APB step (`--suspend wfi32`, built, never run).
+**Answered on 2026-09-20, after B4 priced the rung at 37 mA:**
+
+- ~~The DRAM controller and PHY shutdown as its own rung.~~ Done, ours:
+  `--suspend sr-phy`, a C stub in SRAM A1 compiled against U-Boot's H616 DRAM
+  driver, which rebuilds the controller and the PHY on resume. **29 mA below
+  `sr`, and within three of theirs on a six-minute sleep.**
+- ~~Progress markers and a watchdog armed across the wait, to find where
+  `sr-pll` dies.~~ Done: job 31 asks the stub, through an RTC register, to keep
+  the watchdog armed across a ten-second wait, so a hang becomes a warm reset
+  and the next boot reads the stage code. It was not needed -- the rung worked
+  first time -- but it is the thing that would have been needed if it had not.
+- ~~The vendor's 32 kHz CPU/APB step (`--suspend wfi32`, built, never run).~~
+  Run: 6 to 7 mA for the CPU alone, and the APB half of it is priced by
+  `sr-phy-fastapb`.
+- **Which PLLs are running while the board is asleep.** Answered by the stub's
+  own snapshot, taken at the instruction before WFI: `PLL_PERI0`, `PLL_VIDEO0`,
+  `PLL_DE` and the DE bus clock, and nothing else. `--suspend sr-phy-nodisp`
+  stops the last three, reads about eight milliamps lower, and is not kept --
+  one of its first three sleeps failed its PHY rebuild at read calibration and
+  warm-reset the board. **Retrying it with the display PLLs restarted *after*
+  the DRAM rebuild rather than before it is one line, needs no hands, and is
+  the single highest-value thing left on this list**: if it holds, it closes
+  the whole remaining gap to the published implementation without writing a
+  supply.
+
+**Still open, and none of them needs hands:**
+
+- The PRCM register at `+0x244`, written by the prior art with a key of `0xa7`
+  to take a PLL LDO down. It is the likeliest remaining difference between
+  their 68 mA and our 75, and it is a supply rather than a clock, so it is
+  outside what this work writes. It needs a decision, not a bench visit.
+- The DRAM pad hold at RTC + 0x1F4. `--suspend sr-phy-padhold` is built and
+  unrun; not making the write costs nothing in correctness, and whether it
+  costs current is unmeasured. The manual's polarity and the prior art's
+  disagree and VDD_SYS never goes off here, so the experiment answers less than
+  it looks like it does.
 - `opp-suspend` in the device tree in place of the userspace governor.
 - A read-only PMIC transaction from the SRAM stub at suspend entry and exit,
   all rails kept: the first proof that firmware can talk to the AXP717 before
   anything asks it to change a rail. Gated on B7 and on a decision.
 - A retention qualification: full-memory integrity rather than a 256 MiB
   probe, sleeps of an hour, and temperature.
+
+**Where the remaining gap probably is.** A sleeping board now draws about
+75 mA and a powered-off one 33, so 42 mA is unaccounted for. Almost none of it
+can be a clock: every PLL that can be stopped has been, the CPU and both APBs
+are on 32 kHz, and the whole DRAM clock path is in reset -- and the one PLL
+whose stopping was expected to matter, PLL_DDR0, measured nothing. What is left
+is `vdd-dram` holding a gigabyte in self-refresh, the other core rails at full
+voltage, and the AXP717's own conversion and charger path with no cell on it.
+That last is the one worth suspecting first: 33 mA for a board that is off is a
+lot, and B1, B2 and B5 are the experiments that would say.
