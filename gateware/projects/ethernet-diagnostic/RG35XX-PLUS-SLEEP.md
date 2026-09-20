@@ -724,7 +724,9 @@ None of these was done; the first two need a person at the bench.
    still where the remaining seventy-two are.
 5. **Use the self-refresh firmware.** `--suspend sr`, runbook section 12. It is
    the lowest sleep this bench has measured that keeps the machine's state, it
-   resumes reliably, and it needs no kernel or device-tree change at all.
+   resumes reliably, and it needs no kernel or device-tree change at all. Not
+   `sr-gate`, which is three milliamps lower and has a fifth of the evidence,
+   and not `sr-pll`, which does not come back.
 6. The rails are a PMIC question now, and nothing here writes a PMIC register
    on purpose. That is the next thing to decide, not to do by accident.
 7. A kernel with `PM_DEBUG` and `DEBUG_FS` for `pm_print_times`, the suspend
