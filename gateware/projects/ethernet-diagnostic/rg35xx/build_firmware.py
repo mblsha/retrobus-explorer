@@ -14,6 +14,12 @@ implements PSCI SYSTEM_SUSPEND by stopping the CPU PLL and waiting in WFI.
 The `sr` modes add a second patch that moves the wait into a stub in SRAM A1
 with DRAM in self-refresh around it, one rung of the ladder each.
 
+The `sr-phy` modes go further: a stub of our own, in C, compiled against
+U-Boot's H616 DRAM driver from the same pinned tree the bootloader is built
+from, which shuts the controller, the PHY and PLL_DDR0 down and builds them
+again on the way back. That stub is GPL-2.0-or-later because the driver is, so
+it lives in `firmware/stub/` and is built separately, before TF-A embeds it.
+
 `--suspend rocknix-deep` builds none of ours. It is the implementation this work
 was modelled on, kailashrs' TF-A patch and SRAM stub exactly as ROCKNIX pins
 and ships them, built from source beside the same two trees: it shuts the DRAM
@@ -38,6 +44,26 @@ GATEWARE = HERE.parents[2]
 SOURCES = HERE / "firmware-sources.json"
 PATCHES = HERE / "firmware"
 
+# Where our own C stub lands in the container, and what each rung of it asks
+# the compiler for. The stub is one program; the switches are the ladder, so
+# that every step of the DRAM-side shutdown can be put on a card by itself and
+# priced in milliamps. firmware/stub/src/stub.h documents each one.
+OUR_STUB = "/build/ourstub/suspend_stub.bin"
+OUR_STUB_MODES = {
+    # Level 1 is what our assembly stub does, written in C: self-refresh and
+    # nothing else. It exists to prove the SRAM C environment on its own,
+    # against a register sequence that is already known to resume.
+    "sr-c": "-DSTUB_LEVEL=1",
+    # Level 2 is the whole DRAM side away and rebuilt on the way back.
+    "sr-phy": "-DSTUB_LEVEL=2",
+    # The ablations: one sub-step of level 2 left undone in each.
+    "sr-phy-pllon": "-DSTUB_LEVEL=2 -DSTUB_DDR_PLL_OFF=0",
+    "sr-phy-fastapb": "-DSTUB_LEVEL=2 -DSTUB_APB_32K=0 -DSTUB_CPU_32K=0",
+    # And one sub-step of theirs that level 2 does not do: the DRAM pad hold,
+    # whose polarity the manual and the prior art disagree about.
+    "sr-phy-padhold": "-DSTUB_LEVEL=2 -DSTUB_PAD_HOLD=1",
+}
+
 # What each mode asks the two builds for. The patch list is the subset of our
 # own patches to apply; an empty list is the unmodified upstream tree.
 SUSPEND_MODES = {
@@ -47,6 +73,10 @@ SUSPEND_MODES = {
     "sr": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "1"},
     "sr-gate": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "2"},
     "sr-pll": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "3"},
+    **{
+        mode: {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_BLOB": OUR_STUB}
+        for mode in OUR_STUB_MODES
+    },
     # Not ours: kailashrs' implementation exactly as ROCKNIX ships it, their
     # TF-A patch and their SRAM stub at the commit ROCKNIX pins, so that what
     # it draws can be measured beside ours on the same kernel and card.
@@ -107,6 +137,24 @@ for p in $TFA_ROCKNIX_PATCHES; do
   echo "tf-a patch (ROCKNIX) $p"
   patch -p1 --batch --forward --silent < "/work/rocknix/tfa-patches/$p"
 done
+
+if [ -n "$OUR_STUB_DEFINES" ]; then
+  # Our own stub, which compiles U-Boot's DRAM driver so that it can rebuild
+  # the controller and the PHY on resume. It takes that driver from the tree
+  # the bootloader is built from, patched, a few lines above; the parameter
+  # block it shares with BL31 comes from the TF-A tree, patched just above
+  # that. Both have to be in place before this runs, and this has to run
+  # before TF-A, which embeds the result.
+  rm -rf /build/ourstub
+  mkdir -p /build/ourstub
+  make -C /build/ourstub -f /patches/stub/Makefile SRC_DIR=/patches/stub \
+      UBOOT_DIR=/build/u-boot ATF_DIR=/build/tf-a \
+      DEFCONFIG="/build/u-boot/configs/$UBOOT_DEFCONFIG" \
+      OUT=/build/ourstub/suspend_stub.bin CROSS_COMPILE= \
+      STUB_DEFINES="$OUR_STUB_DEFINES"
+  ls -l /build/ourstub/suspend_stub.bin
+  cp /build/ourstub/suspend_stub.bin /out/suspend_stub.bin
+fi
 
 if [ -n "$STUB_FILE" ]; then
   # Their stub compiles U-Boot's own DRAM driver, from the tree the bootloader
@@ -235,6 +283,11 @@ def patches_for(mode: str, sources: Path = SOURCES) -> list[str]:
     )
 
 
+def _our_stub_environment(mode: str) -> dict:
+    """The compiler switches that make this build's stub the rung it is."""
+    return {"OUR_STUB_DEFINES": OUR_STUB_MODES.get(mode, "")}
+
+
 def _stub_environment(mode: str, tarballs: dict) -> dict:
     """Where their stub comes from, or blanks for every mode that has no use for it."""
     if mode != THEIRS:
@@ -272,6 +325,7 @@ def container_command(runner, work, patches, out, image, mode="none",
             "TFA_PATCHES": " ".join(patches_for(mode, sources)),
             "TFA_ROCKNIX_PATCHES": " ".join(rocknix_tfa_patches_for(mode, sources)),
             **_stub_environment(mode, tarballs),
+            **_our_stub_environment(mode),
             "TFA_OPTIONS": " ".join(f"{k}={v}" for k, v in sorted(options.items())),
             "UBOOT_DEFCONFIG": recorded["defconfig"],
             "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH,
@@ -284,7 +338,10 @@ def describe(out: Path, mode: str, sources: Path = SOURCES) -> dict:
     """What came out, so a card can be traced back to the sources it was built from."""
     recorded = manifest(sources)
     built = {}
-    for name in ("bl31.bin", "u-boot-sunxi-with-spl.bin"):
+    names = ["bl31.bin", "u-boot-sunxi-with-spl.bin"]
+    if mode in OUR_STUB_MODES:
+        names.append("suspend_stub.bin")
+    for name in names:
         path = out / name
         built[name] = {
             "bytes": path.stat().st_size,
@@ -292,6 +349,7 @@ def describe(out: Path, mode: str, sources: Path = SOURCES) -> dict:
         }
     return {
         "suspend": mode,
+        "our_stub_defines": OUR_STUB_MODES.get(mode),
         "u_boot": recorded["tarballs"]["u-boot"]["version"],
         "tf_a": recorded["tarballs"]["tf-a"]["version"],
         "rocknix_commit": recorded["commit"],
@@ -319,8 +377,11 @@ def main(argv=None):
                              "the cluster on the 32 kHz clock; sr puts DRAM into "
                              "self-refresh from a stub in SRAM; sr-gate also gates "
                              "the DRAM and MBUS clocks; sr-pll also stops PLL_DDR0; "
-                             "rocknix-deep is not ours: ROCKNIX's own TF-A patch and "
-                             "SRAM stub, for measuring theirs beside ours")
+                             "sr-c is sr again from our C stub; sr-phy is that stub "
+                             "shutting the controller, PHY and PLL_DDR0 down and "
+                             "rebuilding them on resume, and the sr-phy-* modes are "
+                             "its ablations; rocknix-deep is not ours: ROCKNIX's own "
+                             "TF-A patch and SRAM stub, for measuring theirs beside ours")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--runner")
     parser.add_argument(

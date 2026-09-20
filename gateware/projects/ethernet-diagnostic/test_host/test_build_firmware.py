@@ -175,6 +175,94 @@ class SuspendModeTests(unittest.TestCase):
             builder.patches_for("deep")
 
 
+class PhyRebuildModeTests(unittest.TestCase):
+    """The C stub that rebuilds the controller and the PHY is a separate
+    program, built from firmware/stub/ against U-Boot's GPL DRAM driver, so
+    these modes take a different patch and a different BL31 option."""
+
+    def test_the_c_stub_modes_take_the_blob_patch_and_not_the_assembly_one(self):
+        for mode in builder.OUR_STUB_MODES:
+            self.assertEqual(
+                builder.patches_for(mode),
+                [
+                    "0001-allwinner-h616-minimal-psci-system-suspend.patch",
+                    "0003-allwinner-h616-suspend-from-a-stub-built-outside-the-tree.patch",
+                ],
+                mode,
+            )
+
+    def test_the_two_stubs_are_never_built_into_one_bl31(self):
+        """0002 adds an in-tree assembly stub and 0003 loads an out-of-tree C
+        one; both patch the same file and are two answers to one question."""
+        recorded = builder.manifest()["our_patches"]
+        assembly = set(recorded[
+            "0002-allwinner-h616-dram-self-refresh-from-an-sram-stub.patch"
+        ]["suspend"])
+        blob = set(recorded[
+            "0003-allwinner-h616-suspend-from-a-stub-built-outside-the-tree.patch"
+        ]["suspend"])
+        self.assertEqual(assembly & blob, set())
+        self.assertEqual(blob, set(builder.OUR_STUB_MODES))
+
+    def test_every_rung_asks_for_its_own_compiler_switches(self):
+        self.assertEqual(builder.OUR_STUB_MODES["sr-c"], "-DSTUB_LEVEL=1")
+        self.assertEqual(builder.OUR_STUB_MODES["sr-phy"], "-DSTUB_LEVEL=2")
+        for mode, defines in builder.OUR_STUB_MODES.items():
+            self.assertIn("-DSTUB_LEVEL=", defines, mode)
+        self.assertEqual(
+            len(set(builder.OUR_STUB_MODES.values())),
+            len(builder.OUR_STUB_MODES),
+            "two rungs that compile the same stub would measure the same thing",
+        )
+
+    def test_the_stub_sources_are_in_the_repository_and_say_they_are_gpl(self):
+        stub = builder.PATCHES / "stub"
+        for name in ("Makefile", "stub.lds", "uboot-dram-resume.patch",
+                     "src/main.c", "src/dram.c", "src/clock.c", "src/lib.c",
+                     "src/start.S", "src/stub.h", "compat/stub_compat.h"):
+            path = stub / name
+            self.assertTrue(path.is_file(), name)
+            self.assertIn("GPL-2.0-or-later", path.read_text()[:400], name)
+
+    def test_no_u_boot_source_is_copied_into_the_repository(self):
+        """The driver is taken from the pinned tree in the container and
+        patched there; a copy here would be a fork nobody re-pins."""
+        for path in (builder.PATCHES / "stub").rglob("*"):
+            if path.is_file():
+                self.assertNotIn("(C) Copyright 2020  Jernej Skrabec",
+                                 path.read_text(errors="ignore"), str(path))
+
+    def test_only_the_c_stub_modes_build_a_stub_of_ours(self):
+        command = dict(
+            runner=["docker"], work=Path("/work"), patches=Path("/repo/firmware"),
+            out=Path("/work/x"), image="alpine:3.20",
+        )
+        built = builder.container_command(mode="sr-phy", **command)
+        self.assertIn("OUR_STUB_DEFINES=-DSTUB_LEVEL=2", built)
+        self.assertIn(
+            f"TFA_OPTIONS=SUNXI_SUSPEND_BLOB={builder.OUR_STUB} "
+            "SUNXI_SYSTEM_SUSPEND=1",
+            built,
+        )
+        for mode in ("none", "wfi", "sr", builder.THEIRS):
+            self.assertIn("OUR_STUB_DEFINES=",
+                          builder.container_command(mode=mode, **command), mode)
+            self.assertNotIn("OUR_STUB_DEFINES=-DSTUB_LEVEL=2",
+                             builder.container_command(mode=mode, **command), mode)
+
+    def test_our_stub_is_built_after_both_trees_are_patched_and_before_tf_a(self):
+        """It compiles U-Boot's DRAM driver, so it needs the patched U-Boot;
+        it includes TF-A's parameter header, so it needs the patched TF-A; and
+        TF-A embeds the result, so it has to come before that build."""
+        order = [
+            builder.BUILD.index("u-boot patch"),
+            builder.BUILD.index("tf-a patch"),
+            builder.BUILD.index("make -C /build/ourstub"),
+            builder.BUILD.index('make PLAT="$TFA_PLATFORM"'),
+        ]
+        self.assertEqual(order, sorted(order))
+
+
 class TheirFirmwareTests(unittest.TestCase):
     """Ours slept at 105 mA and nobody had published what theirs draws. Built
     from source beside ours and put on the same card, it slept at 68."""

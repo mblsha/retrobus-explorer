@@ -46,7 +46,12 @@
         "wfi32",
         "sr",
         "sr-gate",
-        "sr-pll"
+        "sr-pll",
+        "sr-c",
+        "sr-phy",
+        "sr-phy-pllon",
+        "sr-phy-fastapb",
+        "sr-phy-padhold"
       ]
     },
     "0002-allwinner-h616-dram-self-refresh-from-an-sram-stub.patch": {
@@ -55,6 +60,17 @@
         "sr",
         "sr-gate",
         "sr-pll"
+      ]
+    },
+    "0003-allwinner-h616-suspend-from-a-stub-built-outside-the-tree.patch": {
+      "applies_to": "tf-a",
+      "note": "an alternative to 0002, never applied beside it: the wait runs in a stub built from firmware/stub/ against U-Boot's DRAM driver",
+      "suspend": [
+        "sr-c",
+        "sr-phy",
+        "sr-phy-pllon",
+        "sr-phy-fastapb",
+        "sr-phy-padhold"
       ]
     }
   }
