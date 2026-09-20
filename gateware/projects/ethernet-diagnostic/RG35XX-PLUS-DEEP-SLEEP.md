@@ -26,9 +26,11 @@ All of it together takes a sleeping board from about 124 mA to about 105 mA,
 fifteen percent. The firmware, which is nearly all of the work, is about 9 mA
 of that, and only the self-refresh half of it is above what this bench can
 tell from noise. About 72 mA separates the best sleep from a board that is
-powered off, and none of it is in a clock, a PLL, an idle core or the DRAM's
-own activity: it is rails that stay up, and rails belong to the PMIC, which
-this experiment deliberately never wrote.
+powered off. What the experiment shows is that the particular CPU-clock,
+core-offline, peripheral-unbind and DRAM-clock-gating changes tried do not
+explain most of it; it does not show that the floor has been reached. Every
+rail is still up at full voltage, the DRAM controller and its PHY are still
+powered and mostly clocked, and the PMIC was deliberately never written.
 
 Currents are at the USB-C port at 5.00 V with no battery fitted, so they
 include the AXP717's conversion and charger path and are not battery-life
@@ -179,11 +181,14 @@ sr-pll    + PLL_DDR0 stopped                  --            --              neve
 
 ## What it means
 
-- **Clock-level suspend is a dead end for power on this SoC.** Stopping the
-  CPU PLL, gating the DRAM clocks and putting the memory to sleep together move
+- **The accessible clock-level changes are nearly spent.** Stopping the CPU
+  PLL, gating the DRAM bus clocks and putting the memory to sleep together move
   a 115 mA sleep by about ten. The datasheet's own sleep figure keeps every
   rail up, the prior art keeps every rail up, and the prior art's peripheral
-  gating measured nothing on a battery either. The three agree.
+  gating measured nothing on a battery either. What has *not* been done is the
+  controller and PHY shutdown the prior art performs (DFI shutdown, controller
+  clocks off, pad retention, reconstruction on resume), which is more than this
+  stub's `sr` rung and is the one clock-level step still unpriced.
 - **The remaining 72 mA is rails**: `vdd-dram`, `vdd-gpu-sys`, `vcc-pll`,
   `vcc-io`, `avcc`, `cpusldo`, `vcc-spkr-amp`, and `aldo3` and `dcdc4` with no
   users, plus whatever the AXP717 and its charger path cost with no cell on
@@ -193,6 +198,59 @@ sr-pll    + PLL_DDR0 stopped                  --            --              neve
   design; a reproducible from-source bootloader; a `deep` state that resumes
   with its memory proved intact, which is the entry and exit any deeper scheme
   needs; and the knowledge of where not to look.
+
+## After an outside review
+
+The brief in [RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md](RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md)
+went to a power expert. Their assessment: the measurements are credible, the
+conclusion was stated too strongly (corrected above), and the next evidence
+worth having is battery-only power, the physical rail voltages in each state,
+and the current in DCDC2, the shared system and GPU supply. What could be
+checked without anyone at the bench was checked the same day:
+
+- **The regulator-cleanup race is closed, and it was worth nothing.**
+  Experiment 27 stays awake past the kernel's one cleanup at 32 s: `aldo3:
+  disabling` at 32.05 s, `aldo3` reads `disabled` afterwards. The same awake
+  idle state read 141 mA before it and 142 after, and two self-refresh sleeps
+  with it off read 107 and 104 mA against the 105 every sleep read with it on.
+  The upstream board file calls ALDO3 unused, and an output with nothing on it
+  saves nothing.
+- **DCDC4 is not a rail to chase.** It stays `enabled` with no users through
+  the cleanup. On an AXP717 configured as a charger DCDC4 is not an
+  independent output at all; the regulator framework's 1.0 V entry is a
+  descriptor, not evidence of a supply. It is left alone.
+- **Charging cannot be switched off through the driver here.** The battery
+  supply reports `present=0`, `Not charging`, and this kernel exposes no
+  charge-enable attribute, so that experiment needs a driver change or a
+  person with a battery.
+- **The drift is not time asleep and not the awake work.** Inside the one
+  six-minute sleep the current does not climb: 104, 102 and 107 mA by thirds.
+  Experiment 28 repeats the alternations' awake work, a 256 MiB md5 and the
+  same dwell, six times with no suspend: 142, 140, 139, 144, 134 and 145 mA
+  while the SoC warmed from 36.0 to 37.9 C, no climb a 10 mA spread can show.
+  That leaves the transitions themselves, which is suggestive and not
+  established.
+- **A median is not an average.** Recomputed from the stored readings, the
+  mean runs 5 to 8 mA above the median in every sleep window, with single
+  readings of 166 to 220 mA inside windows whose median is 105. The
+  differences between arms survive (11.0 mA by means against 11.6 by medians
+  in the first self-refresh alternation), but the absolute sleeping power is
+  nearer 110 to 112 mA than 105, and only a shunt and a scope will say whether
+  those readings are bursts or edges.
+- **Not yet testable hands-off:** whether the FPGA card interface is
+  electrically neutral when the target is off or asleep. The gateware releases
+  its lines when the host clock stops and the qualified bitstream has no
+  pull-ups, but a powered FPGA on a target's pulled-up lines is exactly the
+  back-powering the ROCKNIX work found on the second card slot, and only a
+  physical disconnect settles it.
+
+**For the next visit to the bench**, in the expert's order: a battery with a
+shunt interposer and USB disconnected (awake, `sr` sleep and off, plus the RTC
+wake on battery alone); the PMIC's output voltages with a meter in all three
+states, looking for rails that stay up or sit at an intermediate voltage when
+"off"; the off-state current with the FPGA card interface unplugged; then a
+shunt in DCDC2's load side, then DCDC3's. A scope across the shunt for a few
+sleep windows would settle the median question.
 
 ## What would move the number
 
