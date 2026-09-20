@@ -44,10 +44,12 @@ figures. The supply reads to 1 mA, about once every two and a half seconds.
 
 ## How it was measured
 
-- **Bench.** The qualified seed-19 bitstream, unchanged; the card image
-  `build/rg35xx-sleep/rg35xx-plus-sleep.img`, built with
+- **Bench.** The qualified seed-19 bitstream, unchanged throughout; the card
+  image `build/rg35xx-sleep/rg35xx-plus-sleep.img`, built with
   `--card-max-hz 6000000` and the host command `job-runner`; supply channel
   `psu2`, 5.000 V, 1.200 A limit, never altered. `psu1` was never addressed.
+  The firmware sections at the end use images built the same way around a
+  different bootloader, and nothing else about the bench changes with them.
 - **The rule for a figure.** The median of the supply's readings taken wholly
   inside a state, after discarding the first 3 s, over a dwell of at least
   20 s (40 to 45 s in practice), with the range, the interquartile range and
