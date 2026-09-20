@@ -592,8 +592,21 @@ itself, which is the floor for a sleep that keeps its memory; reaching the rest
 is a PMIC question, and nothing here writes a PMIC register.
 
 At this rung the DRAM controller, its PHY and PLL_DDR0 are all still clocked,
-which is the next thing to try and is what `--suspend sr-gate` and `sr-pll`
-are for.
+which is the next thing to try.
+
+### Two more rungs: the DRAM clocks, and PLL_DDR0
+
+`--suspend sr-gate` adds the two clock gates on the DRAM side -- `MBUS_CFG`
+bit 31 and `DRAM_BGR` bit 0 -- and `--suspend sr-pll` also stops PLL_DDR0 and
+relocks it before anything downstream is ungated. Both are built from the same
+patch and differ from `sr` only in `SUNXI_SUSPEND_DRAM_LEVEL`. Each needs its
+own card image and its own eight-minute deploy, and each was run through
+experiment 23 first -- one sleep on its own -- before anything was measured
+with it, because a rung that cannot come out of self-refresh looks exactly like
+a target that stopped answering.
+
+<!-- LADDER-RESULTS -->
+
 
 ## Powered off is a third of the best sleep
 
