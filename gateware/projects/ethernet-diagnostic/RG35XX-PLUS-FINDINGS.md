@@ -447,86 +447,69 @@ in the history.
 
 Measured on 2026-09-20 with the job harness, on the qualified bitstream and an
 image built with `--card-max-hz 6000000`, over thirty-three experiments whose
-scripts are one per row in `projects/ethernet-diagnostic/jobs/sleep/`.
-Everything here is from the target's own records and the bench supply; nothing
-was read off a screen.
-
-**This section is a summary.** The one long-form home for every measurement,
-register fact, dmesg quote and caveat about power and sleep is
-[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md). The verdict of the firmware
-experiment, and the outside review of it, are
-[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md). What still needs a
-person at the bench, and what each of those experiments would answer, is
-[RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md).
+scripts are one per row in `projects/ethernet-diagnostic/jobs/sleep/`; all of it
+from the target's own records and the bench supply. **This is a summary**:
+every measurement and caveat is in [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md),
+the suspend firmware and its design in
+[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md), the documents, prior art,
+outside review and remaining hypotheses in
+[RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md), and the bench
+backlog in [RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md).
 
 | | at the 5 V input |
 | --- | --- |
 | asleep as the image ships, s2idle | 121 to 126 mA |
 | asleep, s2idle, the best sysfs can reach | about 114 mA |
-| asleep, our firmware suspend, the CPU PLL off | about 113 mA |
-| asleep, our firmware suspend, the LPDDR4 in self-refresh | about 105 mA |
-| asleep, our firmware suspend, DRAM controller, PHY and PLL_DDR0 off and rebuilt on resume (`--suspend sr-phy`) | **about 75 mA** |
-| asleep, ROCKNIX's firmware suspend built from source (`--suspend rocknix-deep`), which does the same | about 68 mA |
+| asleep, our firmware suspend, the CPU PLL off (`wfi`) | about 113 mA |
+| asleep, our firmware suspend, the LPDDR4 in self-refresh (`sr`) | about 105 mA |
+| asleep, our firmware suspend, DRAM controller, PHY and clock path off and rebuilt on resume (`sr-phy`) | **about 76 mA** (75 over six minutes) |
+| asleep, ROCKNIX's firmware suspend built from source (`rocknix-deep`), which does the same | about 68 mA (72 over six minutes) |
 | awake and idle, panel asleep | 139 to 151 mA |
 | awake and idle, panel lit at full backlight | 246 to 252 mA |
 | powered off with an RTC alarm armed, which does bring it back | 33 mA |
 | supply output off | 1 mA |
 
-**What the figures are, and are not.** All of them are at the USB-C port at
-5.00 V with **no battery fitted**, so each includes the AXP717's conversion and
-charger path and none of them is a battery-life figure. Each is the median of
-the supply's readings taken wholly inside one window, one reading about every
-two and a half seconds; the mean of the same readings runs 5 to 8 mA higher in
-every sleep window, so the absolute sleeping power is nearer 110 to 112 mA than
-105, while the differences between arms survive the recomputation. Two cold
-boots of the same state differ by about 7 mA, so every deciding comparison
-alternates the two configurations inside one boot, and a difference below about
-8 mA is not believed.
+**What the figures are, and are not.** All are at the USB-C port at 5.00 V with
+**no battery fitted**, so each includes the AXP717's power path and none is a
+battery-life figure. Each is a median of the supply's readings inside one
+window; the mean runs 5 to 8 mA higher in every sleep window, so the absolute
+sleeping power is nearer 110 to 112 mA than 105, while the differences between
+arms survive. Two cold boots of the same state differ by about 7 mA, so every
+deciding comparison alternates inside one boot and 8 mA is the threshold.
 
-**Two configurations are kept**, and together they are the 75 mA sleep:
+**Two configurations are kept**, and together they are the 76 mA sleep: the
+`powersave` cpufreq governor, one line of shell per boot, which pins the policy
+at 480 MHz and takes `vdd-cpu` from 1.100 V to 0.900 V (11 mA asleep, about 8
+awake); and the **`--suspend sr-phy` firmware**, our own PSCI `SYSTEM_SUSPEND`
+in which a C stub in SRAM A1 puts the LPDDR4 into self-refresh, shuts the DFI
+interface, the controller's clock enables, the DRAM clock path and PLL_DDR0
+down, and rebuilds the controller and the PHY on the way back out of U-Boot's
+own DRAM driver -- **39.3 mA against s2idle** in its own boot, with ten cycles,
+a six-minute sleep and eighteen md5 checks of a 256 MiB probe behind it.
+`--suspend sr`, self-refresh only and no DRAM driver, is the 105 mA fallback.
 
-- the `powersave` cpufreq governor, one line of shell per boot, which pins the
-  policy at 480 MHz and takes `vdd-cpu` from 1.100 V to 0.900 V: 11 mA asleep
-  and about 8 mA awake;
-- the `--suspend sr-phy` firmware, our own PSCI `SYSTEM_SUSPEND` in which a C
-  stub in SRAM A1 puts the LPDDR4 into self-refresh, shuts the DFI interface,
-  the controller's clock enables, the DRAM clock path and PLL_DDR0 down, and
-  builds the controller and the PHY again on the way back out of U-Boot's own
-  DRAM driver: **39.3 mA against s2idle** in its own boot, with ten consecutive
-  cycles, a six-minute sleep and twenty md5 checks of a 256 MiB probe behind
-  it. `--suspend sr`, which only self-refreshes and needs no DRAM driver, stays
-  as the 105 mA fallback.
+**What is blocked, one line each.** With the shipped firmware there is one
+sleep state and it is s2idle: no `cpus/idle-states` in the device tree, no
+cpuidle driver, `deep` is EINVAL.
 
-**What is blocked, one line each.**
-
-- With the shipped firmware there is one sleep state and it is s2idle: no
-  `cpus/idle-states` in the device tree, no cpuidle driver, `deep` is EINVAL.
 - Nothing else sysfs reaches is worth anything: twenty-five devices unbound at
-  once took 112 mA to about 110.
-- Offlining CPUs 1-3 buys nothing; the rail the cores share does not drop.
-- Unbinding `panel-mipi` while the DRM master still holds it costs the wake.
+  once took 112 mA to about 110, offlining CPUs 1-3 buys nothing because the
+  rail the cores share does not drop, and unbinding `panel-mipi` while the DRM
+  master still holds it costs the wake.
 - `aldo3` and `dcdc4` stay enabled with no users, because the kernel's one
-  cleanup at 32 s of uptime lands inside a suspend and the PMIC's I2C bus is
-  unusable there. Letting it run instead (experiment 27) does disable `aldo3`
-  and is worth nothing; `dcdc4` is not an independent output on a
-  charger-configured AXP717.
+  cleanup at 32 s of uptime lands inside a suspend where the PMIC's I2C bus is
+  unusable. Being awake for it (experiment 27) does disable `aldo3` and is worth
+  nothing; `dcdc4` is not an independent output on a charger-configured AXP717.
 - `sr-gate` is 3.4 mA below `sr` on a quarter of the evidence, and `sr-pll`
-  suspends and never resumes: it stops PLL_DDR0 without rebuilding the PHY,
-  which `sr-phy` supersedes.
-- Neither of the two steps that looked like the saving is: stopping PLL_DDR0
-  measures 74.8 mA against 76.0, and leaving the cluster and both APBs on the
-  24 MHz oscillator instead of 32 kHz measures 73.0. Both are the wrong side of
-  `sr-phy` by less than the noise. By elimination the 29 mA is the DFI
-  shutdown, the controller's own clock enables and holding the DRAM clock path
-  in reset rather than merely gated.
-- While the board is asleep, `PLL_PERI0`, `PLL_VIDEO0`, `PLL_DE` and the DE bus
-  clock are still running -- read by the stub itself at the instruction before
-  WFI, which is the first time anyone has seen the sleeping state rather than
-  the awake-idle one. Stopping the last three (`sr-phy-nodisp`) reads about
-  eight milliamps lower and is **not kept**: one of its first three sleeps
-  failed its PHY rebuild, at read calibration, and warm-reset the board.
-- About 42 mA separates the best sleep from a board that is powered off. It is
-  in rails, not in any clock this work was able to stop.
-- The 1.5 mA per cycle drift inside a boot is not time asleep and not the awake
-  work between cycles (experiment 28); what is left is the transitions
-  themselves, which is suggestive and not established.
+  stops PLL_DDR0 without rebuilding the PHY and never resumes; `sr-phy`
+  supersedes both. Neither step that looked like its saving is: PLL_DDR0 stopped
+  measures 74.8 mA against 76.0 and the 32 kHz step 73.0, so by elimination the
+  29 mA is the DFI shutdown, `CLKEN`, and the DRAM clock path held in reset.
+- While the board is asleep `PLL_PERI0`, `PLL_VIDEO0`, `PLL_DE` and the DE bus
+  clock are still running, read by the stub at the instruction before WFI.
+  Stopping the last three (`sr-phy-nodisp`) reads eight milliamps lower and is
+  **not kept**: one of its first three sleeps failed its PHY rebuild.
+- About 43 mA separates the best sleep from a powered-off board, and it is in
+  rails, not in any clock this work could stop. The 1.5 mA per cycle drift is
+  not time asleep and not the awake work between cycles (experiment 28); what is
+  left is the transitions themselves.

@@ -2,14 +2,15 @@
 
 > **This is the brief as it was sent, on 2026-09-20, and it is not updated.**
 > It is kept as a dated snapshot of what was known and claimed at that moment.
-> The expert's assessment, and what was checked after it, are in the "After an
-> outside review" section of
-> [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md); the current long-form
-> account is [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md). Two statements below
-> were softened or corrected there: the conclusion in section 6 that "clocks,
-> PLLs, idle cores and DRAM activity are not where the current is" claims more
-> than the experiments show, and `dcdc4` is treated here as a rail when on a
-> charger-configured AXP717 it is not an independent output.
+> The expert's assessment, point by point, and what was checked after it are in
+> [RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md); the current
+> results are [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), where the best sleep
+> is now 76 mA rather than the 105 quoted below. Two statements here were
+> corrected there: the conclusion in section 6 that "clocks, PLLs, idle cores
+> and DRAM activity are not where the current is" claims more than the
+> experiments show -- shutting the DRAM controller and PHY down was later worth
+> 29 mA -- and `dcdc4` is treated here as a rail when on a charger-configured
+> AXP717 it is not an independent output.
 
 Self-contained brief, 2026-09-20. We are trying to get the suspend current of
 this board down, have run out of things that software at the clock level can

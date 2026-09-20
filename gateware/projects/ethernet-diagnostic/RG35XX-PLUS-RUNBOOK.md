@@ -583,7 +583,8 @@ The scripts are in `projects/ethernet-diagnostic/jobs/sleep/`, one per row of
 the experiment tables in
 [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), numbered in the order they were
 run. They are job scripts, not host scripts: each is passed to
-`rg35xx.py job --script`. There are twenty-eight of them:
+`rg35xx.py job --script`. There are thirty-three of them, plus
+`apply-best.sh`:
 
 ```text
  1-17  the sysfs experiments, on any image
@@ -591,6 +592,8 @@ run. They are job scripts, not host scripts: each is passed to
 22-26  firmware stage 2, the LPDDR4 in self-refresh; needs a self-refresh image
 27-28  the checks that followed the outside review; 27 needs --suspend sr,
        28 never suspends and runs on any image
+29-33  firmware stage 3, the DRAM controller and PHY rebuilt on resume; needs
+       one of the --suspend sr-phy images
 ```
 
 Rows 1 to 17 and 28 need nothing rebuilt or redeployed -- the image on the card

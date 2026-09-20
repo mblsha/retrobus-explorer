@@ -2179,3 +2179,38 @@ leave, from the channel built this session for the purpose, and it arrived
 without anyone asking for it. The rung is not kept; the likeliest cause is that
 two PLLs are relocking while the PHY is being re-trained, and moving the
 display restore to after the rebuild is one line that was not tried today.
+
+## 2026-09-20 The sleep notes rearranged by topic
+
+The power and sleep notes had been written as the work happened, so they were
+layered in the order things were discovered, with three firmware sections
+appended one after another, a section title that was a stale ratio, and the
+outside review written out twice. They were rearranged so that each fact has
+one home and the newest knowledge comes first. Nothing measured changed; the
+entries above are left exactly as they were written, and this file stays the
+chronology.
+
+Where things now live. [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) is the
+results reference, organised by topic: the answer and a ledger of what each
+step saved and cost, how it is measured, what the target offers, the baselines,
+the kept configuration and how to apply it, then what each step is worth with
+the sysfs experiments and the whole firmware ladder as one table, what is still
+running while the board sleeps, what does not work, the powered-off reference,
+the harness and the open questions.
+[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) is the suspend firmware:
+the verdict, then a design reference that did not exist anywhere as one piece
+-- the three TF-A patches and which mode applies which, the two SRAM stubs and
+why there are two, the SRAM A1 layout and its link-time assert, entry with the
+MMU off and the return through `bl31_warm_entrypoint`, the suspend and resume
+sequences register by register, what is deliberately not written, the progress
+markers and the watchdog, and the licensing -- and then how it got there in
+three short acts. The new
+[RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md) holds everything
+that did not come off this bench: what the H616 datasheet and user manual say,
+kailashrs' prior art and ROCKNIX PR #3316, why a kernel patch cannot do this
+job, the outside review point by point in one place rather than two, and the
+hypotheses and two candidate projects for the current that is left.
+[RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md) and the
+`## Sleep` section of [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) were
+brought up to date with the 76 mA sleep, and the stale counts and ratios left
+over from earlier rungs were corrected wherever they appeared.
