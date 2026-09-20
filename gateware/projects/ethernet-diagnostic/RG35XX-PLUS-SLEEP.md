@@ -2,9 +2,9 @@
 
 A report of the sleep-current work of 2026-09-20. It stands on its own; the
 long-form evidence for every figure is the "Sleep" section of
-[RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md), the commands are section 11
-of [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md), and the story, dead ends
-included, is the 2026-09-20 entries of
+[RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md), the commands are sections 11
+and 12 of [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md), and the story, dead
+ends included, is the 2026-09-20 entries of
 [RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md).
 
 The question was how little current the board can draw in a timed sleep, one it
@@ -18,13 +18,17 @@ the emulated card and from the bench supply.
 | --- | --- |
 | asleep as the image ships, s2idle | 121 to 126 mA |
 | asleep in the best configuration found | about 114 mA (110 to 119 over twenty cycles) |
+| asleep, our firmware suspend, the CPU PLL off | about 113 mA (110 to 117 over ten) |
 | powered off with an RTC alarm armed, which does bring it back | 33 mA |
 | supply output off | 1 mA |
 
-s2idle is the only sleep state this kernel and firmware offer, and one knob is
-worth keeping in it: the `powersave` cpufreq governor, 11 mA. Nothing else that
-sysfs can reach is worth a milliamp. If the application can stand a cold boot
-on waking, powering off with the alarm armed draws a quarter of the best sleep.
+s2idle was the only sleep state this kernel and firmware offered, and one knob
+is worth keeping in it: the `powersave` cpufreq governor, 11 mA. Nothing else
+that sysfs can reach is worth a milliamp. A firmware of our own gives the board
+a real `deep` state, and it works -- seventeen suspends, seventeen resumes --
+but with DRAM still running it is worth about 4 mA, which is less than this
+bench calls a difference. If the application can stand a cold boot on waking,
+powering off with the alarm armed draws a quarter of the best sleep.
 
 All currents are at the USB-C port at 5.00 V with **no battery fitted**, so they
 include the PMIC's conversion and charger path and are not battery-life
@@ -56,11 +60,13 @@ figures. The supply reads to 1 mA, about once every two and a half seconds.
 
 - `/sys/power/state` is `freeze mem`; `/sys/power/mem_sleep` is `[s2idle]` and
   nothing else, and writing `deep` to it returns EINVAL. `mem` and `freeze`
-  are the same state.
+  are the same state. That is the firmware the device ships with; the last
+  section of this report replaces it and `deep` appears.
 - There is no cpuidle driver (`current_driver` reads `none`) and no
-  `cpus/idle-states` in the device tree; PSCI is 0.2. A sleeping CPU only
-  waits for an interrupt, the DRAM is not in self-refresh and no power domain
-  collapses.
+  `cpus/idle-states` in the device tree; the device tree says `arm,psci-0.2`.
+  A sleeping CPU only waits for an interrupt, the DRAM is not in self-refresh
+  and no power domain collapses. The device-tree half of that is still true at
+  the end of this report; the firmware half is not.
 - The RTC is `7000000.rtc` with a working `wakealarm`; BusyBox has `rtcwake`.
   The kernel has `CONFIG_SUSPEND` and `CONFIG_RTC_DRV_SUN6I`; it does not have
   `DEBUG_FS` or `PM_DEBUG`, so there is no regulator summary and no suspend
@@ -120,8 +126,9 @@ the host, not a rootfs, an image, or an FPGA load.
 
 ## The experiments
 
-Seventeen, one script each in
-[`jobs/sleep/`](jobs/sleep). Cells are median / IQR / readings in mA over a
+Twenty-one, one script each in
+[`jobs/sleep/`](jobs/sleep); the first seventeen are below and the last four
+are in the deep-sleep section. Cells are median / IQR / readings in mA over a
 40 s sleep; `!` is an UNSOUND window; "mean" is the mean of three medians in an
 A B B A A B run; "to N" means row N decided it properly; "ref." is a reference
 point and not a sleep.
@@ -219,8 +226,175 @@ measurement and not in the sleep.
 - **The I2C traffic during a suspend is not the cost.** About 270 interrupts
   per 40 s cycle, about 128 with the pollers unbound, the current unchanged
   (row 11).
-- **The state itself is the limit.** Anything deeper than s2idle needs idle
-  states in the device tree and a firmware that implements them.
+- **The state itself is the limit,** for anything sysfs can reach. Something
+  deeper needs a firmware that implements it, which is the last section of
+  this report: it was implemented, it works, and it is worth four milliamps.
+
+## Deep sleep: our own PSCI SYSTEM_SUSPEND
+
+The recommendation above -- that the next real saving is in the firmware -- was
+acted on the same day, and this section is what that turned out to be worth.
+
+Someone had already done the work. kailashrs' H700 suspend for ROCKNIX, merged
+on 2026-09-19 as
+[ROCKNIX/distribution#3316](https://github.com/ROCKNIX/distribution/pull/3316)
+from [H700_rocknix_enhancement](https://github.com/kailashrs/H700_rocknix_enhancement),
+gives the H700 a PSCI `SYSTEM_SUSPEND` in which TF-A hands control to a program
+in SRAM A1 that puts the LPDDR4 into self-refresh and waits. It publishes drain
+figures in percent per hour and no currents. What follows is a minimal
+implementation of the same idea, built here so it can be put on this bench's
+supply: the design, the choice of PSCI hooks and the return through TF-A's warm
+boot entry are theirs, the code is ours, and it deliberately stops one step
+short of the DRAM.
+
+### What was built
+
+`rg35xx.py build-firmware` builds the bootloader ROCKNIX ships for this device
+-- mainline U-Boot v2026.01, ROCKNIX's one patch to the H616 DRAM driver, their
+`anbernic_rg35xx_h700_lpddr4_defconfig`, and a BL31 from TF-A v2.12.0 -- from
+sources pinned by hash, in the arm64 container the kernel build already used.
+`--suspend none` is that and nothing else. `--suspend wfi` adds one patch,
+[`rg35xx/firmware/0001-allwinner-h616-minimal-psci-system-suspend.patch`](rg35xx/firmware),
+which is the whole of the deep sleep. Runbook section 12 has the commands.
+
+On `SYSTEM_SUSPEND`, with the other cores already offlined by Linux, EL3 moves
+the CPU cluster off PLL_CPUX onto the 24 MHz oscillator, stops PLL_CPUX, routes
+interrupts to EL3 and waits in WFI. On waking it restarts PLL_CPUX, waits up to
+2 ms for lock, puts the cluster back on it and re-enters BL31 through
+`bl31_warm_entrypoint` -- which is how an arm64 Linux has to be given control
+back, since a plain return from the SMC is a suspend that did not happen.
+Nothing else is touched: no rail, nothing over I2C or RSB, no DRAM, no GIC.
+Four of the RTC's general-purpose scratch registers carry a stage code, the
+number of suspends entered, the number of resumes finished and the interrupt
+that ended the wait; on a board with no serial console that is the only thing
+EL3 can say, and a job reads them with `devmem`.
+
+### The bootloader from source is the bootloader it replaced
+
+Before anything of ours went on the card, the unmodified build replaced
+ROCKNIX's bootloader in the sleep image and was measured against it.
+
+```text
+                                      ROCKNIX's build     ours, --suspend none
+userspace milestone, cold start    5.66-5.76 s (five)    5.72, 5.76, 5.76 s
+kernel stages 0 to 6                  1.25 to 1.69 s       1.25 to 1.69 s
+asleep, s2idle, performance              126 mA mean          128 mA mean
+asleep, s2idle, powersave                115 mA mean          115 mA mean
+/sys/power/mem_sleep                       [s2idle]             [s2idle]
+```
+
+The sleep figures are the three-alternation means of
+[`jobs/sleep/10-powersave-only-abba.sh`](jobs/sleep/10-powersave-only-abba.sh),
+the experiment that decided the kept configuration, run again unchanged: 131,
+124 and 129 mA against 115, 114 and 116, six sound windows. Two builds of the
+same sources are byte-identical, because U-Boot and TF-A are given a fixed
+build date rather than the clock.
+
+### `deep` arrives, and it comes back
+
+With `--suspend wfi` on the card, `/sys/power/mem_sleep` reads `s2idle [deep]`
+and `mem` resolves to `deep`. No kernel change was needed: Linux probes
+`PSCI_1_0_FN64_SYSTEM_SUSPEND` and installs its suspend ops when the firmware
+answers.
+
+Seventeen deep suspends were entered across four boots and seventeen resumed.
+Every one of them: the RTC read 41 s for a requested 40,
+`suspend_stats/success` went up by one with `fail` unchanged and
+`last_failed_dev` empty, the card check passed after the resume, and EL3's own
+counters agreed -- one more suspend entered, one more resume finished, stage
+`0xa5d50008`, which is written from the PSCI resume hook and therefore only
+after the warm boot has handed control back. The s2idle sleeps in the same runs
+left those counters untouched, which is what says `deep` is really going
+through EL3 and `s2idle` is not.
+
+The interrupt EL3 found pending when the WFI ended was 136 on all seventeen.
+The H616 manual's interrupt table calls 136 `R_Alarm0`: the RTC alarm is
+ending the wait, at EL3, exactly as intended.
+
+### What it is worth: about four milliamps, which is not a difference
+
+```text
+ #  knob                                   before       after      wake  card
+19  one deep sleep, first of its kind         --      109/16/11    yes   ok
+20  deep against s2idle, ABBAAB            117 mean    112 mean    6/6   ok
+20  the same again                         117 mean    114 mean    6/6   ok
+21  ten consecutive deep cycles               --       110-117    10/10  ok
+```
+
+Cells are median / IQR / readings in mA over a 40 s sleep; "mean" is the mean
+of three medians in an A B B A A B run, A being `mem` resolved to s2idle and B
+`mem` resolved to `deep`, with the `powersave` governor set once at the top and
+in both arms. All twenty-two windows in the four runs are sound.
+
+- **First run:** 119, 116, 116 mA asleep in s2idle against 113, 110 and 114 in
+  deep. 4.5 mA.
+- **Second run:** 113, 119, 119 against 114, 112, 116. 3.0 mA.
+- **Ten consecutive deep cycles in one boot:** 112, 110, 114, 113, 112, 110,
+  112, 115, 114 and 116 mA, ten sound windows between 110 and 117, against 110
+  to 119 over the twenty s2idle cycles of experiment 17.
+
+The difference is in the same direction both times and is about four
+milliamps, and the rule this report has used throughout is that a difference
+below about eight is not believed. So: the suspend is real, it resumes
+reliably, and with DRAM left running it saves nothing this bench can measure.
+
+That is not a surprise on reflection. A core in WFI is already clock-gated, so
+the 24 MHz step costs nothing by itself, and what remains is PLL_CPUX's own
+bias current on a 1.8 V rail -- a few milliamps, which is what was seen. The
+milliamps are not in the CPU clock tree at all: the rails still standing
+during a suspend are `vdd-dram`, `vdd-gpu-sys`, `vcc-pll`, `vcc-io`, `avcc`,
+`cpusldo`, `vcc-spkr-amp`, `aldo3` and `dcdc4`, and the board powered off with
+its alarm armed draws 33 mA, so about 79 mA of a 112 mA sleep is in rails that
+a CPU-clock suspend does not reach.
+
+### What is measured here and what is assumed
+
+- **Measured:** every current above, the seventeen wakes, the RTC's own account
+  of each sleep, the suspend counters, the card checks, EL3's stage and counter
+  registers, the wake interrupt number, and the parity of the from-source
+  bootloader against the one it replaced.
+- **Assumed, because nothing here looked:** that PLL_CPUX is genuinely off
+  during the WFI. EL3 writes the disable and reads the lock bit back on the way
+  up, and the resume works, but no register was read back while the board was
+  asleep -- there is no way to, with the CPU in WFI and no debug port. The
+  four milliamps are consistent with the PLL being off and are the only
+  evidence for it.
+- **Not attempted:** the 32 kHz step the vendor's standby code takes after
+  stopping the PLL is built (`--suspend wfi32`, it compiles) and was never put
+  on the card. On this evidence there is nothing for it to find.
+- **Not touched, deliberately:** the PRCM register at `+0x244` that the ROCKNIX
+  work writes with a key of `0xa7` to gate the PLL LDO. Their own comment marks
+  it inferred, it is in the one block of this SoC the manual does not document,
+  and the review thread on the pull request asks the same question about a
+  neighbouring write. Nothing here writes a register it cannot cite.
+
+### What Stage 2 -- DRAM self-refresh from SRAM -- needs from this
+
+- **The warm-boot return works.** Turning the MMU off and branching to
+  `bl31_warm_entrypoint` brings Linux back through PSCI's resume path,
+  seventeen times out of seventeen. That is the part of kailashrs' design this
+  confirms independently, and an SRAM stub only has to do the same jump.
+- **BL31 lives in DRAM on this platform.** `plat/allwinner/sun50i_h616` sets
+  `SUNXI_BL31_IN_DRAM := 1`, so BL31 is at `0x40000000`. Self-refresh therefore
+  cannot be done by BL31 itself at all -- the stub is not an optimisation, it
+  is the only way. The inner sequence here is already written to be lifted: it
+  calls nothing in BL31, using only memory-mapped registers, the architected
+  counter and WFI, and it takes its delays from `CNTPCT_EL0` rather than
+  `udelay()` for exactly that reason.
+- **SRAM A1 is `0x20000`, 32 KiB**, and TF-A maps the whole SRAM region
+  `MT_DEVICE | MT_EXECUTE_NEVER`, so a stub must be entered with the MMU off --
+  which the existing jump already does -- or the mapping has to change.
+- **`/dev/mem` works and the RTC scratch registers are free.** `CONFIG_DEVMEM`
+  is on, `CONFIG_IO_STRICT_DEVMEM` is off, and registers 12 to 15 read
+  `0x00000000` on a board that has never suspended, so nothing else uses them.
+  A stub can report the same way. They do not survive the 5 V going away on
+  this battery-less board, so a stub that hangs takes its evidence with it
+  unless a watchdog is armed to turn the hang into a warm reset -- which is why
+  kailashrs arms one around the DRAM recovery and not around the wait.
+- **The budget.** 112 mA asleep, 33 mA powered off. Self-refresh has to find
+  its saving in `vdd-dram` and in whatever the DRAM controller and PHY draw
+  idle; everything the CPU clock tree had to give has now been given, and it
+  was four milliamps.
 
 ## Powered off is a quarter of the best sleep
 
@@ -247,7 +421,9 @@ None of these was done; the first two need a person at the bench.
 4. The next real saving is in the device tree and the firmware:
    `cpus/idle-states` for a cpuidle driver and a `mem` that is not s2idle, and
    a suspend that collapses the domains behind `vdd-dram`, `vdd-gpu-sys`,
-   `vcc-pll` and `avcc`.
+   `vcc-pll` and `avcc`. The firmware half of this was then done and is the
+   deep-sleep section above: a `mem` that is not s2idle is four milliamps, and
+   the domains are where the rest is.
 5. A kernel with `PM_DEBUG` and `DEBUG_FS` for `pm_print_times`, the suspend
    timing breakdown and the regulator summary. Nothing here needed it; the
    next question probably will.
@@ -267,6 +443,10 @@ MDP_CLI=/path/to/miniware-mdp-m01/cli \
   --label A1 --label B1 --label B2 --label A2 --label A3 --label B3 \
   --output /tmp/powersave.json
 ```
+
+The four deep-sleep rows need the card image built with the `--suspend wfi`
+bootloader, `build/rg35xx-firmware-src/wfi/rg35xx-plus-sleep-wfi.img`, which
+runbook section 12 builds; everything else runs on either.
 
 Every run ends with the supply's output read back OFF and the card disarmed.
 `psu2` is the RG35XX; `psu1` carries another machine on this bench and must

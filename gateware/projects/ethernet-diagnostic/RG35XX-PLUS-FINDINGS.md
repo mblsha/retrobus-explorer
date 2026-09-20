@@ -449,6 +449,11 @@ Measured on 2026-09-20 with the job harness, on the qualified bitstream and an
 image built with `--card-max-hz 6000000`. Everything below is from the target's
 own records and the bench supply; nothing was read off a screen.
 
+**There is one sleep state and it is s2idle** -- with the firmware the device
+ships with. Later the same day the bootloader was rebuilt from source and given
+a PSCI `SYSTEM_SUSPEND` of our own; see the end of this section. Everything
+between here and there is the shipped firmware.
+
 **There is one sleep state and it is s2idle.** `/sys/power/state` offers
 `freeze mem`, and `/sys/power/mem_sleep` offers `[s2idle]` and nothing else, so
 `mem` and `freeze` are the same state. Writing `deep` or `shallow` to
@@ -776,6 +781,47 @@ What this costs is state and time: it is a cold boot, not a resume, and the
 FPGA's trace puts the first card command about 5 s and userspace about 12 s
 after the power comes up. For a timed wake where nothing has to survive, it is
 a quarter of the current.
+
+### Deeper than s2idle: a PSCI SYSTEM_SUSPEND of our own
+
+The recommendation that follows -- that the next real saving is in the firmware
+-- was acted on the same day. The bootloader is now built here from pinned
+sources, mainline U-Boot v2026.01 and TF-A v2.12.0, by
+`rg35xx.py build-firmware` (runbook section 12), and one patch to TF-A gives
+the H700 a PSCI `SYSTEM_SUSPEND`: at EL3, with the other cores already
+offlined by Linux, the boot core moves the cluster off PLL_CPUX onto the 24 MHz
+oscillator, stops PLL_CPUX, waits in WFI, restarts the PLL and returns to Linux
+through TF-A's warm boot entry point. DRAM is left running, no rail is touched
+and no register is written that the H616 manual does not document. The idea and
+the shape are kailashrs' work for ROCKNIX,
+[ROCKNIX/distribution#3316](https://github.com/ROCKNIX/distribution/pull/3316),
+which does the whole job with an SRAM stub and DRAM self-refresh; this is a
+minimal version of it, ours, one step short of the DRAM.
+
+- The from-source bootloader is the bootloader it replaced: userspace at 5.72,
+  5.76 and 5.76 s against 5.66 to 5.76 recorded before, the same kernel stage
+  uptimes, and the same deciding sleep experiment reading 128 mA mean against
+  115 where the shipped bootloader gave 126 against 115.
+- With the patch, `/sys/power/mem_sleep` reads `s2idle [deep]` and no kernel
+  change was needed.
+- **Seventeen deep suspends, seventeen resumes**, across four boots: RTC 41 s
+  for a requested 40 every time, `success` up by one with `fail` 0, a card
+  check after each, and EL3's own counters agreeing. The interrupt EL3 found
+  pending when the WFI ended was 136 on all seventeen, which the H616 manual's
+  interrupt table calls `R_Alarm0`.
+- **It is worth about four milliamps**, which is below the eight this bench
+  calls a difference: 117 mA mean asleep in s2idle against 112 in deep, and 117
+  against 114 when the alternation was repeated. Ten consecutive deep cycles
+  read 110 to 117 mA, against 110 to 119 for the twenty s2idle cycles of
+  experiment 17.
+
+A core in WFI is already clock-gated, so what the CPU clock tree had left to
+give was PLL_CPUX's own bias, and that is what four milliamps looks like. The
+rest is in the rails listed above, which need power domains to collapse, which
+needs DRAM in self-refresh, which needs the sequence to run from SRAM because
+BL31 on this platform is linked into DRAM. The full write-up, with what is
+measured and what is assumed, is the deep-sleep section of
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md).
 
 ### Recommendations
 

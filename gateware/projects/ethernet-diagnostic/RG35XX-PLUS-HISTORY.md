@@ -1759,3 +1759,93 @@ and idle, and 33 powered off. The suspend is worth about 25 milliamps and the
 governor about 11, and everything below that is a device-tree and firmware
 question -- there is still no `cpus/idle-states`, the DRAM is still not in
 self-refresh, and no power domain is collapsed by anything s2idle does.
+
+## 2026-09-20 A bootloader of our own, and a suspend that stops the CPU PLL
+
+The sleep work ended at s2idle because the firmware offered nothing else, and
+said so: the next real saving is in the firmware. kailashrs had by then done
+that work for the H700 and ROCKNIX merged it the day before -- TF-A hands
+control to a program in SRAM A1 which puts the LPDDR4 into self-refresh and
+waits -- but nobody had published what it is worth in milliamps. This bench can
+answer that, and answering it meant building the firmware here first.
+
+**Stage 0: the bootloader from source, proved equal to the one it replaced.**
+ROCKNIX's H700 DDR4 bootloader is mainline U-Boot v2026.01 with one patch to
+the H616 DRAM driver and one defconfig, carrying a BL31 from TF-A v2.12.0, and
+`rg35xx.py build-firmware` now builds exactly that in the same arm64 container
+the kernel uses, where the compiler is native. Two things needed finding out.
+TF-A v2.12's toolchain machinery derives the assembler, linker and archiver
+from the C compiler, but reads an empty `CROSS_COMPILE` as a request for the
+`aarch64-none-elf-` prefix rather than for the native one, so the compiler has
+to be named: `CC=gcc`, and with that, ROCKNIX's own patch swapping the
+assembler for the compiler is not needed at all. And U-Boot stamps its version
+string and its FIT with the moment of the build, so a fixed
+`SOURCE_DATE_EPOCH` and a fixed TF-A build banner go in; with those, a second
+build into another directory produced both files byte for byte identical.
+
+The result went into the sleep image in place of ROCKNIX's bootloader --
+`image --install-bootloader`, which clears the region first so a shorter
+bootloader cannot leave the tail of a longer one where the SPL would go on
+reading, and refuses one that would grow into the job sector -- and the card
+was redeployed. It boots, with the same kernel stage uptimes as before, 1.25 s
+at `rootfs-init-entered` and 1.69 s at `job-runner-ready`. Three cold starts
+reached the userspace milestone at 5.72, 5.76 and 5.76 s from the first card
+command, against 5.66, 5.69, 5.71, 5.71 and 5.76 recorded for the shipped
+bootloader at the same 6 MHz cap. The deciding sleep experiment, run again
+unchanged, read 131, 124 and 129 mA at `performance` against 115, 114 and 116
+at `powersave` -- 128 mean against 115, where the shipped bootloader gave 126
+against 115. And `/sys/power/mem_sleep` was still `[s2idle]`, which is the
+point: nothing of ours was in that build. One thing the parity run settled for
+free: the four RTC general-purpose registers the next stage was going to use
+for progress codes all read back `0x00000000` through `devmem`, so `/dev/mem`
+works on this kernel for memory-mapped registers and nothing else on the board
+is using them.
+
+**Stage 1: the smallest thing that is a real suspend.** On `SYSTEM_SUSPEND`,
+EL3 moves the cluster off PLL_CPUX onto the 24 MHz oscillator, stops PLL_CPUX,
+waits in WFI, restarts the PLL and re-enters BL31 through
+`bl31_warm_entrypoint`. That last part is the whole design problem and it is
+kailashrs': an arm64 Linux treats a plain return from the SYSTEM_SUSPEND SMC as
+a suspend that did not happen, so the resume has to arrive at the address
+`plat_setup_psci_ops` was handed, with the MMU off, and let
+`psci_warmboot_entrypoint` unwind the suspend and return to the address Linux
+gave. Reading TF-A around it settled the rest: the CPU's power-down cache
+maintenance has already run by the time `pwr_domain_pwr_down_wfi` is called, so
+the data cache is off and the caches are clean before anything here touches a
+register; `reset_handler` on the warm path puts `CPUECTLR.SMP` back; and the
+GIC must be left entirely alone, because its distributor and this core's CPU
+interface are what turn the RTC's alarm into the event that ends the WFI.
+`pwr_domain_pwr_down_wfi` is also the CPU_OFF path, so it only does any of this
+when the system level is off.
+
+It worked first time. `/sys/power/mem_sleep` came up `s2idle [deep]` with no
+kernel change, and the first `rtc_sleep 40 mem deep` came back: 41 seconds by
+the RTC, `success` 0 to 1, card check good, and EL3's own registers reading
+stage `0xa5d50008`, one suspend entered, one resume finished, wake interrupt
+136 -- which the H616 manual's interrupt table calls `R_Alarm0`. Seventeen deep
+suspends across four boots, seventeen resumes, the counters agreeing every
+time, and the s2idle sleeps in the same runs leaving those counters untouched,
+which is what says `deep` really goes through EL3 and `s2idle` does not.
+
+**And it is worth about four milliamps.** Alternated against s2idle A B B A A
+B with the `powersave` governor in both arms: 117 mA mean against 112, and 117
+against 114 when the whole thing was run again. Ten consecutive deep cycles
+read 110 to 117 mA, ten sound windows, against 110 to 119 for the twenty s2idle
+cycles of experiment 17. Four milliamps is half of what this bench calls a
+difference, and on reflection it is the right answer: a core in WFI is already
+clock-gated, so stopping its PLL can only save the PLL's own bias current. The
+milliamps are not in the CPU clock tree. 112 mA asleep against 33 powered off
+leaves about 79 in rails a CPU-clock suspend does not reach, and reaching them
+means collapsing power domains, which means DRAM in self-refresh, which on this
+platform means running from SRAM -- `plat/allwinner/sun50i_h616` links BL31
+into DRAM at `0x40000000`, so the stub is not an optimisation of kailashrs'
+design, it is the only way to do it at all.
+
+Two things were deliberately not done. The vendor's standby code parks the
+cluster on the 32 kHz clock after stopping the PLL; that is built and compiles
+(`--suspend wfi32`) and was never put on the card, because on this evidence
+there is nothing left for it to find. And the PRCM register at `+0x244` that
+the ROCKNIX work writes with a key of `0xa7` to gate the PLL LDO is untouched:
+their own comment marks it inferred, it is in the one block of this SoC the
+manual does not document, and the review thread on the pull request asks the
+same question about a neighbouring write.
