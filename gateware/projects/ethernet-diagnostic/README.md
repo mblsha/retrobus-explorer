@@ -64,18 +64,6 @@ measured), `deploy` (program, upload, verify, arm), `build-kernel`,
 `build-rootfs` and `build-firmware` (the bootloader, U-Boot and TF-A, from
 pinned sources).
 
-Three documents cover it. [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md) is
-the commands, in the order they have to happen.
-[RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) is what is known, by topic.
-[RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md) is the chronological record,
-superseded by the other two wherever they differ, and
-[RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) is the payload target.
-[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) is a self-contained report of what
-timed sleep costs on this board and how low it was taken.
-[RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) is the lab report of the
-firmware experiment inside it: our own suspend-to-RAM, what it measured, and
-the verdict.
-
 Tests for this project come in two sets. Host tests need neither hardware nor a
 simulator; the Cocotb testbenches need Verilator and a built design:
 
@@ -84,6 +72,24 @@ uv run --frozen python -m unittest discover -t projects/ethernet-diagnostic \
   -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
 uv run --frozen python tools/run_tb.py --project projects/ethernet-diagnostic
 ```
+
+## Documentation map
+
+Every fact has one home, and the other documents summarise it and point at it.
+In reading order:
+
+| document | what it is | when to read it |
+| --- | --- | --- |
+| [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md) | the commands, in the order they have to happen: bitstream, kernel, rootfs, image, deploy, trial, report, the job harness, the bootloader from source | you are about to run something |
+| [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) | what is known, by topic: the card interface, the kernel, the image layout, the boot stage by stage, the display, and a summary of sleep | you want the current answer to a question and not the story behind it |
+| [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) | everything about power and sleep, long form: the baselines, all twenty-eight experiments, what is blocked, the firmware ladder, and every caveat | you are working on power, or you want the evidence behind a sleep figure |
+| [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) | the lab report of the firmware suspend experiment, verdict first -- what it cost, what it saved, what it means -- and the outside review of it | you want the short answer to "was our own suspend-to-RAM worth building" |
+| [RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md) | the backlog that needs a person at the bench, each with the question it would answer | you are going to the bench, or deciding what to buy or fit |
+| [RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md](RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md) | the brief as sent to an outside power expert on 2026-09-20, a dated snapshot that is not updated | you want to see what was asked and claimed at that moment |
+| [RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md) | the chronological record, dead ends included, superseded by the documents above wherever they differ | you want to know why something is the way it is |
+| [RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) | the original plan for the payload: the boot budget, what the kernel keeps and what it gives up | you want the destination this work was aimed at |
+| [PROTOCOL.md](PROTOCOL.md) | the wire protocol of the Ethernet image service: packet formats, the ordered-command API, bulk reads and TRACE | you are writing or debugging a client |
+| [QUALIFICATION.md](QUALIFICATION.md) | the provenance of the hardware results: revisions, bitstream hashes, rates and retry counts, campaign by campaign | you need to know exactly what was tested, and on what |
 
 ## Ownership rules
 

@@ -11,11 +11,13 @@ are. It is not instructions, and it is not the current state: a number of the
 sections below state a conclusion that a later section corrects, and they name
 tools and options that were since renamed or removed.
 
-Where this file differs from [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md)
-or [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md), those two are right. The
-findings state what is true now, the runbook states the commands that work now,
-and [RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) states what the payload was
-aiming at.
+Where this file differs from [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md),
+[RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md) or, on power and sleep,
+[RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md), those are right. The findings
+state what is true now, the sleep report is the long form of everything about
+power, the runbook states the commands that work now, and
+[RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) states what the payload was
+aiming at. The [README](README.md) has a map of all of them.
 
 ## 2026-09-16 MMC bring-up result
 
@@ -1991,3 +1993,65 @@ the rung above it does not come back at all.
 Which leaves 72 mA between a sleeping board and one that is off, and none of it
 in a clock tree. It is in rails, and rails are the PMIC, and nothing here
 writes a PMIC register on purpose.
+
+## 2026-09-20 An outside reading of the sleep work, and four checks it asked for
+
+The sleep work was written up as a brief and sent to a power expert. Their
+reading is that the measurements are credible and the conclusion was stated too
+strongly, which is a fair distinction and the useful one. The entries above say
+in several places that the remaining current is not in a clock. What the
+experiments actually show is narrower: the particular CPU-clock, core-offline,
+peripheral-unbind and DRAM-clock-gating changes that were tried do not explain
+most of the input power. They do not show that a floor was reached. The
+controller and PHY shutdown the prior art performs -- DFI shutdown, controller
+clocks off, pad retention, reconstruction on resume -- is a clock-level step
+beyond anything this stub does, and it is still unpriced. The reports have been
+softened to say that; these entries are left as they were written.
+
+Four of their points could be answered the same day with nobody at the bench,
+which is how experiments 27 and 28 came to exist.
+
+**The regulator cleanup, caught awake.** Every figure this work has quoted was
+taken with `aldo3` still enabled, because the kernel's one attempt to disable
+unused regulators happens at 32 s of uptime and the harness has always been
+asleep at that moment. Experiment 27 simply stays awake for it: `aldo3:
+disabling` at 32.05 s, and `aldo3` reads `disabled` afterwards. The same awake
+idle state read 141 mA before the cleanup and 142 after; two self-refresh
+sleeps taken with the rail off read 107 and 104 mA against the 105 that every
+self-refresh sleep has read with it on. So the race is closed and it was worth
+nothing, which is the good outcome: it means none of the earlier figures needs
+an asterisk. The same job shows `dcdc4` still `enabled` with no users through
+the cleanup, and the expert's reading of that is that on an AXP717 configured
+as a charger DCDC4 is not an independent output at all -- the regulator
+framework's 1.0 V entry is a descriptor and not a supply. It is left alone. The
+job also lists the power-supply class: the battery reports `present=0` and
+`Not charging` and there is no charge-enable attribute, so switching charging
+off needs a driver change or a person with a battery.
+
+**The drift is in the transitions, probably.** The 1.5 mA per cycle climb
+through a boot has been an unexplained thing since the first day of this work.
+It is not time asleep: the six-minute self-refresh sleep reads 104, 102 and
+107 mA by thirds. Experiment 28 removes the other candidate by running the
+alternations' awake work -- the 256 MiB md5, the same dwell -- six times in one
+boot with no suspend at all: 142, 140, 139, 144, 134 and 145 mA while the SoC
+warmed from 36.0 to 37.9 C, which is no climb that a 10 mA spread can show.
+What is left is the suspend and resume transitions themselves. That is where
+the evidence points and not where it arrives; nothing here measured a
+transition.
+
+**A median is not an average.** Recomputed from the stored readings, the mean
+runs 5 to 8 mA above the median in every sleep window, with single readings of
+166 to 220 mA inside windows whose median is 105. The comparisons survive -- the
+first self-refresh alternation is 11.0 mA by means against 11.6 by medians --
+but the absolute sleeping power is nearer 110 to 112 mA than 105, and whether
+those readings are real bursts or an artefact of a supply that samples once
+every two and a half seconds needs a shunt and a scope.
+
+What needs hands is now a list of its own, in the expert's order: the battery
+with a shunt, the rail voltages in each state, the off-state current with the
+card interface unplugged, then DCDC2. It lives in
+[RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md), and this
+was also the day the sleep documents were rearranged so that each fact has one
+home: [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) is the long form,
+[RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) keeps a summary of it, and
+the brief is kept as the dated snapshot it is.
