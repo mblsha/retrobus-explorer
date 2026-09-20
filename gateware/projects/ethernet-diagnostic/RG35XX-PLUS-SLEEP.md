@@ -324,7 +324,7 @@ ending the wait, at EL3, exactly as intended.
 Cells are median / IQR / readings in mA over a 40 s sleep; "mean" is the mean
 of three medians in an A B B A A B run, A being `mem` resolved to s2idle and B
 `mem` resolved to `deep`, with the `powersave` governor set once at the top and
-in both arms. All twenty-two windows in the four runs are sound.
+in both arms. All twenty-three windows in the four runs are sound.
 
 - **First run:** 119, 116, 116 mA asleep in s2idle against 113, 110 and 114 in
   deep. 4.5 mA.
