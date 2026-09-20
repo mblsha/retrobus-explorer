@@ -175,6 +175,62 @@ class SuspendModeTests(unittest.TestCase):
             builder.patches_for("deep")
 
 
+class TheirFirmwareTests(unittest.TestCase):
+    """Ours slept at 105 mA and nobody had published what theirs draws. Built
+    from source beside ours and put on the same card, it slept at 68."""
+
+    def test_their_build_applies_their_patch_and_none_of_ours(self):
+        self.assertEqual(builder.patches_for(builder.THEIRS), [])
+        self.assertEqual(
+            builder.rocknix_tfa_patches_for(builder.THEIRS),
+            ["001-allwinner-h616-psci-system-suspend.patch"],
+        )
+
+    def test_no_build_of_ours_picks_their_patch_up(self):
+        for mode in builder.SUSPEND_MODES:
+            if mode != builder.THEIRS:
+                self.assertEqual(builder.rocknix_tfa_patches_for(mode), [], mode)
+
+    def test_their_stub_is_pinned_like_every_other_source(self):
+        stub = builder.manifest()["tarballs"]["suspend-stub"]
+        self.assertEqual(len(stub["version"]), 40)
+        self.assertEqual(len(stub["sha256"]), 64)
+        self.assertIn(stub["version"], stub["url"])
+
+    def test_only_their_build_fetches_and_embeds_the_stub(self):
+        command = dict(
+            runner=["docker"], work=Path("/work"), patches=Path("/repo/firmware"),
+            image="alpine:3.20",
+        )
+        theirs = builder.container_command(out=Path("/work/x"), mode=builder.THEIRS, **command)
+        stub = builder.manifest()["tarballs"]["suspend-stub"]
+        self.assertIn(f"STUB_SHA256={stub['sha256']}", theirs)
+        self.assertIn(
+            "TFA_OPTIONS=SUNXI_SUSPEND_STUB=/build/stub/suspend_stub_lpddr4.bin "
+            "SUNXI_SYSTEM_SUSPEND=1",
+            theirs,
+        )
+        ours = builder.container_command(out=Path("/work/x"), mode="sr", **command)
+        self.assertIn("STUB_FILE=", ours)
+        self.assertNotIn(f"STUB_SHA256={stub['sha256']}", ours)
+
+    def test_the_stub_is_built_from_the_bootloaders_own_patched_tree(self):
+        """Their stub compiles U-Boot's DRAM driver; it has to be the patched
+        one the bootloader is built from, and built before TF-A embeds it."""
+        order = [
+            builder.BUILD.index("u-boot patch"),
+            builder.BUILD.index("make -C /build/stub"),
+            builder.BUILD.index('make PLAT="$TFA_PLATFORM"'),
+        ]
+        self.assertEqual(order, sorted(order))
+
+    def test_their_output_does_not_land_among_the_pinned_files(self):
+        """The default output directory is the mode's name, and work/rocknix is
+        where the pinned files live and are checked for strays."""
+        self.assertNotEqual(builder.THEIRS, "rocknix")
+        self.assertNotIn("rocknix", set(builder.SUSPEND_MODES))
+
+
 class FirmwareContainerTests(unittest.TestCase):
     def command(self, **overrides):
         arguments = dict(

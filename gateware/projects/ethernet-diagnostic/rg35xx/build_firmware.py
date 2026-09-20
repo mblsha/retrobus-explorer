@@ -13,6 +13,12 @@ builds, nothing of ours added. `--suspend wfi` adds our TF-A patch, which
 implements PSCI SYSTEM_SUSPEND by stopping the CPU PLL and waiting in WFI.
 The `sr` modes add a second patch that moves the wait into a stub in SRAM A1
 with DRAM in self-refresh around it, one rung of the ladder each.
+
+`--suspend rocknix-deep` builds none of ours. It is the implementation this work
+was modelled on, kailashrs' TF-A patch and SRAM stub exactly as ROCKNIX pins
+and ships them, built from source beside the same two trees: it shuts the DRAM
+controller and PHY down and rebuilds them on resume, which ours does not, and
+the only way to say what that is worth is to measure it on the same card.
 """
 
 import argparse
@@ -41,6 +47,11 @@ SUSPEND_MODES = {
     "sr": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "1"},
     "sr-gate": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "2"},
     "sr-pll": {"SUNXI_SYSTEM_SUSPEND": "1", "SUNXI_SUSPEND_DRAM_LEVEL": "3"},
+    # Not ours: kailashrs' implementation exactly as ROCKNIX ships it, their
+    # TF-A patch and their SRAM stub at the commit ROCKNIX pins, so that what
+    # it draws can be measured beside ours on the same kernel and card.
+    "rocknix-deep": {"SUNXI_SYSTEM_SUSPEND": "1",
+                "SUNXI_SUSPEND_STUB": "/build/stub/suspend_stub_lpddr4.bin"},
 }
 
 # U-Boot stamps its version string and its FIT with the moment it was built,
@@ -80,11 +91,40 @@ mkdir tf-a u-boot
 tar xzf "/work/dl/$TFA_FILE" -C tf-a --strip-components=1
 tar xzf "/work/dl/$UBOOT_FILE" -C u-boot --strip-components=1
 
+cd /build/u-boot
+for p in /work/rocknix/patches/*.patch; do
+  echo "u-boot patch $p"
+  patch -p1 --batch --forward --silent < "$p"
+done
+cp /work/rocknix/configs/* configs/
+
 cd /build/tf-a
 for p in $TFA_PATCHES; do
   echo "tf-a patch $p"
   patch -p1 --batch --forward --silent < "/patches/$p"
 done
+for p in $TFA_ROCKNIX_PATCHES; do
+  echo "tf-a patch (ROCKNIX) $p"
+  patch -p1 --batch --forward --silent < "/work/rocknix/tfa-patches/$p"
+done
+
+if [ -n "$STUB_FILE" ]; then
+  # Their stub compiles U-Boot's own DRAM driver, from the tree the bootloader
+  # is built from, against the header their TF-A patch adds.
+  fetch "$STUB_FILE" "$STUB_URL" "$STUB_SHA256"
+  rm -rf /build/stub-src /build/stub
+  mkdir -p /build/stub-src /build/stub
+  tar xzf "/work/dl/$STUB_FILE" -C /build/stub-src --strip-components=1
+  make -C /build/stub -f /build/stub-src/Makefile SRC_DIR=/build/stub-src \
+      UBOOT_DIR=/build/u-boot ATF_DIR=/build/tf-a \
+      DEFCONFIG="/build/u-boot/configs/$UBOOT_DEFCONFIG" \
+      OUT=suspend_stub_lpddr4.bin CROSS_COMPILE= >/dev/null
+  cp /build/stub-src/suspend_stub_lpddr4.bin /build/stub/suspend_stub_lpddr4.bin
+  ls -l /build/stub/suspend_stub_lpddr4.bin
+  cp /build/stub/suspend_stub_lpddr4.bin /out/suspend_stub_lpddr4.bin
+fi
+
+cd /build/tf-a
 # CC has to be named: an empty CROSS_COMPILE makes TF-A fall back to the
 # aarch64-none-elf- prefix rather than to the native compiler, and every other
 # tool in the toolchain is derived from whatever CC turns out to be.
@@ -94,11 +134,6 @@ BL31="/build/tf-a/build/$TFA_PLATFORM/release/bl31.bin"
 ls -l "$BL31"
 
 cd /build/u-boot
-for p in /work/rocknix/patches/*.patch; do
-  echo "u-boot patch $p"
-  patch -p1 --batch --forward --silent < "$p"
-done
-cp /work/rocknix/configs/* configs/
 export SOURCE_DATE_EPOCH
 make ARCH=arm mrproper >/dev/null
 make ARCH=arm "$UBOOT_DEFCONFIG" >/dev/null
@@ -169,6 +204,25 @@ def verify_sources(work: Path, sources: Path = SOURCES) -> dict:
     return recorded
 
 
+# The one mode that builds their firmware and none of ours. It is not called
+# "rocknix" because the default output directory is <work>/<mode>, and
+# <work>/rocknix is where the pinned ROCKNIX files live and are checked for
+# strays.
+THEIRS = "rocknix-deep"
+ROCKNIX_TFA_PATCHES = "tfa-patches/"
+
+
+def rocknix_tfa_patches_for(mode: str, sources: Path = SOURCES) -> list[str]:
+    """ROCKNIX's own TF-A patches, which only the mode that builds theirs applies."""
+    if mode != THEIRS:
+        return []
+    return sorted(
+        name[len(ROCKNIX_TFA_PATCHES):]
+        for name in manifest(sources)["rocknix_files"]
+        if name.startswith(ROCKNIX_TFA_PATCHES)
+    )
+
+
 def patches_for(mode: str, sources: Path = SOURCES) -> list[str]:
     """Our own patches that belong in a build of this mode, in name order."""
     if mode not in SUSPEND_MODES:
@@ -179,6 +233,18 @@ def patches_for(mode: str, sources: Path = SOURCES) -> list[str]:
         for name, entry in recorded["our_patches"].items()
         if mode in entry["suspend"]
     )
+
+
+def _stub_environment(mode: str, tarballs: dict) -> dict:
+    """Where their stub comes from, or blanks for every mode that has no use for it."""
+    if mode != THEIRS:
+        return {"STUB_FILE": "", "STUB_URL": "", "STUB_SHA256": ""}
+    stub = tarballs["suspend-stub"]
+    return {
+        "STUB_FILE": f"h700-suspend-stub-{stub['version'][:12]}.tar.gz",
+        "STUB_URL": stub["url"],
+        "STUB_SHA256": stub["sha256"],
+    }
 
 
 def container_command(runner, work, patches, out, image, mode="none",
@@ -204,6 +270,8 @@ def container_command(runner, work, patches, out, image, mode="none",
             "UBOOT_SHA256": tarballs["u-boot"]["sha256"],
             "TFA_PLATFORM": recorded["tf_a_platform"],
             "TFA_PATCHES": " ".join(patches_for(mode, sources)),
+            "TFA_ROCKNIX_PATCHES": " ".join(rocknix_tfa_patches_for(mode, sources)),
+            **_stub_environment(mode, tarballs),
             "TFA_OPTIONS": " ".join(f"{k}={v}" for k, v in sorted(options.items())),
             "UBOOT_DEFCONFIG": recorded["defconfig"],
             "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH,
@@ -227,6 +295,8 @@ def describe(out: Path, mode: str, sources: Path = SOURCES) -> dict:
         "u_boot": recorded["tarballs"]["u-boot"]["version"],
         "tf_a": recorded["tarballs"]["tf-a"]["version"],
         "rocknix_commit": recorded["commit"],
+        "rocknix_tfa_patches": rocknix_tfa_patches_for(mode, sources),
+        "suspend_stub": recorded["tarballs"]["suspend-stub"]["version"] if mode == THEIRS else None,
         "our_patches": {
             name: hashlib.sha256((PATCHES / name).read_bytes()).hexdigest()
             for name in patches_for(mode, sources)
@@ -248,7 +318,9 @@ def main(argv=None):
                              "adds our PSCI SYSTEM_SUSPEND patch; wfi32 also parks "
                              "the cluster on the 32 kHz clock; sr puts DRAM into "
                              "self-refresh from a stub in SRAM; sr-gate also gates "
-                             "the DRAM and MBUS clocks; sr-pll also stops PLL_DDR0")
+                             "the DRAM and MBUS clocks; sr-pll also stops PLL_DDR0; "
+                             "rocknix-deep is not ours: ROCKNIX's own TF-A patch and "
+                             "SRAM stub, for measuring theirs beside ours")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--runner")
     parser.add_argument(
