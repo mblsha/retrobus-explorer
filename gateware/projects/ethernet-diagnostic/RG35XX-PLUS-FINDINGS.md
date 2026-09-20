@@ -891,8 +891,20 @@ PHY needs re-initialising after its clock stops -- the step this stub exists to
 avoid. Settling it needs the watchdog armed across the wait and a wake on its
 reset instead of on the alarm.
 
-Taking s2idle as the anchor in each boot, the firmware ladder is: stopping the
-CPU PLL about 4 mA, and the LPDDR4 in self-refresh about 8 mA more.
+Taking s2idle as the anchor in each boot, the whole firmware ladder is:
+
+```text
+rung      what it adds                        asleep      against s2idle   kept
+wfi       PLL_CPUX stopped                    112.5 mean      -4.5 mA      no
+sr        + LPDDR4 in self-refresh            104.7 mean     -11.6 mA      YES
+sr-gate   + DRAM bus and MBUS clock gates     101.3 mean     -14.7 mA      no
+sr-pll    + PLL_DDR0 stopped                  does not resume              no
+```
+
+**`sr` is the kept configuration**: the deepest rung that both pays and is
+fully proved, with eighteen sleeps behind it including ten consecutive and one
+of six minutes. `sr-gate` is 3.4 mA below it, which is less than half the
+threshold, on seven sleeps. `sr-pll` does not come back.
 
 ### Recommendations
 

@@ -1967,3 +1967,25 @@ and the step this stub was built to avoid. Whether it is worth taking is now a
 priced question rather than an open one: the two clock gates below it were
 worth three and a half milliamps, so PLL_DDR0 is unlikely to be worth more than
 a handful, against 72 mA still sitting in rails the PMIC controls.
+
+**Where the ladder stopped.** Taking s2idle as the anchor in each boot, and
+counting from the state the device ships in:
+
+```text
+rung      what it adds                        asleep      against s2idle   kept
+wfi       PLL_CPUX stopped                    112.5 mean      -4.5 mA      no
+sr        + LPDDR4 in self-refresh            104.7 mean     -11.6 mA      YES
+sr-gate   + DRAM bus and MBUS clock gates     101.3 mean     -14.7 mA      no
+sr-pll    + PLL_DDR0 stopped                  does not resume              no
+```
+
+`sr` is what the card was left carrying. It is the deepest rung that both pays
+and is fully proved -- eighteen sleeps, ten of them consecutive and one of them
+six minutes, every one with its memory checked -- and it is eleven and a half
+milliamps below where the day started. `sr-gate` is three and a half below that
+on a fifth of the evidence, which is not a difference this bench believes, and
+the rung above it does not come back at all.
+
+Which leaves 72 mA between a sleeping board and one that is off, and none of it
+in a clock tree. It is in rails, and rails are the PMIC, and nothing here
+writes a PMIC register on purpose.
