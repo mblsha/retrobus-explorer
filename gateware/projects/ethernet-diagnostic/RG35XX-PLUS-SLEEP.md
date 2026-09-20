@@ -628,7 +628,65 @@ sleeps: the two extra are 9.7 s long and read 166 and 176 mA, which is the
 target awake between cycles, not a sleep -- the DRAM probe's md5 is checked
 after each wake and that check takes long enough to look like a state.
 
-<!-- LADDER-PLL -->
+**`sr-pll` suspends and does not come back.** The board goes quiet at the
+suspend and stays quiet: in the FPGA's trace the card's clock is at zero edges
+a second from the moment the job marks the sleep until the harness gives up
+five minutes later, with the read counter frozen at the value it had going in
+and the card left selected. The RTC alarm was forty seconds out and nothing
+happened at forty seconds.
+
+What makes that a useful failure rather than just a dead end is what did
+**not** happen. There was no warm reset -- a reboot would have shown thousands
+of low-LBA reads in the trace and there are none -- so the watchdog never
+fired, so the hang is not in either of the two windows the stub arms it for.
+Those two windows are the self-refresh entry and the self-refresh exit, and
+both of them are byte-for-byte what `sr-gate` does, which works. The hang is
+therefore in the part in between: stopping PLL_DDR0, the WFI itself, or
+relocking PLL_DDR0 before the watchdog is armed again.
+
+The difference between the rung that works and the rung that does not is two
+register writes and their undo:
+
+```text
+going down   PLL_DDR0_CTRL_REG &= ~(PLL_ENABLE | PLL_LOCK_ENABLE)
+coming up    PLL_DDR0_CTRL_REG |=  (PLL_ENABLE | PLL_LOCK_ENABLE), wait for LOCK
+```
+
+**And the evidence for which of the three it is died with the 5 V.** The stub
+writes a stage code into an RTC scratch register at every step, and those
+registers are in the always-on domain -- but this board has no battery fitted,
+so "always on" means "while the USB-C port is powering it". A hang that the
+watchdog turns into a warm reset keeps them; a hang the watchdog does not cover
+ends in the harness cutting the power at `--run-seconds`, and takes them with
+it. Reproduced twice, identically.
+
+What would settle it is arming the watchdog across the WFI as well, which means
+waking on its reset rather than on the RTC alarm and reading the stage code on
+the next boot -- a different experiment, and one this note did not run. The
+likeliest answer, on the evidence that everything up to PLL_DDR0 works, is that
+the Allwinner PHY does not survive its clock stopping: coming back would need
+re-initialisation and re-training, which is exactly the step the prior art
+takes and this stub is built to avoid.
+
+### Where the ladder stopped, and what is kept
+
+```text
+rung      what it adds                        asleep      against s2idle   kept
+sr        LPDDR4 in self-refresh              104.7 mean     -11.6 mA      YES
+sr-gate   + DRAM bus and MBUS clock gates     101.3 mean     -14.7 mA      no
+sr-pll    + PLL_DDR0 stopped                  does not resume              no
+```
+
+`sr` is the kept configuration. It is the deepest rung that both pays and is
+fully proved: eleven and a half milliamps against s2idle in its own boot, ten
+consecutive cycles, and a six-minute sleep with its memory intact.
+
+`sr-gate` is three and a half milliamps below it, which is less than half of
+what this bench calls a difference, and it has seven sleeps behind it rather
+than eighteen. It is built, it works, and it is not the recommendation. The
+ladder's own rule -- stop climbing when a rung stops paying -- stops here, and
+the rung above it stops harder.
+
 
 
 
