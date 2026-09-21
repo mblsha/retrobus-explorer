@@ -113,8 +113,12 @@ jobs:
 
       - name: Test Ethernet host protocol and CDC guards (normal and optimized Python)
         run: |
-          "${GATEWARE_PYTHON}" -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
-          "${GATEWARE_PYTHON}" -O -m unittest discover -s projects/ethernet-diagnostic/test -p test_images_host.py
+          "${GATEWARE_PYTHON}" -m unittest discover \
+            -t projects/ethernet-diagnostic \
+            -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
+          "${GATEWARE_PYTHON}" -O -m unittest discover \
+            -t projects/ethernet-diagnostic \
+            -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
           "${GATEWARE_PYTHON}" -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
           "${GATEWARE_PYTHON}" -O -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
 
