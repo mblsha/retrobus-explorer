@@ -5,7 +5,9 @@ use super::{
     serial::{BitTime, FtBe, FtData, StopBits, UartRxOut, ft_tap, uart_rx, uart_tx_tap},
 };
 
+#[inline]
 fn au_usb_uart_bit_time() -> BitTime { 100 }
+#[inline]
 fn au_usb_uart_stop_bits() -> StopBits { 1 }
 
 #[inline]
