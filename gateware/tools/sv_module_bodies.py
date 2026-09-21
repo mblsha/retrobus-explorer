@@ -43,6 +43,10 @@ Usage:
   sv_module_bodies.py --diff <a> <b> --rename 'old=new' ...
                                                     treat `old` in BEFORE as
                                                     `new` when matching bodies
+  sv_module_bodies.py --diff <a> <b> --loose        also ignore what the nets
+                                                    are called, to tell a
+                                                    naming-only difference from
+                                                    a real one
 Exits non-zero when any body differs.
 """
 
@@ -66,6 +70,7 @@ ALIAS_ASSIGN = re.compile(rf"^\s*assign\s+({IDENT})\s*=\s*({IDENT})\s*;\s*$")
 TOKEN = re.compile(rf"(\\[^\s]+\s|\b[A-Za-z_][A-Za-z_0-9]*\b)")
 PORT_DECL = re.compile(r"^\s*(?:input|output|inout)\b.*?([A-Za-z_][A-Za-z_0-9]*)\s*,?\s*$")
 DECL = re.compile(r"\s*(logic|reg|localparam)\b")
+DECLARED = re.compile(rf"^\s*(?:logic|reg|localparam)\b[^;=]*?({IDENT})\s*(?:[;=]|$)")
 MODULE_NAME = re.compile(r"^module\s+(\\\S+|\w+)")
 
 
@@ -96,8 +101,55 @@ def _module_ports(lines: list[str]) -> set[str]:
     return ports
 
 
-def canonical_body(block: str) -> str:
-    """One module's text, with everything the compiler may rename normalised."""
+def _alpha_rename(body: list[str]) -> list[str]:
+    """Rename every net the module declares to `net0`, `net1`, ... by first use.
+
+    Spade suffixes a local when a name would collide (`\\r ` in one build,
+    `r_n0` in the next) and whether it collides depends on how many units are in
+    scope, so that spelling moves for reasons that have nothing to do with the
+    hardware. Renaming declared nets positionally makes two bodies compare equal
+    exactly when they are the same up to a consistent renaming of nets -- which
+    is what "naming only" means. Port names and everything that is not a
+    declared net, including keywords and instantiated module names, are left
+    alone.
+    """
+    declared: set[str] = set()
+    for line in body:
+        match = DECLARED.match(line)
+        if match:
+            declared.add(match.group(1).strip())
+    if not declared:
+        return body
+
+    mapping: dict[str, str] = {}
+    statements = [line for line in body if not DECL.match(line)]
+
+    def assign(match: re.Match) -> str:
+        raw = match.group(1).strip()
+        if raw in declared and raw not in mapping:
+            mapping[raw] = f"net{len(mapping)}"
+        return match.group(0)
+
+    for line in statements:
+        TOKEN.sub(assign, line)
+    for name in sorted(declared):  # declared but never used in a statement
+        mapping.setdefault(name, f"net{len(mapping)}")
+
+    def substitute(match: re.Match) -> str:
+        raw = match.group(1).strip()
+        return mapping.get(raw, match.group(0))
+
+    return [TOKEN.sub(substitute, line) for line in body]
+
+
+def canonical_body(block: str, loose: bool = False) -> str:
+    """One module's text, with everything the compiler may rename normalised.
+
+    `loose` additionally alpha-renames the nets the module declares, so that two
+    bodies which differ only in what the compiler called things compare equal.
+    Run the strict comparison first and reach for this one to answer "was that
+    difference only naming?".
+    """
     lines = SRC_ATTR.sub("", block).splitlines()
     ports = _module_ports(lines)
 
@@ -150,6 +202,8 @@ def canonical_body(block: str) -> str:
         return mapping[token]
 
     body = NUMBERED.sub(renumber, "\n".join(out)).splitlines()
+    if loose:
+        body = _alpha_rename(body)
     # Collapsing an alias chain leaves one declaration per hop, all now spelling
     # the same net, and a chain's length depends on the same unstable ordering.
     # Two identical declarations can only come from that, since real Verilog
@@ -184,6 +238,7 @@ def canonical_modules(
     text: str,
     renames: dict[str, str] | None = None,
     drop_build_info: bool = True,
+    loose: bool = False,
 ) -> list[str]:
     """Every module's canonical body, sorted, ready to compare as a multiset.
 
@@ -202,7 +257,7 @@ def canonical_modules(
     blocks = split_modules(text)
     if drop_build_info:
         blocks = [b for b in blocks if "::build_info::" not in module_name(b)]
-    return sorted(canonical_body(b) for b in blocks)
+    return sorted(canonical_body(b, loose) for b in blocks)
 
 
 def _pairs(a: Path, b: Path) -> list[tuple[str, Path, Path]]:
@@ -217,6 +272,7 @@ def diff(
     b: Path,
     renames: dict[str, str] | None = None,
     verbose: bool = False,
+    loose: bool = False,
     out=sys.stdout,
 ) -> int:
     differing = 0
@@ -226,8 +282,8 @@ def diff(
             print(f"MISSING {name}", file=out)
             differing += 1
             continue
-        before = canonical_modules(left.read_text(), renames)
-        after = canonical_modules(right.read_text())
+        before = canonical_modules(left.read_text(), renames, loose=loose)
+        after = canonical_modules(right.read_text(), loose=loose)
         if before == after:
             print(f"same    {name} ({len(before)} modules)", file=out)
             continue
@@ -262,6 +318,9 @@ def main() -> int:
                         help="rename OLD to NEW in BEFORE before comparing")
     parser.add_argument("--verbose", action="store_true",
                         help="print a body diff for the first differing module")
+    parser.add_argument("--loose", action="store_true",
+                        help="also alpha-rename declared nets, to answer "
+                             "'was that difference only naming?'")
     parser.add_argument("files", nargs="*", type=Path, help="generated .sv files to print")
     args = parser.parse_args()
 
@@ -273,12 +332,14 @@ def main() -> int:
         renames[old] = new
 
     if args.diff:
-        return 1 if diff(Path(args.diff[0]), Path(args.diff[1]), renames, args.verbose) else 0
+        moved = diff(Path(args.diff[0]), Path(args.diff[1]), renames,
+                     args.verbose, args.loose)
+        return 1 if moved else 0
 
     if not args.files:
         parser.error("pass at least one .sv file, or --diff BEFORE AFTER")
     for path in args.files:
-        for block in canonical_modules(path.read_text(), renames):
+        for block in canonical_modules(path.read_text(), renames, loose=args.loose):
             sys.stdout.write(block)
     return 0
 
