@@ -1,4 +1,9 @@
-use std::mem::{clocked_memory, clocked_memory_init, read_memory};
+use std::mem::{clocked_memory, read_memory};
+
+/// One of the sixteen independent 4 KiB banks the resident image is split into.
+/// Spelling it once keeps the bank size in a single place, and the sixteen
+/// declarations below then say only which bank they are.
+type ImageBank = Memory<uint<8>, 4096>;
 
 // Resident 64 KiB image, sparse-zero through the advertised 8 MiB capacity.
 // Image writes are permitted only while disarmed. The caller must load/validate
@@ -30,82 +35,82 @@ pub entity bram_backend(
     let accept_load = !armed && load_address < 65536 && !rst;
     // Independent 4 KiB banks avoid RAMB36 cascade placement in nextpnr-xilinx.
     let image_address: uint<12> = (trunc::<uint<32>, uint<12>>(saved_lba) << 9) | zext(offset);
-    let image_0: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_0: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 0, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_0 = inst read_memory(image_0, image_address);
-    let image_1: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_1: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 1, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_1 = inst read_memory(image_1, image_address);
-    let image_2: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_2: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 2, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_2 = inst read_memory(image_2, image_address);
-    let image_3: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_3: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 3, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_3 = inst read_memory(image_3, image_address);
-    let image_4: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_4: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 4, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_4 = inst read_memory(image_4, image_address);
-    let image_5: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_5: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 5, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_5 = inst read_memory(image_5, image_address);
-    let image_6: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_6: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 6, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_6 = inst read_memory(image_6, image_address);
-    let image_7: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_7: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 7, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_7 = inst read_memory(image_7, image_address);
-    let image_8: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_8: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 8, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_8 = inst read_memory(image_8, image_address);
-    let image_9: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_9: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 9, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_9 = inst read_memory(image_9, image_address);
-    let image_10: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_10: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 10, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_10 = inst read_memory(image_10, image_address);
-    let image_11: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_11: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 11, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_11 = inst read_memory(image_11, image_address);
-    let image_12: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_12: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 12, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_12 = inst read_memory(image_12, image_address);
-    let image_13: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_13: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 13, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_13 = inst read_memory(image_13, image_address);
-    let image_14: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_14: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 14, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );
     reg(clk) read_14 = inst read_memory(image_14, image_address);
-    let image_15: Memory<uint<8>, 4096> = inst clocked_memory(
+    let image_15: ImageBank = inst clocked_memory(
         clk,
         [(load_valid && accept_load && (load_address >> 12) == 15, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
     );

@@ -57,7 +57,14 @@ pub struct FifoUsedOut<TData, TUsed> {
 }
 
 pub type FifoUsed<#uint WIDTH, #uint ENTRIES> =
-    FifoUsedOut<uint<WIDTH>, uint<{uint::bits_for(ENTRIES)}>>;
+    FifoUsedOut<uint<WIDTH>, FifoCount<ENTRIES>>;
+
+/// The type of an index into a FIFO's `ENTRIES` storage slots.
+pub type FifoAddr<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES - 1)}>;
+
+/// The type of a FIFO's occupancy, which reaches `ENTRIES` and so needs one
+/// bit more than an address does.
+pub type FifoCount<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES)}>;
 
 struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
     waddr: uint<ADDR_W>,
@@ -102,10 +109,10 @@ where
             storage: [0; ENTRIES],
         ))
         = {
-            let waddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr;
-            let waddr_delay: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr_delay;
-            let raddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.raddr;
-            let used: uint<{uint::bits_for(ENTRIES)}> = state.used;
+            let waddr: FifoAddr<ENTRIES> = state.waddr;
+            let waddr_delay: FifoAddr<ENTRIES> = state.waddr_delay;
+            let raddr: FifoAddr<ENTRIES> = state.raddr;
+            let used: FifoCount<ENTRIES> = state.used;
             let storage: [uint<WIDTH>; ENTRIES] = state.storage;
 
             let next_write = ptr_inc(waddr);
@@ -141,10 +148,10 @@ where
             )
         };
 
-    let waddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr;
-    let waddr_delay: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr_delay;
-    let raddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.raddr;
-    let used: uint<{uint::bits_for(ENTRIES)}> = state.used;
+    let waddr: FifoAddr<ENTRIES> = state.waddr;
+    let waddr_delay: FifoAddr<ENTRIES> = state.waddr_delay;
+    let raddr: FifoAddr<ENTRIES> = state.raddr;
+    let used: FifoCount<ENTRIES> = state.used;
     let read_data: uint<WIDTH> = state.read_data;
 
     let next_write = ptr_inc(waddr);
