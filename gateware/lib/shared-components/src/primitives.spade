@@ -1,5 +1,3 @@
-use super::guards::{require_positive, require_positive_int};
-
 pipeline(STAGES) sync_delay_pipe<#int STAGES>(
     clk: clock,
     input_signal: bool,
@@ -11,8 +9,9 @@ pipeline(STAGES) sync_delay_pipe<#int STAGES>(
 pub entity sync_delay<#int STAGES>(
     clk: clock,
     input_signal: bool,
-) -> bool {
-    let _ = require_positive_int::<STAGES>();
+) -> bool
+where STAGES > 0 else "sync_delay needs at least one register stage"
+{
     inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
@@ -27,8 +26,9 @@ pipeline(STAGES) sync_bundle_pipe<#int STAGES, #uint N>(
 pub entity sync_bundle<#int STAGES, #uint N>(
     clk: clock,
     input_signals: [bool; N],
-) -> [bool; N] {
-    let _ = require_positive_int::<STAGES>();
+) -> [bool; N]
+where STAGES > 0 else "sync_bundle needs at least one register stage"
+{
     inst(STAGES) sync_bundle_pipe::<STAGES, N>(clk, input_signals)
 }
 
@@ -95,9 +95,9 @@ pub entity sync_z80_controls_n<#int M1_STAGES, #int MREQ_STAGES, #int IORQ_STAGE
 pub entity reset_conditioner<#uint STAGES>(
     clk: clock,
     in_reset: bool,
-) -> bool {
-    let _ = require_positive::<STAGES>();
-
+) -> bool
+where STAGES > 0 else "reset_conditioner needs at least one register stage"
+{
     // DRY generic implementation of Alchitry-style conditioner:
     // assert immediately via `in_reset`, release after STAGES clocks.
     reg(clk) stages: [bool; STAGES] reset(in_reset: [true; STAGES]) =

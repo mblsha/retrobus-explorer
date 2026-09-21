@@ -1,4 +1,4 @@
-use super::guards::{require_at_least_two, require_positive, require_power_of_two};
+use super::guards::require_power_of_two;
 
 #[no_mangle(all)]
 extern entity async_fifo_v<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
@@ -84,9 +84,11 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
     din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> FifoUsed<WIDTH, ENTRIES> {
-    let _ = require_positive::<WIDTH>();
-    let _ = require_at_least_two::<ENTRIES>();
+) -> FifoUsed<WIDTH, ENTRIES>
+where
+    WIDTH > 0 else "a fifo needs at least one data bit",
+    ENTRIES >= 2 else "a fifo needs at least two entries",
+{
     let _ = require_power_of_two::<ENTRIES>();
 
     // Packed state to avoid declaration-order dependency issues across interlocked regs.
@@ -176,11 +178,13 @@ pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     rclk: clock,
     rrst: bool,
     rget: bool,
-) -> FifoOut<uint<WIDTH>> {
-    let _ = require_positive::<WIDTH>();
-    let _ = require_at_least_two::<ENTRIES>();
+) -> FifoOut<uint<WIDTH>>
+where
+    WIDTH > 0 else "an async fifo needs at least one data bit",
+    ENTRIES >= 2 else "an async fifo needs at least two entries",
+    SYNC_STAGES > 0 else "an async fifo needs at least one synchronizer stage",
+{
     let _ = require_power_of_two::<ENTRIES>();
-    let _ = require_positive::<SYNC_STAGES>();
 
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port();
     #[verilog_attrs(keep_hierarchy = "yes")]
@@ -209,9 +213,11 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
     din: uint<WIDTH>,
     wput: bool,
     rget: bool,
-) -> FifoOut<uint<WIDTH>> {
-    let _ = require_positive::<WIDTH>();
-    let _ = require_at_least_two::<ENTRIES>();
+) -> FifoOut<uint<WIDTH>>
+where
+    WIDTH > 0 else "a sync fifo needs at least one data bit",
+    ENTRIES >= 2 else "a sync fifo needs at least two entries",
+{
     let _ = require_power_of_two::<ENTRIES>();
 
     let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port();

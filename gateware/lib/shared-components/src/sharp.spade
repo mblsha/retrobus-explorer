@@ -1,5 +1,3 @@
-use super::guards::require_positive;
-
 pub entity count_on_event<#uint WIDTH>(
     clk: clock,
     rst: bool,
@@ -18,9 +16,9 @@ pub entity wait_hold_n<#uint RELOAD>(
     rst: bool,
     mreq_fall: bool,
     iorq_fall: bool,
-) -> bool {
-    let _ = require_positive::<RELOAD>();
-
+) -> bool
+where RELOAD > 0 else "wait_hold_n needs a non-zero reload count"
+{
     let wait_reload: uint<{uint::bits_for(RELOAD)}> = RELOAD;
     let wait_zero: uint<{uint::bits_for(RELOAD)}> = 0;
     reg(clk) wait_counter: uint<{uint::bits_for(RELOAD)}> reset(rst: 0) = if mreq_fall || iorq_fall {

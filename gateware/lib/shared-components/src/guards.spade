@@ -1,20 +1,33 @@
-pub fn require_positive<#uint N>() -> bool {
-    let _check: uint<{uint::bits_for(N - 1)}> = 0;
+/// The one compile-time requirement this library cannot state as a `where`
+/// clause on the unit that needs it.
+///
+/// Everything else -- "at least one stage", "at least two entries", "a width
+/// greater than zero" -- is now a `where N > 0 else "..."` beside the generic
+/// it constrains, which is where a reader looks for it and where the compiler
+/// can quote a message from.
+///
+/// "`N` is a power of two" resists that. A `where` clause takes a bare generic
+/// name on its left and a type expression on its right, and type expressions
+/// have no shift and no exponentiation, so `N == 1 << k` cannot be written.
+/// The property can be stated about `N`'s *width* instead: `uint::bits_for`
+/// grows by one exactly at a power of two, so `bits_for(N - 1) < bits_for(N)`
+/// holds for those `N` and no others. `LOWER` exists to carry that width, so
+/// the comparison has a bare name on its left; it is inferred from the first
+/// clause, so callers still pass only `N`.
+///
+/// Both units are `#[inline]`, so this costs no module in the generated
+/// SystemVerilog -- which was the point of retiring the other guards.
+#[inline]
+fn power_of_two_check<#uint N, #uint LOWER>() -> bool
+where
+    LOWER == uint::bits_for(N - 1),
+    LOWER < uint::bits_for(N) else "must be a power of two",
+{
     true
 }
 
-pub fn require_positive_int<#int N>() -> bool {
-    let _check: uint<{uint::bits_for(N - 1)}> = 0;
-    true
-}
-
-pub fn require_at_least_two<#uint N>() -> bool {
-    let _check: uint<{uint::bits_for(N - 2)}> = 0;
-    true
-}
-
+/// Fails compilation unless `N` is a power of two.
+#[inline]
 pub fn require_power_of_two<#uint N>() -> bool {
-    let fit_n: uint<{uint::bits_for(N)}> = 0;
-    let _fit_n_expected: uint<{uint::bits_for(N - 1) + 1}> = fit_n;
-    true
+    power_of_two_check::<N, _>()
 }
