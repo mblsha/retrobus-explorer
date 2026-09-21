@@ -11,15 +11,14 @@ fn default_digit_decode() -> DigitDecode {
     DigitDecode$(valid: false, value: 0)
 }
 
-entity decode_rx_digit(
-    clk: clock,
+fn decode_rx_digit(
     rx_valid: bool,
     rx_parity_error: bool,
     rx_byte: uint<8>,
 ) -> Option<DigitDecode> {
     let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
 
-    maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
+    maybe_rx_byte.map(fn |byte| {
         let digit_valid = byte.is_digit();
         DigitDecode$(
             valid: digit_valid,
@@ -56,7 +55,7 @@ entity main(
     let rst = inst reset_conditioner(clk, rst_in);
 
     let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
-    let rx_digit = inst decode_rx_digit(clk, rx_out.valid, rx_out.parity_error, rx_out.byte)
+    let rx_digit = decode_rx_digit(rx_out.valid, rx_out.parity_error, rx_out.byte)
         .unwrap_or(default_digit_decode());
     let (tx_line, tx_line_w): (bool, inv bool) = port();
     let (tx_busy, tx_busy_w): (bool, inv bool) = port();

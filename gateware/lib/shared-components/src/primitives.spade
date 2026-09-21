@@ -113,7 +113,7 @@ where STAGES > 0 else "reset_conditioner needs at least one register stage"
     // DRY generic implementation of Alchitry-style conditioner:
     // assert immediately via `in_reset`, release after STAGES clocks.
     reg(clk) stages: [bool; STAGES] reset(in_reset: [true; STAGES]) =
-        std::conv::concat_arrays([false], stages[0..STAGES - 1]);
+        [false].concat(stages[0..STAGES - 1]);
     let top = stages[STAGES - 1..STAGES][0];
     in_reset || top
 }
