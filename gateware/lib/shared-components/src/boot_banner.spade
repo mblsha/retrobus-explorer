@@ -4,6 +4,10 @@ use super::{
     serial::UartLineBusyPort,
 };
 
+// `IDX_W` is `uint::bits_for(N - 1)` for the banner length `N` every caller
+// pairs it with, and cannot be removed: see the note on `FifoImplState` in
+// `memory.spade`. v0.20.0 rejects a type expression in a struct member, and the
+// type-alias spelling makes the compiler panic.
 pub struct BootBannerState<#uint IDX_W> {
     active: bool,
     idx: uint<IDX_W>,

@@ -66,6 +66,19 @@ pub type FifoAddr<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES - 1)}>;
 /// bit more than an address does.
 pub type FifoCount<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES)}>;
 
+// `ADDR_W` and `COUNT_W` are not independent: they are `FifoAddr<ENTRIES>` and
+// `FifoCount<ENTRIES>`, restated by the one caller. They stay anyway, because
+// v0.20.0 will not evaluate a type expression in a struct member:
+//
+//     waddr: uint<{uint::bits_for(ENTRIES - 1)}>,
+//     error: Struct members cannot have const generics in their type
+//
+// and routing it through the `FifoAddr<ENTRIES>` alias instead crashes the
+// compiler outright ("internal error: entered unreachable code: Const generic in
+// type_expr_to_concrete", spade-typeinference/src/mir_type_lowering.rs:201).
+// Same answer for `BootBannerState`'s `IDX_W`. Worth retrying after a compiler
+// bump; until then the two widths are passed in and the `where` clause above is
+// what keeps a caller from passing something inconsistent.
 struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
     waddr: uint<ADDR_W>,
     waddr_delay: uint<ADDR_W>,
