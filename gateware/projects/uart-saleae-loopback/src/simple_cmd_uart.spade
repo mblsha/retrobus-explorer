@@ -38,12 +38,14 @@ fn max_supported_freq_code() -> uint<4> {
     5
 }
 
-fn default_rx_byte_decode() -> RxByteDecode {
-    RxByteDecode$(
-        byte: 0,
-        upper: 0,
-        digit: DigitDecode$(valid: false, value: 0),
-    )
+impl Default for RxByteDecode {
+    fn default() -> Self {
+        RxByteDecode$(
+            byte: 0,
+            upper: 0,
+            digit: DigitDecode$(valid: false, value: 0),
+        )
+    }
 }
 
 fn decode_rx_byte(
@@ -288,7 +290,7 @@ pub entity simple_cmd_uart_core(
     let (rx_ok, rx_decode) = if let Some(decoded) = rx_decoded {
         (true, decoded)
     } else {
-        (false, default_rx_byte_decode())
+        (false, RxByteDecode::default())
     };
 
     reg(clk) cmd_state: CmdParseState reset(rst: CmdParseState::Idle()) = {

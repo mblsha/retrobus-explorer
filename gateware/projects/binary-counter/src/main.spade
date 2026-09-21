@@ -7,8 +7,10 @@ use shared_components::{
     serial::{uart_rx, uart_tx},
 };
 
-fn default_digit_decode() -> DigitDecode {
-    DigitDecode$(valid: false, value: 0)
+impl Default for DigitDecode {
+    fn default() -> Self {
+        DigitDecode$(valid: false, value: 0)
+    }
 }
 
 fn decode_rx_digit(
@@ -56,7 +58,7 @@ entity main(
 
     let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
     let rx_digit = decode_rx_digit(rx_out.valid, rx_out.parity_error, rx_out.byte)
-        .unwrap_or(default_digit_decode());
+        .unwrap_or(DigitDecode::default());
     let (tx_line, tx_line_w): (bool, inv bool) = port();
     let (tx_busy, tx_busy_w): (bool, inv bool) = port();
     let boot_banner_out = inst boot_banner_core::<8, 84>(

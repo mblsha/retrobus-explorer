@@ -184,34 +184,36 @@ fn init_console_stream() -> ConsoleStreamState {
     init_byte_msg_stream(ConsoleMsg::None())
 }
 
-fn reset_main_state() -> MainState {
-    MainState$(
-        wait: WaitRegs$(
-            sample_state: SampleState::SampleBus(),
-            enabled: 0,
-            counter: 0,
-            last_addr: 0,
-        ),
-        saleae: SaleaeRegs$(
-            state: SaleaeState::DataSignals(),
-            counter: 0,
-        ),
-        ft: FtRegs$(
-            enabled: false,
-            state: FtState::GetFifo(),
-            cur_value: 0,
-            fifo_full_counter: 0,
-            remote_allowed: false,
-            armed: false,
-        ),
-        capture: CaptureRegs$(
-            addr_d0: 0,
-            addr: 0,
-            data_d0: 0,
-            data: 0,
-        ),
-        console_stream: init_console_stream(),
-    )
+impl Default for MainState {
+    fn default() -> Self {
+        MainState$(
+            wait: WaitRegs$(
+                sample_state: SampleState::SampleBus(),
+                enabled: 0,
+                counter: 0,
+                last_addr: 0,
+            ),
+            saleae: SaleaeRegs$(
+                state: SaleaeState::DataSignals(),
+                counter: 0,
+            ),
+            ft: FtRegs$(
+                enabled: false,
+                state: FtState::GetFifo(),
+                cur_value: 0,
+                fifo_full_counter: 0,
+                remote_allowed: false,
+                armed: false,
+            ),
+            capture: CaptureRegs$(
+                addr_d0: 0,
+                addr: 0,
+                data_d0: 0,
+                data: 0,
+            ),
+            console_stream: init_console_stream(),
+        )
+    }
 }
 
 fn console_effect_keep(ft: FtRegs, enabled: bool, msg: ConsoleMsg) -> ConsoleCmdEffect {
@@ -621,7 +623,7 @@ entity main_core(
     );
 
     reg(clk) state: MainState
-        reset(rst: reset_main_state())
+        reset(rst: MainState::default())
         = {
             let eval = state.eval(inputs);
             eval.next_state

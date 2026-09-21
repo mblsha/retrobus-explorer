@@ -104,26 +104,32 @@ entity organizer_monitor_uart<#uint WIDTH>(
     uart.line
 }
 
-fn empty_queued_sample() -> QueuedSample {
-    QueuedSample$(valid: false, sample: organizer_zero_sample())
+impl Default for QueuedSample {
+    fn default() -> Self {
+        QueuedSample$(valid: false, sample: organizer_zero_sample())
+    }
 }
 
-fn empty_queued_samples() -> OrganizerQueuedSamples {
-    OrganizerQueuedSamples$(
-        first: empty_queued_sample(),
-        second: empty_queued_sample(),
-        third: empty_queued_sample(),
-    )
+impl Default for OrganizerQueuedSamples {
+    fn default() -> Self {
+        OrganizerQueuedSamples$(
+            first: QueuedSample::default(),
+            second: QueuedSample::default(),
+            third: QueuedSample::default(),
+        )
+    }
 }
 
-pub(lib) fn reset_monitor_state() -> OrganizerMonitorState {
-    OrganizerMonitorState$(
-        addr: stable_sample_reset::<20, 8>(0),
-        data: stable_sample_reset::<8, 8>(0),
-        misc: stable_sample_reset::<11, 8>(0),
-        queued: empty_queued_samples(),
-        overflow_count: 0,
-    )
+impl Default for OrganizerMonitorState {
+    fn default() -> Self {
+        OrganizerMonitorState$(
+            addr: stable_sample_reset::<20, 8>(0),
+            data: stable_sample_reset::<8, 8>(0),
+            misc: stable_sample_reset::<11, 8>(0),
+            queued: OrganizerQueuedSamples::default(),
+            overflow_count: 0,
+        )
+    }
 }
 
 fn queue_push(queue: OrganizerQueuedSamples, sample_valid: bool, sample: OrganizerSample) -> QueuePushOut {
@@ -167,7 +173,7 @@ fn queue_pop(queue: OrganizerQueuedSamples) -> QueuePopOut {
         queue: OrganizerQueuedSamples$(
             first: queue.second,
             second: queue.third,
-            third: empty_queued_sample(),
+            third: QueuedSample::default(),
         ),
     )
 }
@@ -227,7 +233,7 @@ impl OrganizerMonitorState {
                     addr: addr_step.next_state,
                     data: data_step.next_state,
                     misc: misc_step.next_state,
-                    queued: empty_queued_samples(),
+                    queued: OrganizerQueuedSamples::default(),
                     overflow_count: 0,
                 ),
                 samples: samples,

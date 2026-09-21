@@ -35,12 +35,14 @@ pub struct ParserStepOut {
     event: ParserEvent,
 }
 
-pub fn init_line_parser() -> LineParserState {
-    LineParserState$(
-        phase: ParserPhase::Idle(),
-        word: 0,
-        be: 0x3,
-    )
+impl Default for LineParserState {
+    fn default() -> Self {
+        LineParserState$(
+            phase: ParserPhase::Idle(),
+            word: 0,
+            be: 0x3,
+        )
+    }
 }
 
 pub fn parser_event_none() -> ParserEvent {
@@ -87,7 +89,7 @@ fn parser_step(state: LineParserState, phase: ParserPhase, word: FtData, be: FtB
 }
 
 fn parser_error() -> ParserStepOut {
-    ParserStepOut$(state: init_line_parser(), event: ParserEvent::ParseErr())
+    ParserStepOut$(state: LineParserState::default(), event: ParserEvent::ParseErr())
 }
 pub fn line_parser_step(
     state: LineParserState,
@@ -144,7 +146,7 @@ pub fn line_parser_step(
                 if rx_byte == b'/' {
                     parser_step(state, ParserPhase::NeedBeLineEnd(), state.word, state.be, ParserEvent::None())
                 } else if rx_byte.is_line_end() {
-                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Send(state.word, state.be))
+                    parser_step(LineParserState::default(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Send(state.word, state.be))
                 } else {
                     parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
@@ -165,14 +167,14 @@ pub fn line_parser_step(
             },
             ParserPhase::CmdHelp => {
                 if rx_byte.is_line_end() {
-                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Help())
+                    parser_step(LineParserState::default(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Help())
                 } else {
                     parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
                 }
             },
             ParserPhase::CmdStatus => {
                 if rx_byte.is_line_end() {
-                    parser_step(init_line_parser(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Status())
+                    parser_step(LineParserState::default(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Status())
                 } else {
                     parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
                 }

@@ -129,8 +129,10 @@ pub(lib) struct ParserStepOut {
     echo: EchoMsg,
 }
 
-pub(lib) fn init_parser() -> ParserState {
-    ParserState::Idle()
+impl Default for ParserState {
+    fn default() -> Self {
+        ParserState::Idle()
+    }
 }
 
 

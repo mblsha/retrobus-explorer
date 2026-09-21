@@ -29,12 +29,14 @@ struct PinTesterStep {
     echo: TxReq8,
 }
 
-fn reset_pin_tester_state() -> PinTesterState {
-    PinTesterState$(
-        mode: PinTesterMode::Receive(),
-        bank: 0,
-        counter: 0,
-    )
+impl Default for PinTesterState {
+    fn default() -> Self {
+        PinTesterState$(
+            mode: PinTesterMode::Receive(),
+            bank: 0,
+            counter: 0,
+        )
+    }
 }
 
 fn is_bank_command(byte: uint<8>) -> bool {
@@ -126,7 +128,7 @@ entity main_core(
     let rx_valid = rx.valid && !rx.parity_error;
 
     reg(clk) state: PinTesterState
-        reset(rst: reset_pin_tester_state())
+        reset(rst: PinTesterState::default())
         = pin_tester_step(state, rx_valid, rx.byte).next_state;
     let step = pin_tester_step(state, rx_valid, rx.byte);
 

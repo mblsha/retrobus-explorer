@@ -83,18 +83,20 @@ pub struct StreamingRomOut {
     streaming_index: FtWord,
 }
 
-pub fn reset_streaming_rom_state() -> StreamingRomState {
-    StreamingRomState$(
-        read_state: ReadState::Init(),
-        streaming_state: StreamingState::Ready(),
-        num_data_request: 0,
-        num_streaming_bank: 0,
-        streaming_data_size: 0,
-        streaming_index: 0,
-        write_byte2: 0,
-        last_bank: 0,
-        last_addr: 0,
-    )
+impl Default for StreamingRomState {
+    fn default() -> Self {
+        StreamingRomState$(
+            read_state: ReadState::Init(),
+            streaming_state: StreamingState::Ready(),
+            num_data_request: 0,
+            num_streaming_bank: 0,
+            streaming_data_size: 0,
+            streaming_index: 0,
+            write_byte2: 0,
+            last_bank: 0,
+            last_addr: 0,
+        )
+    }
 }
 
 pub fn read_state_code(state: ReadState) -> uint<3> {
@@ -363,7 +365,7 @@ pub entity streaming_rom_core(
     rst: bool,
     inputs: StreamingRomInputs,
 ) -> StreamingRomOut {
-    reg(clk) state: StreamingRomState reset(rst: reset_streaming_rom_state()) =
+    reg(clk) state: StreamingRomState reset(rst: StreamingRomState::default()) =
         state.step(inputs).next_state;
     let step = state.step(inputs);
 

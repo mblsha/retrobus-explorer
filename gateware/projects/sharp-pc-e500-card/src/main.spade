@@ -392,61 +392,73 @@ fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
     )
 }
 
-fn init_access_cycle_state() -> AccessCycleState {
-    AccessCycleState$(
-        prev_ce: false,
-        classified: false,
-        is_read: false,
-        wait_ctr: 0,
-        start_tick: 0,
-        latched_addr: 0,
-        latched_write_data: 0,
-    )
+impl Default for AccessCycleState {
+    fn default() -> Self {
+        AccessCycleState$(
+            prev_ce: false,
+            classified: false,
+            is_read: false,
+            wait_ctr: 0,
+            start_tick: 0,
+            latched_addr: 0,
+            latched_write_data: 0,
+        )
+    }
 }
 
-fn init_ctrl_write_state() -> CtrlWriteState {
-    CtrlWriteState$(
-        active: false,
-        fired: false,
-        wait_ctr: 0,
-    )
+impl Default for CtrlWriteState {
+    fn default() -> Self {
+        CtrlWriteState$(
+            active: false,
+            fired: false,
+            wait_ctr: 0,
+        )
+    }
 }
 
-fn init_sampled_bus_state() -> SampledBusState {
-    SampledBusState$(
-        active: false,
-        from_cycle_start: false,
-        wait_ctr: 0,
-        cycle_seen: false,
-        cycle_phase: 0,
-        cycles_since_cycle_start: 0,
-        synthetic_armed: false,
-    )
+impl Default for SampledBusState {
+    fn default() -> Self {
+        SampledBusState$(
+            active: false,
+            from_cycle_start: false,
+            wait_ctr: 0,
+            cycle_seen: false,
+            cycle_phase: 0,
+            cycles_since_cycle_start: 0,
+            synthetic_armed: false,
+        )
+    }
 }
 
-fn init_port_overrun_state() -> PortOverrunState {
-    PortOverrunState$(
-        pending_count: 0,
-        idx: 0,
-    )
+impl Default for PortOverrunState {
+    fn default() -> Self {
+        PortOverrunState$(
+            pending_count: 0,
+            idx: 0,
+        )
+    }
 }
 
-fn init_mem_clear_state() -> MemClearState {
-    MemClearState$(
-        active: true,
-        addr: 0,
-    )
+impl Default for MemClearState {
+    fn default() -> Self {
+        MemClearState$(
+            active: true,
+            addr: 0,
+        )
+    }
 }
 
-fn init_measure_capture_state() -> MeasureCaptureState {
-    MeasureCaptureState$(
-        armed: false,
-        start_tag: 0,
-        start_tick: 0,
-        start_event_count: 0,
-        start_addr_uart_count: 0,
-        start_ft_overflow_count: 0,
-    )
+impl Default for MeasureCaptureState {
+    fn default() -> Self {
+        MeasureCaptureState$(
+            armed: false,
+            start_tag: 0,
+            start_tick: 0,
+            start_event_count: 0,
+            start_addr_uart_count: 0,
+            start_ft_overflow_count: 0,
+        )
+    }
 }
 
 fn init_measure_pending_state() -> ElasticSlotState<MeasureReport> {
@@ -462,37 +474,45 @@ fn init_measure_pending_state() -> ElasticSlotState<MeasureReport> {
     )
 }
 
-fn init_measure_engine_state() -> MeasureEngineState {
-    MeasureEngineState$(
-        dump_active: false,
-        stream: init_measure_stream(),
-    )
+impl Default for MeasureEngineState {
+    fn default() -> Self {
+        MeasureEngineState$(
+            dump_active: false,
+            stream: init_measure_stream(),
+        )
+    }
 }
 
 fn init_ft_ingress_state() -> ElasticSlotState<SampledBusWord> {
     elastic_slot_reset(0)
 }
 
-fn init_ft_stream_regs() -> FtStreamRegs {
-    FtStreamRegs$(
-        state: FtWordStreamState::GetFifo(),
-        cur_value: 0,
-    )
+impl Default for FtStreamRegs {
+    fn default() -> Self {
+        FtStreamRegs$(
+            state: FtWordStreamState::GetFifo(),
+            cur_value: 0,
+        )
+    }
 }
 
-fn init_ft_uart_session_state() -> FtUartSessionState {
-    FtUartSessionState$(
-        active: false,
-        base_overflow_count: 0,
-        last_overflow_delta: 0,
-    )
+impl Default for FtUartSessionState {
+    fn default() -> Self {
+        FtUartSessionState$(
+            active: false,
+            base_overflow_count: 0,
+            last_overflow_delta: 0,
+        )
+    }
 }
 
-fn init_parser_front_stage() -> ParserFrontStage {
-    ParserFrontStage$(
-        event: ParserEvent::None(),
-        echo: EchoMsg::None(),
-    )
+impl Default for ParserFrontStage {
+    fn default() -> Self {
+        ParserFrontStage$(
+            event: ParserEvent::None(),
+            echo: EchoMsg::None(),
+        )
+    }
 }
 
 fn pending_uart_step<#uint WIDTH>(
@@ -764,7 +784,7 @@ fn measure_engine_step(
     let dump_complete = want_msg && fifo_empty;
     MeasureEngineOut$(
         next_state: if clear_request {
-            init_measure_engine_state()
+            MeasureEngineState::default()
         } else {
             MeasureEngineState$(
                 dump_active: if dump_complete {
@@ -789,7 +809,7 @@ entity parser_core(
     rx_parity_error: bool,
     rx_byte: uint<8>,
 ) -> ParserStepOut {
-    reg(clk) state: ParserState reset(rst: protocol::init_parser()) = {
+    reg(clk) state: ParserState reset(rst: ParserState::default()) = {
         parser_step(state, rx_valid, rx_parity_error, rx_byte).state
     };
 
@@ -847,7 +867,7 @@ entity access_cycle_core(
     tick: TickCount,
     classify_delay: ClassifyCtr,
 ) -> AccessCycleEval {
-    reg(clk) state: AccessCycleState reset(rst: init_access_cycle_state()) = {
+    reg(clk) state: AccessCycleState reset(rst: AccessCycleState::default()) = {
         access_cycle_step(state, ce, rw, addr, data, tick, classify_delay).next_state
     };
     let step = access_cycle_step(state, ce, rw, addr, data, tick, classify_delay);
@@ -863,7 +883,7 @@ entity ctrl_write_core(
     data: CardData,
     ctrl_write_delay: ClassifyCtr,
 ) -> CtrlWriteStep {
-    reg(clk) state: CtrlWriteState reset(rst: init_ctrl_write_state()) = {
+    reg(clk) state: CtrlWriteState reset(rst: CtrlWriteState::default()) = {
         ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay).next_state
     };
     let step = ctrl_write_step(state, ctrl_window, addr, data, ctrl_write_delay);
@@ -877,7 +897,7 @@ entity sampled_bus_core(
     cycle_start_now: bool,
     addr_pulse_fire: bool,
 ) -> SampledBusStep {
-    reg(clk) state: SampledBusState reset(rst: init_sampled_bus_state()) = {
+    reg(clk) state: SampledBusState reset(rst: SampledBusState::default()) = {
         sampled_bus_step(state, cycle_start_now, addr_pulse_fire).next_state
     };
     let step = sampled_bus_step(state, cycle_start_now, addr_pulse_fire);
@@ -894,7 +914,7 @@ entity measure_engine_core(
     fifo_empty: bool,
     fifo_dout: MeasurePacked,
 ) -> MeasureEngineOut {
-    reg(clk) state: MeasureEngineState reset(rst: init_measure_engine_state()) = {
+    reg(clk) state: MeasureEngineState reset(rst: MeasureEngineState::default()) = {
         measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout).next_state
     };
     let step = measure_engine_step(state, block_tx, dump_request, clear_request, fifo_empty, fifo_dout);
@@ -908,7 +928,7 @@ entity port_overrun_core(
     block_tx: bool,
     overrun_valid: bool,
 ) -> PortOverrunOut {
-    reg(clk) state: PortOverrunState reset(rst: init_port_overrun_state()) = {
+    reg(clk) state: PortOverrunState reset(rst: PortOverrunState::default()) = {
         port_overrun_step(state, block_tx, overrun_valid).next_state
     };
     let step = port_overrun_step(state, block_tx, overrun_valid);
@@ -997,7 +1017,7 @@ entity main_core(
         usb_rx_out.parity_error,
         usb_rx_out.byte,
     );
-    reg(clk) parser_front: ParserFrontStage reset(rst: init_parser_front_stage()) =
+    reg(clk) parser_front: ParserFrontStage reset(rst: ParserFrontStage::default()) =
         ParserFrontStage$(
             event: usb_parse.event,
             echo: usb_parse.echo,
@@ -1079,7 +1099,7 @@ entity main_core(
     reg(clk) ce6_meta: bool reset(rst: true) = ce6;
     reg(clk) ce6_ctrl: bool reset(rst: true) = ce6_meta;
     reg(clk) tick: TickCount reset(rst: 0) = tick +. 1;
-    reg(clk) mem_clear: MemClearState reset(rst: init_mem_clear_state()) =
+    reg(clk) mem_clear: MemClearState reset(rst: MemClearState::default()) =
         // Scrub card RAM after runtime reset so reset behavior is deterministic.
         if mem_clear.active {
             MemClearState$(
@@ -1317,7 +1337,7 @@ entity main_core(
         sampled_bus_word,
         ft_stream_fifo_full,
     );
-    reg(clk) ft_stream_regs: FtStreamRegs reset(rst: init_ft_stream_regs()) = {
+    reg(clk) ft_stream_regs: FtStreamRegs reset(rst: FtStreamRegs::default()) = {
         let step = ft_word_stream_step(
             ft_stream_regs.state,
             ft_stream_regs.cur_value,
@@ -1343,7 +1363,7 @@ entity main_core(
     let ft_stream_fifo_drop = ft_ingress_step.dropped;
     reg(clk) ft_overflow_total: MeasureCount reset(rst: 0) =
         if ft_stream_fifo_drop { ft_overflow_total +. 1 } else { ft_overflow_total };
-    reg(clk) ft_uart_session: FtUartSessionState reset(rst: init_ft_uart_session_state()) =
+    reg(clk) ft_uart_session: FtUartSessionState reset(rst: FtUartSessionState::default()) =
         if ft_uart_source_disable || ft_uart_disable_request {
             FtUartSessionState$(
                 active: false,
@@ -1384,7 +1404,7 @@ entity main_core(
     reg(clk) addr_uart_total: MeasureCount reset(rst: 0) =
         if addr_uart.step.send { addr_uart_total +. 1 } else { addr_uart_total };
 
-    reg(clk) measure_capture: MeasureCaptureState reset(rst: init_measure_capture_state()) =
+    reg(clk) measure_capture: MeasureCaptureState reset(rst: MeasureCaptureState::default()) =
         if ce6_measure_start {
             MeasureCaptureState$(
                 armed: true,

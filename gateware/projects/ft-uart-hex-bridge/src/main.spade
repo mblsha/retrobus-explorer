@@ -17,7 +17,6 @@ use self::protocol::{
     PackedFtWord,
     ParserEvent,
     ParserStepOut,
-    init_line_parser,
     line_parser_step,
     pack_ft_word,
     unpack_ft_be,
@@ -44,26 +43,28 @@ struct MainState {
     stall_active: bool,
 }
 
-fn init_main_state() -> MainState {
-    MainState$(
-        parser: init_line_parser(),
-        msg_stream: init_bridge_msg_stream(),
-        pending_ctrl_msg: BridgeMsg::None(),
-        pending_tx_word: 0,
-        pending_tx_be: 0x3,
-        pending_tx_valid: false,
-        rx_waddr: 0,
-        rx_raddr: 0,
-        rx_used: 0,
-        rx_storage: [0; 4],
-        rx_count: 0,
-        tx_count: 0,
-        err_count: 0,
-        stall_count: 0,
-        parse_err_seen: false,
-        stall_seen: false,
-        stall_active: false,
-    )
+impl Default for MainState {
+    fn default() -> Self {
+        MainState$(
+            parser: LineParserState::default(),
+            msg_stream: init_bridge_msg_stream(),
+            pending_ctrl_msg: BridgeMsg::None(),
+            pending_tx_word: 0,
+            pending_tx_be: 0x3,
+            pending_tx_valid: false,
+            rx_waddr: 0,
+            rx_raddr: 0,
+            rx_used: 0,
+            rx_storage: [0; 4],
+            rx_count: 0,
+            tx_count: 0,
+            err_count: 0,
+            stall_count: 0,
+            parse_err_seen: false,
+            stall_seen: false,
+            stall_active: false,
+        )
+    }
 }
 
 fn choose_ctrl_msg(existing: BridgeMsg, candidate: BridgeMsg) -> BridgeMsg {
@@ -182,7 +183,7 @@ entity main_core(
     let (ft_ui_dout_be, ft_ui_dout_be_w): (FtBe, inv FtBe) = port();
     let (ft_ui_dout_empty, ft_ui_dout_empty_w): (bool, inv bool) = port();
 
-    reg(clk) state: MainState reset(rst: init_main_state()) = {
+    reg(clk) state: MainState reset(rst: MainState::default()) = {
         let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
         let rx_empty = state.rx_used == 0;
         let rx_full = state.rx_used == 4;

@@ -32,11 +32,10 @@ use self::cmd::{
     pin_source_sram1,
     saleae_mode_standard,
 };
-use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, OrganizerMonitorTransportOut, default_stable_threshold, reset_monitor_state};
+use self::monitor::{OrganizerMonitorOut, OrganizerMonitorSamples, OrganizerMonitorState, OrganizerMonitorTransportOut, default_stable_threshold};
 use self::msg::{
     OrganizerMsgStreamOut,
     OrganizerMsgStreamState,
-    init_organizer_msg_stream,
     organizer_msg_stream_step,
 };
 use self::protocol::{
@@ -110,31 +109,33 @@ struct MainEval {
     board_state: BoardRenderState,
 }
 
-fn reset_main_state() -> MainState {
-    MainState$(
-        ft: FtRegs$(
-            enabled: false,
-            stream_fifo_full: false,
-            cur_value: 0,
-            stream_state: FtWordStreamState::GetFifo(),
-        ),
-        saleae: SaleaeRegs$(
-            state: SaleaeState::SyncSignals(),
-            counter: 0,
-            sync_sub_mode: SyncSubMode::StandardSignals(),
-            mode: saleae_mode_standard(),
-            pin0: pin_source_rw(),
-            pin1: pin_source_oe(),
-            pin2: pin_source_mskrom(),
-            pin3: pin_source_sram1(),
-        ),
-        cmd_state: init_organizer_cmd_state(),
-        cmd_hex_high: 0,
-        addr_stable_delay: default_stable_threshold(),
-        data_stable_delay: default_stable_threshold(),
-        monitor: reset_monitor_state(),
-        msg_stream: init_organizer_msg_stream(),
-    )
+impl Default for MainState {
+    fn default() -> Self {
+        MainState$(
+            ft: FtRegs$(
+                enabled: false,
+                stream_fifo_full: false,
+                cur_value: 0,
+                stream_state: FtWordStreamState::GetFifo(),
+            ),
+            saleae: SaleaeRegs$(
+                state: SaleaeState::SyncSignals(),
+                counter: 0,
+                sync_sub_mode: SyncSubMode::StandardSignals(),
+                mode: saleae_mode_standard(),
+                pin0: pin_source_rw(),
+                pin1: pin_source_oe(),
+                pin2: pin_source_mskrom(),
+                pin3: pin_source_sram1(),
+            ),
+            cmd_state: init_organizer_cmd_state(),
+            cmd_hex_high: 0,
+            addr_stable_delay: default_stable_threshold(),
+            data_stable_delay: default_stable_threshold(),
+            monitor: OrganizerMonitorState::default(),
+            msg_stream: OrganizerMsgStreamState::default(),
+        )
+    }
 }
 
 fn current_board_state(state: MainState) -> BoardRenderState {
@@ -355,7 +356,7 @@ entity main_core(
     );
 
     reg(clk) state: MainState
-        reset(rst: reset_main_state())
+        reset(rst: MainState::default())
         = {
             let eval = state.eval(inputs);
             eval.next_state
