@@ -368,6 +368,7 @@ pub entity streaming_rom_core(
     let step = state.step(inputs);
 
     let (ram_read_data, ram_read_data_w): (RomData, inv RomData) = port();
+    #[verilog_attrs(keep_hierarchy = "yes")]
     inst simple_dual_port_ram::<8, 32768>(
         clk,
         step.ram_waddr,

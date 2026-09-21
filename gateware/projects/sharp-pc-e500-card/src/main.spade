@@ -1208,6 +1208,7 @@ entity main_core(
     let ce6_port_write_valid = ce6_ctrl_write_event && ce6_ctrl_step_addr.ctrl.is_uart_port();
     let ce6_port_write_byte = ce6_ctrl_step.data;
 
+    #[verilog_attrs(keep_hierarchy = "yes")]
     let _mem = inst card_ram_2k_v(
         clk,
         if mem_clear.active {
@@ -1230,6 +1231,7 @@ entity main_core(
         usb_ram_read_addr,
         uart_mem_dout_w,
     );
+    #[verilog_attrs(keep_hierarchy = "yes")]
     let _rom = inst card_ram_2k_v(
         clk,
         uart_rom_write_addr,
