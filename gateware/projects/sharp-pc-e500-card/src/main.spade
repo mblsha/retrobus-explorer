@@ -1003,29 +1003,35 @@ entity main_core(
             echo: usb_parse.echo,
         );
     let parser_event = parser_front.event;
-    let (usb_ram_read_valid, usb_ram_read_addr): (bool, CardOffset) = match parser_event.ram_read() {
-        Some(addr) => (true, addr),
-        None => (false, 0),
+    let (usb_ram_read_valid, usb_ram_read_addr): (bool, CardOffset) = if let Some(addr) = parser_event.ram_read() {
+        (true, addr)
+    } else {
+        (false, 0)
     };
-    let (usb_rom_read_valid, usb_rom_read_addr): (bool, CardOffset) = match parser_event.rom_read() {
-        Some(addr) => (true, addr),
-        None => (false, 0),
+    let (usb_rom_read_valid, usb_rom_read_addr): (bool, CardOffset) = if let Some(addr) = parser_event.rom_read() {
+        (true, addr)
+    } else {
+        (false, 0)
     };
-    let (uart_ram_write_valid, uart_ram_write_addr, uart_ram_write_data): (bool, CardOffset, CardData) = match parser_event.ram_write() {
-        Some((addr, data)) => (true, addr, data),
-        None => (false, 0, 0),
+    let (uart_ram_write_valid, uart_ram_write_addr, uart_ram_write_data): (bool, CardOffset, CardData) = if let Some((addr, data)) = parser_event.ram_write() {
+        (true, addr, data)
+    } else {
+        (false, 0, 0)
     };
-    let (uart_rom_write_valid, uart_rom_write_addr, uart_rom_write_data): (bool, CardOffset, CardData) = match parser_event.rom_write() {
-        Some((addr, data)) => (true, addr, data),
-        None => (false, 0, 0),
+    let (uart_rom_write_valid, uart_rom_write_addr, uart_rom_write_data): (bool, CardOffset, CardData) = if let Some((addr, data)) = parser_event.rom_write() {
+        (true, addr, data)
+    } else {
+        (false, 0, 0)
     };
-    let (classify_delay_update_valid, classify_delay_cycles): (bool, ClassifyCtr) = match parser_event.classify_delay() {
-        Some(cycles) => (true, cycles),
-        None => (false, 0),
+    let (classify_delay_update_valid, classify_delay_cycles): (bool, ClassifyCtr) = if let Some(cycles) = parser_event.classify_delay() {
+        (true, cycles)
+    } else {
+        (false, 0)
     };
-    let (ctrl_write_delay_update_valid, ctrl_write_delay_cycles): (bool, ClassifyCtr) = match parser_event.ctrl_write_delay() {
-        Some(cycles) => (true, cycles),
-        None => (false, 0),
+    let (ctrl_write_delay_update_valid, ctrl_write_delay_cycles): (bool, ClassifyCtr) = if let Some(cycles) = parser_event.ctrl_write_delay() {
+        (true, cycles)
+    } else {
+        (false, 0)
     };
     let ft_uart_enable_request = parser_event.ft_uart_enable_request();
     let ft_uart_disable_request = parser_event.ft_uart_disable_request();

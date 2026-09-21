@@ -494,20 +494,20 @@ impl OrganizerMsg {
     }
 
     fn tx_req(self, status_phase: StatusPhase, status_idx: ByteIdx, status_ch: uint<3>, simple_idx: uint<1>) -> TxReq8 {
-        match self {
-            Self::Status$(status) => status_byte(status, status_phase, status_idx, status_ch),
-            _ => if zext(simple_idx) < self.simple_len() {
-                tx_req_byte(self.simple_byte(simple_idx))
-            } else {
-                tx_req_none()
-            },
+        if let Self::Status$(status) = self {
+            status_byte(status, status_phase, status_idx, status_ch)
+        } else if zext(simple_idx) < self.simple_len() {
+            tx_req_byte(self.simple_byte(simple_idx))
+        } else {
+            tx_req_none()
         }
     }
 
     fn last_byte(self, status_phase: StatusPhase, status_idx: ByteIdx, status_ch: uint<3>, simple_idx: uint<1>) -> bool {
-        match self {
-            Self::Status$(status) => status_last_byte(status, status_phase, status_idx, status_ch),
-            _ => zext(simple_idx) == self.simple_len() -. 1,
+        if let Self::Status$(status) = self {
+            status_last_byte(status, status_phase, status_idx, status_ch)
+        } else {
+            zext(simple_idx) == self.simple_len() -. 1
         }
     }
 }
@@ -534,8 +534,8 @@ fn progress_state(state: OrganizerMsgStreamState, sent: bool) -> ProgressedState
     } else if state.cur_msg.last_byte(state.status_phase, state.status_idx, state.status_ch, state.simple_idx) {
         reset_progress()
     } else {
-        match state.cur_msg {
-            OrganizerMsg::Status$(status) => if status_phase_done(status, state.status_phase, state.status_idx, state.status_ch) {
+        if let OrganizerMsg::Status$(status) = state.cur_msg {
+            if status_phase_done(status, state.status_phase, state.status_idx, state.status_ch) {
                 ProgressedState$(
                     cur_msg: state.cur_msg,
                     status_phase: if state.status_phase == phase_channel() && state.status_ch != 7 {
@@ -559,14 +559,15 @@ fn progress_state(state: OrganizerMsgStreamState, sent: bool) -> ProgressedState
                     status_ch: state.status_ch,
                     simple_idx: state.simple_idx,
                 )
-            },
-            _ => ProgressedState$(
+            }
+        } else {
+            ProgressedState$(
                 cur_msg: state.cur_msg,
                 status_phase: state.status_phase,
                 status_idx: state.status_idx,
                 status_ch: state.status_ch,
                 simple_idx: state.simple_idx +. 1,
-            ),
+            )
         }
     }
 }
