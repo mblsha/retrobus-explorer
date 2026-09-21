@@ -157,30 +157,30 @@ fn decide_next_msg(
 entity main_core(
     clk: clock,
     rst_n: bool,
-    led: inv &[bool; 8],
+    led: inv [bool; 8],
     usb_rx: bool,
-    usb_tx: inv &bool,
+    usb_tx: inv bool,
 
     ft_clk: bool,
     ft_rxf: bool,
     ft_txe: bool,
     ft_data: FtData,
     ft_be: FtBe,
-    ft_data_drive: inv &FtData,
-    ft_be_drive: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
+    ft_data_drive: inv FtData,
+    ft_be_drive: inv FtBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
 ) {
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
     let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (ft_ui_din_full, ft_ui_din_full_w): (&bool, inv &bool) = port;
-    let (ft_ui_dout, ft_ui_dout_w): (&FtData, inv &FtData) = port;
-    let (ft_ui_dout_be, ft_ui_dout_be_w): (&FtBe, inv &FtBe) = port;
-    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (&bool, inv &bool) = port;
+    let (ft_ui_din_full, ft_ui_din_full_w): (bool, inv bool) = port;
+    let (ft_ui_dout, ft_ui_dout_w): (FtData, inv FtData) = port;
+    let (ft_ui_dout_be, ft_ui_dout_be_w): (FtBe, inv FtBe) = port;
+    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (bool, inv bool) = port;
 
     reg(clk) state: MainState reset(rst: init_main_state()) = {
         let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
@@ -190,7 +190,7 @@ entity main_core(
         let send_word_valid = parse.event.is_send();
         let send_word = parse.event.send_word();
         let send_be = parse.event.send_be();
-        let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
+        let tx_write = state.pending_tx_valid && !ft_ui_din_full;
         let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
         let parser_msg = parser_event_to_ctrl_msg(
             parse.event,
@@ -209,18 +209,18 @@ entity main_core(
         );
         let msg_stream = bridge_msg_stream_step(
             state.msg_stream,
-            *usb_uart.busy,
+            usb_uart.busy,
             msg_decision.next_msg_valid,
             msg_decision.next_msg,
         );
         let parse_err_event = parse.event.is_parse_err();
         let tx_full_event = tx_queue_overflow;
-        let rx_stall_now = !*ft_ui_dout_empty && rx_full;
+        let rx_stall_now = !ft_ui_dout_empty && rx_full;
         let rx_stall_event = rx_stall_now && !state.stall_active;
-        let rx_write = !*ft_ui_dout_empty && !rx_full;
+        let rx_write = !ft_ui_dout_empty && !rx_full;
         let rx_read = msg_decision.offer_ft_rx;
         let next_rx_storage = if rx_write {
-            rx_queue_write_at(state.rx_storage, state.rx_waddr, pack_ft_word(*ft_ui_dout, *ft_ui_dout_be))
+            rx_queue_write_at(state.rx_storage, state.rx_waddr, pack_ft_word(ft_ui_dout, ft_ui_dout_be))
         } else {
             state.rx_storage
         };
@@ -280,7 +280,7 @@ entity main_core(
     let rx_dout = state.rx_storage[state.rx_raddr];
     let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);
     let send_word_valid = parse.event.is_send();
-    let tx_write = state.pending_tx_valid && !*ft_ui_din_full;
+    let tx_write = state.pending_tx_valid && !ft_ui_din_full;
     let tx_queue_overflow = send_word_valid && state.pending_tx_valid && !tx_write;
     let parser_msg = parser_event_to_ctrl_msg(
         parse.event,
@@ -301,7 +301,7 @@ entity main_core(
         clk,
         rst,
         build_info::boot_banner_text(),
-        *usb_uart.busy,
+        usb_uart.busy,
     );
     let msg_stream = bridge_msg_stream_step(
         state.msg_stream,
@@ -332,7 +332,7 @@ entity main_core(
         if tx_write { state.pending_tx_word } else { 0 },
         if tx_write { state.pending_tx_be } else { 0 },
         tx_write,
-        !*ft_ui_dout_empty && !rx_full,
+        !ft_ui_dout_empty && !rx_full,
         ft_data_drive,
         ft_be_drive,
         ft_rd,
@@ -346,15 +346,15 @@ entity main_core(
 
     reg(clk) heartbeat: uint<24> reset(rst: 0) = heartbeat +. 1;
 
-    set usb_tx = &*usb_uart.line;
-    set led = &[
+    set usb_tx = usb_uart.line;
+    set led = [
         !rx_empty,
         state.pending_tx_valid,
         state.parse_err_seen,
         state.stall_seen,
-        !*ft_ui_dout_empty,
-        !*ft_ui_din_full,
-        *usb_uart.busy,
+        !ft_ui_dout_empty,
+        !ft_ui_din_full,
+        usb_uart.busy,
         heartbeat.to_bits()[23],
     ];
 }
