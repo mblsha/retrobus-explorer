@@ -27,7 +27,7 @@ extern entity sync_fifo_v<#uint WIDTH, #uint ENTRIES>(
 );
 
 impl<T, #uint N> [T; N] {
-    fn write_at(self, idx: uint<{uint_bits_to_fit(N - 1)}>, val: T) -> [T; N] {
+    fn write_at(self, idx: uint<{uint::bits_for(N - 1)}>, val: T) -> [T; N] {
         self.enumerate().map(fn |(i, item)| {
             if i == idx {
                 val
@@ -57,7 +57,7 @@ pub struct FifoUsedOut<TData, TUsed> {
 }
 
 pub type FifoUsed<#uint WIDTH, #uint ENTRIES> =
-    FifoUsedOut<uint<WIDTH>, uint<{uint_bits_to_fit(ENTRIES)}>>;
+    FifoUsedOut<uint<WIDTH>, uint<{uint::bits_for(ENTRIES)}>>;
 
 struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
     waddr: uint<ADDR_W>,
@@ -90,7 +90,7 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
     let _ = require_power_of_two::<ENTRIES>();
 
     // Packed state to avoid declaration-order dependency issues across interlocked regs.
-    reg(clk) state: FifoImplState<{uint_bits_to_fit(ENTRIES - 1)}, {uint_bits_to_fit(ENTRIES)}, WIDTH, ENTRIES>
+    reg(clk) state: FifoImplState<{uint::bits_for(ENTRIES - 1)}, {uint::bits_for(ENTRIES)}, WIDTH, ENTRIES>
         reset(rst: FifoImplState$(
             waddr: 0,
             waddr_delay: 0,
@@ -100,10 +100,10 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
             storage: [0; ENTRIES],
         ))
         = {
-            let waddr: uint<{uint_bits_to_fit(ENTRIES - 1)}> = state.waddr;
-            let waddr_delay: uint<{uint_bits_to_fit(ENTRIES - 1)}> = state.waddr_delay;
-            let raddr: uint<{uint_bits_to_fit(ENTRIES - 1)}> = state.raddr;
-            let used: uint<{uint_bits_to_fit(ENTRIES)}> = state.used;
+            let waddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr;
+            let waddr_delay: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr_delay;
+            let raddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.raddr;
+            let used: uint<{uint::bits_for(ENTRIES)}> = state.used;
             let storage: [uint<WIDTH>; ENTRIES] = state.storage;
 
             let next_write = ptr_inc(waddr);
@@ -139,10 +139,10 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
             )
         };
 
-    let waddr: uint<{uint_bits_to_fit(ENTRIES - 1)}> = state.waddr;
-    let waddr_delay: uint<{uint_bits_to_fit(ENTRIES - 1)}> = state.waddr_delay;
-    let raddr: uint<{uint_bits_to_fit(ENTRIES - 1)}> = state.raddr;
-    let used: uint<{uint_bits_to_fit(ENTRIES)}> = state.used;
+    let waddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr;
+    let waddr_delay: uint<{uint::bits_for(ENTRIES - 1)}> = state.waddr_delay;
+    let raddr: uint<{uint::bits_for(ENTRIES - 1)}> = state.raddr;
+    let used: uint<{uint::bits_for(ENTRIES)}> = state.used;
     let read_data: uint<WIDTH> = state.read_data;
 
     let next_write = ptr_inc(waddr);

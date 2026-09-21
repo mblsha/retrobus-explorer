@@ -7,11 +7,11 @@ pub type FtWord = uint<16>;
 #[no_mangle(all)]
 extern entity simple_dual_port_ram<#uint WIDTH, #uint ENTRIES>(
     wclk: clock,
-    waddr: uint<{uint_bits_to_fit(ENTRIES - 1)}>,
+    waddr: uint<{uint::bits_for(ENTRIES - 1)}>,
     write_data: uint<WIDTH>,
     write_enable: bool,
     rclk: clock,
-    raddr: uint<{uint_bits_to_fit(ENTRIES - 1)}>,
+    raddr: uint<{uint::bits_for(ENTRIES - 1)}>,
     read_data: inv uint<WIDTH>,
 );
 

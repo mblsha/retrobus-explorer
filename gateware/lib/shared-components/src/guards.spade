@@ -1,20 +1,20 @@
 pub fn require_positive<#uint N>() -> bool {
-    let _check: uint<{uint_bits_to_fit(N - 1)}> = 0;
+    let _check: uint<{uint::bits_for(N - 1)}> = 0;
     true
 }
 
 pub fn require_positive_int<#int N>() -> bool {
-    let _check: uint<{uint_bits_to_fit(N - 1)}> = 0;
+    let _check: uint<{uint::bits_for(N - 1)}> = 0;
     true
 }
 
 pub fn require_at_least_two<#uint N>() -> bool {
-    let _check: uint<{uint_bits_to_fit(N - 2)}> = 0;
+    let _check: uint<{uint::bits_for(N - 2)}> = 0;
     true
 }
 
 pub fn require_power_of_two<#uint N>() -> bool {
-    let fit_n: uint<{uint_bits_to_fit(N)}> = 0;
-    let _fit_n_expected: uint<{uint_bits_to_fit(N - 1) + 1}> = fit_n;
+    let fit_n: uint<{uint::bits_for(N)}> = 0;
+    let _fit_n_expected: uint<{uint::bits_for(N - 1) + 1}> = fit_n;
     true
 }

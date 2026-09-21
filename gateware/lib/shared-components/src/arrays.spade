@@ -22,7 +22,7 @@ impl<T, #uint N> [T; N] {
     /// its own; it exists to let a `map` closure see where it is in the array.
     pub fn enumerate<#uint WIDTH>(self) -> [(uint<WIDTH>, T); N]
     where
-        WIDTH: {uint_bits_to_fit(N - 1)},
+        WIDTH: {uint::bits_for(N - 1)},
     {
         indices_from::<WIDTH, N, 0>().zip(self)
     }
