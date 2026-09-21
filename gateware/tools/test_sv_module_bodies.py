@@ -104,7 +104,31 @@ endmodule
 """
 
 
+# `#[verilog_attrs(...)]` lands above the `module` keyword, so a block that
+# began at `module` would not contain it.
+ATTRIBUTED = """\
+(* ASYNC_REG = "TRUE" *)
+module \\lib::sync[3]  (
+        input clk_i,
+        output output__
+    );
+    assign output__ = clk_i;
+endmodule
+"""
+UNATTRIBUTED = ATTRIBUTED.replace('(* ASYNC_REG = "TRUE" *)\n', "")
+
+
 class Canonicalisation(unittest.TestCase):
+    def test_notices_a_gained_synthesis_attribute(self):
+        self.assertNotEqual(
+            bodies.canonical_modules(UNATTRIBUTED), bodies.canonical_modules(ATTRIBUTED)
+        )
+
+    def test_an_attributed_module_is_still_named_after_its_module(self):
+        self.assertEqual(
+            bodies.module_name(bodies.split_modules(ATTRIBUTED)[0]), "\\lib::sync[3]"
+        )
+
     def test_sees_through_everything_the_compiler_may_rename(self):
         self.assertEqual(
             bodies.canonical_modules(BEFORE), bodies.canonical_modules(AFTER_SAME)

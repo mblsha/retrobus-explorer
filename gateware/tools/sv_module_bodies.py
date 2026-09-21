@@ -214,24 +214,39 @@ def canonical_body(block: str, loose: bool = False) -> str:
 
 
 def split_modules(text: str) -> list[str]:
+    """Each `module ... endmodule`, with any attribute lines written above it.
+
+    `#[verilog_attrs(...)]` on a unit becomes a `(* ASYNC_REG = "TRUE" *)` line
+    *before* the `module` keyword, so a block that started at `module` would not
+    contain it and gaining or losing a synthesis attribute would compare equal.
+    """
     blocks: list[str] = []
     current: list[str] | None = None
+    pending: list[str] = []
     for line in text.splitlines(keepends=True):
         if line.startswith("module "):
-            current = [line]
+            current = pending + [line]
+            pending = []
         elif current is not None:
             current.append(line)
             if line.startswith("endmodule"):
                 blocks.append("".join(current))
                 current = None
+        elif line.lstrip().startswith("(*"):
+            pending.append(line)
+        elif line.strip():
+            pending = []
     if current:
         blocks.append("".join(current))
     return blocks
 
 
 def module_name(block: str) -> str:
-    match = MODULE_NAME.match(block)
-    return match.group(1) if match else "<unnamed>"
+    for line in block.splitlines():
+        match = MODULE_NAME.match(line)
+        if match:
+            return match.group(1)
+    return "<unnamed>"
 
 
 def canonical_modules(
