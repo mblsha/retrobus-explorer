@@ -5,11 +5,11 @@ use shared_components::primitives::counter;
 entity main(
     clk: clock,
     rst_n: bool,
-    led: inv &[bool; 8],
+    led: inv [bool; 8],
 ) {
     let rst = !rst_n;
     let counter = inst counter::<26>(clk, rst);
     let led_counter: uint<8> = trunc(counter >> 18);
 
-    set led = &led_counter.to_bits();
+    set led = led_counter.to_bits();
 }
