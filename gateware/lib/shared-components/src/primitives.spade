@@ -1,3 +1,13 @@
+// These two pipelines are the only place in this library where a signal
+// crosses a clock domain, so they are where Vivado wants `ASYNC_REG`: it keeps
+// the synchronizer's flops together and out of shift-register inference, and
+// tells the timing engine not to report the first stage's metastability. The
+// attribute cannot go on a `reg`, only on a unit, so it goes here -- on the
+// pipeline that holds the flops, not on the wrapper entity.
+//
+// UNVERIFIED: whether Vivado then applies it to the flops inside. There is no
+// Vivado on the machine this was written on, and openXC7 ignores it.
+#[verilog_attrs(ASYNC_REG = "TRUE")]
 pipeline(STAGES) sync_delay_pipe<#int STAGES>(
     clk: clock,
     input_signal: bool,
@@ -15,6 +25,8 @@ where STAGES > 0 else "sync_delay needs at least one register stage"
     inst(STAGES) sync_delay_pipe::<STAGES>(clk, input_signal)
 }
 
+// See `sync_delay_pipe` above for why `ASYNC_REG` sits on the pipeline.
+#[verilog_attrs(ASYNC_REG = "TRUE")]
 pipeline(STAGES) sync_bundle_pipe<#int STAGES, #uint N>(
     clk: clock,
     input_signals: [bool; N],
