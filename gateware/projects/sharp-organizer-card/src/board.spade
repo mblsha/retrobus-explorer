@@ -29,8 +29,8 @@ pub(lib) entity organizer_board_outputs(
     conn_vpp_sync: bool,
     addr_changed: bool,
     data_changed: bool,
-    led: inv &[bool; 8],
-    saleae: inv &[bool; 8],
+    led: inv [bool; 8],
+    saleae: inv [bool; 8],
 ) {
     let monitor_lines = inst organizer_monitor_uarts(
         clk,
@@ -68,6 +68,6 @@ pub(lib) entity organizer_board_outputs(
         ),
     );
 
-    set led = &board.led;
-    set saleae = &board.saleae;
+    set led = board.led;
+    set saleae = board.saleae;
 }
