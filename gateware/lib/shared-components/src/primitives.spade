@@ -118,21 +118,14 @@ where STAGES > 0 else "reset_conditioner needs at least one register stage"
     in_reset || top
 }
 
-pub entity rising_edge(
-    clk: clock,
-    signal: bool,
-) -> bool {
-    reg(clk) prev: bool = signal;
-    signal && !prev
-}
-
-pub entity falling_edge(
-    clk: clock,
-    signal: bool,
-) -> bool {
-    reg(clk) prev: bool = signal;
-    !signal && prev
-}
+// The standard library grew these in 0.18 and its versions are identical to the
+// ones this file carried: one unreset register holding the previous value, and
+// `value && !old` / `!value && old` off it. Same first-cycle behaviour, same
+// absence of a reset, same single flop. Re-exporting rather than re-writing
+// keeps `primitives::{rising_edge, falling_edge}` working at the seven call
+// sites and in the two testbench tops.
+pub use std::io::rising_edge;
+pub use std::io::falling_edge;
 
 pub entity counter<#uint WIDTH>(
     clk: clock,
