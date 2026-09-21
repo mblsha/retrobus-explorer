@@ -78,8 +78,14 @@ jobs:
 
       - name: Install swim
         run: |
+          # Spade moved from GitLab to Codeberg on 2026-09-18. Codeberg is run
+          # by volunteers and is down more often than GitLab was, so retry.
           if ! command -v swim >/dev/null 2>&1; then
-            cargo install --git https://gitlab.com/spade-lang/swim swim
+            for attempt in 1 2 3; do
+              cargo install --git https://codeberg.org/spade-lang/swim swim && break
+              echo "swim install attempt ${attempt} failed"
+              sleep 20
+            done
           fi
           swim --version
 
@@ -130,6 +136,7 @@ jobs:
           import re
           import subprocess
           import sys
+          import time
           from pathlib import Path
 
           root = Path(".").resolve()
@@ -149,18 +156,39 @@ jobs:
                       return line.split('"')[1]
               raise RuntimeError(f"missing [spade].commit in {lock_file}")
 
+          # Spade moved from GitLab to Codeberg on 2026-09-18; the GitLab
+          # repository is frozen at a "Spade has moved" commit and will not
+          # carry anything released after v0.20.0.
+          SPADE_REPO = "https://codeberg.org/spade-lang/spade"
+
           def run(*cmd: str, cwd: Path | None = None) -> None:
               subprocess.run(list(cmd), cwd=str(cwd) if cwd else None, check=True)
+
+          def run_retry(*cmd: str, attempts: int = 3) -> None:
+              # Codeberg runs on donated hardware and is less available than
+              # GitLab was, so give the network steps more than one chance.
+              for attempt in range(1, attempts + 1):
+                  try:
+                      run(*cmd)
+                      return
+                  except subprocess.CalledProcessError:
+                      if attempt == attempts:
+                          raise
+                      print(f"{cmd[0]} attempt {attempt} failed; retrying", flush=True)
+                      time.sleep(20)
 
           def ensure_compiler(commit: str) -> Path:
               compiler_dir = cache_root / commit
               if not (compiler_dir / ".git").is_dir():
-                  run("git", "clone", "--recurse-submodules", "https://gitlab.com/spade-lang/spade", str(compiler_dir))
+                  run_retry("git", "clone", "--recurse-submodules", SPADE_REPO, str(compiler_dir))
+              else:
+                  # A cached clone from before the move still points at GitLab.
+                  run("git", "-C", str(compiler_dir), "remote", "set-url", "origin", SPADE_REPO)
               current = subprocess.check_output(
                   ["git", "-C", str(compiler_dir), "rev-parse", "HEAD"], text=True
               ).strip()
               if current != commit:
-                  run("git", "-C", str(compiler_dir), "fetch", "--all", "--tags")
+                  run_retry("git", "-C", str(compiler_dir), "fetch", "--all", "--tags")
                   run("git", "-C", str(compiler_dir), "checkout", "--force", commit)
               submodules = subprocess.check_output(
                   ["git", "-C", str(compiler_dir), "submodule", "status", "--recursive"], text=True
