@@ -282,7 +282,7 @@ entity main_core(
     addr: OrganizerAddr,
     data: OrganizerData,
 ) {
-    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rst = inst reset_conditioner(clk, !rst_n);
     let clk_uart = clk;
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
 

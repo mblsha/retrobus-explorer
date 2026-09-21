@@ -53,7 +53,7 @@ entity main(
     saleae: inv [bool; 8],
 ) {
     let rst_in = !rst_n;
-    let rst = inst reset_conditioner::<4>(clk, rst_in);
+    let rst = inst reset_conditioner(clk, rst_in);
 
     let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
     let rx_digit = inst decode_rx_digit(clk, rx_out.valid, rx_out.parity_error, rx_out.byte)

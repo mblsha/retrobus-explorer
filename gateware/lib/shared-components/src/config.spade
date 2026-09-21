@@ -14,7 +14,7 @@ pub entity au_usb_uart_rx(
     rst: bool,
     rx: bool,
 ) -> UartRxOut<uint<8>> {
-    inst uart_rx::<8>(clk, rst, rx, au_usb_uart_bit_time(), false, au_usb_uart_stop_bits())
+    inst uart_rx(clk, rst, rx, au_usb_uart_bit_time(), false, au_usb_uart_stop_bits())
 }
 
 #[inline]

@@ -16,7 +16,7 @@ pipeline(STAGES) sync_delay_pipe<#int STAGES>(
     input_signal
 }
 
-pub entity sync_delay<#int STAGES>(
+pub entity sync_delay<#int STAGES = 2>(
     clk: clock,
     input_signal: bool,
 ) -> bool
@@ -104,7 +104,7 @@ pub entity sync_z80_controls_n<#int M1_STAGES, #int MREQ_STAGES, #int IORQ_STAGE
     )
 }
 
-pub entity reset_conditioner<#uint STAGES>(
+pub entity reset_conditioner<#uint STAGES = 4>(
     clk: clock,
     in_reset: bool,
 ) -> bool

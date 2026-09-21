@@ -20,7 +20,7 @@ entity main(
     usb_tx: inv bool,
     saleae: inv [bool; 8],
 ) {
-    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rst = inst reset_conditioner(clk, !rst_n);
     let clk_wiz = inst clk_wiz_200_400(clk);
     let clk200_probe = clk_wiz.clk_out200;
     let clk400_probe = clk_wiz.clk_out400;

@@ -44,7 +44,7 @@ pub entity native_cdc(
     // Register the output to break controller-ready through FIFO prefetch RAM.
     // A bubble after consumption is acceptable for this low-rate SD backend.
     decl cmd_hold_valid;
-    let cmds = inst async_fifo::<25, 2, 3>$(
+    let cmds = inst async_fifo::<25, 2>$(
         wclk: s_clk,
         wrst: s_rst,
         din: command,
@@ -69,7 +69,7 @@ pub entity native_cdc(
     set m_cmd_write = cmd_payload.to_bits()[24];
     let write: uint<144> = zext(s_wdata) | (zext::<16, 144>(s_wmask) << 128);
     decl write_hold_valid;
-    let writes = inst async_fifo::<144, 2, 3>$(
+    let writes = inst async_fifo::<144, 2>$(
         wclk: s_clk,
         wrst: s_rst,
         din: write,
@@ -92,7 +92,7 @@ pub entity native_cdc(
     set m_wdata_valid = (write_hold_valid && !m_rst);
     set m_wdata = trunc(write_payload);
     set m_wmask = trunc::<uint<144>, uint<16>>(write_payload >> 128);
-    let reads = inst async_fifo::<128, 2, 3>$(
+    let reads = inst async_fifo::<128, 2>$(
         wclk: m_clk,
         wrst: m_rst,
         din: m_rdata,

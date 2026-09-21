@@ -121,7 +121,7 @@ entity main_core(
     bank_debug: inv uint<3>,
     counter_debug: inv uint<128>,
 ) {
-    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rst = inst reset_conditioner(clk, !rst_n);
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
     let rx_valid = rx.valid && !rx.parity_error;
 

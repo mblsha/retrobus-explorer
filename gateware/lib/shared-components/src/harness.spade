@@ -262,7 +262,7 @@ entity tb_async_fifo_u8(
     empty: inv bool,
     dout: inv uint<8>,
 ) {
-    let out = inst async_fifo::<8, 8, 3>(wclk, wrst, din, wput, rclk, rrst, rget);
+    let out = inst async_fifo::<8, 8>(wclk, wrst, din, wput, rclk, rrst, rget);
     out.inst tap(full, empty, dout);
 }
 

@@ -945,7 +945,7 @@ entity main_core(
     nc: bool,
     oe: bool,
 ) {
-    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rst = inst reset_conditioner(clk, !rst_n);
     // Reuse the card's spare NC pin as an optional external cycle-start strobe.
     let cycle_start_clock = unsafe { inst sampled_bool_clock(nc) };
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
@@ -1050,7 +1050,7 @@ entity main_core(
     reg(clk) data_uart_last: CardData reset(rst: 0) = data_uart_now;
     reg(clk) data_uart_changed: bool reset(rst: false) = data_uart_now != data_uart_last;
     reg(cycle_start_clock) cycle_start_toggle: bool reset(rst: false) = !cycle_start_toggle;
-    let cycle_start_toggle_sync = inst sync_delay::<2>(clk, cycle_start_toggle);
+    let cycle_start_toggle_sync = inst sync_delay(clk, cycle_start_toggle);
     reg(clk) cycle_start_toggle_last: bool reset(rst: false) = cycle_start_toggle_sync;
     let cycle_start_now = cycle_start_toggle_sync != cycle_start_toggle_last;
     reg(clk) addr_pulse_last: BusAddr reset(rst: 0) = addr_now;

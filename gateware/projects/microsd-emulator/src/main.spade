@@ -1597,7 +1597,7 @@ entity emulator_uart(
     armed_status: inv bool,
 ) {
     let rst = !rst_n;
-    let rx = inst shared_components::serial::uart_rx::<8>$(
+    let rx = inst shared_components::serial::uart_rx$(
         clk,
         rst,
         rx: usb_rx,
@@ -1920,7 +1920,7 @@ entity ddr_uart_core<#uint CLK_FREQ>(
     armed_status: inv bool,
 ) {
     let rx_cycles: uint<32> = CLK_FREQ `std::ops::comb_div` 1_000_000;
-    let rx = inst shared_components::serial::uart_rx::<8>$(
+    let rx = inst shared_components::serial::uart_rx$(
         clk,
         rst,
         rx: usb_rx,

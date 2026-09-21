@@ -61,7 +61,7 @@ entity main_core(
     streaming_size_debug: inv uint<16>,
     streaming_index_debug: inv uint<16>,
 ) {
-    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rst = inst reset_conditioner(clk, !rst_n);
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
 
     let z80_sync = inst sync_z80_controls_n::<6, 4, 4, 2, 2>(
@@ -76,8 +76,8 @@ entity main_core(
     let bank_sync_bits = inst sync_bundle::<2, 2>(clk, addr_bnk.to_bits());
     let addr_sync: RomAddr = addr_sync_bits.to_uint();
     let bank_sync: RomBank = bank_sync_bits.to_uint();
-    let addr_ceram2_sync = inst sync_delay::<2>(clk, addr_ceram2);
-    let addr_cerom2_sync = inst sync_delay::<2>(clk, addr_cerom2);
+    let addr_ceram2_sync = inst sync_delay(clk, addr_ceram2);
+    let addr_cerom2_sync = inst sync_delay(clk, addr_cerom2);
 
     let mreq_fall = inst falling_edge(clk, z80_sync.mreq);
     let mreq_rise = inst rising_edge(clk, z80_sync.mreq);

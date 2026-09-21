@@ -323,7 +323,7 @@ fn uart_rx_after_data<#uint DATA_WIDTH>(
     }
 }
 
-pub entity uart_rx<#uint DATA_WIDTH>(
+pub entity uart_rx<#uint DATA_WIDTH = 8>(
     clk: clock,
     rst: bool,
     rx: bool,

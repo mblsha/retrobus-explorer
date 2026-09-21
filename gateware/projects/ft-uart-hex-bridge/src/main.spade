@@ -172,7 +172,7 @@ entity main_core(
     ft_wr: inv bool,
     ft_oe: inv bool,
 ) {
-    let rst = inst reset_conditioner::<4>(clk, !rst_n);
+    let rst = inst reset_conditioner(clk, !rst_n);
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
