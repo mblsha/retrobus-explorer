@@ -525,29 +525,29 @@ entity g850_uart_bridge<#uint WIDTH>(
 entity main_core(
     clk: clock,
     rst_n: bool,
-    led: inv &[bool; 8],
+    led: inv [bool; 8],
     usb_rx: bool,
-    usb_tx: inv &bool,
+    usb_tx: inv bool,
 
     ft_clk: bool,
     ft_rxf: bool,
     ft_txe: bool,
     ft_data: FtData,
     ft_be: FtBe,
-    ft_data_drive: inv &FtData,
-    ft_be_drive: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
+    ft_data_drive: inv FtData,
+    ft_be_drive: inv FtBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
 
-    saleae: inv &[bool; 8],
+    saleae: inv [bool; 8],
 
     z80_mreq: bool,
     z80_m1: bool,
     z80_ioreset: bool,
     z80_iorq: bool,
     z80_int1: bool,
-    z80_wait: inv &bool,
+    z80_wait: inv bool,
     z80_rd: bool,
     z80_wr: bool,
 
@@ -577,9 +577,9 @@ entity main_core(
     let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port;
 
-    let (stream_fifo_full, stream_fifo_full_w): (&bool, inv &bool) = port;
-    let (stream_fifo_empty, stream_fifo_empty_w): (&bool, inv &bool) = port;
-    let (stream_fifo_dout, stream_fifo_dout_w): (&TraceWord, inv &TraceWord) = port;
+    let (stream_fifo_full, stream_fifo_full_w): (bool, inv bool) = port;
+    let (stream_fifo_empty, stream_fifo_empty_w): (bool, inv bool) = port;
+    let (stream_fifo_dout, stream_fifo_dout_w): (TraceWord, inv TraceWord) = port;
 
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
@@ -590,15 +590,15 @@ entity main_core(
         rd_rise,
         wr_rise,
         rx.byte,
-        *ft_io.ui_dout_empty,
-        *ft_io.ui_dout,
+        ft_io.ui_dout_empty,
+        ft_io.ui_dout,
     );
 
     let boot_tx = inst boot_banner_tx_gate::<8, 93>(
         clk,
         rst,
         build_info::boot_banner_text(),
-        *usb_uart.busy,
+        usb_uart.busy,
     );
 
     let inputs = MainInputs$(
@@ -610,12 +610,12 @@ entity main_core(
         iorq_fall: iorq_fall,
         rd_rise: rd_rise,
         wr_rise: wr_rise,
-        ft_ui_din_full: *ft_io.ui_din_full,
-        ft_ui_dout_empty: *ft_io.ui_dout_empty,
-        ft_ui_dout: *ft_io.ui_dout,
-        stream_fifo_full: *stream_fifo_full,
-        stream_fifo_empty: *stream_fifo_empty,
-        stream_fifo_dout: *stream_fifo_dout,
+        ft_ui_din_full: ft_io.ui_din_full,
+        ft_ui_dout_empty: ft_io.ui_dout_empty,
+        ft_ui_dout: ft_io.ui_dout,
+        stream_fifo_full: stream_fifo_full,
+        stream_fifo_empty: stream_fifo_empty,
+        stream_fifo_dout: stream_fifo_dout,
         addr: addr,
         data: data,
     );
@@ -649,9 +649,9 @@ entity main_core(
         eval.stream_fifo_wput,
         ft_mux.stream_fifo_rget,
     );
-    set stream_fifo_full_w = &stream_fifo.full;
-    set stream_fifo_empty_w = &stream_fifo.empty;
-    set stream_fifo_dout_w = &stream_fifo.dout;
+    set stream_fifo_full_w = stream_fifo.full;
+    set stream_fifo_empty_w = stream_fifo.empty;
+    set stream_fifo_dout_w = stream_fifo.dout;
 
     let addr_bridge = inst g850_uart_bridge::<16>(
         clk,
@@ -701,7 +701,7 @@ entity main_core(
         ft_io_w.ui_dout_empty,
     );
 
-    let _unused_ft_ui_dout_be = *ft_io.ui_dout_be;
+    let _unused_ft_ui_dout_be = ft_io.ui_dout_be;
     let _unused_addr_bnk = addr_bnk;
     let _unused_addr_ceram2 = addr_ceram2;
     let _unused_addr_cerom2 = addr_cerom2;
@@ -713,8 +713,8 @@ entity main_core(
         BoardRenderInputs$(
             ft_txe: ft_txe,
             ft_rxf: ft_rxf,
-            ft_ui_dout_empty: *ft_io.ui_dout_empty,
-            ft_ui_din_full: *ft_io.ui_din_full,
+            ft_ui_dout_empty: ft_io.ui_dout_empty,
+            ft_ui_din_full: ft_io.ui_din_full,
             z80_wr_sync: z80_wr_sync,
             z80_rd_sync: z80_rd_sync,
             z80_iorq_sync: z80_iorq_sync,
@@ -734,13 +734,13 @@ entity main_core(
         ),
     );
 
-    set ft_data_drive = &*ft_io.ft_data_out;
-    set ft_be_drive = &*ft_io.ft_be_out;
-    set usb_tx = &*usb_uart.line;
-    set ft_rd = &*ft_io.ft_rd;
-    set ft_wr = &*ft_io.ft_wr;
-    set ft_oe = &*ft_io.ft_oe;
-    set z80_wait = &!bus_sample.sample_is_wait;
-    set led = &board_outputs.led;
-    set saleae = &board_outputs.saleae;
+    set ft_data_drive = ft_io.ft_data_out;
+    set ft_be_drive = ft_io.ft_be_out;
+    set usb_tx = usb_uart.line;
+    set ft_rd = ft_io.ft_rd;
+    set ft_wr = ft_io.ft_wr;
+    set ft_oe = ft_io.ft_oe;
+    set z80_wait = !bus_sample.sample_is_wait;
+    set led = board_outputs.led;
+    set saleae = board_outputs.saleae;
 }

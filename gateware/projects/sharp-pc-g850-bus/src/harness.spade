@@ -22,10 +22,10 @@ entity tb_bus_debug(
     overflow_fifo_full: bool,
     overflow_rd_rise: bool,
     overflow_wr_rise: bool,
-    event_word: inv &uint<32>,
-    overflow_word: inv &uint<32>,
-    saleae_out: inv &[bool; 8],
-    should_emit_overflow: inv &bool,
+    event_word: inv uint<32>,
+    overflow_word: inv uint<32>,
+    saleae_out: inv [bool; 8],
+    should_emit_overflow: inv bool,
 ) {
     let signals = saleae_inputs.to_bits();
     let state = match saleae_mode {
@@ -86,8 +86,8 @@ entity tb_bus_debug(
         fifo_full_counter: overflow_count,
     ).run();
 
-    set event_word = &pack_event_word(addr, data, event_code);
-    set overflow_word = &pack_overflow_word(overflow_count, event_code);
-    set saleae_out = &saleae;
-    set should_emit_overflow = &step.should_emit_overflow;
+    set event_word = pack_event_word(addr, data, event_code);
+    set overflow_word = pack_overflow_word(overflow_count, event_code);
+    set saleae_out = saleae;
+    set should_emit_overflow = step.should_emit_overflow;
 }
