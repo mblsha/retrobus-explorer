@@ -47,10 +47,10 @@ fn divider_last(slow_factor: uint<4>) -> uint<10> {
 entity main(
     clk: clock,
     rst_n: bool,
-    led: inv &[bool; 8],
+    led: inv [bool; 8],
     usb_rx: bool,
-    usb_tx: inv &bool,
-    saleae: inv &[bool; 8],
+    usb_tx: inv bool,
+    saleae: inv [bool; 8],
 ) {
     let rst_in = !rst_n;
     let rst = inst reset_conditioner::<4>(clk, rst_in);
@@ -58,13 +58,13 @@ entity main(
     let rx_out = inst uart_rx(clk, rst, usb_rx, 100, false, 1);
     let rx_digit = inst decode_rx_digit(clk, rx_out.valid, rx_out.parity_error, rx_out.byte)
         .unwrap_or(default_digit_decode());
-    let (tx_line, tx_line_w): (&bool, inv &bool) = port;
-    let (tx_busy, tx_busy_w): (&bool, inv &bool) = port;
+    let (tx_line, tx_line_w): (bool, inv bool) = port;
+    let (tx_busy, tx_busy_w): (bool, inv bool) = port;
     let boot_banner_out = inst boot_banner_core::<8, 84>(
         clk,
         rst,
         build_info::boot_banner_text(),
-        *tx_busy,
+        tx_busy,
     );
     let tx_data = if boot_banner_out.tx_req.valid {
         boot_banner_out.tx_req.byte
@@ -79,9 +79,9 @@ entity main(
         tx_data,
         tx_valid,
     );
-    set tx_line_w = &tx_out.tx;
-    set tx_busy_w = &tx_out.busy;
-    let accepted_digit = rx_digit.valid && !*tx_busy && !boot_banner_out.tx_req.valid;
+    set tx_line_w = tx_out.tx;
+    set tx_busy_w = tx_out.busy;
+    let accepted_digit = rx_digit.valid && !tx_busy && !boot_banner_out.tx_req.valid;
 
     reg(clk) slow_factor: uint<4> reset(rst: 0) = {
         if accepted_digit {
@@ -110,7 +110,7 @@ entity main(
     };
 
     let bits = counter.to_bits();
-    set led = &bits;
-    set saleae = &bits;
-    set usb_tx = &*tx_line;
+    set led = bits;
+    set saleae = bits;
+    set usb_tx = tx_line;
 }
