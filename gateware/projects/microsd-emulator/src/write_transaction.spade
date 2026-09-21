@@ -14,34 +14,34 @@ pub entity sd_write_transaction(
     sample: bool,
     fall: bool,
     dat: uint<4>,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    active: inv &bool,
-    complete: inv &bool,
-    good: inv &bool,
-    commit_busy: inv &bool,
-    commit_complete: inv &bool,
-    cmd_valid: inv &bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    active: inv bool,
+    complete: inv bool,
+    good: inv bool,
+    commit_busy: inv bool,
+    commit_complete: inv bool,
+    cmd_valid: inv bool,
     cmd_ready: bool,
-    cmd_address: inv &uint<24>,
-    wdata_valid: inv &bool,
+    cmd_address: inv uint<24>,
+    wdata_valid: inv bool,
     wdata_ready: bool,
-    wdata: inv &uint<128>,
-    wdata_mask: inv &uint<16>,
+    wdata: inv uint<128>,
+    wdata_mask: inv uint<16>,
 ) {
     reg(clk) saved_lba: uint<32> reset(rst: 0) = if start {
         lba
     } else {
         saved_lba
     };
-    let (receive_active, receive_active_w): (&bool, inv &bool) = port;
-    let (receive_complete, receive_complete_w): (&bool, inv &bool) = port;
-    let (receive_crc_good, receive_crc_good_w): (&bool, inv &bool) = port;
-    let (staged_byte_index, staged_byte_index_w): (&uint<9>, inv &uint<9>) = port;
-    let (staged_byte, staged_byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (commit_active, commit_active_w): (&bool, inv &bool) = port;
-    let (commit_failed, commit_failed_w): (&bool, inv &bool) = port;
-    let (response_active, response_active_w): (&bool, inv &bool) = port;
+    let (receive_active, receive_active_w): (bool, inv bool) = port;
+    let (receive_complete, receive_complete_w): (bool, inv bool) = port;
+    let (receive_crc_good, receive_crc_good_w): (bool, inv bool) = port;
+    let (staged_byte_index, staged_byte_index_w): (uint<9>, inv uint<9>) = port;
+    let (staged_byte, staged_byte_w): (uint<8>, inv uint<8>) = port;
+    let (commit_active, commit_active_w): (bool, inv bool) = port;
+    let (commit_failed, commit_failed_w): (bool, inv bool) = port;
+    let (response_active, response_active_w): (bool, inv bool) = port;
     // Validate the stable sector address when reception starts, rather than
     // keeping a 32-bit range comparison on the DDR arbitration/loader path.
     reg(clk) saved_lba_valid reset(rst: false) = if start {
@@ -49,11 +49,11 @@ pub entity sd_write_transaction(
     } else {
         saved_lba_valid
     };
-    let accepted = *receive_crc_good && saved_lba_valid;
-    let commit = *receive_complete && accepted;
+    let accepted = receive_crc_good && saved_lba_valid;
+    let commit = receive_complete && accepted;
     reg(clk) packet_good reset(rst: false) = if start {
         false
-    } else if *receive_complete {
+    } else if receive_complete {
         accepted
     } else {
         packet_good
@@ -71,7 +71,7 @@ pub entity sd_write_transaction(
         active: receive_active_w,
         complete: receive_complete_w,
         good: receive_crc_good_w,
-        byte_index: *staged_byte_index,
+        byte_index: staged_byte_index,
         sector_byte: staged_byte_w,
     );
     let _ = inst super::storage::ddr_sector_writer$(
@@ -80,7 +80,7 @@ pub entity sd_write_transaction(
         start: commit,
         lba: saved_lba,
         byte_index: staged_byte_index_w,
-        sector_byte: *staged_byte,
+        sector_byte: staged_byte,
         cmd_valid,
         cmd_ready,
         cmd_address,
@@ -97,16 +97,16 @@ pub entity sd_write_transaction(
         rst,
         prepared_mode,
         cancel,
-        start: *receive_complete,
+        start: receive_complete,
         accepted,
         fall,
-        busy: *commit_active || commit,
+        busy: commit_active || commit,
         dat_out,
         dat_oe,
         active: response_active_w,
         complete,
     );
-    set active = &(*receive_active || *response_active || *commit_active || commit);
-    set good = &(packet_good && !*commit_failed);
-    set commit_busy = &(*commit_active || commit);
+    set active = (receive_active || response_active || commit_active || commit);
+    set good = (packet_good && !commit_failed);
+    set commit_busy = (commit_active || commit);
 }

@@ -14,31 +14,31 @@ pub entity native_cdc(
 
     // Command channel
     s_cmd_valid: bool,
-    s_cmd_ready: inv &bool,
+    s_cmd_ready: inv bool,
     s_cmd_address: uint<24>,
     s_cmd_write: bool,
-    m_cmd_valid: inv &bool,
+    m_cmd_valid: inv bool,
     m_cmd_ready: bool,
-    m_cmd_address: inv &uint<24>,
-    m_cmd_write: inv &bool,
+    m_cmd_address: inv uint<24>,
+    m_cmd_write: inv bool,
 
     // Write-data channel
     s_wdata_valid: bool,
-    s_wdata_ready: inv &bool,
+    s_wdata_ready: inv bool,
     s_wdata: uint<128>,
     s_wmask: uint<16>,
-    m_wdata_valid: inv &bool,
+    m_wdata_valid: inv bool,
     m_wdata_ready: bool,
-    m_wdata: inv &uint<128>,
-    m_wmask: inv &uint<16>,
+    m_wdata: inv uint<128>,
+    m_wmask: inv uint<16>,
 
     // Read-data channel
     m_rdata_valid: bool,
-    m_rdata_ready: inv &bool,
+    m_rdata_ready: inv bool,
     m_rdata: uint<128>,
-    s_rdata_valid: inv &bool,
+    s_rdata_valid: inv bool,
     s_rdata_ready: bool,
-    s_rdata: inv &uint<128>,
+    s_rdata: inv uint<128>,
 ) {
     let command: uint<25> = zext(s_cmd_address) | (if s_cmd_write { 1 << 24 } else { 0 });
     // Register the output to break controller-ready through FIFO prefetch RAM.
@@ -63,10 +63,10 @@ pub entity native_cdc(
     } else {
         cmd_payload
     };
-    set s_cmd_ready = &(!cmds.full && !s_rst);
-    set m_cmd_valid = &(cmd_hold_valid && !m_rst);
-    set m_cmd_address = &trunc(cmd_payload);
-    set m_cmd_write = &cmd_payload.to_bits()[24];
+    set s_cmd_ready = (!cmds.full && !s_rst);
+    set m_cmd_valid = (cmd_hold_valid && !m_rst);
+    set m_cmd_address = trunc(cmd_payload);
+    set m_cmd_write = cmd_payload.to_bits()[24];
     let write: uint<144> = zext(s_wdata) | (zext::<16, 144>(s_wmask) << 128);
     decl write_hold_valid;
     let writes = inst async_fifo::<144, 2, 3>$(
@@ -88,10 +88,10 @@ pub entity native_cdc(
     } else {
         write_payload
     };
-    set s_wdata_ready = &(!writes.full && !s_rst);
-    set m_wdata_valid = &(write_hold_valid && !m_rst);
-    set m_wdata = &trunc(write_payload);
-    set m_wmask = &trunc::<uint<144>, uint<16>>(write_payload >> 128);
+    set s_wdata_ready = (!writes.full && !s_rst);
+    set m_wdata_valid = (write_hold_valid && !m_rst);
+    set m_wdata = trunc(write_payload);
+    set m_wmask = trunc::<uint<144>, uint<16>>(write_payload >> 128);
     let reads = inst async_fifo::<128, 2, 3>$(
         wclk: m_clk,
         wrst: m_rst,
@@ -101,9 +101,9 @@ pub entity native_cdc(
         rrst: s_rst,
         rget: s_rdata_ready && !s_rst,
     );
-    set m_rdata_ready = &(!reads.full && !m_rst);
-    set s_rdata_valid = &(!reads.empty && !s_rst);
-    set s_rdata = &reads.dout;
+    set m_rdata_ready = (!reads.full && !m_rst);
+    set s_rdata_valid = (!reads.empty && !s_rst);
+    set s_rdata = reads.dout;
 }
 
 // LiteDRAM schedules write-data consumption from commands and does not wait
@@ -115,26 +115,26 @@ pub entity native_stage(
     clk: clock,
     rst: bool,
     s_cmd_valid: bool,
-    s_cmd_ready: inv &bool,
+    s_cmd_ready: inv bool,
     s_cmd_address: uint<24>,
     s_cmd_write: bool,
     s_wdata_valid: bool,
-    s_wdata_ready: inv &bool,
+    s_wdata_ready: inv bool,
     s_wdata: uint<128>,
     s_wmask: uint<16>,
-    s_rdata_valid: inv &bool,
+    s_rdata_valid: inv bool,
     s_rdata_ready: bool,
-    s_rdata: inv &uint<128>,
-    m_cmd_valid: inv &bool,
+    s_rdata: inv uint<128>,
+    m_cmd_valid: inv bool,
     m_cmd_ready: bool,
-    m_cmd_address: inv &uint<24>,
-    m_cmd_write: inv &bool,
-    m_wdata_valid: inv &bool,
+    m_cmd_address: inv uint<24>,
+    m_cmd_write: inv bool,
+    m_wdata_valid: inv bool,
     m_wdata_ready: bool,
-    m_wdata: inv &uint<128>,
-    m_wmask: inv &uint<16>,
+    m_wdata: inv uint<128>,
+    m_wmask: inv uint<16>,
     m_rdata_valid: bool,
-    m_rdata_ready: inv &bool,
+    m_rdata_ready: inv bool,
     m_rdata: uint<128>,
 ) {
     decl command_full, command_issued, write_full, read_full, write_command;
@@ -199,15 +199,15 @@ pub entity native_stage(
     } else {
         read_data
     };
-    set s_cmd_ready = &(!command_full && !rst);
-    set s_wdata_ready = &(!write_full && !rst);
-    set m_rdata_ready = &(command_full && !write_command && command_issued && !read_full && !rst);
-    set m_cmd_valid = &(offer_command && !rst);
-    set m_cmd_address = &address;
-    set m_cmd_write = &write_command;
-    set m_wdata_valid = &(command_full && write_command && command_issued && write_full && !rst);
-    set m_wdata = &write_data;
-    set m_wmask = &write_mask;
-    set s_rdata_valid = &(read_full && !rst);
-    set s_rdata = &read_data;
+    set s_cmd_ready = (!command_full && !rst);
+    set s_wdata_ready = (!write_full && !rst);
+    set m_rdata_ready = (command_full && !write_command && command_issued && !read_full && !rst);
+    set m_cmd_valid = (offer_command && !rst);
+    set m_cmd_address = address;
+    set m_cmd_write = write_command;
+    set m_wdata_valid = (command_full && write_command && command_issued && write_full && !rst);
+    set m_wdata = write_data;
+    set m_wmask = write_mask;
+    set s_rdata_valid = (read_full && !rst);
+    set s_rdata = read_data;
 }

@@ -11,15 +11,15 @@ pub entity bram_backend(
     load_valid: bool,
     load_address: uint<32>,
     load_byte: uint<8>,
-    load_ready: inv &bool,
+    load_ready: inv bool,
     request_valid: bool,
     request_lba: uint<32>,
     generation: uint<32>,
     buffer_release: bool,
-    sector_ready: inv &bool,
-    sector_generation: inv &uint<32>,
+    sector_ready: inv bool,
+    sector_generation: inv uint<32>,
     byte_index: uint<9>,
-    sector_byte: inv &uint<8>,
+    sector_byte: inv uint<8>,
 ) {
     let IDLE: uint<2> = 0;
     let WAIT_BANK_READ: uint<2> = 1;
@@ -157,10 +157,10 @@ pub entity bram_backend(
             })],
     );
     let data = inst read_memory(buffer, byte_index);
-    set load_ready = &accept_load;
-    set sector_ready = &(state == SECTOR_READY && !cancel);
-    set sector_generation = &saved_epoch;
-    set sector_byte = &data;
+    set load_ready = accept_load;
+    set sector_ready = (state == SECTOR_READY && !cancel);
+    set sector_generation = saved_epoch;
+    set sector_byte = data;
 }
 
 // One outstanding LiteDRAM native read at a time (128-bit words). Cancellation
@@ -177,15 +177,15 @@ pub entity ddr_backend(
     request_lba: uint<32>,
     generation: uint<32>,
     buffer_release: bool,
-    sector_ready: inv &bool,
-    sector_generation: inv &uint<32>,
+    sector_ready: inv bool,
+    sector_generation: inv uint<32>,
     byte_index: uint<9>,
-    sector_byte: inv &uint<8>,
-    cmd_valid: inv &bool,
+    sector_byte: inv uint<8>,
+    cmd_valid: inv bool,
     cmd_ready: bool,
-    cmd_address: inv &uint<24>,
+    cmd_address: inv uint<24>,
     rdata_valid: bool,
-    rdata_ready: inv &bool,
+    rdata_ready: inv bool,
     rdata: uint<128>,
 ) {
     let IDLE: uint<3> = 0;
@@ -277,12 +277,12 @@ pub entity ddr_backend(
         [(state == COPY_WORD_BYTES && !stale && !discarded, address_byte, selected)],
     );
     let data = inst read_memory(buffer, byte_index);
-    set cmd_valid = &issue;
-    set cmd_address = &address;
-    set rdata_ready = &(state == WAIT_READ_DATA);
-    set sector_ready = &(state == SECTOR_READY && !stale && !discarded);
-    set sector_generation = &saved_epoch;
-    set sector_byte = &data;
+    set cmd_valid = issue;
+    set cmd_address = address;
+    set rdata_ready = (state == WAIT_READ_DATA);
+    set sector_ready = (state == SECTOR_READY && !stale && !discarded);
+    set sector_generation = saved_epoch;
+    set sector_byte = data;
 }
 
 // Convert a held byte write into independent LiteDRAM command/data handshakes.
@@ -296,14 +296,14 @@ pub entity ddr_byte_writer(
     load_valid: bool,
     load_address: uint<32>,
     load_byte: uint<8>,
-    load_ready: inv &bool,
-    cmd_valid: inv &bool,
+    load_ready: inv bool,
+    cmd_valid: inv bool,
     cmd_ready: bool,
-    cmd_address: inv &uint<24>,
-    wdata_valid: inv &bool,
+    cmd_address: inv uint<24>,
+    wdata_valid: inv bool,
     wdata_ready: bool,
-    wdata: inv &uint<128>,
-    wdata_mask: inv &uint<16>,
+    wdata: inv uint<128>,
+    wdata_mask: inv uint<16>,
 ) {
     let IDLE: uint<2> = 0;
     let SEND_COMMAND_AND_DATA: uint<2> = 1;
@@ -348,12 +348,12 @@ pub entity ddr_byte_writer(
     let data: uint<128> = zext(byte) << (zext::<4, 128>(lane) << 3);
     let one: uint<16> = 1;
     let mask = one << zext(lane);
-    set cmd_valid = &(state == SEND_COMMAND_AND_DATA && !command_sent);
-    set cmd_address = &trunc::<uint<32>, uint<24>>(address >> 4);
-    set wdata_valid = &(state == SEND_COMMAND_AND_DATA && !data_sent);
-    set wdata = &data;
-    set wdata_mask = &mask;
-    set load_ready = &(state == LOAD_COMPLETE);
+    set cmd_valid = (state == SEND_COMMAND_AND_DATA && !command_sent);
+    set cmd_address = trunc::<uint<32>, uint<24>>(address >> 4);
+    set wdata_valid = (state == SEND_COMMAND_AND_DATA && !data_sent);
+    set wdata = data;
+    set wdata_mask = mask;
+    set load_ready = (state == LOAD_COMPLETE);
 }
 
 // Commit a CRC-validated 512-byte staging buffer. The byte port has one-cycle
@@ -365,18 +365,18 @@ pub entity ddr_sector_writer(
     rst: bool,
     start: bool,
     lba: uint<32>,
-    byte_index: inv &uint<9>,
+    byte_index: inv uint<9>,
     sector_byte: uint<8>,
-    cmd_valid: inv &bool,
+    cmd_valid: inv bool,
     cmd_ready: bool,
-    cmd_address: inv &uint<24>,
-    wdata_valid: inv &bool,
+    cmd_address: inv uint<24>,
+    wdata_valid: inv bool,
     wdata_ready: bool,
-    wdata: inv &uint<128>,
-    wdata_mask: inv &uint<16>,
-    busy: inv &bool,
-    complete: inv &bool,
-    failed: inv &bool,
+    wdata: inv uint<128>,
+    wdata_mask: inv uint<16>,
+    busy: inv bool,
+    complete: inv bool,
+    failed: inv bool,
 ) {
     let IDLE: uint<3> = 0;
     let WAIT_SECTOR_BYTE: uint<3> = 1;
@@ -447,13 +447,13 @@ pub entity ddr_sector_writer(
     } else {
         state
     };
-    set byte_index = &offset;
-    set cmd_valid = &(state == SEND_WORD && !command_sent && !rst);
-    set cmd_address = &((trunc::<uint<32>, uint<24>>(saved_lba) << 5) | zext(word_index));
-    set wdata_valid = &(state == SEND_WORD && !data_sent && !rst);
-    set wdata = &word;
-    set wdata_mask = &(0xffff);
-    set busy = &(state >= WAIT_SECTOR_BYTE && state <= SEND_WORD);
-    set complete = &(state == COMMIT_COMPLETE);
-    set failed = &error;
+    set byte_index = offset;
+    set cmd_valid = (state == SEND_WORD && !command_sent && !rst);
+    set cmd_address = ((trunc::<uint<32>, uint<24>>(saved_lba) << 5) | zext(word_index));
+    set wdata_valid = (state == SEND_WORD && !data_sent && !rst);
+    set wdata = word;
+    set wdata_mask = (0xffff);
+    set busy = (state >= WAIT_SECTOR_BYTE && state <= SEND_WORD);
+    set complete = (state == COMMIT_COMPLETE);
+    set failed = error;
 }

@@ -13,11 +13,11 @@ pub entity sd_write_receiver(
     wide: bool,
     sample: bool,
     dat: uint<4>,
-    active: inv &bool,
-    complete: inv &bool,
-    good: inv &bool,
+    active: inv bool,
+    complete: inv bool,
+    good: inv bool,
     byte_index: uint<9>,
-    sector_byte: inv &uint<8>,
+    sector_byte: inv uint<8>,
 ) {
     let IDLE: uint<3> = 0;
     let WAIT_START_BIT: uint<3> = 1;
@@ -107,8 +107,8 @@ pub entity sd_write_receiver(
         [(!clear && !start && sample && state == RECEIVE_DATA && (bit_index & 7) == 7, trunc::<uint<12>, uint<9>>(bit_index >> 3), assembled)],
     );
     reg(clk) read_byte = inst read_memory(buffer, byte_index);
-    set active = &(state != IDLE && !clear);
-    set complete = &finished;
-    set good = &accepted;
-    set sector_byte = &read_byte;
+    set active = (state != IDLE && !clear);
+    set complete = finished;
+    set good = accepted;
+    set sector_byte = read_byte;
 }

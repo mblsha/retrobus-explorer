@@ -26,52 +26,52 @@ pub entity qualified_ddr(
     timeout_cycles: uint<20>,
 
     // Native DDR port
-    cmd_valid: inv &bool,
+    cmd_valid: inv bool,
     cmd_ready: bool,
-    cmd_address: inv &uint<24>,
-    cmd_write: inv &bool,
-    wdata_valid: inv &bool,
+    cmd_address: inv uint<24>,
+    cmd_write: inv bool,
+    wdata_valid: inv bool,
     wdata_ready: bool,
-    wdata: inv &uint<128>,
-    wdata_mask: inv &uint<16>,
+    wdata: inv uint<128>,
+    wdata_mask: inv uint<16>,
     rdata_valid: bool,
-    rdata_ready: inv &bool,
+    rdata_ready: inv bool,
     rdata: uint<128>,
 
     // Client command channel
     client_cmd_valid: bool,
-    client_cmd_ready: inv &bool,
+    client_cmd_ready: inv bool,
     client_cmd_address: uint<24>,
     client_cmd_write: bool,
 
     // Client write channel
     client_wdata_valid: bool,
-    client_wdata_ready: inv &bool,
+    client_wdata_ready: inv bool,
     client_wdata: uint<128>,
     client_wdata_mask: uint<16>,
 
     // Client read channel
-    client_rdata_valid: inv &bool,
+    client_rdata_valid: inv bool,
     client_rdata_ready: bool,
-    client_rdata: inv &uint<128>,
+    client_rdata: inv uint<128>,
 
     // Qualification results
-    busy: inv &bool,
-    passed: inv &bool,
-    failed: inv &bool,
-    progress: inv &uint<24>,
-    diagnostic: inv &uint<5>,
-    expected_word: inv &uint<128>,
-    actual_word: inv &uint<128>,
+    busy: inv bool,
+    passed: inv bool,
+    failed: inv bool,
+    progress: inv uint<24>,
+    diagnostic: inv uint<5>,
+    expected_word: inv uint<128>,
+    actual_word: inv uint<128>,
 ) {
-    let (bist_passed, bist_passed_w): (&bool, inv &bool) = port;
-    let (bist_cmd_valid, bist_cmd_valid_w): (&bool, inv &bool) = port;
-    let (bist_cmd_address, bist_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
-    let (bist_cmd_write, bist_cmd_write_w): (&bool, inv &bool) = port;
-    let (bist_write_valid, bist_write_valid_w): (&bool, inv &bool) = port;
-    let (bist_write_data, bist_write_data_w): (&uint<128>, inv &uint<128>) = port;
-    let (bist_write_mask, bist_write_mask_w): (&uint<16>, inv &uint<16>) = port;
-    let (bist_read_ready, bist_read_ready_w): (&bool, inv &bool) = port;
+    let (bist_passed, bist_passed_w): (bool, inv bool) = port;
+    let (bist_cmd_valid, bist_cmd_valid_w): (bool, inv bool) = port;
+    let (bist_cmd_address, bist_cmd_address_w): (uint<24>, inv uint<24>) = port;
+    let (bist_cmd_write, bist_cmd_write_w): (bool, inv bool) = port;
+    let (bist_write_valid, bist_write_valid_w): (bool, inv bool) = port;
+    let (bist_write_data, bist_write_data_w): (uint<128>, inv uint<128>) = port;
+    let (bist_write_mask, bist_write_mask_w): (uint<16>, inv uint<16>) = port;
+    let (bist_read_ready, bist_read_ready_w): (bool, inv bool) = port;
     let _ = inst native_bist$(
         clk,
         rst,
@@ -79,14 +79,14 @@ pub entity qualified_ddr(
         word_count,
         timeout_cycles,
         cmd_valid: bist_cmd_valid_w,
-        cmd_ready: cmd_ready && !*bist_passed,
+        cmd_ready: cmd_ready && !bist_passed,
         cmd_address: bist_cmd_address_w,
         cmd_write: bist_cmd_write_w,
         wdata_valid: bist_write_valid_w,
-        wdata_ready: wdata_ready && !*bist_passed,
+        wdata_ready: wdata_ready && !bist_passed,
         wdata: bist_write_data_w,
         wdata_mask: bist_write_mask_w,
-        rdata_valid: rdata_valid && !*bist_passed,
+        rdata_valid: rdata_valid && !bist_passed,
         rdata_ready: bist_read_ready_w,
         rdata,
         busy,
@@ -99,31 +99,31 @@ pub entity qualified_ddr(
     );
     // Register ownership separately from reset and the BIST state decoder.
     // This also inserts an idle cycle between the final response and handover.
-    reg(clk) qualified reset(rst: false) = *bist_passed;
-    set passed = &qualified;
-    set cmd_valid = &(!rst && if qualified {
+    reg(clk) qualified reset(rst: false) = bist_passed;
+    set passed = qualified;
+    set cmd_valid = (!rst && if qualified {
             client_cmd_valid
         } else {
-            *bist_cmd_valid
+            bist_cmd_valid
         });
-    set cmd_address = &(if qualified { client_cmd_address } else { *bist_cmd_address });
-    set cmd_write = &(if qualified { client_cmd_write } else { *bist_cmd_write });
-    set wdata_valid = &(!rst && if qualified {
+    set cmd_address = (if qualified { client_cmd_address } else { bist_cmd_address });
+    set cmd_write = (if qualified { client_cmd_write } else { bist_cmd_write });
+    set wdata_valid = (!rst && if qualified {
             client_wdata_valid
         } else {
-            *bist_write_valid
+            bist_write_valid
         });
-    set wdata = &(if qualified { client_wdata } else { *bist_write_data });
-    set wdata_mask = &(if qualified { client_wdata_mask } else { *bist_write_mask });
-    set rdata_ready = &(!rst && if qualified {
+    set wdata = (if qualified { client_wdata } else { bist_write_data });
+    set wdata_mask = (if qualified { client_wdata_mask } else { bist_write_mask });
+    set rdata_ready = (!rst && if qualified {
             client_rdata_ready
         } else {
-            *bist_read_ready
+            bist_read_ready
         });
-    set client_cmd_ready = &(qualified && !rst && cmd_ready);
-    set client_wdata_ready = &(qualified && !rst && wdata_ready);
-    set client_rdata_valid = &(qualified && !rst && rdata_valid);
-    set client_rdata = &rdata;
+    set client_cmd_ready = (qualified && !rst && cmd_ready);
+    set client_wdata_ready = (qualified && !rst && wdata_ready);
+    set client_rdata_valid = (qualified && !rst && rdata_valid);
+    set client_rdata = rdata;
 }
 
 #[no_mangle(all)]
@@ -133,24 +133,24 @@ pub entity native_bist(
     start: bool,
     word_count: uint<25>,
     timeout_cycles: uint<20>,
-    cmd_valid: inv &bool,
+    cmd_valid: inv bool,
     cmd_ready: bool,
-    cmd_address: inv &uint<24>,
-    cmd_write: inv &bool,
-    wdata_valid: inv &bool,
+    cmd_address: inv uint<24>,
+    cmd_write: inv bool,
+    wdata_valid: inv bool,
     wdata_ready: bool,
-    wdata: inv &uint<128>,
-    wdata_mask: inv &uint<16>,
+    wdata: inv uint<128>,
+    wdata_mask: inv uint<16>,
     rdata_valid: bool,
-    rdata_ready: inv &bool,
+    rdata_ready: inv bool,
     rdata: uint<128>,
-    busy: inv &bool,
-    passed: inv &bool,
-    failed: inv &bool,
-    progress: inv &uint<24>,
-    diagnostic: inv &uint<5>,
-    expected_word: inv &uint<128>,
-    actual_word: inv &uint<128>,
+    busy: inv bool,
+    passed: inv bool,
+    failed: inv bool,
+    progress: inv uint<24>,
+    diagnostic: inv uint<5>,
+    expected_word: inv uint<128>,
+    actual_word: inv uint<128>,
 ) {
     let IDLE: uint<3> = 0;
     let WRITE_PATTERN: uint<3> = 1;
@@ -285,18 +285,18 @@ pub entity native_bist(
         state
     };
 
-    set cmd_valid = &(!rst && (state == WRITE_PATTERN && !command_sent || state == ISSUE_READ));
-    set cmd_address = &(address);
-    set cmd_write = &(state == WRITE_PATTERN);
-    set wdata_valid = &(!rst && state == WRITE_PATTERN && !data_sent);
-    set wdata = &expected;
-    set wdata_mask = &(0xffff);
-    set rdata_ready = &(!rst && state == WAIT_READ_DATA);
-    set busy = &(active);
-    set passed = &(state == TEST_PASSED);
-    set failed = &(state == TEST_FAILED);
-    set progress = &(address);
-    set diagnostic = &(if state == TEST_FAILED { failure_diagnostic } else { phase });
-    set expected_word = &expected;
-    set actual_word = &received_word;
+    set cmd_valid = (!rst && (state == WRITE_PATTERN && !command_sent || state == ISSUE_READ));
+    set cmd_address = (address);
+    set cmd_write = (state == WRITE_PATTERN);
+    set wdata_valid = (!rst && state == WRITE_PATTERN && !data_sent);
+    set wdata = expected;
+    set wdata_mask = (0xffff);
+    set rdata_ready = (!rst && state == WAIT_READ_DATA);
+    set busy = (active);
+    set passed = (state == TEST_PASSED);
+    set failed = (state == TEST_FAILED);
+    set progress = (address);
+    set diagnostic = (if state == TEST_FAILED { failure_diagnostic } else { phase });
+    set expected_word = expected;
+    set actual_word = received_word;
 }

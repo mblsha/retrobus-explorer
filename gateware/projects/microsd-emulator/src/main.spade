@@ -68,20 +68,20 @@ pub entity sd_frontend(
     // SD pins
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
 
     // Read-buffer exchange
-    request_valid: inv &bool,
-    request_lba: inv &uint<32>,
-    generation: inv &uint<32>,
+    request_valid: inv bool,
+    request_lba: inv uint<32>,
+    generation: inv uint<32>,
     sector_ready: bool,
     sector_generation: uint<32>,
     sector_byte: uint<8>,
-    byte_index: inv &uint<9>,
-    sector_release: inv &bool,
+    byte_index: inv uint<9>,
+    sector_release: inv bool,
 
     // Mode and write-side inputs
     fast_mode: bool,
@@ -94,32 +94,32 @@ pub entity sd_frontend(
     dat_in: uint<4>,
 
     // DDR write command
-    write_cmd_valid: inv &bool,
+    write_cmd_valid: inv bool,
     write_cmd_ready: bool,
-    write_cmd_address: inv &uint<24>,
+    write_cmd_address: inv uint<24>,
 
     // DDR write data
-    write_data_valid: inv &bool,
+    write_data_valid: inv bool,
     write_data_ready: bool,
-    write_data: inv &uint<128>,
-    write_mask: inv &uint<16>,
-    write_busy: inv &bool,
+    write_data: inv uint<128>,
+    write_mask: inv uint<16>,
+    write_busy: inv bool,
 
     // Passive command-observation taps for external diagnostics.
-    trace_clock_tick: inv &bool,
-    trace_frame: inv &bool,
-    trace_valid: inv &bool,
-    trace_command: inv &uint<6>,
-    trace_argument: inv &uint<32>,
-    trace_response: inv &bool,
-    trace_response_complete: inv &bool,
-    trace_response_payload: inv &uint<32>,
-    trace_data_release: inv &bool,
-    trace_protocol_status: inv &uint<32>,
-    trace_pin_response: inv &uint<32>,
-    trace_pin_response_mismatch: inv &uint<32>,
-    trace_pin_data: inv &uint<32>,
-    trace_pin_data_mismatch: inv &uint<32>,
+    trace_clock_tick: inv bool,
+    trace_frame: inv bool,
+    trace_valid: inv bool,
+    trace_command: inv uint<6>,
+    trace_argument: inv uint<32>,
+    trace_response: inv bool,
+    trace_response_complete: inv bool,
+    trace_response_payload: inv uint<32>,
+    trace_data_release: inv bool,
+    trace_protocol_status: inv uint<32>,
+    trace_pin_response: inv uint<32>,
+    trace_pin_response_mismatch: inv uint<32>,
+    trace_pin_data: inv uint<32>,
+    trace_pin_data_mismatch: inv uint<32>,
 ) {
     let CMD_GO_IDLE: uint<6> = 0;
     let CMD_SEND_OP_COND: uint<6> = 1;
@@ -166,19 +166,19 @@ pub entity sd_frontend(
     reg(clk) cmd_sync reset(rst: true) = cmd_meta;
     reg(clk) dat_meta: uint<4> reset(rst: 15) = dat_in;
     reg(clk) dat_sync: uint<4> reset(rst: 15) = dat_meta;
-    let (write_transaction_active, write_transaction_active_w): (&bool, inv &bool) = port;
-    let (committing, committing_w): (&bool, inv &bool) = port;
-    let (write_done, write_done_w): (&bool, inv &bool) = port;
-    let (write_good, write_good_w): (&bool, inv &bool) = port;
-    let (write_response_data, write_response_data_w): (&uint<4>, inv &uint<4>) = port;
-    let (write_response_enable, write_response_enable_w): (&uint<4>, inv &uint<4>) = port;
-    let (commit_done, commit_done_w): (&bool, inv &bool) = port;
+    let (write_transaction_active, write_transaction_active_w): (bool, inv bool) = port;
+    let (committing, committing_w): (bool, inv bool) = port;
+    let (write_done, write_done_w): (bool, inv bool) = port;
+    let (write_good, write_good_w): (bool, inv bool) = port;
+    let (write_response_data, write_response_data_w): (uint<4>, inv uint<4>) = port;
+    let (write_response_enable, write_response_enable_w): (uint<4>, inv uint<4>) = port;
+    let (commit_done, commit_done_w): (bool, inv bool) = port;
     decl write_mode, write_lba;
     let prepared_data_mode = fast_mode || h700_mode || mmc_only;
     // A packet spans hundreds of SD edges. Register its aggregate activity
     // in prepared-data modes to keep reset/CRC-response decode out of read arbitration.
-    reg(clk) delayed_write_transaction_active reset(rst || !armed: false) = *write_transaction_active;
-    let write_active = write_mode != WRITE_IDLE || (if prepared_data_mode { delayed_write_transaction_active } else { *write_transaction_active });
+    reg(clk) delayed_write_transaction_active reset(rst || !armed: false) = write_transaction_active;
+    let write_active = write_mode != WRITE_IDLE || (if prepared_data_mode { delayed_write_transaction_active } else { write_transaction_active });
     let sd_sample_tick = clk_sync && !clk_prev;
     // A live host clocks SD_CLK continuously; an unpowered one leaves the line
     // floating, where measured noise still produces a few hundred transitions
@@ -453,7 +453,7 @@ pub entity sd_frontend(
     // Write-transaction controls: accepted commits outlive protocol cancellation.
     let raw_write_request = valid && transfer_idle && writable && write_command &&
         !block_length_256 && !range_error;
-    let raw_write_next = *write_done && *write_good && write_mode == WRITE_MULTIPLE && write_lba < last_lba && !stop;
+    let raw_write_next = write_done && write_good && write_mode == WRITE_MULTIPLE && write_lba < last_lba && !stop;
     // Register fast command-to-receiver controls rather than letting
     // command decoding and response-active logic feed a receiver-wide reset.
     reg(clk) queued_write_request reset(local_rst: false) = raw_write_request;
@@ -488,7 +488,7 @@ pub entity sd_frontend(
         } else {
             WRITE_SINGLE
         }
-    } else if *write_done && !raw_write_next {
+    } else if write_done && !raw_write_next {
         WRITE_IDLE
     } else {
         write_mode
@@ -532,14 +532,14 @@ pub entity sd_frontend(
         wdata_mask: write_mask,
     );
     set write_busy = committing;
-    set trace_clock_tick = &sd_sample_tick;
-    set trace_frame = &observed_frame;
-    set trace_valid = &valid;
-    set trace_command = &command_index;
-    set trace_argument = &command_argument;
+    set trace_clock_tick = sd_sample_tick;
+    set trace_frame = observed_frame;
+    set trace_valid = valid;
+    set trace_command = command_index;
+    set trace_argument = command_argument;
     reg(clk) write_crc_error reset(local_rst: false) = if valid && (command_index == CMD_GO_IDLE || (command_index == CMD_SEND_STATUS && !app)) {
         false
-    } else if *write_done && !*write_good {
+    } else if write_done && !write_good {
         true
     } else {
         write_crc_error
@@ -571,7 +571,7 @@ pub entity sd_frontend(
     // Command legality, status, and response payload selection.
     let base_status: uint<32> = card_status_word$(
         card_state: state,
-        committing: *committing,
+        committing: committing,
         write_active,
         reading: data_state != READ_IDLE || pending,
         write_crc_error,
@@ -660,7 +660,7 @@ pub entity sd_frontend(
     } else {
         status
     };
-    set trace_response_payload = &payload;
+    set trace_response_payload = payload;
     // Report the fixed voltage window, READY, and sector addressing on the
     // first probe. Linux/U-Boot may still repeat CMD1 with its selected OCR.
     // Bit 7 is part of the legacy MMC window used by the H616/H700 family.
@@ -751,7 +751,7 @@ pub entity sd_frontend(
     };
     reg(clk) reply reset(local_rst: false) = valid && command_index != CMD_GO_IDLE &&
         !deselect && !suppress_sd_probe;
-    set trace_response = &reply;
+    set trace_response = reply;
     reg(clk) response_delay reset(local_rst: false) = if reply {
         true
     } else if command_output_advance {
@@ -760,7 +760,7 @@ pub entity sd_frontend(
         response_delay
     };
     let response_bit_ready = response_left > 0 && !response_delay;
-    set trace_response_complete = &(command_output_advance &&
+    set trace_response_complete = (command_output_advance &&
         response_left == 1 && response_bit_ready);
     reg(clk) response: uint<136> reset(local_rst: 0) = {
         if reply {
@@ -838,9 +838,9 @@ pub entity sd_frontend(
     // response ones as lows while every driven zero remained correct. Drive
     // the complete response in that explicit compatibility profile. The
     // qualified SD and GKD MMC profiles retain standards-compliant open drain.
-    set cmd_oe = &(command_pin_drive && armed &&
+    set cmd_oe = (command_pin_drive && armed &&
         (!open_drain_reply || !command_output || h700_mode));
-    set cmd_out = &command_output;
+    set cmd_out = command_output;
 
     // Observe the response through the CMD input buffer at host sampling edges.
     // This is independent of the serializer state used to generate the reply:
@@ -940,18 +940,18 @@ pub entity sd_frontend(
     let observed_start_flag: uint<32> = if observed_response_header.to_bits()[7] { 1 << 29 } else { 0 };
     let observed_transmission_flag: uint<32> = if observed_response_header.to_bits()[6] { 1 << 30 } else { 0 };
     let observed_mismatch_flag: uint<32> = if observed_response_mismatch { 1 << 31 } else { 0 };
-    set trace_pin_response = &(zext(observed_response_bits) |
+    set trace_pin_response = (zext(observed_response_bits) |
         (zext(observed_response_crc) << 8) | (zext(observed_received_crc) << 15) |
         (zext(trunc::<uint<8>, uint<6>>(observed_response_header)) << 22) |
         observed_end_flag | observed_start_flag | observed_transmission_flag |
         observed_mismatch_flag);
-    set trace_pin_response_mismatch = &(zext(observed_response_low_for_high) |
+    set trace_pin_response_mismatch = (zext(observed_response_low_for_high) |
         (zext(observed_response_high_for_low) << 8) |
         (zext(observed_response_first_mismatch) << 16));
 
     // Read requests, sector ownership, and data serialization.
     let data_end = data_output_advance && data_state == READ_RELEASE;
-    set trace_data_release = &data_end;
+    set trace_data_release = data_end;
     // CMD12 may arrive while the host is receiving the current block. Finish
     // that block, including its CRC and end bit, but do not start another one.
     // Reset/deselect still abort immediately, as does CMD12 before data starts.
@@ -1198,9 +1198,9 @@ pub entity sd_frontend(
     };
     let read_data_start = data_state == READ_IDLE && data_start;
     let read_data_drive = read_data_start || data_state == READ_PAYLOAD || data_state == READ_CRC || data_state == READ_END_BIT;
-    reg(clk) prepared_pad_write reset(local_rst: false) = *write_response_enable != 0;
-    reg(clk) prepared_pad_data: uint<4> reset(local_rst: 15) = if *write_response_enable != 0 {
-        *write_response_data
+    reg(clk) prepared_pad_write reset(local_rst: false) = write_response_enable != 0;
+    reg(clk) prepared_pad_data: uint<4> reset(local_rst: 15) = if write_response_enable != 0 {
+        write_response_data
     } else {
         read_data_bit
     };
@@ -1265,10 +1265,10 @@ pub entity sd_frontend(
     };
     // In prepared-data modes DAT values leave the final registers directly, without a
     // read/write-response mux between the registers and the output buffers.
-    set dat_out = &(if prepared_data_mode {
+    set dat_out = (if prepared_data_mode {
             data_output
-        } else if *write_response_enable != 0 {
-            *write_response_data
+        } else if write_response_enable != 0 {
+            write_response_data
         } else {
             data_output
         });
@@ -1278,8 +1278,8 @@ pub entity sd_frontend(
             1
         } else if prepared_data_mode {
             pad_data_enable
-        } else if *write_response_enable != 0 {
-            *write_response_enable
+        } else if write_response_enable != 0 {
+            write_response_enable
         } else if data_drive {
             if wide {
                 15
@@ -1309,7 +1309,7 @@ pub entity sd_frontend(
     // only engages while the host is clocking, so the level this presents is
     // never stale for more than one host clock period.
     let h700_idle_data_high = h700_idle_data_armed && data_output_enable == 0;
-    set dat_oe = &(if data_output_enable != 0 {
+    set dat_oe = (if data_output_enable != 0 {
             data_output_enable
         } else if h700_idle_data_high {
             15
@@ -1395,10 +1395,10 @@ pub entity sd_frontend(
     };
     let observed_data_mismatch_flag: uint<32> = if completed_data_mismatch { 1 << 24 } else { 0 };
     let observed_data_active_flag: uint<32> = if observed_data_enable { 1 << 25 } else { 0 };
-    set trace_pin_data = &(zext(completed_data_samples) |
+    set trace_pin_data = (zext(completed_data_samples) |
         (zext(completed_data_blocks) << 16) | observed_data_mismatch_flag |
         observed_data_active_flag | (zext(observed_data_lanes) << 26));
-    set trace_pin_data_mismatch = &(zext(completed_data_mismatch_count) |
+    set trace_pin_data_mismatch = (zext(completed_data_mismatch_count) |
         (zext(completed_data_first_mismatch) << 16));
     // A passive snapshot distinguishes a response still being serialized from
     // a completed CMD7 whose host did not issue the following command. It has
@@ -1413,7 +1413,7 @@ pub entity sd_frontend(
     let trace_block_256: uint<32> = if block_length_256 { 1 << 29 } else { 0 };
     let trace_wide: uint<32> = if wide { 1 << 30 } else { 0 };
     let trace_loader_read: uint<32> = if boot_read_seen { 1 << 31 } else { 0 };
-    set trace_protocol_status = &(zext(response_left) | (zext(state) << 8) |
+    set trace_protocol_status = (zext(response_left) | (zext(state) << 8) |
         trace_mmc | trace_open_drain | trace_select_busy | trace_idle_data_high |
         (zext(saved_index) << 16) | trace_command_drive | trace_command_output |
         trace_data_drive | (zext(pad_data_enable) << 25) | trace_block_256 |
@@ -1423,15 +1423,15 @@ pub entity sd_frontend(
     } else {
         offset
     };
-    set byte_index = &backend_offset;
-    set request_valid = &pending;
-    set request_lba = &lba;
-    set generation = &epoch;
+    set byte_index = backend_offset;
+    set request_valid = pending;
+    set request_lba = lba;
+    set generation = epoch;
     // Break command-decode fanout into backend control. Generation changes on
     // the original event, so a late backend response is already stale before
     // this registered release arrives one management cycle later.
     reg(clk) release_event reset(rst: false) = read_stop_now || data_end;
-    set sector_release = &release_event;
+    set sector_release = release_event;
 }
 
 #[no_mangle(all)]
@@ -1441,30 +1441,30 @@ entity bram_emulator(
     rx_valid: bool,
     rx_byte: uint<8>,
     tx_ready: bool,
-    tx_valid: inv &bool,
-    tx_byte: inv &uint<8>,
+    tx_valid: inv bool,
+    tx_byte: inv uint<8>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
-    let (card_armed, card_armed_w): (&bool, inv &bool) = port;
-    let (loader_valid, loader_valid_w): (&bool, inv &bool) = port;
-    let (loader_address, loader_address_w): (&uint<32>, inv &uint<32>) = port;
-    let (loader_byte, loader_byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (loader_ready, loader_ready_w): (&bool, inv &bool) = port;
-    let (read_request, read_request_w): (&bool, inv &bool) = port;
-    let (read_lba, read_lba_w): (&uint<32>, inv &uint<32>) = port;
-    let (read_generation, read_generation_w): (&uint<32>, inv &uint<32>) = port;
-    let (read_ready, read_ready_w): (&bool, inv &bool) = port;
-    let (buffer_generation, buffer_generation_w): (&uint<32>, inv &uint<32>) = port;
-    let (read_byte_index, read_byte_index_w): (&uint<9>, inv &uint<9>) = port;
-    let (read_byte, read_byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (read_release, read_release_w): (&bool, inv &bool) = port;
-    let (_, unused_selector): (&uint<7>, inv &uint<7>) = port;
+    let (card_armed, card_armed_w): (bool, inv bool) = port;
+    let (loader_valid, loader_valid_w): (bool, inv bool) = port;
+    let (loader_address, loader_address_w): (uint<32>, inv uint<32>) = port;
+    let (loader_byte, loader_byte_w): (uint<8>, inv uint<8>) = port;
+    let (loader_ready, loader_ready_w): (bool, inv bool) = port;
+    let (read_request, read_request_w): (bool, inv bool) = port;
+    let (read_lba, read_lba_w): (uint<32>, inv uint<32>) = port;
+    let (read_generation, read_generation_w): (uint<32>, inv uint<32>) = port;
+    let (read_ready, read_ready_w): (bool, inv bool) = port;
+    let (buffer_generation, buffer_generation_w): (uint<32>, inv uint<32>) = port;
+    let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port;
+    let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port;
+    let (read_release, read_release_w): (bool, inv bool) = port;
+    let (_, unused_selector): (uint<7>, inv uint<7>) = port;
     let _ = inst loader::image_loader$(
         clk,
         rst,
@@ -1474,7 +1474,7 @@ entity bram_emulator(
         tx_ready,
         tx_valid,
         tx_byte,
-        load_ready: *loader_ready,
+        load_ready: loader_ready,
         load_valid: loader_valid_w,
         load_address: loader_address_w,
         load_byte: loader_byte_w,
@@ -1484,46 +1484,46 @@ entity bram_emulator(
     let _ = inst storage::bram_backend$(
         clk,
         rst,
-        armed: *card_armed,
-        load_valid: *loader_valid,
-        load_address: *loader_address,
-        load_byte: *loader_byte,
+        armed: card_armed,
+        load_valid: loader_valid,
+        load_address: loader_address,
+        load_byte: loader_byte,
         load_ready: loader_ready_w,
-        request_valid: *read_request,
-        request_lba: *read_lba,
-        generation: *read_generation,
-        buffer_release: *read_release,
+        request_valid: read_request,
+        request_lba: read_lba,
+        generation: read_generation,
+        buffer_release: read_release,
         sector_ready: read_ready_w,
         sector_generation: buffer_generation_w,
-        byte_index: *read_byte_index,
+        byte_index: read_byte_index,
         sector_byte: read_byte_w,
     );
-    let (unused_wc, unused_wc_w): (&bool, inv &bool) = port;
-    let (unused_wa, unused_wa_w): (&uint<24>, inv &uint<24>) = port;
-    let (unused_wv, unused_wv_w): (&bool, inv &bool) = port;
-    let (unused_wd, unused_wd_w): (&uint<128>, inv &uint<128>) = port;
-    let (unused_wm, unused_wm_w): (&uint<16>, inv &uint<16>) = port;
-    let (unused_wb, unused_wb_w): (&bool, inv &bool) = port;
-    let (_, unused_trace_clock): (&bool, inv &bool) = port;
-    let (_, unused_trace_frame): (&bool, inv &bool) = port;
-    let (_, unused_trace_valid): (&bool, inv &bool) = port;
-    let (_, unused_trace_command): (&uint<6>, inv &uint<6>) = port;
-    let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_response): (&bool, inv &bool) = port;
-    let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
-    let (_, unused_trace_response_payload): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_data_release): (&bool, inv &bool) = port;
-    let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_response_mismatch): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_data_mismatch): (&uint<32>, inv &uint<32>) = port;
+    let (unused_wc, unused_wc_w): (bool, inv bool) = port;
+    let (unused_wa, unused_wa_w): (uint<24>, inv uint<24>) = port;
+    let (unused_wv, unused_wv_w): (bool, inv bool) = port;
+    let (unused_wd, unused_wd_w): (uint<128>, inv uint<128>) = port;
+    let (unused_wm, unused_wm_w): (uint<16>, inv uint<16>) = port;
+    let (unused_wb, unused_wb_w): (bool, inv bool) = port;
+    let (_, unused_trace_clock): (bool, inv bool) = port;
+    let (_, unused_trace_frame): (bool, inv bool) = port;
+    let (_, unused_trace_valid): (bool, inv bool) = port;
+    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port;
+    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_response): (bool, inv bool) = port;
+    let (_, unused_trace_response_complete): (bool, inv bool) = port;
+    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_data_release): (bool, inv bool) = port;
+    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
         clk,
         rst,
-        armed: *card_armed,
+        armed: card_armed,
 
         // SD pins
         sd_clk,
@@ -1537,9 +1537,9 @@ entity bram_emulator(
         request_valid: read_request_w,
         request_lba: read_lba_w,
         generation: read_generation_w,
-        sector_ready: *read_ready,
-        sector_generation: *buffer_generation,
-        sector_byte: *read_byte,
+        sector_ready: read_ready,
+        sector_generation: buffer_generation,
+        sector_byte: read_byte,
         byte_index: read_byte_index_w,
         sector_release: read_release_w,
 
@@ -1587,14 +1587,14 @@ entity emulator_uart(
     clk: clock,
     rst_n: bool,
     usb_rx: bool,
-    usb_tx: inv &bool,
+    usb_tx: inv bool,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
     let rst = !rst_n;
     let rx = inst shared_components::serial::uart_rx::<8>$(
@@ -1605,11 +1605,11 @@ entity emulator_uart(
         parity: false,
         stop_bits: 1,
     );
-    let (valid, valid_w): (&bool, inv &bool) = port;
-    let (byte, byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (busy, busy_w): (&bool, inv &bool) = port;
-    reg(clk) issued reset(rst: false) = *valid && !*busy && !issued;
-    let send = *valid && !*busy && !issued;
+    let (valid, valid_w): (bool, inv bool) = port;
+    let (byte, byte_w): (uint<8>, inv uint<8>) = port;
+    let (busy, busy_w): (bool, inv bool) = port;
+    reg(clk) issued reset(rst: false) = valid && !busy && !issued;
+    let send = valid && !busy && !issued;
     let _ = inst bram_emulator$(
         clk,
         rst,
@@ -1630,11 +1630,11 @@ entity emulator_uart(
         clk,
         rst,
         block: false,
-        data: *byte,
+        data: byte,
         new_data: send,
     );
-    set busy_w = &tx.busy;
-    set usb_tx = &tx.tx;
+    set busy_w = tx.busy;
+    set usb_tx = tx.tx;
 }
 
 #[no_mangle(all)]
@@ -1643,51 +1643,51 @@ entity ddr_emulator(
     rst: bool,
     initialized: bool,
     diagnostic_status: uint<27>,
-    status_selector: inv &uint<7>,
+    status_selector: inv uint<7>,
     fast_mode: bool,
     writable: bool,
     dat_in: uint<4>,
-    ddr_cmd_valid: inv &bool,
+    ddr_cmd_valid: inv bool,
     ddr_cmd_ready: bool,
-    ddr_cmd_address: inv &uint<24>,
-    ddr_cmd_write: inv &bool,
+    ddr_cmd_address: inv uint<24>,
+    ddr_cmd_write: inv bool,
     ddr_rdata_valid: bool,
-    ddr_rdata_ready: inv &bool,
+    ddr_rdata_ready: inv bool,
     ddr_rdata: uint<128>,
-    ddr_wdata_valid: inv &bool,
+    ddr_wdata_valid: inv bool,
     ddr_wdata_ready: bool,
-    ddr_wdata: inv &uint<128>,
-    ddr_wdata_mask: inv &uint<16>,
+    ddr_wdata: inv uint<128>,
+    ddr_wdata_mask: inv uint<16>,
     rx_valid: bool,
     rx_byte: uint<8>,
     tx_ready: bool,
-    tx_valid: inv &bool,
-    tx_byte: inv &uint<8>,
+    tx_valid: inv bool,
+    tx_byte: inv uint<8>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
-    let (card_armed, card_armed_w): (&bool, inv &bool) = port;
-    let (loader_valid, loader_valid_w): (&bool, inv &bool) = port;
-    let (loader_address, loader_address_w): (&uint<32>, inv &uint<32>) = port;
-    let (loader_byte, loader_byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (loader_ready, loader_ready_w): (&bool, inv &bool) = port;
-    let (read_request, read_request_w): (&bool, inv &bool) = port;
-    let (read_lba, read_lba_w): (&uint<32>, inv &uint<32>) = port;
-    let (read_generation, read_generation_w): (&uint<32>, inv &uint<32>) = port;
-    let (read_ready, read_ready_w): (&bool, inv &bool) = port;
-    let (buffer_generation, buffer_generation_w): (&uint<32>, inv &uint<32>) = port;
-    let (read_byte_index, read_byte_index_w): (&uint<9>, inv &uint<9>) = port;
-    let (read_byte, read_byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (read_release, read_release_w): (&bool, inv &bool) = port;
+    let (card_armed, card_armed_w): (bool, inv bool) = port;
+    let (loader_valid, loader_valid_w): (bool, inv bool) = port;
+    let (loader_address, loader_address_w): (uint<32>, inv uint<32>) = port;
+    let (loader_byte, loader_byte_w): (uint<8>, inv uint<8>) = port;
+    let (loader_ready, loader_ready_w): (bool, inv bool) = port;
+    let (read_request, read_request_w): (bool, inv bool) = port;
+    let (read_lba, read_lba_w): (uint<32>, inv uint<32>) = port;
+    let (read_generation, read_generation_w): (uint<32>, inv uint<32>) = port;
+    let (read_ready, read_ready_w): (bool, inv bool) = port;
+    let (buffer_generation, buffer_generation_w): (uint<32>, inv uint<32>) = port;
+    let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port;
+    let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port;
+    let (read_release, read_release_w): (bool, inv bool) = port;
     // Low bits expose live interface state; upper bits carry BIST diagnostics.
     let loader_status_word: uint<32> = (zext::<27, 32>(diagnostic_status) << 5)
         | zext(std::conv::bits_to_uint([
-            initialized, ddr_cmd_ready, ddr_wdata_ready, *card_armed, ddr_rdata_valid,
+            initialized, ddr_cmd_ready, ddr_wdata_ready, card_armed, ddr_rdata_valid,
         ]));
     let _ = inst loader::image_loader$(
         clk,
@@ -1698,36 +1698,36 @@ entity ddr_emulator(
         tx_ready,
         tx_valid,
         tx_byte,
-        load_ready: *loader_ready,
+        load_ready: loader_ready,
         load_valid: loader_valid_w,
         load_address: loader_address_w,
         load_byte: loader_byte_w,
         armed: card_armed_w,
         status_selector,
     );
-    let (read_cmd_valid, read_cmd_valid_w): (&bool, inv &bool) = port;
-    let (read_cmd_address, read_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
-    let (loader_cmd_valid, loader_cmd_valid_w): (&bool, inv &bool) = port;
-    let (loader_cmd_address, loader_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
-    let (sd_write_cmd_valid, sd_write_cmd_valid_w): (&bool, inv &bool) = port;
-    let (sd_write_cmd_address, sd_write_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
-    let (sd_write_data_valid, sd_write_data_valid_w): (&bool, inv &bool) = port;
-    let (sd_write_data, sd_write_data_w): (&uint<128>, inv &uint<128>) = port;
-    let (sd_write_mask, sd_write_mask_w): (&uint<16>, inv &uint<16>) = port;
-    let (sd_commit_busy, sd_commit_busy_w): (&bool, inv &bool) = port;
-    let (loader_data_valid, loader_data_valid_w): (&bool, inv &bool) = port;
-    let (loader_data, loader_data_w): (&uint<128>, inv &uint<128>) = port;
-    let (loader_mask, loader_mask_w): (&uint<16>, inv &uint<16>) = port;
+    let (read_cmd_valid, read_cmd_valid_w): (bool, inv bool) = port;
+    let (read_cmd_address, read_cmd_address_w): (uint<24>, inv uint<24>) = port;
+    let (loader_cmd_valid, loader_cmd_valid_w): (bool, inv bool) = port;
+    let (loader_cmd_address, loader_cmd_address_w): (uint<24>, inv uint<24>) = port;
+    let (sd_write_cmd_valid, sd_write_cmd_valid_w): (bool, inv bool) = port;
+    let (sd_write_cmd_address, sd_write_cmd_address_w): (uint<24>, inv uint<24>) = port;
+    let (sd_write_data_valid, sd_write_data_valid_w): (bool, inv bool) = port;
+    let (sd_write_data, sd_write_data_w): (uint<128>, inv uint<128>) = port;
+    let (sd_write_mask, sd_write_mask_w): (uint<16>, inv uint<16>) = port;
+    let (sd_commit_busy, sd_commit_busy_w): (bool, inv bool) = port;
+    let (loader_data_valid, loader_data_valid_w): (bool, inv bool) = port;
+    let (loader_data, loader_data_w): (uint<128>, inv uint<128>) = port;
+    let (loader_mask, loader_mask_w): (uint<16>, inv uint<16>) = port;
     // The sector writer stages 16 bytes before issuing its first DDR beat.
     // Register ownership during that staging time, cutting final-CRC decode
     // out of the wide data mux/FIFO enables. Keep it through the final beat
     // and one following idle cycle. Raw busy still blocks a new UART load
     // immediately when SD accepts a packet on the same edge as disarm.
-    reg(clk) sd_commit_owner reset(rst: false) = *sd_commit_busy;
+    reg(clk) sd_commit_owner reset(rst: false) = sd_commit_busy;
     let sd_owner = if fast_mode {
         sd_commit_owner
     } else {
-        *sd_commit_busy
+        sd_commit_busy
     };
     // Accepted SD commits retain ownership even if the loader disarms SD.
     // native_stage orders the final buffered write ahead of subsequent reads.
@@ -1742,17 +1742,17 @@ entity ddr_emulator(
         0, 0,
         true,
     )) = (
-        *card_armed, initialized, *read_request,
-        *read_lba, *read_generation,
-        *read_release,
+        card_armed, initialized, read_request,
+        read_lba, read_generation,
+        read_release,
     );
     let (backend_arm, backend_initialized, backend_request, backend_lba, backend_epoch, backend_release) = if fast_mode {
         backend_inputs
     } else {
         (
-            *card_armed, initialized, *read_request,
-            *read_lba, *read_generation,
-            *read_release,
+            card_armed, initialized, read_request,
+            read_lba, read_generation,
+            read_release,
         )
     };
     let _ = inst storage::ddr_backend$(
@@ -1767,10 +1767,10 @@ entity ddr_emulator(
         buffer_release: backend_release,
         sector_ready: read_ready_w,
         sector_generation: buffer_generation_w,
-        byte_index: *read_byte_index,
+        byte_index: read_byte_index,
         sector_byte: read_byte_w,
         cmd_valid: read_cmd_valid_w,
-        cmd_ready: ddr_cmd_ready && *card_armed && !sd_owner,
+        cmd_ready: ddr_cmd_ready && card_armed && !sd_owner,
         cmd_address: read_cmd_address_w,
         rdata_valid: ddr_rdata_valid,
         rdata_ready: ddr_rdata_ready,
@@ -1779,57 +1779,57 @@ entity ddr_emulator(
     let _ = inst storage::ddr_byte_writer$(
         clk,
         rst,
-        enabled: !*card_armed && initialized && !*sd_commit_busy && !sd_owner,
-        load_valid: *loader_valid,
-        load_address: *loader_address,
-        load_byte: *loader_byte,
+        enabled: !card_armed && initialized && !sd_commit_busy && !sd_owner,
+        load_valid: loader_valid,
+        load_address: loader_address,
+        load_byte: loader_byte,
         load_ready: loader_ready_w,
         cmd_valid: loader_cmd_valid_w,
-        cmd_ready: ddr_cmd_ready && !*card_armed && !sd_owner,
+        cmd_ready: ddr_cmd_ready && !card_armed && !sd_owner,
         cmd_address: loader_cmd_address_w,
         wdata_valid: loader_data_valid_w,
         wdata_ready: ddr_wdata_ready && !sd_owner,
         wdata: loader_data_w,
         wdata_mask: loader_mask_w,
     );
-    set ddr_cmd_valid = &(if sd_owner {
-            *sd_write_cmd_valid
-        } else if *card_armed {
-            *read_cmd_valid
+    set ddr_cmd_valid = (if sd_owner {
+            sd_write_cmd_valid
+        } else if card_armed {
+            read_cmd_valid
         } else {
-            *loader_cmd_valid
+            loader_cmd_valid
         });
-    set ddr_cmd_address = &(if sd_owner {
-            *sd_write_cmd_address
-        } else if *card_armed {
-            *read_cmd_address
+    set ddr_cmd_address = (if sd_owner {
+            sd_write_cmd_address
+        } else if card_armed {
+            read_cmd_address
         } else {
-            *loader_cmd_address
+            loader_cmd_address
         });
-    set ddr_cmd_write = &(sd_owner || !*card_armed);
-    set ddr_wdata_valid = &(if sd_owner { *sd_write_data_valid } else { *loader_data_valid });
-    set ddr_wdata = &(if sd_owner { *sd_write_data } else { *loader_data });
-    set ddr_wdata_mask = &(if sd_owner { *sd_write_mask } else { *loader_mask });
-    let (_, unused_trace_clock): (&bool, inv &bool) = port;
-    let (_, unused_trace_frame): (&bool, inv &bool) = port;
-    let (_, unused_trace_valid): (&bool, inv &bool) = port;
-    let (_, unused_trace_command): (&uint<6>, inv &uint<6>) = port;
-    let (_, unused_trace_argument): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_response): (&bool, inv &bool) = port;
-    let (_, unused_trace_response_complete): (&bool, inv &bool) = port;
-    let (_, unused_trace_response_payload): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_data_release): (&bool, inv &bool) = port;
-    let (_, unused_trace_protocol_status): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_response): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_response_mismatch): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_data): (&uint<32>, inv &uint<32>) = port;
-    let (_, unused_trace_pin_data_mismatch): (&uint<32>, inv &uint<32>) = port;
+    set ddr_cmd_write = (sd_owner || !card_armed);
+    set ddr_wdata_valid = (if sd_owner { sd_write_data_valid } else { loader_data_valid });
+    set ddr_wdata = (if sd_owner { sd_write_data } else { loader_data });
+    set ddr_wdata_mask = (if sd_owner { sd_write_mask } else { loader_mask });
+    let (_, unused_trace_clock): (bool, inv bool) = port;
+    let (_, unused_trace_frame): (bool, inv bool) = port;
+    let (_, unused_trace_valid): (bool, inv bool) = port;
+    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port;
+    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_response): (bool, inv bool) = port;
+    let (_, unused_trace_response_complete): (bool, inv bool) = port;
+    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_data_release): (bool, inv bool) = port;
+    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port;
     let _ = inst sd_frontend$(
 
         // Clock and card control
         clk,
         rst,
-        armed: *card_armed && initialized,
+        armed: card_armed && initialized,
 
         // SD pins
         sd_clk,
@@ -1843,9 +1843,9 @@ entity ddr_emulator(
         request_valid: read_request_w,
         request_lba: read_lba_w,
         generation: read_generation_w,
-        sector_ready: *read_ready,
-        sector_generation: *buffer_generation,
-        sector_byte: *read_byte,
+        sector_ready: read_ready,
+        sector_generation: buffer_generation,
+        sector_byte: read_byte,
         byte_index: read_byte_index_w,
         sector_release: read_release_w,
 
@@ -1885,7 +1885,7 @@ entity ddr_emulator(
         trace_pin_data: unused_trace_pin_data,
         trace_pin_data_mismatch: unused_trace_pin_data_mismatch,
     );
-    set armed_status = &(*card_armed && initialized);
+    set armed_status = (card_armed && initialized);
 }
 
 // UART divisors track the selected DDR system clock.
@@ -1894,30 +1894,30 @@ entity ddr_uart_core<#uint CLK_FREQ>(
     rst: bool,
     initialized: bool,
     diagnostic_status: uint<27>,
-    status_selector: inv &uint<7>,
+    status_selector: inv uint<7>,
     fast_mode: bool,
     writable: bool,
     dat_in: uint<4>,
     usb_rx: bool,
-    usb_tx: inv &bool,
-    ddr_cmd_valid: inv &bool,
+    usb_tx: inv bool,
+    ddr_cmd_valid: inv bool,
     ddr_cmd_ready: bool,
-    ddr_cmd_address: inv &uint<24>,
-    ddr_cmd_write: inv &bool,
+    ddr_cmd_address: inv uint<24>,
+    ddr_cmd_write: inv bool,
     ddr_rdata_valid: bool,
-    ddr_rdata_ready: inv &bool,
+    ddr_rdata_ready: inv bool,
     ddr_rdata: uint<128>,
-    ddr_wdata_valid: inv &bool,
+    ddr_wdata_valid: inv bool,
     ddr_wdata_ready: bool,
-    ddr_wdata: inv &uint<128>,
-    ddr_wdata_mask: inv &uint<16>,
+    ddr_wdata: inv uint<128>,
+    ddr_wdata_mask: inv uint<16>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
     let rx_cycles: uint<32> = CLK_FREQ `std::ops::comb_div` 1_000_000;
     let rx = inst shared_components::serial::uart_rx::<8>$(
@@ -1928,11 +1928,11 @@ entity ddr_uart_core<#uint CLK_FREQ>(
         parity: false,
         stop_bits: 1,
     );
-    let (valid, valid_w): (&bool, inv &bool) = port;
-    let (byte, byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (busy, busy_w): (&bool, inv &bool) = port;
-    reg(clk) issued reset(rst: false) = *valid && !*busy && !issued;
-    let send = *valid && !*busy && !issued;
+    let (valid, valid_w): (bool, inv bool) = port;
+    let (byte, byte_w): (uint<8>, inv uint<8>) = port;
+    let (busy, busy_w): (bool, inv bool) = port;
+    reg(clk) issued reset(rst: false) = valid && !busy && !issued;
+    let send = valid && !busy && !issued;
     let _ = inst ddr_emulator$(
 
         // Clock and card control
@@ -1982,11 +1982,11 @@ entity ddr_uart_core<#uint CLK_FREQ>(
         clk,
         rst,
         block: false,
-        data: *byte,
+        data: byte,
         new_data: send,
     );
-    set busy_w = &tx.busy;
-    set usb_tx = &tx.tx;
+    set busy_w = tx.busy;
+    set usb_tx = tx.tx;
 }
 
 #[no_mangle(all)]
@@ -1995,29 +1995,29 @@ entity ddr_uart(
     rst: bool,
     initialized: bool,
     diagnostic_status: uint<27>,
-    status_selector: inv &uint<7>,
+    status_selector: inv uint<7>,
     writable: bool,
     dat_in: uint<4>,
     usb_rx: bool,
-    usb_tx: inv &bool,
-    ddr_cmd_valid: inv &bool,
+    usb_tx: inv bool,
+    ddr_cmd_valid: inv bool,
     ddr_cmd_ready: bool,
-    ddr_cmd_address: inv &uint<24>,
-    ddr_cmd_write: inv &bool,
+    ddr_cmd_address: inv uint<24>,
+    ddr_cmd_write: inv bool,
     ddr_rdata_valid: bool,
-    ddr_rdata_ready: inv &bool,
+    ddr_rdata_ready: inv bool,
     ddr_rdata: uint<128>,
-    ddr_wdata_valid: inv &bool,
+    ddr_wdata_valid: inv bool,
     ddr_wdata_ready: bool,
-    ddr_wdata: inv &uint<128>,
-    ddr_wdata_mask: inv &uint<16>,
+    ddr_wdata: inv uint<128>,
+    ddr_wdata_mask: inv uint<16>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
     let _ = inst ddr_uart_core::<83_333_333>$(
         clk,
@@ -2057,29 +2057,29 @@ entity ddr_uart_80(
     rst: bool,
     initialized: bool,
     diagnostic_status: uint<27>,
-    status_selector: inv &uint<7>,
+    status_selector: inv uint<7>,
     writable: bool,
     dat_in: uint<4>,
     usb_rx: bool,
-    usb_tx: inv &bool,
-    ddr_cmd_valid: inv &bool,
+    usb_tx: inv bool,
+    ddr_cmd_valid: inv bool,
     ddr_cmd_ready: bool,
-    ddr_cmd_address: inv &uint<24>,
-    ddr_cmd_write: inv &bool,
+    ddr_cmd_address: inv uint<24>,
+    ddr_cmd_write: inv bool,
     ddr_rdata_valid: bool,
-    ddr_rdata_ready: inv &bool,
+    ddr_rdata_ready: inv bool,
     ddr_rdata: uint<128>,
-    ddr_wdata_valid: inv &bool,
+    ddr_wdata_valid: inv bool,
     ddr_wdata_ready: bool,
-    ddr_wdata: inv &uint<128>,
-    ddr_wdata_mask: inv &uint<16>,
+    ddr_wdata: inv uint<128>,
+    ddr_wdata_mask: inv uint<16>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
     let _ = inst ddr_uart_core::<80_000_000>$(
         clk,
@@ -2119,29 +2119,29 @@ entity ddr_uart_200(
     rst: bool,
     initialized: bool,
     diagnostic_status: uint<27>,
-    status_selector: inv &uint<7>,
+    status_selector: inv uint<7>,
     writable: bool,
     dat_in: uint<4>,
     usb_rx: bool,
-    usb_tx: inv &bool,
-    ddr_cmd_valid: inv &bool,
+    usb_tx: inv bool,
+    ddr_cmd_valid: inv bool,
     ddr_cmd_ready: bool,
-    ddr_cmd_address: inv &uint<24>,
-    ddr_cmd_write: inv &bool,
+    ddr_cmd_address: inv uint<24>,
+    ddr_cmd_write: inv bool,
     ddr_rdata_valid: bool,
-    ddr_rdata_ready: inv &bool,
+    ddr_rdata_ready: inv bool,
     ddr_rdata: uint<128>,
-    ddr_wdata_valid: inv &bool,
+    ddr_wdata_valid: inv bool,
     ddr_wdata_ready: bool,
-    ddr_wdata: inv &uint<128>,
-    ddr_wdata_mask: inv &uint<16>,
+    ddr_wdata: inv uint<128>,
+    ddr_wdata_mask: inv uint<16>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
     let _ = inst ddr_uart_core::<200_000_000>$(
         clk,
@@ -2181,29 +2181,29 @@ entity ddr_uart_100(
     rst: bool,
     initialized: bool,
     diagnostic_status: uint<27>,
-    status_selector: inv &uint<7>,
+    status_selector: inv uint<7>,
     writable: bool,
     dat_in: uint<4>,
     usb_rx: bool,
-    usb_tx: inv &bool,
-    ddr_cmd_valid: inv &bool,
+    usb_tx: inv bool,
+    ddr_cmd_valid: inv bool,
     ddr_cmd_ready: bool,
-    ddr_cmd_address: inv &uint<24>,
-    ddr_cmd_write: inv &bool,
+    ddr_cmd_address: inv uint<24>,
+    ddr_cmd_write: inv bool,
     ddr_rdata_valid: bool,
-    ddr_rdata_ready: inv &bool,
+    ddr_rdata_ready: inv bool,
     ddr_rdata: uint<128>,
-    ddr_wdata_valid: inv &bool,
+    ddr_wdata_valid: inv bool,
     ddr_wdata_ready: bool,
-    ddr_wdata: inv &uint<128>,
-    ddr_wdata_mask: inv &uint<16>,
+    ddr_wdata: inv uint<128>,
+    ddr_wdata_mask: inv uint<16>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
     let _ = inst ddr_uart_core::<100_000_000>$(
         clk,
@@ -2245,57 +2245,57 @@ entity ddr_emulator_cdc(
     rst: bool,
     initialized: bool,
     diagnostic_status: uint<27>,
-    status_selector: inv &uint<7>,
+    status_selector: inv uint<7>,
     fast_mode: bool,
     writable: bool,
     dat_in: uint<4>,
-    ddr_cmd_valid: inv &bool,
+    ddr_cmd_valid: inv bool,
     ddr_cmd_ready: bool,
-    ddr_cmd_address: inv &uint<24>,
-    ddr_cmd_write: inv &bool,
+    ddr_cmd_address: inv uint<24>,
+    ddr_cmd_write: inv bool,
     ddr_rdata_valid: bool,
-    ddr_rdata_ready: inv &bool,
+    ddr_rdata_ready: inv bool,
     ddr_rdata: uint<128>,
-    ddr_wdata_valid: inv &bool,
+    ddr_wdata_valid: inv bool,
     ddr_wdata_ready: bool,
-    ddr_wdata: inv &uint<128>,
-    ddr_wdata_mask: inv &uint<16>,
+    ddr_wdata: inv uint<128>,
+    ddr_wdata_mask: inv uint<16>,
     rx_valid: bool,
     rx_byte: uint<8>,
     tx_ready: bool,
-    tx_valid: inv &bool,
-    tx_byte: inv &uint<8>,
+    tx_valid: inv bool,
+    tx_byte: inv uint<8>,
     sd_clk: bool,
     cmd_in: bool,
-    cmd_out: inv &bool,
-    cmd_oe: inv &bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    armed_status: inv &bool,
+    cmd_out: inv bool,
+    cmd_oe: inv bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    armed_status: inv bool,
 ) {
     // Exercise the separately clocked frontend / 80 MHz native-memory boundary.
-    let (frontend_cmd_valid, frontend_cmd_valid_w): (&bool, inv &bool) = port;
-    let (frontend_cmd_ready, frontend_cmd_ready_w): (&bool, inv &bool) = port;
-    let (frontend_cmd_address, frontend_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
-    let (frontend_cmd_write, frontend_cmd_write_w): (&bool, inv &bool) = port;
-    let (frontend_data_valid, frontend_data_valid_w): (&bool, inv &bool) = port;
-    let (frontend_data_ready, frontend_data_ready_w): (&bool, inv &bool) = port;
-    let (frontend_write_data, frontend_write_data_w): (&uint<128>, inv &uint<128>) = port;
-    let (frontend_write_mask, frontend_write_mask_w): (&uint<16>, inv &uint<16>) = port;
-    let (frontend_read_valid, frontend_read_valid_w): (&bool, inv &bool) = port;
-    let (frontend_read_ready, frontend_read_ready_w): (&bool, inv &bool) = port;
-    let (frontend_read_data, frontend_read_data_w): (&uint<128>, inv &uint<128>) = port;
-    let (memory_cmd_valid, memory_cmd_valid_w): (&bool, inv &bool) = port;
-    let (memory_cmd_ready, memory_cmd_ready_w): (&bool, inv &bool) = port;
-    let (memory_cmd_address, memory_cmd_address_w): (&uint<24>, inv &uint<24>) = port;
-    let (memory_cmd_write, memory_cmd_write_w): (&bool, inv &bool) = port;
-    let (memory_data_valid, memory_data_valid_w): (&bool, inv &bool) = port;
-    let (memory_data_ready, memory_data_ready_w): (&bool, inv &bool) = port;
-    let (memory_write_data, memory_write_data_w): (&uint<128>, inv &uint<128>) = port;
-    let (memory_write_mask, memory_write_mask_w): (&uint<16>, inv &uint<16>) = port;
-    let (memory_read_valid, memory_read_valid_w): (&bool, inv &bool) = port;
-    let (memory_read_ready, memory_read_ready_w): (&bool, inv &bool) = port;
-    let (memory_read_data, memory_read_data_w): (&uint<128>, inv &uint<128>) = port;
+    let (frontend_cmd_valid, frontend_cmd_valid_w): (bool, inv bool) = port;
+    let (frontend_cmd_ready, frontend_cmd_ready_w): (bool, inv bool) = port;
+    let (frontend_cmd_address, frontend_cmd_address_w): (uint<24>, inv uint<24>) = port;
+    let (frontend_cmd_write, frontend_cmd_write_w): (bool, inv bool) = port;
+    let (frontend_data_valid, frontend_data_valid_w): (bool, inv bool) = port;
+    let (frontend_data_ready, frontend_data_ready_w): (bool, inv bool) = port;
+    let (frontend_write_data, frontend_write_data_w): (uint<128>, inv uint<128>) = port;
+    let (frontend_write_mask, frontend_write_mask_w): (uint<16>, inv uint<16>) = port;
+    let (frontend_read_valid, frontend_read_valid_w): (bool, inv bool) = port;
+    let (frontend_read_ready, frontend_read_ready_w): (bool, inv bool) = port;
+    let (frontend_read_data, frontend_read_data_w): (uint<128>, inv uint<128>) = port;
+    let (memory_cmd_valid, memory_cmd_valid_w): (bool, inv bool) = port;
+    let (memory_cmd_ready, memory_cmd_ready_w): (bool, inv bool) = port;
+    let (memory_cmd_address, memory_cmd_address_w): (uint<24>, inv uint<24>) = port;
+    let (memory_cmd_write, memory_cmd_write_w): (bool, inv bool) = port;
+    let (memory_data_valid, memory_data_valid_w): (bool, inv bool) = port;
+    let (memory_data_ready, memory_data_ready_w): (bool, inv bool) = port;
+    let (memory_write_data, memory_write_data_w): (uint<128>, inv uint<128>) = port;
+    let (memory_write_mask, memory_write_mask_w): (uint<16>, inv uint<16>) = port;
+    let (memory_read_valid, memory_read_valid_w): (bool, inv bool) = port;
+    let (memory_read_ready, memory_read_ready_w): (bool, inv bool) = port;
+    let (memory_read_data, memory_read_data_w): (uint<128>, inv uint<128>) = port;
     let _ = inst ddr_emulator$(
 
         // Clock and card control
@@ -2310,18 +2310,18 @@ entity ddr_emulator_cdc(
 
         // DDR command channel
         ddr_cmd_valid: frontend_cmd_valid_w,
-        ddr_cmd_ready: *frontend_cmd_ready,
+        ddr_cmd_ready: frontend_cmd_ready,
         ddr_cmd_address: frontend_cmd_address_w,
         ddr_cmd_write: frontend_cmd_write_w,
 
         // DDR read channel
-        ddr_rdata_valid: *frontend_read_valid,
+        ddr_rdata_valid: frontend_read_valid,
         ddr_rdata_ready: frontend_read_ready_w,
-        ddr_rdata: *frontend_read_data,
+        ddr_rdata: frontend_read_data,
 
         // DDR write channel
         ddr_wdata_valid: frontend_data_valid_w,
-        ddr_wdata_ready: *frontend_data_ready,
+        ddr_wdata_ready: frontend_data_ready,
         ddr_wdata: frontend_write_data_w,
         ddr_wdata_mask: frontend_write_mask_w,
 
@@ -2350,46 +2350,46 @@ entity ddr_emulator_cdc(
         m_rst: memory_rst,
 
         // Command channel
-        s_cmd_valid: *frontend_cmd_valid,
+        s_cmd_valid: frontend_cmd_valid,
         s_cmd_ready: frontend_cmd_ready_w,
-        s_cmd_address: *frontend_cmd_address,
-        s_cmd_write: *frontend_cmd_write,
+        s_cmd_address: frontend_cmd_address,
+        s_cmd_write: frontend_cmd_write,
         m_cmd_valid: memory_cmd_valid_w,
-        m_cmd_ready: *memory_cmd_ready,
+        m_cmd_ready: memory_cmd_ready,
         m_cmd_address: memory_cmd_address_w,
         m_cmd_write: memory_cmd_write_w,
 
         // Write-data channel
-        s_wdata_valid: *frontend_data_valid,
+        s_wdata_valid: frontend_data_valid,
         s_wdata_ready: frontend_data_ready_w,
-        s_wdata: *frontend_write_data,
-        s_wmask: *frontend_write_mask,
+        s_wdata: frontend_write_data,
+        s_wmask: frontend_write_mask,
         m_wdata_valid: memory_data_valid_w,
-        m_wdata_ready: *memory_data_ready,
+        m_wdata_ready: memory_data_ready,
         m_wdata: memory_write_data_w,
         m_wmask: memory_write_mask_w,
 
         // Read-data channel
-        m_rdata_valid: *memory_read_valid,
+        m_rdata_valid: memory_read_valid,
         m_rdata_ready: memory_read_ready_w,
-        m_rdata: *memory_read_data,
+        m_rdata: memory_read_data,
         s_rdata_valid: frontend_read_valid_w,
-        s_rdata_ready: *frontend_read_ready,
+        s_rdata_ready: frontend_read_ready,
         s_rdata: frontend_read_data_w,
     );
     let _ = inst cdc::native_stage$(
         clk: memory_clk,
         rst: memory_rst,
-        s_cmd_valid: *memory_cmd_valid,
+        s_cmd_valid: memory_cmd_valid,
         s_cmd_ready: memory_cmd_ready_w,
-        s_cmd_address: *memory_cmd_address,
-        s_cmd_write: *memory_cmd_write,
-        s_wdata_valid: *memory_data_valid,
+        s_cmd_address: memory_cmd_address,
+        s_cmd_write: memory_cmd_write,
+        s_wdata_valid: memory_data_valid,
         s_wdata_ready: memory_data_ready_w,
-        s_wdata: *memory_write_data,
-        s_wmask: *memory_write_mask,
+        s_wdata: memory_write_data,
+        s_wmask: memory_write_mask,
         s_rdata_valid: memory_read_valid_w,
-        s_rdata_ready: *memory_read_ready,
+        s_rdata_ready: memory_read_ready,
         s_rdata: memory_read_data_w,
         m_cmd_valid: ddr_cmd_valid,
         m_cmd_ready: ddr_cmd_ready,

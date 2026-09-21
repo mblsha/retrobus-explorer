@@ -6,10 +6,10 @@ pub entity sd_clock_meter(
     rst: bool,
     sd_clk: bool,
     window_cycles: uint<17>,
-    peak_edges: inv &uint<16>,
-    minimum_period: inv &uint<24>,
-    latest_period: inv &uint<24>,
-    total_edges: inv &uint<32>,
+    peak_edges: inv uint<16>,
+    minimum_period: inv uint<24>,
+    latest_period: inv uint<24>,
+    total_edges: inv uint<32>,
 ) {
     reg(clk) meta reset(rst: false) = sd_clk;
     reg(clk) sync reset(rst: false) = meta;
@@ -72,13 +72,13 @@ pub entity sd_clock_meter(
     } else {
         latest
     };
-    set latest_period = &latest;
+    set latest_period = latest;
     reg(clk) all_edges: uint<32> reset(rst: 0) = if rise {
         all_edges +. 1
     } else {
         all_edges
     };
-    set total_edges = &all_edges;
-    set peak_edges = &peak;
-    set minimum_period = &shortest;
+    set total_edges = all_edges;
+    set peak_edges = peak;
+    set minimum_period = shortest;
 }

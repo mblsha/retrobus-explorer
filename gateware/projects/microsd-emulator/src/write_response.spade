@@ -11,10 +11,10 @@ pub entity sd_write_response(
     accepted: bool,
     fall: bool,
     busy: bool,
-    dat_out: inv &uint<4>,
-    dat_oe: inv &uint<4>,
-    active: inv &bool,
-    complete: inv &bool,
+    dat_out: inv uint<4>,
+    dat_oe: inv uint<4>,
+    active: inv bool,
+    complete: inv bool,
 ) {
     let IDLE: uint<4> = 0;
     let RESPONSE_DELAY: uint<4> = 1;
@@ -80,8 +80,8 @@ pub entity sd_write_response(
     reg(clk) finished reset(clear: false) = fall && state == RESPONSE_COMPLETE;
     let response_bit = if prepared_mode { prepared_output } else { output };
     let response_drive = if prepared_mode { prepared_drive } else { drive };
-    set dat_out = &(if response_bit { 15 } else { 14 });
-    set dat_oe = &(if response_drive && !clear { 1 } else { 0 });
-    set active = &(state != IDLE && !clear);
-    set complete = &finished;
+    set dat_out = (if response_bit { 15 } else { 14 });
+    set dat_oe = (if response_drive && !clear { 1 } else { 0 });
+    set active = (state != IDLE && !clear);
+    set complete = finished;
 }
