@@ -126,6 +126,40 @@ To bump the compiler:
   deprecated free units in `std::conv`: `bool::as_clock`, `clock::as_bool`,
   `[bool; N]::as_uint`. A conversion named `as_*` reinterprets bits and one
   named `to_*` preserves a numeric value.
+- State a requirement on a generic as a `where` clause beside it, not as a
+  helper that fails to compile:
+  `where ENTRIES >= 2 else "a fifo needs at least two entries"`, comma-separated
+  after the return type. The compiler checks it at monomorphisation and quotes
+  the message with a traceback through every instantiation, and unlike a guard
+  unit it costs no module. Clauses take a bare generic name on the left, and
+  type expressions have `+ - * / %`, comparisons, `&& || ^^ !`, `uint::bits_for`
+  and `int::bits_for` -- no shift and no exponentiation, which is why
+  `guards::require_power_of_two` still exists and why it is `#[inline]`.
+  Prove a new constraint fires: instantiate it wrong once and read the error.
+- Type expressions do **not** work in a struct member that refers to the
+  struct's own generic ("Struct members cannot have const generics in their
+  type"), and routing one through a type alias panics the compiler. They do work
+  in a `let` annotation, which is where `memory.spade`'s `FifoAddr<ENTRIES>` and
+  `FifoCount<ENTRIES>` are used. Name a type spelling that repeats more than a
+  few times.
+- Give a generic a default when one value dominates its call sites, so the call
+  sites that want something else stand out: `reset_conditioner<#uint STAGES = 4>`,
+  `sync_delay<#int STAGES = 2>`, `uart_rx<#uint DATA_WIDTH = 8>`,
+  `async_fifo<..., #uint SYNC_STAGES = 3>`. Defaults must be trailing, and the
+  value must be a literal.
+- Prefer `if let` to a two-arm `match` that binds one value and falls back; keep
+  `match` where it is exhaustive over a small enum, because `if let` would
+  quietly stop being.
+- Walk two arrays together with `zip`, not `enumerate` plus indexing into the
+  second one. `arrays::enumerate` is for a closure that needs the index as a
+  number.
+- A reset value belongs to its type: `impl Default for X { fn default() }` and
+  `reset(rst: X::default())`. An associated function cannot be called on a
+  generic type yet, so a constructor for `ByteMsgStreamState<Msg, N>` and
+  friends stays a free function. `X::default()` is for the power-on state; a
+  protocol sentinel like `tx_req_none()` keeps the name that says what it means.
+- `#[inline]` anything whose whole body is a constant or a single forwarding
+  call. Without it each one is a module in every project that instantiates it.
 - Every project must build with zero compiler warnings. A warning here is
   usually a deprecation with a fix-it attached, and letting them accumulate is
   what makes the next compiler bump expensive.
@@ -136,6 +170,39 @@ To bump the compiler:
   composition.
 - Keep mixed-SystemVerilog interfaces narrow and explicit. Add Cocotb coverage
   at the boundary.
+
+Synthesis attributes live in two places and both are deliberate.
+`#[verilog_attrs(ASYNC_REG = "TRUE")]` is on `sync_delay_pipe` and
+`sync_bundle_pipe` in `primitives.spade` -- on the pipelines that hold the
+flops, because the attribute is rejected on a `reg` and accepted on a unit.
+`#[verilog_attrs(keep_hierarchy = "yes")]` is on all nine extern
+SystemVerilog instantiations, so a vendor block's boundary survives synthesis
+and is still there to be named by a constraint or a report.
+
+**Open check, for whoever next has Vivado:** whether a module-level `ASYNC_REG`
+reaches the registers inside when the hierarchy is kept. It was added from a
+machine with no Vivado on it, openXC7 ignores the attribute, and Verilator only
+tells us it parses. Read a synthesis report before relying on it, and do not
+treat it as an MTBF improvement until you have.
+
+Two pieces of known compiler debt, both retryable after a bump:
+
+- `FifoImplState`'s `ADDR_W`/`COUNT_W` and `BootBannerState`'s `IDX_W` are
+  size-only generics that v0.20.0 will not let a struct member compute. The
+  notes beside them say what was tried.
+- The ~70 nested `concat_arrays` calls in `sharp-pc-g850-bus/console.spade` and
+  `uart-saleae-loopback/simple_cmd_uart.spade` should become `[T; N]::concat`.
+  Their `use std::conv::concat_arrays;` lines are what keeps the deprecated
+  prelude re-export out of those builds, so do not simply delete them.
+
+To check a refactor that is meant to preserve behaviour: build before and after,
+and compare with both `tools/sv_module_surface.py --diff` (what the testbenches
+and constraints bind to) and `tools/sv_module_bodies.py --diff` (the logic
+itself, with `--loose` to tell a renamed net from a changed one and `--rename`
+when a unit was renamed on purpose). Build the fourteen projects **one at a
+time** when saving a reference: `ethernet-diagnostic` consumes
+`microsd-emulator` as a library, and a concurrent build reads that library's
+`build/` while swim is rewriting it.
 
 Directory names are user-facing organization; they do not authorize renaming
 the logical package name in `swim.toml`, generated boot-banner identity,
