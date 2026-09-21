@@ -32,7 +32,7 @@ pub entity sd_trace(
     capture_lba: uint<32>,
     write_busy: bool,
     word_index: uint<6>,
-    word: inv &uint<32>,
+    word: inv uint<32>,
 ) {
     reg(clk) clock_edges: uint<32> reset(rst: 0) = if armed && clock_tick {
         clock_edges +. 1
@@ -461,5 +461,5 @@ pub entity sd_trace(
         63 => block_end_edge,
         _ => 0,
     };
-    set word = &selected_word;
+    set word = selected_word;
 }

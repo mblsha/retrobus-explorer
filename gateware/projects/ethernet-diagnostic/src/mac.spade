@@ -15,9 +15,9 @@ pub entity frame_receiver(
     er: bool,
     consume: bool,
     address: uint<11>,
-    data: inv &uint<8>,
-    available: inv &bool,
-    frame_length: inv &uint<11>,
+    data: inv uint<8>,
+    available: inv bool,
+    frame_length: inv uint<11>,
 ) {
     // PHY clocks must run while reset is held; release takes two local edges.
     let rx_reset = inst reset_conditioner::<2>(rx_clk, rst);
@@ -62,10 +62,10 @@ pub entity frame_receiver(
     let available_now = (consumed ^ (consumed >> 1)) != published_sync;
     reg(clk) consumed: uint<4> reset(rst: 0) = if consume && available_now { consumed +. 1 } else { consumed };
     reg(clk) read_data = inst read_memory(memory, (zext::<4, 14>(consumed & 7) << 11) | zext(address));
-    set data = &read_data;
-    set available = &available_now;
+    set data = read_data;
+    set available = available_now;
     let lengths = [length0, length1, length2, length3, length4, length5, length6, length7];
-    set frame_length = &lengths[trunc(consumed)];
+    set frame_length = lengths[trunc(consumed)];
 }
 
 #[no_mangle(all)]
@@ -78,9 +78,9 @@ pub entity frame_transmitter(
     data: uint<8>,
     length: uint<11>,
     submit: bool,
-    ready: inv &bool,
-    txd: inv &uint<4>,
-    tx_en: inv &bool,
+    ready: inv bool,
+    txd: inv uint<4>,
+    tx_en: inv bool,
 ) {
     decl published, consumed, active, index, half, crc;
     let launch = unsafe { inst std::conv::bool_to_clock(!inst std::conv::clock_to_bool(tx_clk)) };
@@ -117,7 +117,7 @@ pub entity frame_transmitter(
         else { trunc((crc ^ 0xffffffff) >> (zext::<12, 32>(index -. zext(saved_length) -. 8) << 3)) };
     reg(launch) crc: uint<32> reset(tx_reset: 0xffffffff) = if !active { 0xffffffff }
         else if half && index >= 8 && index < zext(saved_length) +. 8 { crc32_byte(crc, payload) } else { crc };
-    set ready = &free;
-    set tx_en = &active;
-    set txd = &(if active { if half { trunc(byte >> 4) } else { trunc(byte) } } else { 0 });
+    set ready = free;
+    set tx_en = active;
+    set txd = (if active { if half { trunc(byte >> 4) } else { trunc(byte) } } else { 0 });
 }

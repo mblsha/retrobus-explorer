@@ -13,27 +13,27 @@ pub entity block_service(
     sd_quiescent: bool,
     request: bool,
     request_length: uint<11>,
-    request_address: inv &uint<10>,
+    request_address: inv uint<10>,
     request_data: uint<8>,
-    reply_write: inv &bool,
-    reply_address: inv &uint<11>,
-    reply_data: inv &uint<8>,
-    reply_done: inv &bool,
-    reply_length: inv &uint<11>,
-    memory_request: inv &bool,
-    memory_write: inv &bool,
-    memory_lba: inv &uint<32>,
-    memory_count: inv &uint<2>,
+    reply_write: inv bool,
+    reply_address: inv uint<11>,
+    reply_data: inv uint<8>,
+    reply_done: inv bool,
+    reply_length: inv uint<11>,
+    memory_request: inv bool,
+    memory_write: inv bool,
+    memory_lba: inv uint<32>,
+    memory_count: inv uint<2>,
     memory_write_index: uint<9>,
-    memory_write_data: inv &uint<8>,
+    memory_write_data: inv uint<8>,
     memory_read_valid: bool,
     memory_read_index: uint<10>,
     memory_read_data: uint<8>,
     memory_done: bool,
     memory_error: bool,
     sd_trace: uint<32>,
-    trace_word_index: inv &uint<6>,
-    armed: inv &bool,
+    trace_word_index: inv uint<6>,
+    armed: inv bool,
 ) {
     // Keep these encodings and address/capture stages: they preserve RAM latency.
     let IDLE: uint<4> = 0;
@@ -171,17 +171,17 @@ pub entity block_service(
         else { trunc((reply_crc ^ 0xffffffff) >> (zext::<11, 32>(index -. (response_length -. 4)) << 3)) };
     // Separate variable header-byte selection from the CRC feedback path.
     reg(clk) out_byte: uint<8> reset(rst: 0) = if state == REPLY_REGISTER { selected_byte } else { out_byte };
-    set request_address = &trunc(index);
-    set reply_write = &(state == REPLY_EMIT);
-    set reply_address = &index;
-    set reply_data = &out_byte;
-    set reply_done = &(state == COMPLETE || state == REJECT_LENGTH);
-    set reply_length = &(if state == REJECT_LENGTH { 0 } else { response_length });
-    set memory_request = &(state == DDR_TRANSFER);
-    set memory_write = &(opcode == OP_WRITE);
-    set memory_lba = &lba;
-    set memory_count = &(if long_reply { 2 } else { 1 });
-    set memory_write_data = &write_byte;
-    set trace_word_index = &trunc(lba);
-    set armed = &arm;
+    set request_address = trunc(index);
+    set reply_write = (state == REPLY_EMIT);
+    set reply_address = index;
+    set reply_data = out_byte;
+    set reply_done = (state == COMPLETE || state == REJECT_LENGTH);
+    set reply_length = (if state == REJECT_LENGTH { 0 } else { response_length });
+    set memory_request = (state == DDR_TRANSFER);
+    set memory_write = (opcode == OP_WRITE);
+    set memory_lba = lba;
+    set memory_count = (if long_reply { 2 } else { 1 });
+    set memory_write_data = write_byte;
+    set trace_word_index = trunc(lba);
+    set armed = arm;
 }

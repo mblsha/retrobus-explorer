@@ -14,19 +14,19 @@ pub entity network_engine(
     rst: bool,
     rx_available: bool,
     rx_length: uint<11>,
-    rx_address: inv &uint<11>,
+    rx_address: inv uint<11>,
     rx_data: uint<8>,
-    rx_consume: inv &bool,
+    rx_consume: inv bool,
     tx_ready: bool,
-    tx_write: inv &bool,
-    tx_address: inv &uint<11>,
-    tx_data: inv &uint<8>,
-    tx_submit: inv &bool,
-    tx_length: inv &uint<11>,
-    app_request: inv &bool,
-    app_request_length: inv &uint<11>,
+    tx_write: inv bool,
+    tx_address: inv uint<11>,
+    tx_data: inv uint<8>,
+    tx_submit: inv bool,
+    tx_length: inv uint<11>,
+    app_request: inv bool,
+    app_request_length: inv uint<11>,
     app_address: uint<10>,
-    app_data: inv &uint<8>,
+    app_data: inv uint<8>,
     app_write: bool,
     app_write_address: uint<11>,
     app_write_data: uint<8>,
@@ -143,14 +143,14 @@ pub entity network_engine(
             else if index == 37 { trunc(echo_checksum) } else { packet_data }
         } else if index < 42 { trunc(udp_header >> (zext::<11, 64>(41 -. index) << 3)) }
         else { response_data };
-    set rx_address = &index;
-    set rx_consume = &(state == TX_SUBMIT || state == REJECT_PACKET);
-    set tx_write = &(state == TX_EMIT);
-    set tx_address = &index;
-    set tx_data = &byte;
-    set tx_submit = &(state == TX_SUBMIT);
-    set tx_length = &output_length;
-    set app_request = &(state == APPLICATION);
-    set app_request_length = &trunc(udp_length -. 8);
-    set app_data = &packet_data;
+    set rx_address = index;
+    set rx_consume = (state == TX_SUBMIT || state == REJECT_PACKET);
+    set tx_write = (state == TX_EMIT);
+    set tx_address = index;
+    set tx_data = byte;
+    set tx_submit = (state == TX_SUBMIT);
+    set tx_length = output_length;
+    set app_request = (state == APPLICATION);
+    set app_request_length = trunc(udp_length -. 8);
+    set app_data = packet_data;
 }
