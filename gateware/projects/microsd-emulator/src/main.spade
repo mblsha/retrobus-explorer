@@ -1156,8 +1156,8 @@ pub entity sd_frontend(
         if data_state == READ_IDLE {
             [0; 4]
         } else if data_output_advance && data_state == READ_PAYLOAD {
-            crcs.enumerate().map(fn |(lane, crc)| {
-                    crc16_bit(crc, nibble.to_bits()[lane])
+            crcs.zip(nibble.to_bits()).map(fn |(crc, bit)| {
+                    crc16_bit(crc, bit)
                 })
         } else {
             crcs

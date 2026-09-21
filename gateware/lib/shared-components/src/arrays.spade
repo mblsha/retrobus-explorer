@@ -4,6 +4,12 @@
 ///
 /// Built as a balanced tree so elaboration depth grows with `log2(N)` rather
 /// than with `N`.
+///
+/// `std::array::unfold(FIRST, fn |i| i +. 1)` would say this in one line and was
+/// tried. It is worse: `unfold` recurses linearly and calls its closure for
+/// real, so the generated SystemVerilog gains a `wrapping_add` module, a lambda
+/// `call` module and two `concat` modules -- four modules and a hundred lines,
+/// for an array whose every element is an elaboration-time constant here.
 fn indices_from<#uint WIDTH, #uint N, #uint FIRST>() -> [uint<WIDTH>; N] {
     gen if N == 0 {
         []
@@ -20,6 +26,10 @@ impl<T, #uint N> [T; N] {
     ///
     /// The indices are elaboration-time constants, so this costs no hardware on
     /// its own; it exists to let a `map` closure see where it is in the array.
+    ///
+    /// Only reach for this when the closure needs the index *as a number*. To
+    /// walk two arrays together, `self.zip(other)` is what you want: the closure
+    /// then cannot reach into the wrong array at all.
     pub fn enumerate<#uint WIDTH>(self) -> [(uint<WIDTH>, T); N]
     where
         WIDTH: {uint::bits_for(N - 1)},

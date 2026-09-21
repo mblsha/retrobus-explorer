@@ -53,9 +53,9 @@ entity probe_core(
     reg(clk) seen_high: uint<8> reset(rst: 0) = if clear { 0 } else if settling == 7 { seen_high | pins } else { seen_high };
     reg(clk) seen_low: uint<8> reset(rst: 0) = if clear { 0 } else if settling == 7 { seen_low | (pins ^ 255) } else { seen_low };
     reg(clk) edges: [uint<32>; 8] reset(rst: [0; 8]) = {
-        edges.enumerate().map(fn |(index, count)| {
+        edges.zip(changed.to_bits()).map(fn |(count, pin_changed)| {
             if clear { 0 }
-            else if settling == 7 && changed.to_bits()[index] && count != 0xffffffff { count +. 1 }
+            else if settling == 7 && pin_changed && count != 0xffffffff { count +. 1 }
             else { count }
         })
     };

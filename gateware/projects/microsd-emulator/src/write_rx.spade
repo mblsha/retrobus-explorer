@@ -71,8 +71,8 @@ pub entity sd_write_receiver(
     reg(clk) crcs: [uint<16>; 4] reset(clear: [0; 4]) = if start {
         [0; 4]
     } else if sample && state == RECEIVE_DATA {
-        crcs.enumerate().map(fn |(lane, crc)| {
-                crc16_bit(crc, dat.to_bits()[lane])
+        crcs.zip(dat.to_bits()).map(fn |(crc, bit)| {
+                crc16_bit(crc, bit)
             })
     } else {
         crcs
