@@ -11,8 +11,8 @@ entity probe_core(
     rx_valid: bool,
     rx_byte: uint<8>,
     tx_ready: bool,
-    tx_valid: inv &bool,
-    tx_byte: inv &uint<8>,
+    tx_valid: inv bool,
+    tx_byte: inv uint<8>,
 ) {
     reg(clk) meta reset(rst: 0) = pmod;
     reg(clk) pins reset(rst: 0) = meta;
@@ -112,25 +112,25 @@ entity probe_core(
         else if sending && tx_ready && index < 60 { crc32_byte(response_crc, data) }
         else { response_crc }
     };
-    set tx_valid = &sending;
-    set tx_byte = &data;
+    set tx_valid = sending;
+    set tx_byte = data;
 }
 
 #[no_mangle(all)]
 entity probe_uart(
     clk: clock, rst_n: bool, pmod: uint<8>, top_header: uint<2>,
-    usb_rx: bool, usb_tx: inv &bool,
+    usb_rx: bool, usb_tx: inv bool,
 ) {
     let rst = !rst_n;
     let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
-    let (valid, valid_w): (&bool, inv &bool) = port;
-    let (byte, byte_w): (&uint<8>, inv &uint<8>) = port;
-    let (busy, busy_w): (&bool, inv &bool) = port;
-    reg(clk) issued reset(rst: false) = *valid && !*busy && !issued;
-    let send = *valid && !*busy && !issued;
+    let (valid, valid_w): (bool, inv bool) = port;
+    let (byte, byte_w): (uint<8>, inv uint<8>) = port;
+    let (busy, busy_w): (bool, inv bool) = port;
+    reg(clk) issued reset(rst: false) = valid && !busy && !issued;
+    let send = valid && !busy && !issued;
     let _ = inst probe_core(clk, rst, pmod, top_header, rx.valid && !rx.parity_error,
         rx.byte, send, valid_w, byte_w);
-    let tx = inst uart_tx::<100_000_000, 1_000_000, 8>(clk, rst, false, *byte, send);
-    set busy_w = &tx.busy;
-    set usb_tx = &tx.tx;
+    let tx = inst uart_tx::<100_000_000, 1_000_000, 8>(clk, rst, false, byte, send);
+    set busy_w = tx.busy;
+    set usb_tx = tx.tx;
 }
