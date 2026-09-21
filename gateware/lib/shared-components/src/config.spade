@@ -24,8 +24,8 @@ pub entity au_usb_uart_tx8_tap(
     block: bool,
     data: uint<8>,
     new_data: bool,
-    tx_line: inv &bool,
-    busy: inv &bool,
+    tx_line: inv bool,
+    busy: inv bool,
 ) {
     inst uart_tx_tap::<100_000_000, 1_000_000, 8>(
         clk,
@@ -44,11 +44,11 @@ pub entity au_usb_uart_tx8_req_tap(
     rst: bool,
     block: bool,
     tx_req: TxReq8,
-    tx_line: inv &bool,
-    busy: inv &bool,
+    tx_line: inv bool,
+    busy: inv bool,
 ) {
-    let (busy_sig, busy_sig_w): (&bool, inv &bool) = port;
-    let tx_fire = tx_req.valid && !block && !*busy_sig;
+    let (busy_sig, busy_sig_w): (bool, inv bool) = port;
+    let tx_fire = tx_req.valid && !block && !busy_sig;
 
     inst au_usb_uart_tx8_tap(
         clk,
@@ -59,7 +59,7 @@ pub entity au_usb_uart_tx8_req_tap(
         tx_line,
         busy_sig_w,
     );
-    set busy = &*busy_sig;
+    set busy = busy_sig;
 }
 
 #[inline]
@@ -174,15 +174,15 @@ pub entity au_ft_tap_u16(
     ui_din_be: FtBe,
     ui_din_valid: bool,
     ui_dout_get: bool,
-    ft_data_out: inv &FtData,
-    ft_be_out: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &FtData,
-    ui_dout_be: inv &FtBe,
-    ui_dout_empty: inv &bool,
+    ft_data_out: inv FtData,
+    ft_be_out: inv FtBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
+    ui_din_full: inv bool,
+    ui_dout: inv FtData,
+    ui_dout_be: inv FtBe,
+    ui_dout_empty: inv bool,
 ) {
     #[verilog_attrs(keep_hierarchy = "yes")]
     inst ft_tap::<16, 2, 8192, 64, 1, 0>(

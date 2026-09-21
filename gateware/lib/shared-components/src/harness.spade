@@ -13,22 +13,22 @@ use super::{
 entity tb_counter_bits<#uint WIDTH>(
     clk: clock,
     rst: bool,
-    value_bits: inv &[bool; WIDTH],
+    value_bits: inv [bool; WIDTH],
 ) {
     let value = inst counter::<WIDTH>(clk, rst);
     let bits = value.to_bits();
-    set value_bits = &bits;
+    set value_bits = bits;
 }
 
 entity tb_count_on_event_bits<#uint WIDTH>(
     clk: clock,
     rst: bool,
     event_in: bool,
-    value_bits: inv &[bool; WIDTH],
+    value_bits: inv [bool; WIDTH],
 ) {
     let value = inst count_on_event::<WIDTH>(clk, rst, event_in);
     let bits = value.to_bits();
-    set value_bits = &bits;
+    set value_bits = bits;
 }
 
 entity tb_uart_rx_bits<#uint WIDTH>(
@@ -38,80 +38,80 @@ entity tb_uart_rx_bits<#uint WIDTH>(
     bit_time: BitTime,
     parity: bool,
     stop_bits: StopBits,
-    rx_valid: inv &bool,
-    rx_parity_error: inv &bool,
-    rx_word: inv &uint<WIDTH>,
+    rx_valid: inv bool,
+    rx_parity_error: inv bool,
+    rx_word: inv uint<WIDTH>,
 ) {
     let rx_out = inst uart_rx::<WIDTH>(clk, rst, rx_line, bit_time, parity, stop_bits);
-    set rx_valid = &rx_out.valid;
-    set rx_parity_error = &rx_out.parity_error;
-    set rx_word = &rx_out.byte;
+    set rx_valid = rx_out.valid;
+    set rx_parity_error = rx_out.parity_error;
+    set rx_word = rx_out.byte;
 }
 
 #[no_mangle(all)]
 entity tb_sync2(
     clk: clock,
     input_signal: bool,
-    output_signal: inv &bool,
+    output_signal: inv bool,
 ) {
     let synced = inst sync_delay::<2>(clk, input_signal);
-    set output_signal = &synced;
+    set output_signal = synced;
 }
 
 #[no_mangle(all)]
 entity tb_sync_delay(
     clk: clock,
     input_signal: bool,
-    output_stage2: inv &bool,
-    output_stage4: inv &bool,
-    output_stage6: inv &bool,
+    output_stage2: inv bool,
+    output_stage4: inv bool,
+    output_stage6: inv bool,
 ) {
     let sync2 = inst sync_delay::<2>(clk, input_signal);
     let sync4 = inst sync_delay::<4>(clk, input_signal);
     let sync6 = inst sync_delay::<6>(clk, input_signal);
-    set output_stage2 = &sync2;
-    set output_stage4 = &sync4;
-    set output_stage6 = &sync6;
+    set output_stage2 = sync2;
+    set output_stage4 = sync4;
+    set output_stage6 = sync6;
 }
 
 #[no_mangle(all)]
 entity tb_reset_conditioner(
     clk: clock,
     in_reset: bool,
-    output_stage2: inv &bool,
-    output_stage4: inv &bool,
+    output_stage2: inv bool,
+    output_stage4: inv bool,
 ) {
     let reset2 = inst reset_conditioner::<2>(clk, in_reset);
     let reset4 = inst reset_conditioner::<4>(clk, in_reset);
-    set output_stage2 = &reset2;
-    set output_stage4 = &reset4;
+    set output_stage2 = reset2;
+    set output_stage4 = reset4;
 }
 
 #[no_mangle(all)]
 entity tb_rising_edge(
     clk: clock,
     signal_in: bool,
-    edge_pulse: inv &bool,
+    edge_pulse: inv bool,
 ) {
     let pulse = inst rising_edge(clk, signal_in);
-    set edge_pulse = &pulse;
+    set edge_pulse = pulse;
 }
 
 #[no_mangle(all)]
 entity tb_falling_edge(
     clk: clock,
     signal_in: bool,
-    edge_pulse: inv &bool,
+    edge_pulse: inv bool,
 ) {
     let pulse = inst falling_edge(clk, signal_in);
-    set edge_pulse = &pulse;
+    set edge_pulse = pulse;
 }
 
 #[no_mangle(all)]
 entity tb_counter_u8(
     clk: clock,
     rst: bool,
-    value_bits: inv &[bool; 8],
+    value_bits: inv [bool; 8],
 ) {
     inst tb_counter_bits::<8>(clk, rst, value_bits);
 }
@@ -121,7 +121,7 @@ entity tb_count_on_event_u8(
     clk: clock,
     rst: bool,
     event_in: bool,
-    value_bits: inv &[bool; 8],
+    value_bits: inv [bool; 8],
 ) {
     inst tb_count_on_event_bits::<8>(clk, rst, event_in, value_bits);
 }
@@ -132,10 +132,10 @@ entity tb_wait_hold(
     rst: bool,
     mreq_fall: bool,
     iorq_fall: bool,
-    hold_wait: inv &bool,
+    hold_wait: inv bool,
 ) {
     let hold = inst wait_hold(clk, rst, mreq_fall, iorq_fall);
-    set hold_wait = &hold;
+    set hold_wait = hold;
 }
 
 #[no_mangle(all)]
@@ -143,7 +143,7 @@ entity tb_stream_counter(
     clk: clock,
     rst: bool,
     advance: bool,
-    value_bits: inv &[bool; 8],
+    value_bits: inv [bool; 8],
 ) {
     inst tb_count_on_event_bits::<8>(clk, rst, advance, value_bits);
 }
@@ -154,14 +154,14 @@ entity tb_rom_gate(
     addr_bnk: [bool; 2],
     stream_counter: uint<8>,
     enable: bool,
-    rom_byte: inv &[bool; 8],
-    gated_byte: inv &[bool; 8],
+    rom_byte: inv [bool; 8],
+    gated_byte: inv [bool; 8],
 ) {
     let rom = inst banked_rom_byte(addr, addr_bnk, stream_counter);
     let gated = inst gate_byte8(enable, rom);
 
-    set rom_byte = &rom;
-    set gated_byte = &gated;
+    set rom_byte = rom;
+    set gated_byte = gated;
 }
 
 #[no_mangle(all)]
@@ -171,13 +171,13 @@ entity tb_uart_tx(
     block: bool,
     data_word: uint<20>,
     new_data: bool,
-    tx_line: inv &bool,
-    tx_busy: inv &bool,
+    tx_line: inv bool,
+    tx_busy: inv bool,
 ) {
     // Testbench instance for Lucid-compatible UART TX core.
     let tx_out = inst uart_tx::<40, 10, 20>(clk, rst, block, data_word, new_data);
-    set tx_line = &tx_out.tx;
-    set tx_busy = &tx_out.busy;
+    set tx_line = tx_out.tx;
+    set tx_busy = tx_out.busy;
 }
 
 #[no_mangle(all)]
@@ -188,9 +188,9 @@ entity tb_uart_rx(
     bit_time: BitTime,
     parity: bool,
     stop_bits: StopBits,
-    rx_valid: inv &bool,
-    rx_parity_error: inv &bool,
-    rx_byte: inv &uint<8>,
+    rx_valid: inv bool,
+    rx_parity_error: inv bool,
+    rx_byte: inv uint<8>,
 ) {
     inst tb_uart_rx_bits::<8>(
         clk,
@@ -213,9 +213,9 @@ entity tb_uart_rx_u16(
     bit_time: BitTime,
     parity: bool,
     stop_bits: StopBits,
-    rx_valid: inv &bool,
-    rx_parity_error: inv &bool,
-    rx_word: inv &uint<16>,
+    rx_valid: inv bool,
+    rx_parity_error: inv bool,
+    rx_word: inv uint<16>,
 ) {
     inst tb_uart_rx_bits::<16>(
         clk,
@@ -237,16 +237,16 @@ entity tb_fifo(
     din: uint<8>,
     wput: bool,
     rget: bool,
-    full: inv &bool,
-    empty: inv &bool,
-    dout: inv &uint<8>,
-    used: inv &uint<4>,
+    full: inv bool,
+    empty: inv bool,
+    dout: inv uint<8>,
+    used: inv uint<4>,
 ) {
     let out = inst fifo::<8, 8>(clk, rst, din, wput, rget);
-    set full = &out.full;
-    set empty = &out.empty;
-    set dout = &out.dout;
-    set used = &out.used;
+    set full = out.full;
+    set empty = out.empty;
+    set dout = out.dout;
+    set used = out.used;
 }
 
 #[no_mangle(all)]
@@ -258,9 +258,9 @@ entity tb_async_fifo_u8(
     rclk: clock,
     rrst: bool,
     rget: bool,
-    full: inv &bool,
-    empty: inv &bool,
-    dout: inv &uint<8>,
+    full: inv bool,
+    empty: inv bool,
+    dout: inv uint<8>,
 ) {
     let out = inst async_fifo::<8, 8, 3>(wclk, wrst, din, wput, rclk, rrst, rget);
     out.inst tap(full, empty, dout);
@@ -279,15 +279,15 @@ entity tb_ft(
     ui_din_be: FtBe,
     ui_din_valid: bool,
     ui_dout_get: bool,
-    ft_data_out: inv &FtData,
-    ft_be_out: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &FtData,
-    ui_dout_be: inv &FtBe,
-    ui_dout_empty: inv &bool,
+    ft_data_out: inv FtData,
+    ft_be_out: inv FtBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
+    ui_din_full: inv bool,
+    ui_dout: inv FtData,
+    ui_dout_be: inv FtBe,
+    ui_dout_empty: inv bool,
 ) {
     let out = inst ft::<16, 2, 64, 64, 1, 0>(
         clk,
@@ -324,19 +324,19 @@ entity tb_async_uart_monitor_queue_only(
     wput: bool,
     rclk: clock,
     rrst: bool,
-    monitor_line: inv &bool,
-    monitor_busy: inv &bool,
-    monitor_full: inv &bool,
-    monitor_empty: inv &bool,
-    monitor_dout: inv &uint<8>,
-    bridge_line: inv &bool,
-    bridge_busy: inv &bool,
-    bridge_full: inv &bool,
-    bridge_empty: inv &bool,
-    bridge_dout: inv &uint<8>,
-    bridge_tx_fire: inv &bool,
-    bridge_dropped: inv &bool,
-    bridge_dropped_count: inv &uint<8>,
+    monitor_line: inv bool,
+    monitor_busy: inv bool,
+    monitor_full: inv bool,
+    monitor_empty: inv bool,
+    monitor_dout: inv uint<8>,
+    bridge_line: inv bool,
+    bridge_busy: inv bool,
+    bridge_full: inv bool,
+    bridge_empty: inv bool,
+    bridge_dout: inv uint<8>,
+    bridge_tx_fire: inv bool,
+    bridge_dropped: inv bool,
+    bridge_dropped_count: inv uint<8>,
 ) {
     let monitor = inst async_uart_monitor::<8, 4, 3, 40, 10>(
         wclk,
@@ -357,19 +357,19 @@ entity tb_async_uart_monitor_queue_only(
         BridgePolicy::QueueOnly(),
     );
 
-    set monitor_line = &monitor.line;
-    set monitor_busy = &monitor.busy;
-    set monitor_full = &monitor.fifo_full;
-    set monitor_empty = &monitor.fifo_empty;
-    set monitor_dout = &monitor.fifo_dout;
-    set bridge_line = &bridge.line;
-    set bridge_busy = &bridge.busy;
-    set bridge_full = &bridge.fifo_full;
-    set bridge_empty = &bridge.fifo_empty;
-    set bridge_dout = &bridge.fifo_dout;
-    set bridge_tx_fire = &bridge.tx_fire;
-    set bridge_dropped = &bridge.dropped;
-    set bridge_dropped_count = &bridge.dropped_count;
+    set monitor_line = monitor.line;
+    set monitor_busy = monitor.busy;
+    set monitor_full = monitor.fifo_full;
+    set monitor_empty = monitor.fifo_empty;
+    set monitor_dout = monitor.fifo_dout;
+    set bridge_line = bridge.line;
+    set bridge_busy = bridge.busy;
+    set bridge_full = bridge.fifo_full;
+    set bridge_empty = bridge.fifo_empty;
+    set bridge_dout = bridge.fifo_dout;
+    set bridge_tx_fire = bridge.tx_fire;
+    set bridge_dropped = bridge.dropped;
+    set bridge_dropped_count = bridge.dropped_count;
 }
 
 #[no_mangle(all)]
@@ -379,24 +379,24 @@ entity tb_elastic_buffer_u8(
     capture_valid: bool,
     capture_data: uint<8>,
     sink_full: bool,
-    pending_valid: inv &bool,
-    pending_data: inv &uint<8>,
-    sink_wput: inv &bool,
-    sink_data: inv &uint<8>,
-    accepted: inv &bool,
-    dropped: inv &bool,
+    pending_valid: inv bool,
+    pending_data: inv uint<8>,
+    sink_wput: inv bool,
+    sink_data: inv uint<8>,
+    accepted: inv bool,
+    dropped: inv bool,
 ) {
     reg(clk) slot: ElasticSlotState<uint<8>> reset(rst: elastic_slot_reset(0)) = {
         elastic_slot_step(slot, capture_valid, capture_data, sink_full).next_state
     };
     let step = elastic_slot_step(slot, capture_valid, capture_data, sink_full);
 
-    set pending_valid = &step.pending_valid;
-    set pending_data = &step.pending_data;
-    set sink_wput = &step.sink_wput;
-    set sink_data = &step.sink_data;
-    set accepted = &step.accepted;
-    set dropped = &step.dropped;
+    set pending_valid = step.pending_valid;
+    set pending_data = step.pending_data;
+    set sink_wput = step.sink_wput;
+    set sink_data = step.sink_data;
+    set accepted = step.accepted;
+    set dropped = step.dropped;
 }
 
 #[no_mangle(all)]
@@ -406,10 +406,10 @@ entity tb_uart_tx_adapter_equiv(
     block: bool,
     tx_valid: bool,
     tx_byte: uint<8>,
-    direct_line: inv &bool,
-    direct_busy: inv &bool,
-    adapter_line: inv &bool,
-    adapter_busy: inv &bool,
+    direct_line: inv bool,
+    direct_busy: inv bool,
+    adapter_line: inv bool,
+    adapter_busy: inv bool,
 ) {
     let (direct, direct_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let (adapter, adapter_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
@@ -445,10 +445,10 @@ entity tb_uart_tx_tap_equiv(
     block: bool,
     tx_valid: bool,
     tx_byte: uint<8>,
-    core_line: inv &bool,
-    core_busy: inv &bool,
-    tap_line: inv &bool,
-    tap_busy: inv &bool,
+    core_line: inv bool,
+    core_busy: inv bool,
+    tap_line: inv bool,
+    tap_busy: inv bool,
 ) {
     let core = inst uart_tx::<40, 10, 8>(clk, rst, block, tx_byte, tx_valid);
     let (tap, tap_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
@@ -462,8 +462,8 @@ entity tb_uart_tx_tap_equiv(
         tap_w.busy,
     );
 
-    set core_line = &core.tx;
-    set core_busy = &core.busy;
+    set core_line = core.tx;
+    set core_busy = core.busy;
     set tap_line = tap.line;
     set tap_busy = tap.busy;
 }
@@ -479,15 +479,15 @@ entity tb_ft_out_tap(
     in_ui_dout: FtData,
     in_ui_dout_be: FtBe,
     in_ui_dout_empty: bool,
-    ft_data_out: inv &FtData,
-    ft_be_out: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &FtData,
-    ui_dout_be: inv &FtBe,
-    ui_dout_empty: inv &bool,
+    ft_data_out: inv FtData,
+    ft_be_out: inv FtBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
+    ui_din_full: inv bool,
+    ui_dout: inv FtData,
+    ui_dout_be: inv FtBe,
+    ui_dout_empty: inv bool,
 ) {
     let out = FtOut$(
         ft_data_out: in_ft_data_out,

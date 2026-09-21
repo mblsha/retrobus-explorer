@@ -30,14 +30,14 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     policy: BridgePolicy,
 ) -> UartBridgeOut<WIDTH, DROP_COUNT_W> {
     let (bridge, bridge_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (fifo_rget, fifo_rget_w): (&bool, inv &bool) = port;
+    let (fifo_rget, fifo_rget_w): (bool, inv bool) = port;
 
     let drop_when_busy = if let BridgePolicy::DropWhenBusy = policy { true } else { false };
-    let fifo = inst async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(wclk, wrst, din, wput, rclk, rrst, *fifo_rget);
-    let tx_fire = send_enable && !fifo.empty && !*bridge.busy;
-    let drop_fire = send_enable && !fifo.empty && *bridge.busy && drop_when_busy;
+    let fifo = inst async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(wclk, wrst, din, wput, rclk, rrst, fifo_rget);
+    let tx_fire = send_enable && !fifo.empty && !bridge.busy;
+    let drop_fire = send_enable && !fifo.empty && bridge.busy && drop_when_busy;
     let fifo_take = tx_fire || drop_fire;
-    set fifo_rget_w = &fifo_take;
+    set fifo_rget_w = fifo_take;
 
     reg(rclk) dropped_count: uint<DROP_COUNT_W> reset(rrst: 0) = {
         if drop_fire {
@@ -58,8 +58,8 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     );
 
     UartFifoBridgeOut$(
-        line: *bridge.line,
-        busy: *bridge.busy,
+        line: bridge.line,
+        busy: bridge.busy,
         fifo_full: fifo.full,
         fifo_empty: fifo.empty,
         fifo_dout: fifo.dout,

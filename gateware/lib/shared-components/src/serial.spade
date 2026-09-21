@@ -25,16 +25,16 @@ struct UartRxCapture<#uint DATA_WIDTH> {
     parity_error: bool,
 }
 
-pub struct port UartLineBusyPort {
-    line: &bool,
-    busy: &bool,
+pub struct UartLineBusyPort {
+    line: bool,
+    busy: bool,
 }
 
 pub entity usb_loopback(
     usb_rx: bool,
-    usb_tx: inv &bool,
+    usb_tx: inv bool,
 ) {
-    set usb_tx = &usb_rx;
+    set usb_tx = usb_rx;
 }
 
 pub fn ft_aux_activity(
@@ -55,18 +55,18 @@ extern entity ft_v<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_B
     ft_txe: bool,
     ft_data_in: uint<DATA_WIDTH>,
     ft_be_in: uint<BE_WIDTH>,
-    ft_data_out: inv &uint<DATA_WIDTH>,
-    ft_be_out: inv &uint<BE_WIDTH>,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
+    ft_data_out: inv uint<DATA_WIDTH>,
+    ft_be_out: inv uint<BE_WIDTH>,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
     ui_din: uint<DATA_WIDTH>,
     ui_din_be: uint<BE_WIDTH>,
     ui_din_valid: bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &uint<DATA_WIDTH>,
-    ui_dout_be: inv &uint<BE_WIDTH>,
-    ui_dout_empty: inv &bool,
+    ui_din_full: inv bool,
+    ui_dout: inv uint<DATA_WIDTH>,
+    ui_dout_be: inv uint<BE_WIDTH>,
+    ui_dout_empty: inv bool,
     ui_dout_get: bool,
 );
 
@@ -82,16 +82,16 @@ pub struct FtOut<TData, TBe> {
     ui_dout_empty: bool,
 }
 
-pub struct port FtWirePort<TData, TBe> {
-    ft_data_out: &TData,
-    ft_be_out: &TBe,
-    ft_rd: &bool,
-    ft_wr: &bool,
-    ft_oe: &bool,
-    ui_din_full: &bool,
-    ui_dout: &TData,
-    ui_dout_be: &TBe,
-    ui_dout_empty: &bool,
+pub struct FtWirePort<TData, TBe> {
+    ft_data_out: TData,
+    ft_be_out: TBe,
+    ft_rd: bool,
+    ft_wr: bool,
+    ft_oe: bool,
+    ui_din_full: bool,
+    ui_dout: TData,
+    ui_dout_be: TBe,
+    ui_dout_empty: bool,
 }
 
 impl uint<15> {
@@ -278,12 +278,12 @@ pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     block: bool,
     data: uint<DATA_WIDTH>,
     new_data: bool,
-    tx_line: inv &bool,
-    busy: inv &bool,
+    tx_line: inv bool,
+    busy: inv bool,
 ) {
     let out = inst uart_tx::<CLK_FREQ, BAUD, DATA_WIDTH>(clk, rst, block, data, new_data);
-    set tx_line = &out.tx;
-    set busy = &out.busy;
+    set tx_line = out.tx;
+    set busy = out.busy;
 }
 
 enum RxState<#uint DATA_WIDTH> {
@@ -483,40 +483,40 @@ pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER
     );
 
     FtOut$(
-        ft_data_out: *ft.ft_data_out,
-        ft_be_out: *ft.ft_be_out,
-        ft_rd: *ft.ft_rd,
-        ft_wr: *ft.ft_wr,
-        ft_oe: *ft.ft_oe,
-        ui_din_full: *ft.ui_din_full,
-        ui_dout: *ft.ui_dout,
-        ui_dout_be: *ft.ui_dout_be,
-        ui_dout_empty: *ft.ui_dout_empty,
+        ft_data_out: ft.ft_data_out,
+        ft_be_out: ft.ft_be_out,
+        ft_rd: ft.ft_rd,
+        ft_wr: ft.ft_wr,
+        ft_oe: ft.ft_oe,
+        ui_din_full: ft.ui_din_full,
+        ui_dout: ft.ui_dout,
+        ui_dout_be: ft.ui_dout_be,
+        ui_dout_empty: ft.ui_dout_empty,
     )
 }
 
 #[inline]
 pub entity ft_out_tap<TData, TBe>(
     out: FtOut<TData, TBe>,
-    ft_data_out: inv &TData,
-    ft_be_out: inv &TBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &TData,
-    ui_dout_be: inv &TBe,
-    ui_dout_empty: inv &bool,
+    ft_data_out: inv TData,
+    ft_be_out: inv TBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
+    ui_din_full: inv bool,
+    ui_dout: inv TData,
+    ui_dout_be: inv TBe,
+    ui_dout_empty: inv bool,
 ) {
-    set ft_data_out = &out.ft_data_out;
-    set ft_be_out = &out.ft_be_out;
-    set ft_rd = &out.ft_rd;
-    set ft_wr = &out.ft_wr;
-    set ft_oe = &out.ft_oe;
-    set ui_din_full = &out.ui_din_full;
-    set ui_dout = &out.ui_dout;
-    set ui_dout_be = &out.ui_dout_be;
-    set ui_dout_empty = &out.ui_dout_empty;
+    set ft_data_out = out.ft_data_out;
+    set ft_be_out = out.ft_be_out;
+    set ft_rd = out.ft_rd;
+    set ft_wr = out.ft_wr;
+    set ft_oe = out.ft_oe;
+    set ui_din_full = out.ui_din_full;
+    set ui_dout = out.ui_dout;
+    set ui_dout_be = out.ui_dout_be;
+    set ui_dout_empty = out.ui_dout_empty;
 }
 
 pub entity ft_tap<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(
@@ -531,15 +531,15 @@ pub entity ft_tap<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BU
     ui_din_be: uint<BE_WIDTH>,
     ui_din_valid: bool,
     ui_dout_get: bool,
-    ft_data_out: inv &uint<DATA_WIDTH>,
-    ft_be_out: inv &uint<BE_WIDTH>,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    ui_din_full: inv &bool,
-    ui_dout: inv &uint<DATA_WIDTH>,
-    ui_dout_be: inv &uint<BE_WIDTH>,
-    ui_dout_empty: inv &bool,
+    ft_data_out: inv uint<DATA_WIDTH>,
+    ft_be_out: inv uint<BE_WIDTH>,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
+    ui_din_full: inv bool,
+    ui_dout: inv uint<DATA_WIDTH>,
+    ui_dout_be: inv uint<BE_WIDTH>,
+    ui_dout_empty: inv bool,
 ) {
     #[verilog_attrs(keep_hierarchy = "yes")]
     let out = inst ft::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(

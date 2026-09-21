@@ -25,15 +25,15 @@ entity tb_ascii_message_helpers(
     high_byte: uint<8>,
     low_valid: bool,
     low_byte: uint<8>,
-    hex_char_out: inv &uint<8>,
-    byte_hex_high: inv &uint<8>,
-    byte_hex_low: inv &uint<8>,
-    digit_char: inv &uint<8>,
-    bool_char: inv &uint<8>,
-    text_valid: inv &bool,
-    text_byte: inv &uint<8>,
-    arbiter_valid: inv &bool,
-    arbiter_byte: inv &uint<8>,
+    hex_char_out: inv uint<8>,
+    byte_hex_high: inv uint<8>,
+    byte_hex_low: inv uint<8>,
+    digit_char: inv uint<8>,
+    bool_char: inv uint<8>,
+    text_valid: inv bool,
+    text_byte: inv uint<8>,
+    arbiter_valid: inv bool,
+    arbiter_byte: inv uint<8>,
 ) {
     let indexed = tx_req_indexed(b"ABC", text_idx);
     let arbitrated = tx_req_arbiter(
@@ -42,15 +42,15 @@ entity tb_ascii_message_helpers(
         TxReq8$(valid: low_valid, byte: low_byte),
     );
 
-    set hex_char_out = &ascii::hex_char(nibble);
-    set byte_hex_high = &ascii::byte_hex_high(value);
-    set byte_hex_low = &ascii::byte_hex_low(value);
-    set digit_char = &ascii::digit_char(digit);
-    set bool_char = &ascii::bool_char(flag);
-    set text_valid = &indexed.valid;
-    set text_byte = &indexed.byte;
-    set arbiter_valid = &arbitrated.valid;
-    set arbiter_byte = &arbitrated.byte;
+    set hex_char_out = ascii::hex_char(nibble);
+    set byte_hex_high = ascii::byte_hex_high(value);
+    set byte_hex_low = ascii::byte_hex_low(value);
+    set digit_char = ascii::digit_char(digit);
+    set bool_char = ascii::bool_char(flag);
+    set text_valid = indexed.valid;
+    set text_byte = indexed.byte;
+    set arbiter_valid = arbitrated.valid;
+    set arbiter_byte = arbitrated.byte;
 }
 
 fn harness_msg_byte(msg: uint<8>, idx: uint<2>) -> TxReq8 {
@@ -79,17 +79,17 @@ entity tb_message_stream(
     schedule_incoming_valid: bool,
     schedule_incoming: uint<8>,
     schedule_incoming_is_none: bool,
-    tx_valid: inv &bool,
-    tx_byte: inv &uint<8>,
-    msg_none: inv &bool,
-    current_msg: inv &uint<8>,
-    current_idx: inv &uint<2>,
-    pending_msg: inv &uint<8>,
-    scheduled_current: inv &uint<8>,
-    scheduled_current_is_none: inv &bool,
-    scheduled_pending: inv &uint<8>,
-    scheduled_pending_is_none: inv &bool,
-    scheduled_current_loaded: inv &bool,
+    tx_valid: inv bool,
+    tx_byte: inv uint<8>,
+    msg_none: inv bool,
+    current_msg: inv uint<8>,
+    current_idx: inv uint<2>,
+    pending_msg: inv uint<8>,
+    scheduled_current: inv uint<8>,
+    scheduled_current_is_none: inv bool,
+    scheduled_pending: inv uint<8>,
+    scheduled_pending_is_none: inv bool,
+    scheduled_current_loaded: inv bool,
 ) {
     reg(clk) state: ByteMsgStreamState<uint<8>, 2> reset(rst: init_byte_msg_stream(0)) = {
         state.step_with(
@@ -120,15 +120,15 @@ entity tb_message_stream(
         schedule_incoming_is_none,
     );
 
-    set tx_valid = &step.tx_req.valid;
-    set tx_byte = &step.tx_req.byte;
-    set msg_none = &step.msg_none;
-    set current_msg = &state.cur_msg;
-    set current_idx = &state.cur_idx;
-    set pending_msg = &state.pending_msg;
-    set scheduled_current = &scheduled.current;
-    set scheduled_current_is_none = &scheduled.current_is_none;
-    set scheduled_pending = &scheduled.pending;
-    set scheduled_pending_is_none = &scheduled.pending_is_none;
-    set scheduled_current_loaded = &scheduled.current_loaded;
+    set tx_valid = step.tx_req.valid;
+    set tx_byte = step.tx_req.byte;
+    set msg_none = step.msg_none;
+    set current_msg = state.cur_msg;
+    set current_idx = state.cur_idx;
+    set pending_msg = state.pending_msg;
+    set scheduled_current = scheduled.current;
+    set scheduled_current_is_none = scheduled.current_is_none;
+    set scheduled_pending = scheduled.pending;
+    set scheduled_pending_is_none = scheduled.pending_is_none;
+    set scheduled_current_loaded = scheduled.current_loaded;
 }

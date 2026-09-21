@@ -6,12 +6,12 @@ extern entity async_fifo_v<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     wrst: bool,
     din: uint<WIDTH>,
     wput: bool,
-    full: inv &bool,
+    full: inv bool,
     rclk: clock,
     rrst: bool,
-    dout: inv &uint<WIDTH>,
+    dout: inv uint<WIDTH>,
     rget: bool,
-    empty: inv &bool,
+    empty: inv bool,
 );
 
 #[no_mangle(all)]
@@ -20,10 +20,10 @@ extern entity sync_fifo_v<#uint WIDTH, #uint ENTRIES>(
     rst: bool,
     din: uint<WIDTH>,
     wput: bool,
-    full: inv &bool,
-    dout: inv &uint<WIDTH>,
+    full: inv bool,
+    dout: inv uint<WIDTH>,
     rget: bool,
-    empty: inv &bool,
+    empty: inv bool,
 );
 
 impl<T, #uint N> [T; N] {
@@ -68,10 +68,10 @@ struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
     storage: [uint<WIDTH>; ENTRIES],
 }
 
-struct port FifoOutPort<T> {
-    full: &bool,
-    empty: &bool,
-    dout: &T,
+struct FifoOutPort<T> {
+    full: bool,
+    empty: bool,
+    dout: T,
 }
 
 // Synchronous first-word-fall-through FIFO.
@@ -197,9 +197,9 @@ pub entity async_fifo<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
         fifo_w.empty,
     );
     FifoOut$(
-        full: *fifo.full,
-        empty: *fifo.empty,
-        dout: *fifo.dout,
+        full: fifo.full,
+        empty: fifo.empty,
+        dout: fifo.dout,
     )
 }
 
@@ -227,20 +227,20 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
         fifo_w.empty,
     );
     FifoOut$(
-        full: *fifo.full,
-        empty: *fifo.empty,
-        dout: *fifo.dout,
+        full: fifo.full,
+        empty: fifo.empty,
+        dout: fifo.dout,
     )
 }
 
 impl<T> FifoOut<T> {
     #[inline]
-    pub entity tap(self, full: inv &bool, empty: inv &bool, dout: inv &T) {
+    pub entity tap(self, full: inv bool, empty: inv bool, dout: inv T) {
         let full_value = self.full;
         let empty_value = self.empty;
         let dout_value = self.dout;
-        set full = &full_value;
-        set empty = &empty_value;
-        set dout = &dout_value;
+        set full = full_value;
+        set empty = empty_value;
+        set dout = dout_value;
     }
 }

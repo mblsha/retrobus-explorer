@@ -1,7 +1,7 @@
 #[no_mangle(all)]
 extern entity clk_wiz_0<#str BANDWIDTH, #str STARTUP_WAIT>(
-    clk_out200: inv &bool,
-    clk_out400: inv &bool,
+    clk_out200: inv bool,
+    clk_out400: inv bool,
     clk_in100: clock,
 );
 
@@ -10,9 +10,9 @@ pub struct ClkWiz200400Out {
     clk_out400: bool,
 }
 
-struct port ClkWiz200400Port {
-    clk_out200: &bool,
-    clk_out400: &bool,
+struct ClkWiz200400Port {
+    clk_out200: bool,
+    clk_out400: bool,
 }
 
 pub entity clk_wiz_200_400(
@@ -22,8 +22,8 @@ pub entity clk_wiz_200_400(
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst clk_wiz_0::<"OPTIMIZED", "FALSE">(clk_wiz_w.clk_out200, clk_wiz_w.clk_out400, clk_in100);
     ClkWiz200400Out$(
-        clk_out200: *clk_wiz.clk_out200,
-        clk_out400: *clk_wiz.clk_out400,
+        clk_out200: clk_wiz.clk_out200,
+        clk_out400: clk_wiz.clk_out400,
     )
 }
 

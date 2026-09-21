@@ -93,7 +93,7 @@ pub entity au_usb_uart_banner_then_loopback<#uint IDX_W, #uint N>(
     rst: bool,
     usb_rx: bool,
     banner: [uint<8>; N],
-    usb_tx: inv &bool,
+    usb_tx: inv bool,
 ) {
     let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
@@ -101,7 +101,7 @@ pub entity au_usb_uart_banner_then_loopback<#uint IDX_W, #uint N>(
         clk,
         rst,
         banner,
-        *uart.busy,
+        uart.busy,
     );
     let banner_active = banner_out.tx_req.valid;
     let tx_data = if banner_active {
@@ -121,5 +121,5 @@ pub entity au_usb_uart_banner_then_loopback<#uint IDX_W, #uint N>(
         uart_w.busy,
     );
 
-    set usb_tx = &*uart.line;
+    set usb_tx = uart.line;
 }
