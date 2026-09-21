@@ -7,12 +7,6 @@ use shared_components::{
     serial::{uart_rx, uart_tx},
 };
 
-impl Default for DigitDecode {
-    fn default() -> Self {
-        DigitDecode$(valid: false, value: 0)
-    }
-}
-
 fn decode_rx_digit(
     rx_valid: bool,
     rx_parity_error: bool,
@@ -20,13 +14,7 @@ fn decode_rx_digit(
 ) -> Option<DigitDecode> {
     let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
 
-    maybe_rx_byte.map(fn |byte| {
-        let digit_valid = byte.is_digit();
-        DigitDecode$(
-            valid: digit_valid,
-            value: if digit_valid { trunc(byte - b'0') } else { 0 },
-        )
-    })
+    maybe_rx_byte.map(fn |byte| byte.decode_digit())
 }
 
 fn divider_last(slow_factor: uint<4>) -> uint<10> {

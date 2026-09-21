@@ -43,7 +43,7 @@ impl Default for RxByteDecode {
         RxByteDecode$(
             byte: 0,
             upper: 0,
-            digit: DigitDecode$(valid: false, value: 0),
+            digit: DigitDecode::default(),
         )
     }
 }

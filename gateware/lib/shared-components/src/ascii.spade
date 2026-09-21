@@ -8,6 +8,16 @@ pub struct DigitDecode {
     value: uint<4>,
 }
 
+// "no digit here": what every failed decode in this module returns. A `///` doc
+// comment does not go here -- v0.20.0 parses one as an attribute and rejects
+// attributes on an `impl`.
+impl Default for DigitDecode {
+    #[inline]
+    fn default() -> Self {
+        DigitDecode$(valid: false, value: 0)
+    }
+}
+
 pub fn hex_char(value: uint<4>) -> uint<8> {
     let value_u8: uint<8> = zext(value);
     if value < 10 {
@@ -55,7 +65,7 @@ impl uint<8> {
         if self.is_digit() {
             DigitDecode$(valid: true, value: self.digit_value())
         } else {
-            DigitDecode$(valid: false, value: 0)
+            DigitDecode::default()
         }
     }
 
@@ -64,7 +74,7 @@ impl uint<8> {
         if decoded.valid && decoded.value <= max_value {
             decoded
         } else {
-            DigitDecode$(valid: false, value: 0)
+            DigitDecode::default()
         }
     }
 
