@@ -250,9 +250,9 @@ extern entity card_ram_2k_v(
     din: CardData,
     we: bool,
     raddr_bus: CardOffset,
-    dout_bus: inv &CardData,
+    dout_bus: inv CardData,
     raddr_uart: CardOffset,
-    dout_uart: inv &CardData,
+    dout_uart: inv CardData,
 );
 
 struct PendingUartState<#uint WIDTH> {
@@ -920,26 +920,26 @@ entity port_overrun_core(
 entity main_core(
     clk: clock,
     rst_n: bool,
-    led: inv &[bool; 8],
+    led: inv [bool; 8],
     usb_rx: bool,
-    usb_tx: inv &bool,
+    usb_tx: inv bool,
     ft_clk: bool,
     ft_rxf: bool,
     ft_txe: bool,
     ft_data: FtData,
     ft_be: FtBe,
-    ft_data_drive: inv &FtData,
-    ft_be_drive: inv &FtBe,
-    ft_rd: inv &bool,
-    ft_wr: inv &bool,
-    ft_oe: inv &bool,
-    saleae: inv &[bool; 8],
+    ft_data_drive: inv FtData,
+    ft_be_drive: inv FtBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
+    saleae: inv [bool; 8],
     rw: bool,
     addr: BusAddr,
     vcc2: bool,
     data_in: CardData,
-    data_drive: inv &CardData,
-    data_oe: inv &bool,
+    data_drive: inv CardData,
+    data_oe: inv bool,
     ce1: bool,
     ce6: bool,
     nc: bool,
@@ -959,26 +959,26 @@ entity main_core(
     let data_now: CardData = data_sync_bits.to_uint();
     let data_uart_now: CardData = data_in;
 
-    let (mem_dout, mem_dout_w): (&CardData, inv &CardData) = port;
-    let (uart_mem_dout, uart_mem_dout_w): (&CardData, inv &CardData) = port;
-    let (rom_dout, rom_dout_w): (&CardData, inv &CardData) = port;
-    let (rom_uart_mem_dout, rom_uart_mem_dout_w): (&CardData, inv &CardData) = port;
+    let (mem_dout, mem_dout_w): (CardData, inv CardData) = port;
+    let (uart_mem_dout, uart_mem_dout_w): (CardData, inv CardData) = port;
+    let (rom_dout, rom_dout_w): (CardData, inv CardData) = port;
+    let (rom_uart_mem_dout, rom_uart_mem_dout_w): (CardData, inv CardData) = port;
     let (addr_uart_io, addr_uart_io_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let (data_uart_io, data_uart_io_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
     let (event_uart_io, event_uart_io_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (event_fifo_empty, event_fifo_empty_w): (&bool, inv &bool) = port;
-    let (event_fifo_dout, event_fifo_dout_w): (&EventWord, inv &EventWord) = port;
+    let (event_fifo_empty, event_fifo_empty_w): (bool, inv bool) = port;
+    let (event_fifo_dout, event_fifo_dout_w): (EventWord, inv EventWord) = port;
     let (sampled_bus_uart_io, sampled_bus_uart_io_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (sampled_bus_fifo_full, sampled_bus_fifo_full_w): (&bool, inv &bool) = port;
-    let (sampled_bus_fifo_empty, sampled_bus_fifo_empty_w): (&bool, inv &bool) = port;
-    let (sampled_bus_fifo_dout, sampled_bus_fifo_dout_w): (&SampledBusWord, inv &SampledBusWord) = port;
-    let (measure_fifo_full, measure_fifo_full_w): (&bool, inv &bool) = port;
-    let (measure_fifo_empty, measure_fifo_empty_w): (&bool, inv &bool) = port;
-    let (measure_fifo_dout, measure_fifo_dout_w): (&MeasurePacked, inv &MeasurePacked) = port;
+    let (sampled_bus_fifo_full, sampled_bus_fifo_full_w): (bool, inv bool) = port;
+    let (sampled_bus_fifo_empty, sampled_bus_fifo_empty_w): (bool, inv bool) = port;
+    let (sampled_bus_fifo_dout, sampled_bus_fifo_dout_w): (SampledBusWord, inv SampledBusWord) = port;
+    let (measure_fifo_full, measure_fifo_full_w): (bool, inv bool) = port;
+    let (measure_fifo_empty, measure_fifo_empty_w): (bool, inv bool) = port;
+    let (measure_fifo_dout, measure_fifo_dout_w): (MeasurePacked, inv MeasurePacked) = port;
     let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port;
-    let (ft_stream_fifo_full, ft_stream_fifo_full_w): (&bool, inv &bool) = port;
-    let (ft_stream_fifo_empty, ft_stream_fifo_empty_w): (&bool, inv &bool) = port;
-    let (ft_stream_fifo_dout, ft_stream_fifo_dout_w): (&SampledBusWord, inv &SampledBusWord) = port;
+    let (ft_stream_fifo_full, ft_stream_fifo_full_w): (bool, inv bool) = port;
+    let (ft_stream_fifo_empty, ft_stream_fifo_empty_w): (bool, inv bool) = port;
+    let (ft_stream_fifo_dout, ft_stream_fifo_dout_w): (SampledBusWord, inv SampledBusWord) = port;
     let (usb_tx_io, usb_tx_io_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
 
     let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
@@ -987,7 +987,7 @@ entity main_core(
         clk,
         rst,
         build_info::boot_banner_text(),
-        *usb_tx_io.busy,
+        usb_tx_io.busy,
     );
 
     let usb_parse = inst parser_core(
@@ -1038,7 +1038,7 @@ entity main_core(
         clk,
         rst,
         addr_now,
-        *addr_uart_io.busy,
+        addr_uart_io.busy,
         cooldown_last,
     );
     reg(clk) data_uart_last: CardData reset(rst: 0) = data_uart_now;
@@ -1144,7 +1144,7 @@ entity main_core(
         ce6_active &&
         ce6_cycle_addr.rom_in_range &&
         (ce6_read_event || (ce6_eval.state.classified && ce6_eval.state.is_read));
-    let bus_data_out = if ce6_rom_drive_cycle { *rom_dout } else { *mem_dout };
+    let bus_data_out = if ce6_rom_drive_cycle { rom_dout } else { mem_dout };
     let bus_drive_cycle =
         ce6_rom_drive_cycle ||
         (!mem_clear.active && ce1 && (read_start || (ce1_eval.state.classified && ce1_eval.state.is_read)));
@@ -1171,11 +1171,11 @@ entity main_core(
     } else if ce6_write_event {
         ce6_write_event_word(ce6_eval.step.data)
     } else {
-        ce6_read_event_word(if ce6_step_addr.rom_in_range { *rom_dout } else { ce6_eval.step.data })
+        ce6_read_event_word(if ce6_step_addr.rom_in_range { rom_dout } else { ce6_eval.step.data })
     };
 
     let event_fifo_wput = event_valid;
-    let event_fifo_rget = !*event_uart_io.busy && !*event_fifo_empty;
+    let event_fifo_rget = !event_uart_io.busy && !event_fifo_empty;
     let event_fifo = inst sync_fifo::<16, 64>(
         clk,
         rst,
@@ -1183,11 +1183,11 @@ entity main_core(
         event_fifo_wput,
         event_fifo_rget,
     );
-    set event_fifo_empty_w = &event_fifo.empty;
-    set event_fifo_dout_w = &event_fifo.dout;
+    set event_fifo_empty_w = event_fifo.empty;
+    set event_fifo_dout_w = event_fifo.dout;
 
-    let sampled_bus_fifo_wput = sampled_bus_valid && !*sampled_bus_fifo_full;
-    let sampled_bus_fifo_rget = !*sampled_bus_uart_io.busy && !*sampled_bus_fifo_empty;
+    let sampled_bus_fifo_wput = sampled_bus_valid && !sampled_bus_fifo_full;
+    let sampled_bus_fifo_rget = !sampled_bus_uart_io.busy && !sampled_bus_fifo_empty;
     let sampled_bus_fifo = inst sync_fifo::<32, 64>(
         clk,
         rst,
@@ -1195,9 +1195,9 @@ entity main_core(
         sampled_bus_fifo_wput,
         sampled_bus_fifo_rget,
     );
-    set sampled_bus_fifo_full_w = &sampled_bus_fifo.full;
-    set sampled_bus_fifo_empty_w = &sampled_bus_fifo.empty;
-    set sampled_bus_fifo_dout_w = &sampled_bus_fifo.dout;
+    set sampled_bus_fifo_full_w = sampled_bus_fifo.full;
+    set sampled_bus_fifo_empty_w = sampled_bus_fifo.empty;
+    set sampled_bus_fifo_dout_w = sampled_bus_fifo.dout;
 
     let echo_out = inst echo_stream_core(
         clk,
@@ -1301,22 +1301,22 @@ entity main_core(
             ft_ingress,
             ft_capture_sample,
             sampled_bus_word,
-            *ft_stream_fifo_full,
+            ft_stream_fifo_full,
         ).next_state;
     let ft_ingress_step = elastic_slot_step(
         ft_ingress,
         ft_capture_sample,
         sampled_bus_word,
-        *ft_stream_fifo_full,
+        ft_stream_fifo_full,
     );
     reg(clk) ft_stream_regs: FtStreamRegs reset(rst: init_ft_stream_regs()) = {
         let step = ft_word_stream_step(
             ft_stream_regs.state,
             ft_stream_regs.cur_value,
-            *ft_io.ui_din_full,
-            *ft_io.ui_dout_empty,
-            *ft_stream_fifo_empty,
-            *ft_stream_fifo_dout,
+            ft_io.ui_din_full,
+            ft_io.ui_dout_empty,
+            ft_stream_fifo_empty,
+            ft_stream_fifo_dout,
         );
         FtStreamRegs$(
             state: step.next_state,
@@ -1326,10 +1326,10 @@ entity main_core(
     let ft_stream = ft_word_stream_step(
         ft_stream_regs.state,
         ft_stream_regs.cur_value,
-        *ft_io.ui_din_full,
-        *ft_io.ui_dout_empty,
-        *ft_stream_fifo_empty,
-        *ft_stream_fifo_dout,
+        ft_io.ui_din_full,
+        ft_io.ui_dout_empty,
+        ft_stream_fifo_empty,
+        ft_stream_fifo_dout,
     );
     let ft_stream_fifo_wput = ft_ingress_step.sink_wput;
     let ft_stream_fifo_drop = ft_ingress_step.dropped;
@@ -1367,9 +1367,9 @@ entity main_core(
         ft_stream_fifo_wput,
         ft_stream.stream_fifo_rget,
     );
-    set ft_stream_fifo_full_w = &ft_stream_fifo.full;
-    set ft_stream_fifo_empty_w = &ft_stream_fifo.empty;
-    set ft_stream_fifo_dout_w = &ft_stream_fifo.dout;
+    set ft_stream_fifo_full_w = ft_stream_fifo.full;
+    set ft_stream_fifo_empty_w = ft_stream_fifo.empty;
+    set ft_stream_fifo_dout_w = ft_stream_fifo.dout;
 
     reg(clk) event_total: MeasureCount reset(rst: 0) =
         if event_valid { event_total +. 1 } else { event_total };
@@ -1413,13 +1413,13 @@ entity main_core(
             measure_pending,
             measure_report_capture,
             measure_report,
-            *measure_fifo_full,
+            measure_fifo_full,
         ).next_state;
     let measure_pending_step = elastic_slot_step(
         measure_pending,
         measure_report_capture,
         measure_report,
-        *measure_fifo_full,
+        measure_fifo_full,
     );
     let measure_report_wput = measure_pending_step.sink_wput;
     let measure_report_drop = measure_pending_step.dropped;
@@ -1430,8 +1430,8 @@ entity main_core(
         measure_block_tx,
         measure_dump_request,
         measure_clear_request,
-        *measure_fifo_empty,
-        *measure_fifo_dout,
+        measure_fifo_empty,
+        measure_fifo_dout,
     );
     let measure_fifo_rst = rst || measure_clear_request;
     let measure_fifo = inst sync_fifo::<144, 32>(
@@ -1441,9 +1441,9 @@ entity main_core(
         measure_report_wput,
         measure_eval.fifo_rget,
     );
-    set measure_fifo_full_w = &measure_fifo.full;
-    set measure_fifo_empty_w = &measure_fifo.empty;
-    set measure_fifo_dout_w = &measure_fifo.dout;
+    set measure_fifo_full_w = measure_fifo.full;
+    set measure_fifo_empty_w = measure_fifo.empty;
+    set measure_fifo_dout_w = measure_fifo.dout;
 
     let measure_queue_inc: MeasureQueueLevel = if measure_report_wput { 1 } else { 0 };
     let measure_queue_dec: MeasureQueueLevel = if measure_eval.fifo_rget { 1 } else { 0 };
@@ -1488,12 +1488,12 @@ entity main_core(
         if mem_clear.active || uart_ram_read_collision {
             RespMsg::Busy()
         } else {
-            RespMsg::Read(usb_ram_read_addr, *uart_mem_dout)
+            RespMsg::Read(usb_ram_read_addr, uart_mem_dout)
         }
     } else if uart_ram_write_valid {
         if uart_ram_write_busy { RespMsg::Busy() } else { RespMsg::Ok() }
     } else if usb_rom_read_valid {
-        RespMsg::Read(usb_rom_read_addr, *rom_uart_mem_dout)
+        RespMsg::Read(usb_rom_read_addr, rom_uart_mem_dout)
     } else if uart_rom_write_valid {
         RespMsg::Ok()
     } else if classify_delay_update_valid {
@@ -1561,7 +1561,7 @@ entity main_core(
         clk,
         rst,
         false,
-        *event_fifo_dout,
+        event_fifo_dout,
         event_fifo_rget,
         event_uart_io_w.line,
         event_uart_io_w.busy,
@@ -1570,7 +1570,7 @@ entity main_core(
         clk,
         rst,
         false,
-        *sampled_bus_fifo_dout,
+        sampled_bus_fifo_dout,
         sampled_bus_fifo_rget,
         sampled_bus_uart_io_w.line,
         sampled_bus_uart_io_w.busy,
@@ -1611,11 +1611,11 @@ entity main_core(
         ce1,
         ce6,
         rw,
-        if rst { true } else { *event_uart_io.line },
-        if rst { true } else { *sampled_bus_uart_io.line },
+        if rst { true } else { event_uart_io.line },
+        if rst { true } else { sampled_bus_uart_io.line },
         if rst { false } else { addr_pulse_fire },
-        if rst { true } else { *data_uart_io.line },
-        if rst { true } else { *addr_uart_io.line },
+        if rst { true } else { data_uart_io.line },
+        if rst { true } else { addr_uart_io.line },
     ];
     let led_lines: [bool; 8] = [
         measure_capture.armed,
@@ -1628,18 +1628,18 @@ entity main_core(
         false,
     ];
 
-    set saleae = &saleae_lines;
-    set led = &led_lines;
-    set usb_tx = &*usb_tx_io.line;
-    set ft_data_drive = &*ft_io.ft_data_out;
-    set ft_be_drive = &*ft_io.ft_be_out;
-    set ft_rd = &*ft_io.ft_rd;
-    set ft_wr = &*ft_io.ft_wr;
-    set ft_oe = &*ft_io.ft_oe;
-    set data_drive = &bus_data_out;
-    set data_oe = &bus_drive_cycle;
-    let _unused_ft_ui_dout = *ft_io.ui_dout;
-    let _unused_ft_ui_dout_be = *ft_io.ui_dout_be;
+    set saleae = saleae_lines;
+    set led = led_lines;
+    set usb_tx = usb_tx_io.line;
+    set ft_data_drive = ft_io.ft_data_out;
+    set ft_be_drive = ft_io.ft_be_out;
+    set ft_rd = ft_io.ft_rd;
+    set ft_wr = ft_io.ft_wr;
+    set ft_oe = ft_io.ft_oe;
+    set data_drive = bus_data_out;
+    set data_oe = bus_drive_cycle;
+    let _unused_ft_ui_dout = ft_io.ui_dout;
+    let _unused_ft_ui_dout_be = ft_io.ui_dout_be;
     let _unused_rst_n = rst_n;
     let _unused_vcc2 = vcc2;
     let _unused_nc = nc;
