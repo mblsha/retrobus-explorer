@@ -27,7 +27,13 @@ in documentation.
 ## Set up the workspace
 
 Install Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), Swim, and
-Verilator. Then, from this directory:
+Verilator. Swim now lives on Codeberg:
+
+```sh
+cargo install --git https://codeberg.org/spade-lang/swim swim
+```
+
+Then, from this directory:
 
 ```sh
 uv sync --locked --all-packages
@@ -35,7 +41,9 @@ uv run python tools/project_inventory.py --check
 ```
 
 The single `gateware/.venv` supplies Cocotb to every project. Each project's
-`swim.lock` pins its Spade compiler and library revisions.
+`swim.lock` pins the Spade compiler as `[spade].commit`; all fourteen name the
+same release, currently **v0.20.0**. There are no library dependencies.
+[AGENTS.md](./AGENTS.md) has the compiler-bump procedure.
 
 ## Run tests
 

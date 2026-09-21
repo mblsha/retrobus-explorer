@@ -75,11 +75,60 @@ errors.
   behavior, and observable UART output unless a change explicitly requests a
   behavior update.
 
+## The Spade compiler and where it lives
+
+Every project and `lib/shared-components` pins the compiler as
+`[spade].commit` in its own `swim.lock`. All fourteen must name the same
+commit; the current pin is **v0.20.0**
+(`7e0bf7883d8a23dff89b5e38ce5c5f24761fafe5`). There is no library dependency
+left: the one combinator this repository used from `nstd` now lives in
+`lib/shared-components/src/arrays.spade`.
+
+Spade and Swim moved from GitLab to **Codeberg** on 2026-09-18
+(`https://codeberg.org/spade-lang/spade`, `.../swim`). The GitLab repository
+is frozen at a "Spade has moved" commit. It still serves every tag up to
+v0.20.0, which is why a swim binary built before the move -- it has the
+GitLab URL compiled in -- can still fetch this pin; it will never see a
+later release. Codeberg is run by volunteers on donated hardware and is less
+available than GitLab was, so expect the occasional failed clone and retry.
+
+To bump the compiler:
+
+1. Install swim from Codeberg:
+   `cargo install --git https://codeberg.org/spade-lang/swim swim`.
+2. In each project whose `build/` predates the move, run
+   `swim clean --and-spade`, so the old GitLab checkout under `build/spade`
+   is discarded rather than fetched from a frozen repository.
+3. Edit `[spade].commit` in all fourteen `swim.lock` files to the release
+   commit you want. Do **not** run `swim update-spade`: it moves the pin to
+   whatever the branch head is, and these locks name exact release tags.
+4. Build every project, work the compiler's warnings back to zero, and only
+   then run the testbenches. Go through the intermediate releases rather than
+   jumping: a release that deprecates something prints a fix-it for every
+   occurrence, and a later one may reuse the same syntax for a new meaning.
+
 ## Spade and HDL style
 
 - Use four-space indentation and descriptive `snake_case` names.
 - Prefer small typed functions for combinational transformations and small
   entities for stateful or clocked behavior.
+- Spade has no port/value distinction any more, and the wire-layer spelling
+  that used to mark it is gone. Make a pair with
+  `let (x, x_w): (T, inv T) = port();`, read the forward half as `x`, and
+  drive the inverted half with `set x_w = value`. No `&` on the types, no `&`
+  before the value in a `set`, no `*` before a read, and `struct`, never
+  `struct port`. This matters beyond tidiness: since 0.19 `&T` means a
+  read-only copy view of a linear type, so a leftover `&` would still compile
+  and say something quite different from what it used to.
+- Ask for widths with `uint::bits_for` and `int::bits_for`, not the deprecated
+  `uint_bits_to_fit` / `int_bits_to_fit`.
+- Reinterpret bits with the standard library's methods rather than the
+  deprecated free units in `std::conv`: `bool::as_clock`, `clock::as_bool`,
+  `[bool; N]::as_uint`. A conversion named `as_*` reinterprets bits and one
+  named `to_*` preserves a numeric value.
+- Every project must build with zero compiler warnings. A warning here is
+  usually a deprecation with a fix-it attached, and letting them accumulate is
+  what makes the next compiler bump expensive.
 - Centralize repeated widths, protocol constants, UART helpers, synchronizers,
   FIFOs, counters, and edge detectors in the shared library when their behavior
   is genuinely common.
