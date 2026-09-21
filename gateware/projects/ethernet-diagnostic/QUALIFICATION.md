@@ -1,5 +1,29 @@
 # Qualification provenance
 
+## The qualified bitstreams predate the Spade v0.20.0 upgrade
+
+Every bitstream named in this file, including the hardware-qualified H700
+build at `build/microsd-ddr-ethernet-h700`, was compiled by **Spade v0.17.0**
+from a source revision at or before `ae2a4b7`. The sources have since moved to
+**Spade v0.20.0**, and the shared library no longer depends on `nstd`.
+
+That upgrade was made without changing any top-level port list, any
+`#[no_mangle]` module name, or any reset, clock-domain, high-impedance or
+timing semantics, and the generated SystemVerilog was compared module by
+module at each step. It is still a **different netlist**: v0.20.0 emits
+`microsd-emulator` in 274 modules where v0.17.0 emitted 336, and every
+internal net is named differently.
+
+So a bitstream rebuilt from the current sources is not this bitstream. Place
+and route would start from a different netlist, which means a fresh
+placement-seed search (`tools/search_placement_seeds.py`) and a fresh timing
+check before any seed could be called usable, and then the full hardware
+campaign again before it could replace the qualified build. Seed 19's
+65.78/64 MHz and 80.38/80 MHz margins say nothing about what a new netlist
+would route to. Until that work is done, treat `build/microsd-ddr-ethernet-h700`
+as the only qualified artifact and leave it alone; a measurement taken against
+a rebuilt card is a measurement about a different card.
+
 ## Current revision qualification, 2026-09-14
 
 Functional source `ae2a4b7` was built and programmed on the Arty A7-35T.

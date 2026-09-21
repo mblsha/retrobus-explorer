@@ -85,6 +85,13 @@ DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
   --seeds 8 9 10 11 12 19 21 30
 ```
 
+That output directory currently holds the hardware-qualified H700 bitstream,
+compiled by Spade v0.17.0 from an earlier source revision. The sources are now
+on Spade v0.20.0, whose netlist is different, so a rebuild there would
+overwrite a qualified artifact with an unqualified one. Search into a new
+directory and read
+[QUALIFICATION.md](../../ethernet-diagnostic/QUALIFICATION.md) first.
+
 The `--mmc-only` profile above suppresses the complete initial SD negotiation
 boundary so a host which permits MMC falls back to CMD1. Its MMC CSD advertises 5 MHz; the tested
 GKD clock tree generates 4 MHz from that request. CMD23 bounds the next CMD18

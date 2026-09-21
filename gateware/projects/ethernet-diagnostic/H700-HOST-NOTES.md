@@ -254,6 +254,13 @@ bitstream SHA-256 `cf5fb75dadfd8dcb65a89f4df8772986cdfd26b2dee3bbfab50979eeb28a3
 constraint and `dclk` 80.38 against 80. That is the build every RG35XX figure
 was measured on, and the margin is why "rebuild it and see" is not an option.
 
+That bitstream was compiled by **Spade v0.17.0**; the sources have since moved
+to **v0.20.0**, which emits the same ports and the same `#[no_mangle]` names
+but a different netlist (`microsd-emulator` in 274 modules rather than 336).
+A rebuild is therefore a new netlist needing its own placement-seed search,
+its own timing check and its own hardware qualification before it could stand
+in for seed 19. [QUALIFICATION.md](./QUALIFICATION.md) has the details.
+
 **A pull-up can be added to a routed design without re-running place and
 route.** `PULLTYPE` is a per-IOB configuration feature, and nextpnr emits one
 line per IOB half — 79 `PULLTYPE.NONE` lines in the qualified design's

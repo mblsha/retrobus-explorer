@@ -172,7 +172,11 @@ bench or the client:
   with the supply's output read back OFF and the card disarmed.
 - Never change the qualified bitstream (`build/microsd-ddr-ethernet-h700`) or
   the gateware to make a target experiment work. A result measured against a
-  rebuilt card is a result about a different card.
+  rebuilt card is a result about a different card. That bitstream was compiled
+  by Spade v0.17.0 and the sources are now on v0.20.0, so a rebuild is a new
+  netlist: it needs its own placement-seed search and its own hardware
+  qualification before it could replace the qualified one. See
+  [QUALIFICATION.md](projects/ethernet-diagnostic/QUALIFICATION.md).
 - `projects/ethernet-diagnostic/scripts/images.py`, its importability as
   `scripts.images`, `PROTOCOL.md` and the `build/<experiment>/` layout
   (`design.bit` beside `result.json`) are an **interface**: `linux-consoles`
