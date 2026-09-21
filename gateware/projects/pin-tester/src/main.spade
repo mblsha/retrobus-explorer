@@ -110,16 +110,16 @@ fn send_counter_byte(counter: uint<128>, bank: uint<3>) -> uint<8> {
 entity main_core(
     clk: clock,
     rst_n: bool,
-    led: inv &[bool; 8],
+    led: inv [bool; 8],
     usb_rx: bool,
-    usb_tx: inv &bool,
+    usb_tx: inv bool,
     ffc_data_in: uint<48>,
-    ffc_data_drive: inv &uint<48>,
-    ffc_data_oe: inv &uint<48>,
-    saleae: inv &[bool; 8],
-    send_mode_debug: inv &bool,
-    bank_debug: inv &uint<3>,
-    counter_debug: inv &uint<128>,
+    ffc_data_drive: inv uint<48>,
+    ffc_data_oe: inv uint<48>,
+    saleae: inv [bool; 8],
+    send_mode_debug: inv bool,
+    bank_debug: inv uint<3>,
+    counter_debug: inv uint<128>,
 ) {
     let rst = inst reset_conditioner::<4>(clk, !rst_n);
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
@@ -147,12 +147,12 @@ entity main_core(
     let ffc_drive: uint<48> = zext(send_byte);
     let ffc_oe: uint<48> = if send_mode { 255 } else { 0 };
 
-    set led = &display_byte.to_bits();
-    set usb_tx = &*uart.line;
-    set ffc_data_drive = &ffc_drive;
-    set ffc_data_oe = &ffc_oe;
-    set saleae = &display_byte.to_bits();
-    set send_mode_debug = &send_mode;
-    set bank_debug = &state.bank;
-    set counter_debug = &state.counter;
+    set led = display_byte.to_bits();
+    set usb_tx = uart.line;
+    set ffc_data_drive = ffc_drive;
+    set ffc_data_oe = ffc_oe;
+    set saleae = display_byte.to_bits();
+    set send_mode_debug = send_mode;
+    set bank_debug = state.bank;
+    set counter_debug = state.counter;
 }
