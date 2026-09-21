@@ -227,12 +227,12 @@ pub entity sd_frontend(
     // Prepared output registers use the opposite fabric edge. The mode is
     // static in hardware wrappers and is checked in the routed netlist.
     let command_output_clk = unsafe {
-        let level = inst std::conv::clock_to_bool(clk);
-        inst std::conv::bool_to_clock(if fast_mode { !level } else { level })
+        let level = clk.as_bool();
+        (if fast_mode { !level } else { level }).as_clock()
     };
     let data_output_clk = unsafe {
-        let level = inst std::conv::clock_to_bool(clk);
-        inst std::conv::bool_to_clock(if prepared_data_mode { !level } else { level })
+        let level = clk.as_bool();
+        (if prepared_data_mode { !level } else { level }).as_clock()
     };
     let local_rst = rst || !armed;
     reg(clk) registered_output_reset reset(rst: true) = !armed;
@@ -1178,7 +1178,7 @@ pub entity sd_frontend(
 
     // Prepared data and opposite-edge pad registers.
     reg(clk) prepared_nibble: uint<4> reset(local_rst: 15) = nibble;
-    reg(clk) prepared_crc: uint<4> reset(local_rst: 15) = std::conv::bits_to_uint(crc_bits);
+    reg(clk) prepared_crc: uint<4> reset(local_rst: 15) = crc_bits.as_uint();
     let pad_nibble = if prepared_data_mode {
         prepared_nibble
     } else {
@@ -1187,7 +1187,7 @@ pub entity sd_frontend(
     let pad_crc = if prepared_data_mode {
         prepared_crc
     } else {
-        std::conv::bits_to_uint(crc_bits)
+        crc_bits.as_uint()
     };
     let read_data_bit: uint<4> = if data_state == READ_PAYLOAD {
         pad_nibble
@@ -1686,9 +1686,9 @@ entity ddr_emulator(
     let (read_release, read_release_w): (bool, inv bool) = port();
     // Low bits expose live interface state; upper bits carry BIST diagnostics.
     let loader_status_word: uint<32> = (zext::<27, 32>(diagnostic_status) << 5)
-        | zext(std::conv::bits_to_uint([
+        | zext([
             initialized, ddr_cmd_ready, ddr_wdata_ready, card_armed, ddr_rdata_valid,
-        ]));
+        ].as_uint());
     let _ = inst loader::image_loader$(
         clk,
         rst,

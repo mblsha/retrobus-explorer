@@ -30,7 +30,7 @@ pub entity clk_wiz_200_400(
 pub unsafe entity sampled_bool_clock(
     signal: bool,
 ) -> clock {
-    unsafe { inst std::conv::bool_to_clock(signal) }
+    unsafe { signal.as_clock() }
 }
 
 pub unsafe entity clk_wiz_400(

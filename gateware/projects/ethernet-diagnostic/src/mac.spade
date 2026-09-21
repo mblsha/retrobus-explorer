@@ -83,7 +83,7 @@ pub entity frame_transmitter(
     tx_en: inv bool,
 ) {
     decl published, consumed, active, index, half, crc;
-    let launch = unsafe { inst std::conv::bool_to_clock(!inst std::conv::clock_to_bool(tx_clk)) };
+    let launch = unsafe { (!tx_clk.as_bool()).as_clock() };
     let tx_reset = inst reset_conditioner::<2>(launch, rst);
     reg(launch) consumed_gray: uint<2> reset(tx_reset: 0) = consumed ^ (consumed >> 1);
     reg(clk) consumed_meta: uint<2> reset(rst: 0) = consumed_gray;

@@ -95,7 +95,7 @@ entity probe_core(
         (zext(edges[4]) << 128) | (zext(edges[5]) << 160) |
         (zext(edges[6]) << 192) | (zext(edges[7]) << 224);
     let saturated_bits = edges.map(fn |count| { count == 0xffffffff });
-    let saturated: uint<8> = std::conv::bits_to_uint(saturated_bits);
+    let saturated: uint<8> = saturated_bits.as_uint();
     let snapshot: uint<480> = 0x01504d | (zext(opcode) << 24) | (zext(sequence) << 32) |
         (zext(pins) << 40) | (zext(seen_high) << 48) | (zext(seen_low) << 56) |
         (zext(cycles) << 64) | (zext(edge_word) << 96) |
