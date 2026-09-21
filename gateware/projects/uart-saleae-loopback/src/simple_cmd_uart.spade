@@ -56,7 +56,6 @@ entity decode_rx_byte(
     let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
 
     maybe_rx_byte.inst(_) pmap(clk, pipeline(0) |clk, byte| {
-        let _ = clk;
         RxByteDecode$(
             byte: byte,
             upper: byte.to_upper(),
