@@ -120,7 +120,7 @@ SD/DDR implementation and replaces the UART loader with a checked UDP client.
 ## What a real host does with this card
 
 Several hundred cold starts of an Allwinner H700 handheld booted from this
-emulator between 2026-09-14 and 2026-09-21, and what they taught the SD
+emulator between 2026-09-16 and 2026-09-21, and what they taught the SD
 frontend — which clock the host picks out of the advertised `TRAN_SPEED`, how
 far after its rising edge the card samples CMD and DAT, what a host with no
 working pull-ups does to the data lines, and which of the passive trace's
