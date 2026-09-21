@@ -12,7 +12,7 @@ extern entity simple_dual_port_ram<#uint WIDTH, #uint ENTRIES>(
     write_enable: bool,
     rclk: clock,
     raddr: uint<{uint_bits_to_fit(ENTRIES - 1)}>,
-    read_data: inv &uint<WIDTH>,
+    read_data: inv uint<WIDTH>,
 );
 
 pub enum ReadState {
@@ -367,7 +367,7 @@ pub entity streaming_rom_core(
         state.step(inputs).next_state;
     let step = state.step(inputs);
 
-    let (ram_read_data, ram_read_data_w): (&RomData, inv &RomData) = port;
+    let (ram_read_data, ram_read_data_w): (RomData, inv RomData) = port;
     inst simple_dual_port_ram::<8, 32768>(
         clk,
         step.ram_waddr,
@@ -383,7 +383,7 @@ pub entity streaming_rom_core(
         ft_ui_din_be: step.ft_ui_din_be,
         ft_ui_din_valid: step.ft_ui_din_valid,
         ft_ui_dout_get: step.ft_ui_dout_get,
-        data_drive: *ram_read_data,
+        data_drive: ram_read_data,
         data_oe: step.data_oe,
         read_state_code: read_state_code(state.read_state),
         streaming_state_code: streaming_state_code(state.streaming_state),
