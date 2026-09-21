@@ -1,8 +1,5 @@
 name = "shared_components"
 
-[libraries]
-nstd.git = "https://gitlab.com/spade-lang/lib/nstd.git"
-
 [tooling]
 top = "tb_sync2"
 test_module = "test_sync2"

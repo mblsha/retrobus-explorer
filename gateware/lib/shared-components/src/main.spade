@@ -1,3 +1,4 @@
+pub mod arrays;
 pub mod primitives;
 pub mod clocking;
 pub mod sharp;

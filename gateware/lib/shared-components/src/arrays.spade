@@ -1,0 +1,29 @@
+/// Array helpers the Spade standard library does not provide.
+
+/// The constants `[FIRST, FIRST + 1, ..., FIRST + N - 1]`.
+///
+/// Built as a balanced tree so elaboration depth grows with `log2(N)` rather
+/// than with `N`.
+fn indices_from<#uint WIDTH, #uint N, #uint FIRST>() -> [uint<WIDTH>; N] {
+    gen if N == 0 {
+        []
+    } else if N == 1 {
+        [FIRST]
+    } else {
+        indices_from::<WIDTH, {N / 2}, FIRST>()
+            .concat(indices_from::<WIDTH, {N - N / 2}, {FIRST + N / 2}>())
+    }
+}
+
+impl<T, #uint N> [T; N] {
+    /// Pair every element with its own index: `[(0, self[0]), (1, self[1]), ...]`.
+    ///
+    /// The indices are elaboration-time constants, so this costs no hardware on
+    /// its own; it exists to let a `map` closure see where it is in the array.
+    pub fn enumerate<#uint WIDTH>(self) -> [(uint<WIDTH>, T); N]
+    where
+        WIDTH: {uint_bits_to_fit(N - 1)},
+    {
+        indices_from::<WIDTH, N, 0>().zip(self)
+    }
+}
