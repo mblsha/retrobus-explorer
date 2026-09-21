@@ -95,7 +95,7 @@ pub entity au_usb_uart_banner_then_loopback<#uint IDX_W, #uint N>(
     banner: [uint<8>; N],
     usb_tx: inv bool,
 ) {
-    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
+    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
     let banner_out = inst boot_banner_core::<IDX_W, N>(
         clk,

@@ -324,11 +324,11 @@ entity main_core(
         conn_vpp_sync,
     );
 
-    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port;
-    let (stream_fifo_full, stream_fifo_full_w): (bool, inv bool) = port;
-    let (stream_fifo_empty, stream_fifo_empty_w): (bool, inv bool) = port;
-    let (stream_fifo_dout, stream_fifo_dout_w): (OrganizerTraceWord, inv OrganizerTraceWord) = port;
+    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
+    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port();
+    let (stream_fifo_full, stream_fifo_full_w): (bool, inv bool) = port();
+    let (stream_fifo_empty, stream_fifo_empty_w): (bool, inv bool) = port();
+    let (stream_fifo_dout, stream_fifo_dout_w): (OrganizerTraceWord, inv OrganizerTraceWord) = port();
 
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
     let boot_tx = inst boot_banner_tx_gate::<8, 96>(

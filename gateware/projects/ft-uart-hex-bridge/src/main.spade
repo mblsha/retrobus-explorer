@@ -176,11 +176,11 @@ entity main_core(
     let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
-    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (ft_ui_din_full, ft_ui_din_full_w): (bool, inv bool) = port;
-    let (ft_ui_dout, ft_ui_dout_w): (FtData, inv FtData) = port;
-    let (ft_ui_dout_be, ft_ui_dout_be_w): (FtBe, inv FtBe) = port;
-    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (bool, inv bool) = port;
+    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
+    let (ft_ui_din_full, ft_ui_din_full_w): (bool, inv bool) = port();
+    let (ft_ui_dout, ft_ui_dout_w): (FtData, inv FtData) = port();
+    let (ft_ui_dout_be, ft_ui_dout_be_w): (FtBe, inv FtBe) = port();
+    let (ft_ui_dout_empty, ft_ui_dout_empty_w): (bool, inv bool) = port();
 
     reg(clk) state: MainState reset(rst: init_main_state()) = {
         let parse: ParserStepOut = line_parser_step(state.parser, rx.valid, rx.parity_error, rx.byte);

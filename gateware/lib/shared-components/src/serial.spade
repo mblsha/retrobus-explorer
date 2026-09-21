@@ -456,7 +456,7 @@ pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER
     let _ = require_power_of_two::<TX_BUFFER>();
     let _ = require_power_of_two::<RX_BUFFER>();
 
-    let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port;
+    let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port();
 
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst ft_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(

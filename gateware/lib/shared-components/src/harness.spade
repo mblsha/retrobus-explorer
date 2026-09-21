@@ -411,8 +411,8 @@ entity tb_uart_tx_adapter_equiv(
     adapter_line: inv bool,
     adapter_busy: inv bool,
 ) {
-    let (direct, direct_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (adapter, adapter_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
+    let (direct, direct_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
+    let (adapter, adapter_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
 
     inst au_usb_uart_tx8_tap(
         clk,
@@ -451,7 +451,7 @@ entity tb_uart_tx_tap_equiv(
     tap_busy: inv bool,
 ) {
     let core = inst uart_tx::<40, 10, 8>(clk, rst, block, tx_byte, tx_valid);
-    let (tap, tap_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
+    let (tap, tap_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
     inst uart_tx_tap::<40, 10, 8>(
         clk,
         rst,

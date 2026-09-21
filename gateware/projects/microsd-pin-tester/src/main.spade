@@ -123,9 +123,9 @@ entity probe_uart(
 ) {
     let rst = !rst_n;
     let rx = inst uart_rx::<8>(clk, rst, usb_rx, 100, false, 1);
-    let (valid, valid_w): (bool, inv bool) = port;
-    let (byte, byte_w): (uint<8>, inv uint<8>) = port;
-    let (busy, busy_w): (bool, inv bool) = port;
+    let (valid, valid_w): (bool, inv bool) = port();
+    let (byte, byte_w): (uint<8>, inv uint<8>) = port();
+    let (busy, busy_w): (bool, inv bool) = port();
     reg(clk) issued reset(rst: false) = valid && !busy && !issued;
     let send = valid && !busy && !issued;
     let _ = inst probe_core(clk, rst, pmod, top_header, rx.valid && !rx.parity_error,

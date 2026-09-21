@@ -47,7 +47,7 @@ pub entity au_usb_uart_tx8_req_tap(
     tx_line: inv bool,
     busy: inv bool,
 ) {
-    let (busy_sig, busy_sig_w): (bool, inv bool) = port;
+    let (busy_sig, busy_sig_w): (bool, inv bool) = port();
     let tx_fire = tx_req.valid && !block && !busy_sig;
 
     inst au_usb_uart_tx8_tap(

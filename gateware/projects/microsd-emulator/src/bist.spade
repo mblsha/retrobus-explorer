@@ -64,14 +64,14 @@ pub entity qualified_ddr(
     expected_word: inv uint<128>,
     actual_word: inv uint<128>,
 ) {
-    let (bist_passed, bist_passed_w): (bool, inv bool) = port;
-    let (bist_cmd_valid, bist_cmd_valid_w): (bool, inv bool) = port;
-    let (bist_cmd_address, bist_cmd_address_w): (uint<24>, inv uint<24>) = port;
-    let (bist_cmd_write, bist_cmd_write_w): (bool, inv bool) = port;
-    let (bist_write_valid, bist_write_valid_w): (bool, inv bool) = port;
-    let (bist_write_data, bist_write_data_w): (uint<128>, inv uint<128>) = port;
-    let (bist_write_mask, bist_write_mask_w): (uint<16>, inv uint<16>) = port;
-    let (bist_read_ready, bist_read_ready_w): (bool, inv bool) = port;
+    let (bist_passed, bist_passed_w): (bool, inv bool) = port();
+    let (bist_cmd_valid, bist_cmd_valid_w): (bool, inv bool) = port();
+    let (bist_cmd_address, bist_cmd_address_w): (uint<24>, inv uint<24>) = port();
+    let (bist_cmd_write, bist_cmd_write_w): (bool, inv bool) = port();
+    let (bist_write_valid, bist_write_valid_w): (bool, inv bool) = port();
+    let (bist_write_data, bist_write_data_w): (uint<128>, inv uint<128>) = port();
+    let (bist_write_mask, bist_write_mask_w): (uint<16>, inv uint<16>) = port();
+    let (bist_read_ready, bist_read_ready_w): (bool, inv bool) = port();
     let _ = inst native_bist$(
         clk,
         rst,

@@ -574,12 +574,12 @@ entity main_core(
     let rd_rise = inst rising_edge(clk, z80_rd_sync);
     let wr_rise = inst rising_edge(clk, z80_wr_sync);
 
-    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
-    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port;
+    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
+    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port();
 
-    let (stream_fifo_full, stream_fifo_full_w): (bool, inv bool) = port;
-    let (stream_fifo_empty, stream_fifo_empty_w): (bool, inv bool) = port;
-    let (stream_fifo_dout, stream_fifo_dout_w): (TraceWord, inv TraceWord) = port;
+    let (stream_fifo_full, stream_fifo_full_w): (bool, inv bool) = port();
+    let (stream_fifo_empty, stream_fifo_empty_w): (bool, inv bool) = port();
+    let (stream_fifo_dout, stream_fifo_dout_w): (TraceWord, inv TraceWord) = port();
 
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 

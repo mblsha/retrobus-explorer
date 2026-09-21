@@ -82,7 +82,7 @@ entity main_core(
     let mreq_fall = inst falling_edge(clk, z80_sync.mreq);
     let mreq_rise = inst rising_edge(clk, z80_sync.mreq);
 
-    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port;
+    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port();
     let stream = inst streaming_rom_core(
         clk,
         rst,

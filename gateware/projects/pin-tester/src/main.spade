@@ -130,7 +130,7 @@ entity main_core(
         = pin_tester_step(state, rx_valid, rx.byte).next_state;
     let step = pin_tester_step(state, rx_valid, rx.byte);
 
-    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port;
+    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
     let _tx = inst au_usb_uart_tx8_req_tap(
         clk,
         rst,

@@ -34,14 +34,14 @@ pub entity sd_write_transaction(
     } else {
         saved_lba
     };
-    let (receive_active, receive_active_w): (bool, inv bool) = port;
-    let (receive_complete, receive_complete_w): (bool, inv bool) = port;
-    let (receive_crc_good, receive_crc_good_w): (bool, inv bool) = port;
-    let (staged_byte_index, staged_byte_index_w): (uint<9>, inv uint<9>) = port;
-    let (staged_byte, staged_byte_w): (uint<8>, inv uint<8>) = port;
-    let (commit_active, commit_active_w): (bool, inv bool) = port;
-    let (commit_failed, commit_failed_w): (bool, inv bool) = port;
-    let (response_active, response_active_w): (bool, inv bool) = port;
+    let (receive_active, receive_active_w): (bool, inv bool) = port();
+    let (receive_complete, receive_complete_w): (bool, inv bool) = port();
+    let (receive_crc_good, receive_crc_good_w): (bool, inv bool) = port();
+    let (staged_byte_index, staged_byte_index_w): (uint<9>, inv uint<9>) = port();
+    let (staged_byte, staged_byte_w): (uint<8>, inv uint<8>) = port();
+    let (commit_active, commit_active_w): (bool, inv bool) = port();
+    let (commit_failed, commit_failed_w): (bool, inv bool) = port();
+    let (response_active, response_active_w): (bool, inv bool) = port();
     // Validate the stable sector address when reception starts, rather than
     // keeping a 32-bit range comparison on the DDR arbitration/loader path.
     reg(clk) saved_lba_valid reset(rst: false) = if start {

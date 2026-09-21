@@ -166,13 +166,13 @@ pub entity sd_frontend(
     reg(clk) cmd_sync reset(rst: true) = cmd_meta;
     reg(clk) dat_meta: uint<4> reset(rst: 15) = dat_in;
     reg(clk) dat_sync: uint<4> reset(rst: 15) = dat_meta;
-    let (write_transaction_active, write_transaction_active_w): (bool, inv bool) = port;
-    let (committing, committing_w): (bool, inv bool) = port;
-    let (write_done, write_done_w): (bool, inv bool) = port;
-    let (write_good, write_good_w): (bool, inv bool) = port;
-    let (write_response_data, write_response_data_w): (uint<4>, inv uint<4>) = port;
-    let (write_response_enable, write_response_enable_w): (uint<4>, inv uint<4>) = port;
-    let (commit_done, commit_done_w): (bool, inv bool) = port;
+    let (write_transaction_active, write_transaction_active_w): (bool, inv bool) = port();
+    let (committing, committing_w): (bool, inv bool) = port();
+    let (write_done, write_done_w): (bool, inv bool) = port();
+    let (write_good, write_good_w): (bool, inv bool) = port();
+    let (write_response_data, write_response_data_w): (uint<4>, inv uint<4>) = port();
+    let (write_response_enable, write_response_enable_w): (uint<4>, inv uint<4>) = port();
+    let (commit_done, commit_done_w): (bool, inv bool) = port();
     decl write_mode, write_lba;
     let prepared_data_mode = fast_mode || h700_mode || mmc_only;
     // A packet spans hundreds of SD edges. Register its aggregate activity
@@ -1451,20 +1451,20 @@ entity bram_emulator(
     dat_oe: inv uint<4>,
     armed_status: inv bool,
 ) {
-    let (card_armed, card_armed_w): (bool, inv bool) = port;
-    let (loader_valid, loader_valid_w): (bool, inv bool) = port;
-    let (loader_address, loader_address_w): (uint<32>, inv uint<32>) = port;
-    let (loader_byte, loader_byte_w): (uint<8>, inv uint<8>) = port;
-    let (loader_ready, loader_ready_w): (bool, inv bool) = port;
-    let (read_request, read_request_w): (bool, inv bool) = port;
-    let (read_lba, read_lba_w): (uint<32>, inv uint<32>) = port;
-    let (read_generation, read_generation_w): (uint<32>, inv uint<32>) = port;
-    let (read_ready, read_ready_w): (bool, inv bool) = port;
-    let (buffer_generation, buffer_generation_w): (uint<32>, inv uint<32>) = port;
-    let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port;
-    let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port;
-    let (read_release, read_release_w): (bool, inv bool) = port;
-    let (_, unused_selector): (uint<7>, inv uint<7>) = port;
+    let (card_armed, card_armed_w): (bool, inv bool) = port();
+    let (loader_valid, loader_valid_w): (bool, inv bool) = port();
+    let (loader_address, loader_address_w): (uint<32>, inv uint<32>) = port();
+    let (loader_byte, loader_byte_w): (uint<8>, inv uint<8>) = port();
+    let (loader_ready, loader_ready_w): (bool, inv bool) = port();
+    let (read_request, read_request_w): (bool, inv bool) = port();
+    let (read_lba, read_lba_w): (uint<32>, inv uint<32>) = port();
+    let (read_generation, read_generation_w): (uint<32>, inv uint<32>) = port();
+    let (read_ready, read_ready_w): (bool, inv bool) = port();
+    let (buffer_generation, buffer_generation_w): (uint<32>, inv uint<32>) = port();
+    let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port();
+    let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port();
+    let (read_release, read_release_w): (bool, inv bool) = port();
+    let (_, unused_selector): (uint<7>, inv uint<7>) = port();
     let _ = inst loader::image_loader$(
         clk,
         rst,
@@ -1498,26 +1498,26 @@ entity bram_emulator(
         byte_index: read_byte_index,
         sector_byte: read_byte_w,
     );
-    let (unused_wc, unused_wc_w): (bool, inv bool) = port;
-    let (unused_wa, unused_wa_w): (uint<24>, inv uint<24>) = port;
-    let (unused_wv, unused_wv_w): (bool, inv bool) = port;
-    let (unused_wd, unused_wd_w): (uint<128>, inv uint<128>) = port;
-    let (unused_wm, unused_wm_w): (uint<16>, inv uint<16>) = port;
-    let (unused_wb, unused_wb_w): (bool, inv bool) = port;
-    let (_, unused_trace_clock): (bool, inv bool) = port;
-    let (_, unused_trace_frame): (bool, inv bool) = port;
-    let (_, unused_trace_valid): (bool, inv bool) = port;
-    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port;
-    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_response): (bool, inv bool) = port;
-    let (_, unused_trace_response_complete): (bool, inv bool) = port;
-    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_data_release): (bool, inv bool) = port;
-    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port;
+    let (unused_wc, unused_wc_w): (bool, inv bool) = port();
+    let (unused_wa, unused_wa_w): (uint<24>, inv uint<24>) = port();
+    let (unused_wv, unused_wv_w): (bool, inv bool) = port();
+    let (unused_wd, unused_wd_w): (uint<128>, inv uint<128>) = port();
+    let (unused_wm, unused_wm_w): (uint<16>, inv uint<16>) = port();
+    let (unused_wb, unused_wb_w): (bool, inv bool) = port();
+    let (_, unused_trace_clock): (bool, inv bool) = port();
+    let (_, unused_trace_frame): (bool, inv bool) = port();
+    let (_, unused_trace_valid): (bool, inv bool) = port();
+    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port();
+    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_response): (bool, inv bool) = port();
+    let (_, unused_trace_response_complete): (bool, inv bool) = port();
+    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_data_release): (bool, inv bool) = port();
+    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port();
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1605,9 +1605,9 @@ entity emulator_uart(
         parity: false,
         stop_bits: 1,
     );
-    let (valid, valid_w): (bool, inv bool) = port;
-    let (byte, byte_w): (uint<8>, inv uint<8>) = port;
-    let (busy, busy_w): (bool, inv bool) = port;
+    let (valid, valid_w): (bool, inv bool) = port();
+    let (byte, byte_w): (uint<8>, inv uint<8>) = port();
+    let (busy, busy_w): (bool, inv bool) = port();
     reg(clk) issued reset(rst: false) = valid && !busy && !issued;
     let send = valid && !busy && !issued;
     let _ = inst bram_emulator$(
@@ -1671,19 +1671,19 @@ entity ddr_emulator(
     dat_oe: inv uint<4>,
     armed_status: inv bool,
 ) {
-    let (card_armed, card_armed_w): (bool, inv bool) = port;
-    let (loader_valid, loader_valid_w): (bool, inv bool) = port;
-    let (loader_address, loader_address_w): (uint<32>, inv uint<32>) = port;
-    let (loader_byte, loader_byte_w): (uint<8>, inv uint<8>) = port;
-    let (loader_ready, loader_ready_w): (bool, inv bool) = port;
-    let (read_request, read_request_w): (bool, inv bool) = port;
-    let (read_lba, read_lba_w): (uint<32>, inv uint<32>) = port;
-    let (read_generation, read_generation_w): (uint<32>, inv uint<32>) = port;
-    let (read_ready, read_ready_w): (bool, inv bool) = port;
-    let (buffer_generation, buffer_generation_w): (uint<32>, inv uint<32>) = port;
-    let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port;
-    let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port;
-    let (read_release, read_release_w): (bool, inv bool) = port;
+    let (card_armed, card_armed_w): (bool, inv bool) = port();
+    let (loader_valid, loader_valid_w): (bool, inv bool) = port();
+    let (loader_address, loader_address_w): (uint<32>, inv uint<32>) = port();
+    let (loader_byte, loader_byte_w): (uint<8>, inv uint<8>) = port();
+    let (loader_ready, loader_ready_w): (bool, inv bool) = port();
+    let (read_request, read_request_w): (bool, inv bool) = port();
+    let (read_lba, read_lba_w): (uint<32>, inv uint<32>) = port();
+    let (read_generation, read_generation_w): (uint<32>, inv uint<32>) = port();
+    let (read_ready, read_ready_w): (bool, inv bool) = port();
+    let (buffer_generation, buffer_generation_w): (uint<32>, inv uint<32>) = port();
+    let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port();
+    let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port();
+    let (read_release, read_release_w): (bool, inv bool) = port();
     // Low bits expose live interface state; upper bits carry BIST diagnostics.
     let loader_status_word: uint<32> = (zext::<27, 32>(diagnostic_status) << 5)
         | zext(std::conv::bits_to_uint([
@@ -1705,19 +1705,19 @@ entity ddr_emulator(
         armed: card_armed_w,
         status_selector,
     );
-    let (read_cmd_valid, read_cmd_valid_w): (bool, inv bool) = port;
-    let (read_cmd_address, read_cmd_address_w): (uint<24>, inv uint<24>) = port;
-    let (loader_cmd_valid, loader_cmd_valid_w): (bool, inv bool) = port;
-    let (loader_cmd_address, loader_cmd_address_w): (uint<24>, inv uint<24>) = port;
-    let (sd_write_cmd_valid, sd_write_cmd_valid_w): (bool, inv bool) = port;
-    let (sd_write_cmd_address, sd_write_cmd_address_w): (uint<24>, inv uint<24>) = port;
-    let (sd_write_data_valid, sd_write_data_valid_w): (bool, inv bool) = port;
-    let (sd_write_data, sd_write_data_w): (uint<128>, inv uint<128>) = port;
-    let (sd_write_mask, sd_write_mask_w): (uint<16>, inv uint<16>) = port;
-    let (sd_commit_busy, sd_commit_busy_w): (bool, inv bool) = port;
-    let (loader_data_valid, loader_data_valid_w): (bool, inv bool) = port;
-    let (loader_data, loader_data_w): (uint<128>, inv uint<128>) = port;
-    let (loader_mask, loader_mask_w): (uint<16>, inv uint<16>) = port;
+    let (read_cmd_valid, read_cmd_valid_w): (bool, inv bool) = port();
+    let (read_cmd_address, read_cmd_address_w): (uint<24>, inv uint<24>) = port();
+    let (loader_cmd_valid, loader_cmd_valid_w): (bool, inv bool) = port();
+    let (loader_cmd_address, loader_cmd_address_w): (uint<24>, inv uint<24>) = port();
+    let (sd_write_cmd_valid, sd_write_cmd_valid_w): (bool, inv bool) = port();
+    let (sd_write_cmd_address, sd_write_cmd_address_w): (uint<24>, inv uint<24>) = port();
+    let (sd_write_data_valid, sd_write_data_valid_w): (bool, inv bool) = port();
+    let (sd_write_data, sd_write_data_w): (uint<128>, inv uint<128>) = port();
+    let (sd_write_mask, sd_write_mask_w): (uint<16>, inv uint<16>) = port();
+    let (sd_commit_busy, sd_commit_busy_w): (bool, inv bool) = port();
+    let (loader_data_valid, loader_data_valid_w): (bool, inv bool) = port();
+    let (loader_data, loader_data_w): (uint<128>, inv uint<128>) = port();
+    let (loader_mask, loader_mask_w): (uint<16>, inv uint<16>) = port();
     // The sector writer stages 16 bytes before issuing its first DDR beat.
     // Register ownership during that staging time, cutting final-CRC decode
     // out of the wide data mux/FIFO enables. Keep it through the final beat
@@ -1810,20 +1810,20 @@ entity ddr_emulator(
     set ddr_wdata_valid = (if sd_owner { sd_write_data_valid } else { loader_data_valid });
     set ddr_wdata = (if sd_owner { sd_write_data } else { loader_data });
     set ddr_wdata_mask = (if sd_owner { sd_write_mask } else { loader_mask });
-    let (_, unused_trace_clock): (bool, inv bool) = port;
-    let (_, unused_trace_frame): (bool, inv bool) = port;
-    let (_, unused_trace_valid): (bool, inv bool) = port;
-    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port;
-    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_response): (bool, inv bool) = port;
-    let (_, unused_trace_response_complete): (bool, inv bool) = port;
-    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_data_release): (bool, inv bool) = port;
-    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port;
-    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port;
+    let (_, unused_trace_clock): (bool, inv bool) = port();
+    let (_, unused_trace_frame): (bool, inv bool) = port();
+    let (_, unused_trace_valid): (bool, inv bool) = port();
+    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port();
+    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_response): (bool, inv bool) = port();
+    let (_, unused_trace_response_complete): (bool, inv bool) = port();
+    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_data_release): (bool, inv bool) = port();
+    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port();
+    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port();
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1928,9 +1928,9 @@ entity ddr_uart_core<#uint CLK_FREQ>(
         parity: false,
         stop_bits: 1,
     );
-    let (valid, valid_w): (bool, inv bool) = port;
-    let (byte, byte_w): (uint<8>, inv uint<8>) = port;
-    let (busy, busy_w): (bool, inv bool) = port;
+    let (valid, valid_w): (bool, inv bool) = port();
+    let (byte, byte_w): (uint<8>, inv uint<8>) = port();
+    let (busy, busy_w): (bool, inv bool) = port();
     reg(clk) issued reset(rst: false) = valid && !busy && !issued;
     let send = valid && !busy && !issued;
     let _ = inst ddr_emulator$(
@@ -2274,28 +2274,28 @@ entity ddr_emulator_cdc(
     armed_status: inv bool,
 ) {
     // Exercise the separately clocked frontend / 80 MHz native-memory boundary.
-    let (frontend_cmd_valid, frontend_cmd_valid_w): (bool, inv bool) = port;
-    let (frontend_cmd_ready, frontend_cmd_ready_w): (bool, inv bool) = port;
-    let (frontend_cmd_address, frontend_cmd_address_w): (uint<24>, inv uint<24>) = port;
-    let (frontend_cmd_write, frontend_cmd_write_w): (bool, inv bool) = port;
-    let (frontend_data_valid, frontend_data_valid_w): (bool, inv bool) = port;
-    let (frontend_data_ready, frontend_data_ready_w): (bool, inv bool) = port;
-    let (frontend_write_data, frontend_write_data_w): (uint<128>, inv uint<128>) = port;
-    let (frontend_write_mask, frontend_write_mask_w): (uint<16>, inv uint<16>) = port;
-    let (frontend_read_valid, frontend_read_valid_w): (bool, inv bool) = port;
-    let (frontend_read_ready, frontend_read_ready_w): (bool, inv bool) = port;
-    let (frontend_read_data, frontend_read_data_w): (uint<128>, inv uint<128>) = port;
-    let (memory_cmd_valid, memory_cmd_valid_w): (bool, inv bool) = port;
-    let (memory_cmd_ready, memory_cmd_ready_w): (bool, inv bool) = port;
-    let (memory_cmd_address, memory_cmd_address_w): (uint<24>, inv uint<24>) = port;
-    let (memory_cmd_write, memory_cmd_write_w): (bool, inv bool) = port;
-    let (memory_data_valid, memory_data_valid_w): (bool, inv bool) = port;
-    let (memory_data_ready, memory_data_ready_w): (bool, inv bool) = port;
-    let (memory_write_data, memory_write_data_w): (uint<128>, inv uint<128>) = port;
-    let (memory_write_mask, memory_write_mask_w): (uint<16>, inv uint<16>) = port;
-    let (memory_read_valid, memory_read_valid_w): (bool, inv bool) = port;
-    let (memory_read_ready, memory_read_ready_w): (bool, inv bool) = port;
-    let (memory_read_data, memory_read_data_w): (uint<128>, inv uint<128>) = port;
+    let (frontend_cmd_valid, frontend_cmd_valid_w): (bool, inv bool) = port();
+    let (frontend_cmd_ready, frontend_cmd_ready_w): (bool, inv bool) = port();
+    let (frontend_cmd_address, frontend_cmd_address_w): (uint<24>, inv uint<24>) = port();
+    let (frontend_cmd_write, frontend_cmd_write_w): (bool, inv bool) = port();
+    let (frontend_data_valid, frontend_data_valid_w): (bool, inv bool) = port();
+    let (frontend_data_ready, frontend_data_ready_w): (bool, inv bool) = port();
+    let (frontend_write_data, frontend_write_data_w): (uint<128>, inv uint<128>) = port();
+    let (frontend_write_mask, frontend_write_mask_w): (uint<16>, inv uint<16>) = port();
+    let (frontend_read_valid, frontend_read_valid_w): (bool, inv bool) = port();
+    let (frontend_read_ready, frontend_read_ready_w): (bool, inv bool) = port();
+    let (frontend_read_data, frontend_read_data_w): (uint<128>, inv uint<128>) = port();
+    let (memory_cmd_valid, memory_cmd_valid_w): (bool, inv bool) = port();
+    let (memory_cmd_ready, memory_cmd_ready_w): (bool, inv bool) = port();
+    let (memory_cmd_address, memory_cmd_address_w): (uint<24>, inv uint<24>) = port();
+    let (memory_cmd_write, memory_cmd_write_w): (bool, inv bool) = port();
+    let (memory_data_valid, memory_data_valid_w): (bool, inv bool) = port();
+    let (memory_data_ready, memory_data_ready_w): (bool, inv bool) = port();
+    let (memory_write_data, memory_write_data_w): (uint<128>, inv uint<128>) = port();
+    let (memory_write_mask, memory_write_mask_w): (uint<16>, inv uint<16>) = port();
+    let (memory_read_valid, memory_read_valid_w): (bool, inv bool) = port();
+    let (memory_read_ready, memory_read_ready_w): (bool, inv bool) = port();
+    let (memory_read_data, memory_read_data_w): (uint<128>, inv uint<128>) = port();
     let _ = inst ddr_emulator$(
 
         // Clock and card control
