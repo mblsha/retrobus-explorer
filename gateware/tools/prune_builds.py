@@ -10,11 +10,15 @@ was configured from. This prints that as a table, largest first, and removes
 the directories you do not name.
 
 By default only a finished bitstream experiment is a candidate. The openxc7
-toolchain, the pinned LiteX interpreter, and the RG35XX kernel trees and card
-images live in the same directory; they take hours to reproduce and some of
-them cannot be rebuilt from this repository at all. They are refused by name
-and by pattern, and no option overrides that: --keep chooses among the
-experiments, it never widens what may be deleted.
+toolchain and the pinned LiteX interpreter live in the same directory; they
+take hours to reproduce and cannot be rebuilt from this repository at all. They
+are refused by name and by pattern, and no option overrides that: --keep
+chooses among the experiments, it never widens what may be deleted.
+
+The `rg35xx-*` pattern is kept although the kernel trees and card images it
+named now build in the `linux-consoles` repository instead. Protecting a name
+that is not here costs nothing, and a directory left behind by an older
+checkout would still be hours of work to reproduce.
 
 A directory whose result.json is missing or unreadable is also refused by
 default, because a directory that cannot say what it is has not earned a

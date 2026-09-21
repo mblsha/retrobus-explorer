@@ -116,3 +116,13 @@ Opening UART preserves SD state and DDR contents in the BTN0 configuration.
 For upload and readback over the onboard 100 Mbps RJ45, build the
 [Ethernet SD image service](../ethernet-diagnostic/README.md). It shares this
 SD/DDR implementation and replaces the UART loader with a checked UDP client.
+
+## What a real host does with this card
+
+Several hundred cold starts of an Allwinner H700 handheld booted from this
+emulator between 2026-09-14 and 2026-09-21, and what they taught the SD
+frontend — which clock the host picks out of the advertised `TRAN_SPEED`, how
+far after its rising edge the card samples CMD and DAT, what a host with no
+working pull-ups does to the data lines, and which of the passive trace's
+counters can be believed — is in
+[the H700 host notes](../ethernet-diagnostic/H700-HOST-NOTES.md).

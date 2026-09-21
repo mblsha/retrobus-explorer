@@ -102,22 +102,19 @@ wire-protocol identifiers, or hardware-visible strings.
 - Bulk streaming uses the Alchitry Ft Element FT600 path. The Au USB-UART is the
   console and control path, not the high-rate capture path.
 
-## The RG35XX Plus bench
+## Targets driven from the emulated card
 
-The RG35XX Plus work (boot time, the display, sleep current, the suspend
-firmware) lives in `projects/ethernet-diagnostic/`. Start at the
-"Documentation map" in its `README.md`: it says what each note is and when to
-read it. One home per fact: commands in the runbook, results in
-`RG35XX-PLUS-SLEEP.md` and `RG35XX-PLUS-FINDINGS.md`, the suspend firmware's
-design in `RG35XX-PLUS-DEEP-SLEEP.md`, research and the outside review in
-`RG35XX-PLUS-POWER-RESEARCH.md`, what needs a person at the bench in
-`RG35XX-PLUS-BENCH-EXPERIMENTS.md`, chronology in the history. Add to the home
-a fact belongs in, and leave a pointer elsewhere.
+The emulated card boots real machines, and that happens on a shared bench with
+a supply on it. The device-side work -- the Anbernic RG35XX Plus (Allwinner
+H700): boot time, the display, sleep current, the suspend firmware -- moved to
+the **`linux-consoles`** repository, under `docs/rg35xx-plus/` and
+`devices/rg35xx-plus/`. What a real H700 host taught the emulator stayed here,
+in [H700-HOST-NOTES.md](projects/ethernet-diagnostic/H700-HOST-NOTES.md).
 
-The bench is real hardware and is driven unattended. These hold for every
-session:
+These rules are this repository's and hold for every session that touches the
+bench or the client:
 
-- `psu2` is the RG35XX. **`psu1` powers another machine and must never be
+- `psu2` powers the target. **`psu1` powers another machine and must never be
   switched, set or commanded.** Do not change `psu2`'s voltage or current
   limit. The supply's link drops for a minute or two at a time; never act on a
   reading taken while it is offline, and confirm every power-off by reading it
@@ -125,18 +122,15 @@ session:
 - An armed FPGA must not be left driving an unpowered target. Finish every run
   with the supply's output read back OFF and the card disarmed.
 - Never change the qualified bitstream (`build/microsd-ddr-ethernet-h700`) or
-  the gateware to make a target experiment work. Card images keep
-  `--card-max-hz 6000000`.
-- Firmware experiments do not write the PMIC, a rail or a voltage. A register
-  is written only if the H616 manual, mainline U-Boot, Linux or TF-A, or the
-  credited prior art grounds it, and the comment says which. Lifting one of
-  these rules is the owner's decision, not a session's.
-- Nothing may depend on a person looking at the device: the target reports
-  through the debug partition, the FPGA trace and the supply.
-- Measure before believing: alternate configurations inside one boot, report
-  the median and the mean, and do not call a difference under about 8 mA a
-  difference. A configuration is not "kept" on a handful of sleeps; job 34
-  exists to give a failure rate.
+  the gateware to make a target experiment work. A result measured against a
+  rebuilt card is a result about a different card.
+- `projects/ethernet-diagnostic/scripts/images.py`, its importability as
+  `scripts.images`, `PROTOCOL.md` and the `build/<experiment>/` layout
+  (`design.bit` beside `result.json`) are an **interface**: `linux-consoles`
+  imports that client by path through `SD_EMULATOR_CLIENT_DIR` and finds the
+  bitstream through `SD_EMULATOR_BUILD_DIR`, rather than vendoring a copy that
+  would drift from the gateware it speaks to. Do not move or rename them, and
+  treat a wire-protocol change as a change to both repositories.
 
 ## Generated files and reviews
 

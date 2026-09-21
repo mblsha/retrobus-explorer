@@ -47,31 +47,30 @@ reads and writes while disarming and verify that network access waits for
 them to drain, and vary PHY clock phase and reset release.
 `--waves` retains waveforms when diagnosing a failure.
 
-## RG35XX Plus boot tooling
-
-The host tooling that boots an Anbernic RG35XX Plus from the emulated card
-lives in the `rg35xx` package, and every part of it is reached through one
-entry point:
-
-```sh
-uv run --frozen python projects/ethernet-diagnostic/scripts/rg35xx.py --help
-```
-
-Its subcommands are `image` (build, patch, verify and describe a card image),
-`trial` (one standardized cold start), `report` (reduce a set of trials to a
-distribution), `job` (run one experiment on the target and bring back what it
-measured), `deploy` (program, upload, verify, arm), `build-kernel`,
-`build-rootfs` and `build-firmware` (the bootloader, U-Boot and TF-A, from
-pinned sources).
-
-Tests for this project come in two sets. Host tests need neither hardware nor a
-simulator; the Cocotb testbenches need Verilator and a built design:
+Tests come in two sets. Host tests need neither hardware nor a simulator; the
+Cocotb testbenches need Verilator and a built design:
 
 ```sh
 uv run --frozen python -m unittest discover -t projects/ethernet-diagnostic \
   -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
 uv run --frozen python tools/run_tb.py --project projects/ethernet-diagnostic
 ```
+
+## Where the RG35XX Plus tooling went
+
+The host tooling that boots an Anbernic RG35XX Plus (Allwinner H700) from the
+emulated card — the kernel and rootfs builds, the card images, the trial and job
+harnesses, the suspend firmware and the ten notes that go with them — moved to
+the **`linux-consoles`** repository, under `docs/rg35xx-plus/` and
+`devices/rg35xx-plus/`, along with the bench rig that drives the card and the
+supply. It reaches this client rather than vendoring a copy of it:
+`SD_EMULATOR_CLIENT_DIR` names the directory holding `scripts/images.py`
+(default `~/src/github/retrobus-explorer/gateware/projects/ethernet-diagnostic/scripts`)
+and `SD_EMULATOR_BUILD_DIR` the build directory holding the qualified bitstream.
+Treat `images.py`, its importability as `scripts.images`, `PROTOCOL.md` and the
+`build/<experiment>/` layout as an interface that repository depends on. What
+that host taught *this* gateware stayed here, in
+[H700-HOST-NOTES.md](H700-HOST-NOTES.md).
 
 ## Documentation map
 
@@ -80,16 +79,8 @@ In reading order:
 
 | document | what it is | when to read it |
 | --- | --- | --- |
-| [RG35XX-PLUS-RUNBOOK.md](RG35XX-PLUS-RUNBOOK.md) | the commands, in the order they have to happen: bitstream, kernel, rootfs, image, deploy, trial, report, the job harness, the bootloader from source | you are about to run something |
-| [RG35XX-PLUS-FINDINGS.md](RG35XX-PLUS-FINDINGS.md) | what is known, by topic: the card interface, the kernel, the image layout, the boot stage by stage, the display, and a summary of sleep | you want the current answer to a question and not the story behind it |
-| [RG35XX-PLUS-SLEEP.md](RG35XX-PLUS-SLEEP.md) | the results reference for power and sleep, by topic: the answer and the ledger, how it is measured, the baselines, the kept configuration, what each of the thirty-four experiments and every firmware rung is worth, what is still running while the board sleeps, and what is blocked | you are working on power, or you want the evidence behind a sleep figure |
-| [RG35XX-PLUS-DEEP-SLEEP.md](RG35XX-PLUS-DEEP-SLEEP.md) | the suspend firmware: the verdict and the ledger, then the design -- the three TF-A patches, the two SRAM stubs, the suspend and resume sequences register by register, what is deliberately not written, the markers and the licensing -- then how it got there in five acts | you are changing the firmware, or you want the short answer to "was our own suspend-to-RAM worth building" |
-| [RG35XX-PLUS-POWER-RESEARCH.md](RG35XX-PLUS-POWER-RESEARCH.md) | the research behind the sleep work: what the H616 documents say, kailashrs' prior art and ROCKNIX PR #3316, why a kernel patch cannot do it, the outside review point by point, and the hypotheses and two candidate projects for the current that is left | you are deciding what to try next, or you want the provenance of a claim that did not come off this bench |
-| [RG35XX-PLUS-BENCH-EXPERIMENTS.md](RG35XX-PLUS-BENCH-EXPERIMENTS.md) | the backlog that needs a person at the bench, each with the question it would answer | you are going to the bench, or deciding what to buy or fit |
-| [RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md](RG35XX-PLUS-SLEEP-EXPERT-BRIEF.md) | the brief as sent to an outside power expert on 2026-09-20, a dated snapshot that is not updated | you want to see what was asked and claimed at that moment |
-| [RG35XX-PLUS-HISTORY.md](RG35XX-PLUS-HISTORY.md) | the chronological record, dead ends included, superseded by the documents above wherever they differ | you want to know why something is the way it is |
-| [RG35XX-PLUS-TARGET.md](RG35XX-PLUS-TARGET.md) | the original plan for the payload: the boot budget, what the kernel keeps and what it gives up | you want the destination this work was aimed at |
 | [PROTOCOL.md](PROTOCOL.md) | the wire protocol of the Ethernet image service: packet formats, the ordered-command API, bulk reads and TRACE | you are writing or debugging a client |
+| [H700-HOST-NOTES.md](H700-HOST-NOTES.md) | what a real Allwinner H700 host taught this emulator: the clock ladder it picks, how the frontend samples, the pull-up findings, what TRACE keeps and loses, and how the qualified H700 bitstream was built | you are changing the SD frontend, the trace, or an H700 build |
 | [QUALIFICATION.md](QUALIFICATION.md) | the provenance of the hardware results: revisions, bitstream hashes, rates and retry counts, campaign by campaign | you need to know exactly what was tested, and on what |
 
 ## Ownership rules
@@ -227,8 +218,9 @@ and backend requests establish useful protocol progress.
 The trace records observation points already present in the SD frontend rather
 than instantiating another command decoder. It deliberately keeps only the last
 command, not a command log, to preserve timing in the combined DDR/Ethernet
-build. See [the RG35XX Plus findings](RG35XX-PLUS-FINDINGS.md), which use
-these counters to boot an H700 handheld from the emulated card.
+build. See [the H700 host notes](H700-HOST-NOTES.md) for what these counters
+do and do not preserve, learned booting an H700 handheld from the emulated
+card.
 
 On the GKD, bind the external controller and apply the 13 MHz, four-bit,
 keep-awake settings from the [DDR guide](../microsd-emulator/ddr/README.md).

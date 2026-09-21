@@ -68,7 +68,9 @@ host's R1b busy check requires. `--sd-io-clock-hz` selects the SD fabric clock;
 50, 64, 80 and 100 MHz divide the same 1600 MHz VCO as the DDR outputs. This
 profile builds at 64 MHz because the telemetry-rich design does not place
 within 80 MHz, and the card interface it serves runs three orders of magnitude
-slower. See [the RG35XX Plus findings](../../ethernet-diagnostic/RG35XX-PLUS-FINDINGS.md).
+slower. See [the H700 host notes](../../ethernet-diagnostic/H700-HOST-NOTES.md)
+for the clock ladder this host picks, the pull-up findings and how the
+qualified seed-19 build was made.
 
 `build_ddr.py` routes exactly one seed and rejects the build if that placement
 misses a constraint, and this design is close enough to its bounds that a seed
@@ -86,8 +88,9 @@ DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
 The `--mmc-only` profile above suppresses the complete initial SD negotiation
 boundary so a host which permits MMC falls back to CMD1. Its MMC CSD advertises 5 MHz; the tested
 GKD clock tree generates 4 MHz from that request. CMD23 bounds the next CMD18
-without requiring an on-wire CMD12 after the final requested block. See the
-[GKD validation record](../../ethernet-diagnostic/RG35XX-PLUS-HISTORY.md#gkd-350h-legacy-mmc-validation).
+without requiring an on-wire CMD12 after the final requested block. The GKD
+validation record is the "GKD-350H legacy-MMC validation" entry in the
+`linux-consoles` repository's `docs/rg35xx-plus/history.md`.
 
 The build checks support tests, clock timing, native Gray-pointer crossings,
 direct SD outputs and a configuration-frame round trip. The builder removes any old success manifest before preflight and publishes
