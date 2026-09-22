@@ -461,12 +461,15 @@ pub entity sd_frontend(
     let raw_write_request = valid && transfer_idle && writable && write_command &&
         !block_length_256 && !range_error;
     let raw_write_next = write_done && write_good && write_mode == WRITE_MULTIPLE && write_lba < last_lba && !stop;
+    let raw_write_cancel = local_rst || reset_stop;
     // Register fast command-to-receiver controls rather than letting
     // command decoding and response-active logic feed a receiver-wide reset.
+    // Each queued register holds exactly the raw term beside it, so a prepared
+    // profile differs from the slow one only by that one cycle of delay.
     reg(clk) queued_write_request reset(local_rst: false) = raw_write_request;
     reg(clk) queued_write_next reset(local_rst: false) = raw_write_next;
-    reg(clk) queued_write_cancel reset(local_rst: true) = local_rst || (valid && reset_command);
-    reg(clk) queued_write_stop reset(local_rst: false) = valid && command_index == CMD_STOP_TRANSMISSION;
+    reg(clk) queued_write_cancel reset(local_rst: true) = raw_write_cancel;
+    reg(clk) queued_write_stop reset(local_rst: false) = command_stop;
     let write_request = if prepared_data_mode {
         queued_write_request
     } else {
@@ -477,15 +480,16 @@ pub entity sd_frontend(
     } else {
         raw_write_next
     };
+    // The live reset must still reach a cancelled receiver on the same cycle.
     let write_cancel = if prepared_data_mode {
         queued_write_cancel || local_rst
     } else {
-        local_rst || (valid && reset_command)
+        raw_write_cancel
     };
     let write_stop = if prepared_data_mode {
         queued_write_stop
     } else {
-        valid && command_index == CMD_STOP_TRANSMISSION
+        command_stop
     };
     reg(clk) write_mode: uint<2> reset(local_rst: WRITE_IDLE) = if stop {
         WRITE_IDLE
@@ -1721,6 +1725,11 @@ entity ddr_emulator(
     // native_stage orders the final buffered write ahead of subsequent reads.
     // Pipeline the whole request/cancellation bundle together. Generation
     // tagging still rejects a stale buffer immediately at the SD frontend.
+    let live_backend_inputs = (
+        card_armed, initialized, read_request,
+        read_lba, read_generation,
+        read_release,
+    );
     reg(clk) backend_inputs: (
         bool, bool, bool,       // armed, initialized, request
         uint<32>, uint<32>,     // LBA, generation
@@ -1729,19 +1738,11 @@ entity ddr_emulator(
         false, false, false,
         0, 0,
         true,
-    )) = (
-        card_armed, initialized, read_request,
-        read_lba, read_generation,
-        read_release,
-    );
+    )) = live_backend_inputs;
     let (backend_arm, backend_initialized, backend_request, backend_lba, backend_epoch, backend_release) = if fast_mode {
         backend_inputs
     } else {
-        (
-            card_armed, initialized, read_request,
-            read_lba, read_generation,
-            read_release,
-        )
+        live_backend_inputs
     };
     let _ = inst storage::ddr_backend$(
         clk,

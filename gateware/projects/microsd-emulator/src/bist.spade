@@ -182,7 +182,10 @@ pub entity native_bist(
     let mismatch = read_complete && received_word != expected;
     let last = zext::<24, 25>(address) +. 1 == count;
     let expired = waiting && elapsed == timeout;
-    let invalid = begin && (word_count == 0 || word_count > 16777216 || timeout_cycles == 0);
+    // A run is refused outright for an empty or oversized region, or for a
+    // timeout that would expire before the controller could ever answer.
+    let unusable_request = word_count == 0 || word_count > 16777216 || timeout_cycles == 0;
+    let invalid = begin && unusable_request;
     let pass_offset: uint<5> = if inverted {
         4
     } else {
@@ -260,7 +263,7 @@ pub entity native_bist(
     reg(clk) state: uint<3> reset(rst: IDLE) = if expired || mismatch {
         TEST_FAILED
     } else if begin {
-        if word_count == 0 || word_count > 16777216 || timeout_cycles == 0 {
+        if unusable_request {
             TEST_FAILED
         } else {
             WRITE_PATTERN
