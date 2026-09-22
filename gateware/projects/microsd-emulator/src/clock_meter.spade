@@ -15,12 +15,14 @@ pub entity sd_clock_meter(
     reg(clk) sync reset(rst: false) = meta;
     reg(clk) previous reset(rst: false) = sync;
     let rise = sync && !previous;
-    reg(clk) window: uint<17> reset(rst: 0) = if window +. 1 >= window_cycles {
+    decl window;
+    let next_window = window +. 1;
+    let boundary = next_window >= window_cycles;
+    reg(clk) window: uint<17> reset(rst: 0) = if boundary {
         0
     } else {
-        window +. 1
+        next_window
     };
-    let boundary = window +. 1 >= window_cycles;
     decl edges, peak, period, shortest, seen;
     let total = edges +. if rise {
         1
@@ -56,6 +58,9 @@ pub entity sd_clock_meter(
     } else {
         period +. 1
     };
+    // The second edge of a pair closes a measurement. `measured_event` marks
+    // the cycle on which `measured_period` becomes the new one, which is both
+    // the reported value and the candidate for the running minimum.
     reg(clk) measured_event reset(rst: false) = rise && seen;
     reg(clk) measured_period: uint<24> reset(rst: 0) = if rise && seen {
         measured
@@ -67,12 +72,7 @@ pub entity sd_clock_meter(
     } else {
         shortest
     };
-    reg(clk) latest: uint<24> reset(rst: 0) = if rise && seen {
-        measured
-    } else {
-        latest
-    };
-    set latest_period = latest;
+    set latest_period = measured_period;
     reg(clk) all_edges: uint<32> reset(rst: 0) = if rise {
         all_edges +. 1
     } else {
