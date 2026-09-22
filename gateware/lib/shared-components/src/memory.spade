@@ -88,12 +88,6 @@ struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
     storage: [uint<WIDTH>; ENTRIES],
 }
 
-struct FifoOutPort<T> {
-    full: bool,
-    empty: bool,
-    dout: T,
-}
-
 // Synchronous first-word-fall-through FIFO.
 // Matches Alchitry's fifo.luc behavior:
 // - full when next write pointer equals read pointer (usable depth = ENTRIES-1)
@@ -206,7 +200,7 @@ where
 {
     let _ = require_power_of_two::<ENTRIES>();
 
-    let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port();
+    let (fifo, fifo_w): (FifoOut<uint<WIDTH>>, inv FifoOut<uint<WIDTH>>) = port();
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst async_fifo_v::<WIDTH, ENTRIES, SYNC_STAGES>(
         wclk,
@@ -220,11 +214,7 @@ where
         rget,
         fifo_w.empty,
     );
-    FifoOut$(
-        full: fifo.full,
-        empty: fifo.empty,
-        dout: fifo.dout,
-    )
+    fifo
 }
 
 pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
@@ -240,7 +230,7 @@ where
 {
     let _ = require_power_of_two::<ENTRIES>();
 
-    let (fifo, fifo_w): (FifoOutPort<uint<WIDTH>>, inv FifoOutPort<uint<WIDTH>>) = port();
+    let (fifo, fifo_w): (FifoOut<uint<WIDTH>>, inv FifoOut<uint<WIDTH>>) = port();
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst sync_fifo_v::<WIDTH, ENTRIES>(
         clk,
@@ -252,11 +242,7 @@ where
         rget,
         fifo_w.empty,
     );
-    FifoOut$(
-        full: fifo.full,
-        empty: fifo.empty,
-        dout: fifo.dout,
-    )
+    fifo
 }
 
 impl<T> FifoOut<T> {

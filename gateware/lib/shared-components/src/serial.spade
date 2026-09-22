@@ -82,17 +82,12 @@ pub struct FtOut<TData, TBe> {
     ui_dout_empty: bool,
 }
 
-pub struct FtWirePort<TData, TBe> {
-    ft_data_out: TData,
-    ft_be_out: TBe,
-    ft_rd: bool,
-    ft_wr: bool,
-    ft_oe: bool,
-    ui_din_full: bool,
-    ui_dout: TData,
-    ui_dout_be: TBe,
-    ui_dout_empty: bool,
-}
+/// The same nine signals as `FtOut`, named for the `port()` pair that four
+/// projects declare to wire `ft_tap` up. It was a second, identical `struct`
+/// until 0.18 removed the port/value type distinction; one type can now serve
+/// both sides, so this is an alias and there is only one field list to keep
+/// right.
+pub type FtWirePort<TData, TBe> = FtOut<TData, TBe>;
 
 impl uint<15> {
     fn bit_time_last(self) -> uint<15> {
@@ -459,7 +454,7 @@ where
     let _ = require_power_of_two::<TX_BUFFER>();
     let _ = require_power_of_two::<RX_BUFFER>();
 
-    let (ft, ft_w): (FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtWirePort<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port();
+    let (ft, ft_w): (FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port();
 
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst ft_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(
@@ -485,17 +480,7 @@ where
         ui_dout_get,
     );
 
-    FtOut$(
-        ft_data_out: ft.ft_data_out,
-        ft_be_out: ft.ft_be_out,
-        ft_rd: ft.ft_rd,
-        ft_wr: ft.ft_wr,
-        ft_oe: ft.ft_oe,
-        ui_din_full: ft.ui_din_full,
-        ui_dout: ft.ui_dout,
-        ui_dout_be: ft.ui_dout_be,
-        ui_dout_empty: ft.ui_dout_empty,
-    )
+    ft
 }
 
 #[inline]

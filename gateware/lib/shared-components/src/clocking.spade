@@ -10,21 +10,13 @@ pub struct ClkWiz200400Out {
     clk_out400: bool,
 }
 
-struct ClkWiz200400Port {
-    clk_out200: bool,
-    clk_out400: bool,
-}
-
 pub entity clk_wiz_200_400(
     clk_in100: clock,
 ) -> ClkWiz200400Out {
-    let (clk_wiz, clk_wiz_w): (ClkWiz200400Port, inv ClkWiz200400Port) = port();
+    let (clk_wiz, clk_wiz_w): (ClkWiz200400Out, inv ClkWiz200400Out) = port();
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst clk_wiz_0::<"OPTIMIZED", "FALSE">(clk_wiz_w.clk_out200, clk_wiz_w.clk_out400, clk_in100);
-    ClkWiz200400Out$(
-        clk_out200: clk_wiz.clk_out200,
-        clk_out400: clk_wiz.clk_out400,
-    )
+    clk_wiz
 }
 
 pub unsafe entity sampled_bool_clock(
