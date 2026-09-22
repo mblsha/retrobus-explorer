@@ -163,97 +163,52 @@ where
             let ctr_inc: uint<32> = ctr +. 1;
             let block_flag_next = block;
 
+            // One bit time has elapsed; every non-idle state moves on.
+            let elapsed = ctr == ctr_last;
+
             match state {
                 UartTxState::Idle => {
                     let start_send = !block_flag && new_data;
-                    // Keep blocked idle state as-is; otherwise clear counters while idle.
-                    let idle_ctr = if block_flag { ctr } else { 0 };
-                    let idle_bit_ctr = if block_flag { bit_ctr } else { 0 };
                     UartTxRegs$(
                         state: if start_send { UartTxState::StartBit() } else { UartTxState::Idle() },
-                        ctr: idle_ctr,
-                        bit_ctr: idle_bit_ctr,
+                        // Keep blocked idle state as-is; otherwise clear counters while idle.
+                        ctr: if block_flag { ctr } else { 0 },
+                        bit_ctr: if block_flag { bit_ctr } else { 0 },
                         saved_data: if start_send { data } else { saved_data },
                         tx_reg: true,
                         block_flag: block_flag_next,
                     )
                 },
-                UartTxState::StartBit => {
-                    if ctr == ctr_last {
-                        UartTxRegs$(
-                            state: UartTxState::Data(),
-                            ctr: 0,
-                            bit_ctr: bit_ctr,
-                            saved_data: saved_data,
-                            tx_reg: false,
-                            block_flag: block_flag_next,
-                        )
-                    } else {
-                        UartTxRegs$(
-                            state: UartTxState::StartBit(),
-                            ctr: ctr_inc,
-                            bit_ctr: bit_ctr,
-                            saved_data: saved_data,
-                            tx_reg: false,
-                            block_flag: block_flag_next,
-                        )
-                    }
-                },
+                UartTxState::StartBit => UartTxRegs$(
+                    state: if elapsed { UartTxState::Data() } else { UartTxState::StartBit() },
+                    ctr: if elapsed { 0 } else { ctr_inc },
+                    bit_ctr: bit_ctr,
+                    saved_data: saved_data,
+                    tx_reg: false,
+                    block_flag: block_flag_next,
+                ),
                 UartTxState::Data => {
-                    let tx_bit = saved_data.as_bits()[trunc(bit_ctr)];
-                    if ctr == ctr_last {
-                        let bit_ctr_inc: uint<32> = bit_ctr +. 1;
-                        if bit_ctr == DATA_WIDTH - 1 {
-                            UartTxRegs$(
-                                state: UartTxState::StopBit(),
-                                ctr: 0,
-                                bit_ctr: bit_ctr_inc,
-                                saved_data: saved_data,
-                                tx_reg: tx_bit,
-                                block_flag: block_flag_next,
-                            )
-                        } else {
-                            UartTxRegs$(
-                                state: UartTxState::Data(),
-                                ctr: 0,
-                                bit_ctr: bit_ctr_inc,
-                                saved_data: saved_data,
-                                tx_reg: tx_bit,
-                                block_flag: block_flag_next,
-                            )
-                        }
-                    } else {
-                        UartTxRegs$(
-                            state: UartTxState::Data(),
-                            ctr: ctr_inc,
-                            bit_ctr: bit_ctr,
-                            saved_data: saved_data,
-                            tx_reg: tx_bit,
-                            block_flag: block_flag_next,
-                        )
-                    }
+                    let last_bit = bit_ctr == DATA_WIDTH - 1;
+                    let bit_ctr_inc: uint<32> = bit_ctr +. 1;
+                    UartTxRegs$(
+                        state: if elapsed && last_bit { UartTxState::StopBit() } else { UartTxState::Data() },
+                        ctr: if elapsed { 0 } else { ctr_inc },
+                        bit_ctr: if elapsed { bit_ctr_inc } else { bit_ctr },
+                        saved_data: saved_data,
+                        tx_reg: saved_data.as_bits()[trunc(bit_ctr)],
+                        block_flag: block_flag_next,
+                    )
                 },
-                UartTxState::StopBit => {
-                    if ctr == ctr_last {
-                        UartTxRegs$(
-                            state: UartTxState::Idle(),
-                            ctr: ctr_inc,
-                            bit_ctr: bit_ctr,
-                            saved_data: saved_data,
-                            tx_reg: true,
-                            block_flag: block_flag_next,
-                        )
-                    } else {
-                        UartTxRegs$(
-                            state: UartTxState::StopBit(),
-                            ctr: ctr_inc,
-                            bit_ctr: bit_ctr,
-                            saved_data: saved_data,
-                            tx_reg: true,
-                            block_flag: block_flag_next,
-                        )
-                    }
-                },
+                // The stop bit is the one state that keeps counting past its
+                // own end: `ctr` advances on the cycle it hands back to Idle.
+                UartTxState::StopBit => UartTxRegs$(
+                    state: if elapsed { UartTxState::Idle() } else { UartTxState::StopBit() },
+                    ctr: ctr_inc,
+                    bit_ctr: bit_ctr,
+                    saved_data: saved_data,
+                    tx_reg: true,
+                    block_flag: block_flag_next,
+                ),
             }
         };
 
