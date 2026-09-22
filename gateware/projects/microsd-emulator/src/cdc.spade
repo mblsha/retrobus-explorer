@@ -146,9 +146,11 @@ pub entity native_stage(
     // LiteDRAM queues commands before scheduling data. Use the registered
     // acceptance flag; a combinational cmd_ready -> data-consumed path would
     // extend bank arbitration through the whole native adapter.
-    let consume_write = command_full && write_command && command_issued && write_full && m_wdata_ready;
+    let offer_write = command_full && write_command && command_issued && write_full;
+    let await_read = command_full && !write_command && command_issued && !read_full;
+    let consume_write = offer_write && m_wdata_ready;
     let consume_read = read_full && s_rdata_ready;
-    let receive_read = command_full && !write_command && command_issued && !read_full && m_rdata_valid;
+    let receive_read = await_read && m_rdata_valid;
     let done = if write_command {
         consume_write
     } else {
@@ -201,11 +203,11 @@ pub entity native_stage(
     };
     set s_cmd_ready = (!command_full && !rst);
     set s_wdata_ready = (!write_full && !rst);
-    set m_rdata_ready = (command_full && !write_command && command_issued && !read_full && !rst);
+    set m_rdata_ready = (await_read && !rst);
     set m_cmd_valid = (offer_command && !rst);
     set m_cmd_address = address;
     set m_cmd_write = write_command;
-    set m_wdata_valid = (command_full && write_command && command_issued && write_full && !rst);
+    set m_wdata_valid = (offer_write && !rst);
     set m_wdata = write_data;
     set m_wmask = write_mask;
     set s_rdata_valid = (read_full && !rst);

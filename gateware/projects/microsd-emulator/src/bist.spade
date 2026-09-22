@@ -164,8 +164,10 @@ pub entity native_bist(
     let begin = state == IDLE && start;
     let waiting = state == WRITE_PATTERN || state == ISSUE_READ || state == WAIT_READ_DATA;
     let active = waiting || state == CHECK_READ_DATA;
-    let command_fire = (state == WRITE_PATTERN && !command_sent || state == ISSUE_READ) && cmd_ready;
-    let data_fire = state == WRITE_PATTERN && !data_sent && wdata_ready;
+    let offer_command = state == WRITE_PATTERN && !command_sent || state == ISSUE_READ;
+    let offer_data = state == WRITE_PATTERN && !data_sent;
+    let command_fire = offer_command && cmd_ready;
+    let data_fire = offer_data && wdata_ready;
     let write_complete = state == WRITE_PATTERN && (command_sent || command_fire) && (data_sent || data_fire);
     let receive = state == WAIT_READ_DATA && rdata_valid;
     reg(clk) received_word: uint<128> = if receive {
@@ -288,10 +290,10 @@ pub entity native_bist(
         state
     };
 
-    set cmd_valid = (!rst && (state == WRITE_PATTERN && !command_sent || state == ISSUE_READ));
+    set cmd_valid = (!rst && offer_command);
     set cmd_address = (address);
     set cmd_write = (state == WRITE_PATTERN);
-    set wdata_valid = (!rst && state == WRITE_PATTERN && !data_sent);
+    set wdata_valid = (!rst && offer_data);
     set wdata = expected;
     set wdata_mask = (0xffff);
     set rdata_ready = (!rst && state == WAIT_READ_DATA);
