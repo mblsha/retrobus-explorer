@@ -47,14 +47,11 @@ pub entity frame_receiver(
         && count >= 64 && count <= 1518 && crc == 0xdebb20e3;
     let memory: Memory<uint<8>, 16384> = inst clocked_memory(rx_clk,
         [(octet && inside && !dropping && free && count < 2048, ((zext::<4, 14>(published & 7) << 11) | zext(count)), byte)]);
-    reg(rx_clk) length0: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 0 { trunc(count -. 4) } else { length0 };
-    reg(rx_clk) length1: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 1 { trunc(count -. 4) } else { length1 };
-    reg(rx_clk) length2: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 2 { trunc(count -. 4) } else { length2 };
-    reg(rx_clk) length3: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 3 { trunc(count -. 4) } else { length3 };
-    reg(rx_clk) length4: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 4 { trunc(count -. 4) } else { length4 };
-    reg(rx_clk) length5: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 5 { trunc(count -. 4) } else { length5 };
-    reg(rx_clk) length6: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 6 { trunc(count -. 4) } else { length6 };
-    reg(rx_clk) length7: uint<11> reset(rx_reset: 0) = if finish && (published & 7) == 7 { trunc(count -. 4) } else { length7 };
+    let writing_slot: uint<3> = trunc(published);
+    reg(rx_clk) lengths: [uint<11>; 8] reset(rx_reset: [0; 8]) =
+        lengths.enumerate().map(fn |(slot, held)| {
+            if finish && slot == writing_slot { trunc(count -. 4) } else { held }
+        });
     reg(rx_clk) published: uint<4> reset(rx_reset: 0) = if finish { published +. 1 } else { published };
     reg(rx_clk) published_gray: uint<4> reset(rx_reset: 0) = published ^ (published >> 1);
     reg(clk) published_meta: uint<4> reset(rst: 0) = published_gray;
@@ -64,7 +61,6 @@ pub entity frame_receiver(
     reg(clk) read_data = inst read_memory(memory, (zext::<4, 14>(consumed & 7) << 11) | zext(address));
     set data = read_data;
     set available = available_now;
-    let lengths = [length0, length1, length2, length3, length4, length5, length6, length7];
     set frame_length = lengths[trunc(consumed)];
 }
 
