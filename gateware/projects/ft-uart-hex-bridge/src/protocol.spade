@@ -45,10 +45,6 @@ impl Default for LineParserState {
     }
 }
 
-pub fn parser_event_none() -> ParserEvent {
-    ParserEvent::None()
-}
-
 impl ParserEvent {
     pub fn is_none(self) -> bool {
         if let Self::None = self { true } else { false }
@@ -59,21 +55,11 @@ impl ParserEvent {
     }
 
     pub fn send_word(self) -> FtData {
-        if let Self::Send$(word, be) = self {
-            let _ = be;
-            word
-        } else {
-            0
-        }
+        if let Self::Send(word, _) = self { word } else { 0 }
     }
 
     pub fn send_be(self) -> FtBe {
-        if let Self::Send$(word, be) = self {
-            let _ = word;
-            be
-        } else {
-            0x3
-        }
+        if let Self::Send(_, be) = self { be } else { 0x3 }
     }
 
     pub fn is_parse_err(self) -> bool {
@@ -81,7 +67,7 @@ impl ParserEvent {
     }
 }
 
-fn parser_step(state: LineParserState, phase: ParserPhase, word: FtData, be: FtBe, event: ParserEvent) -> ParserStepOut {
+fn parser_step(phase: ParserPhase, word: FtData, be: FtBe, event: ParserEvent) -> ParserStepOut {
     ParserStepOut$(
         state: LineParserState$(phase: phase, word: word, be: be),
         event: event,
@@ -112,78 +98,77 @@ pub fn line_parser_step(
                 if rx_byte.is_line_end() {
                     ParserStepOut$(state: state, event: ParserEvent::None())
                 } else if rx_byte == b'?' {
-                    parser_step(state, ParserPhase::CmdStatus(), 0, 0x3, ParserEvent::None())
+                    parser_step(ParserPhase::CmdStatus(), 0, 0x3, ParserEvent::None())
                 } else if rx_byte.to_upper() == b'H' {
-                    parser_step(state, ParserPhase::CmdHelp(), 0, 0x3, ParserEvent::None())
+                    parser_step(ParserPhase::CmdHelp(), 0, 0x3, ParserEvent::None())
                 } else if nibble_ok {
-                    parser_step(state, ParserPhase::NeedHex1(), zext(nibble), 0x3, ParserEvent::None())
+                    parser_step(ParserPhase::NeedHex1(), zext(nibble), 0x3, ParserEvent::None())
                 } else {
-                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), 0, 0x3, ParserEvent::None())
                 }
             },
             ParserPhase::NeedHex1 => {
                 if nibble_ok {
-                    parser_step(state, ParserPhase::NeedHex2(), next_word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::NeedHex2(), next_word, state.be, ParserEvent::None())
                 } else {
-                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
             },
             ParserPhase::NeedHex2 => {
                 if nibble_ok {
-                    parser_step(state, ParserPhase::NeedHex3(), next_word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::NeedHex3(), next_word, state.be, ParserEvent::None())
                 } else {
-                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
             },
             ParserPhase::NeedHex3 => {
                 if nibble_ok {
-                    parser_step(state, ParserPhase::NeedLineEnd(), next_word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::NeedLineEnd(), next_word, state.be, ParserEvent::None())
                 } else {
-                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
             },
             ParserPhase::NeedLineEnd => {
                 if rx_byte == b'/' {
-                    parser_step(state, ParserPhase::NeedBeLineEnd(), state.word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::NeedBeLineEnd(), state.word, state.be, ParserEvent::None())
                 } else if rx_byte.is_line_end() {
-                    parser_step(LineParserState::default(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Send(state.word, state.be))
+                    parser_step(ParserPhase::Idle(), 0, 0x3, ParserEvent::Send(state.word, state.be))
                 } else {
-                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
             },
             ParserPhase::NeedBeLineEnd => {
                 let be_digit = rx_byte.decode_digit_max(3);
                 if be_digit.valid {
                     parser_step(
-                        state,
                         ParserPhase::NeedLineEnd(),
                         state.word,
                         trunc(be_digit.value),
                         ParserEvent::None(),
                     )
                 } else {
-                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
             },
             ParserPhase::CmdHelp => {
                 if rx_byte.is_line_end() {
-                    parser_step(LineParserState::default(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Help())
+                    parser_step(ParserPhase::Idle(), 0, 0x3, ParserEvent::Help())
                 } else {
-                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), 0, 0x3, ParserEvent::None())
                 }
             },
             ParserPhase::CmdStatus => {
                 if rx_byte.is_line_end() {
-                    parser_step(LineParserState::default(), ParserPhase::Idle(), 0, 0x3, ParserEvent::Status())
+                    parser_step(ParserPhase::Idle(), 0, 0x3, ParserEvent::Status())
                 } else {
-                    parser_step(state, ParserPhase::Error(), 0, 0x3, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), 0, 0x3, ParserEvent::None())
                 }
             },
             ParserPhase::Error => {
                 if rx_byte.is_line_end() {
                     parser_error()
                 } else {
-                    parser_step(state, ParserPhase::Error(), state.word, state.be, ParserEvent::None())
+                    parser_step(ParserPhase::Error(), state.word, state.be, ParserEvent::None())
                 }
             },
         }
