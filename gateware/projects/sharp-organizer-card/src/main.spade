@@ -355,14 +355,10 @@ entity main_core(
         stream_fifo_dout: stream_fifo_dout,
     );
 
-    reg(clk) state: MainState
-        reset(rst: MainState::default())
-        = {
-            let eval = state.eval(inputs);
-            eval.next_state
-        };
-
+    decl state;
     let eval = state.eval(inputs);
+    reg(clk) state: MainState reset(rst: MainState::default()) = eval.next_state;
+
     let usb_tx_req = tx_req_arbiter(boot_tx.tx_req, eval.tx_req, tx_req_none());
     inst organizer_transport(
         clk,
