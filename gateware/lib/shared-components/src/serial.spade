@@ -88,12 +88,12 @@ pub struct FtOut<TData, TBe> {
     ui_dout_empty: bool,
 }
 
-/// The same nine signals as `FtOut`, named for the `port()` pair that four
-/// projects declare to wire `ft_tap` up. It was a second, identical `struct`
-/// until 0.18 removed the port/value type distinction; one type can now serve
-/// both sides, so this is an alias and there is only one field list to keep
-/// right.
-pub type FtWirePort<TData, TBe> = FtOut<TData, TBe>;
+/// The `port()` pair of an `FtOut`, which is how all four `ft_tap` callers and
+/// `ft` itself declare it. It was a second, identical `struct` until 0.18
+/// removed the port/value type distinction, then an alias for the value type;
+/// naming the pair the way `UartLineBusy` does says `inv` once instead of
+/// repeating the nine-field type on both halves.
+pub type FtWire<TData, TBe> = (FtOut<TData, TBe>, inv FtOut<TData, TBe>);
 
 impl uint<15> {
     fn bit_time_last(self) -> uint<15> {
@@ -414,7 +414,7 @@ where
     let _ = require_power_of_two::<TX_BUFFER>();
     let _ = require_power_of_two::<RX_BUFFER>();
 
-    let (ft, ft_w): (FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>>, inv FtOut<uint<DATA_WIDTH>, uint<BE_WIDTH>>) = port();
+    let (ft, ft_w): FtWire<uint<DATA_WIDTH>, uint<BE_WIDTH>> = port();
 
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst ft_v::<DATA_WIDTH, BE_WIDTH, TX_BUFFER, RX_BUFFER, PRIORITY_RX, PREEMPT>(

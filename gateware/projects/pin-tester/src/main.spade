@@ -4,7 +4,7 @@ use shared_components::{
     config::{au_usb_uart_rx, au_usb_uart_tx8_req_tap},
     message_stream::{TxReq8, tx_req_byte, tx_req_none},
     primitives::reset_conditioner,
-    serial::UartLineBusyPort,
+    serial::UartLineBusy,
 };
 
 enum PinTesterMode {
@@ -130,7 +130,7 @@ entity main_core(
         = state.step(rx_valid, rx.byte).next_state;
     let step = state.step(rx_valid, rx.byte);
 
-    let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
+    let (uart, uart_w): UartLineBusy = port();
     let _tx = inst au_usb_uart_tx8_req_tap(
         clk,
         rst,

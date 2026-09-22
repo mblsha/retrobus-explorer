@@ -17,7 +17,7 @@ use shared_components::{
     ft_stream::{FtWordStreamOut, FtWordStreamState, ft_word_stream_step},
     message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
     primitives::{reset_conditioner, sync_bundle},
-    serial::{FtBe, FtData, FtWirePort, UartLineBusyPort},
+    serial::{FtBe, FtData, FtWire, UartLineBusy},
 };
 use self::board::organizer_board_outputs;
 use self::cmd::{
@@ -325,8 +325,8 @@ entity main_core(
         conn_vpp_sync,
     );
 
-    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
-    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port();
+    let (usb_uart, usb_uart_w): UartLineBusy = port();
+    let (ft_io, ft_io_w): FtWire<FtData, FtBe> = port();
     let (stream_fifo_full, stream_fifo_full_w): (bool, inv bool) = port();
     let (stream_fifo_empty, stream_fifo_empty_w): (bool, inv bool) = port();
     let (stream_fifo_dout, stream_fifo_dout_w): (OrganizerTraceWord, inv OrganizerTraceWord) = port();

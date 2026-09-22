@@ -7,7 +7,7 @@ use shared_components::{
     config::{au_dual_bridge_u8x8_100_200, au_usb_uart_rx, au_usb_uart_tx8_req_tap},
     message_stream::{tx_req_arbiter, tx_req_byte, tx_req_none},
     primitives::reset_conditioner,
-    serial::UartLineBusyPort,
+    serial::UartLineBusy,
 };
 use self::simple_cmd_uart::{clock_from_code, saleae_outputs, simple_cmd_uart_core};
 
@@ -28,7 +28,7 @@ entity main(
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
 
     let (enqueue, enqueue_w): (bool, inv bool) = port();
-    let (usb_uart, usb_uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
+    let (usb_uart, usb_uart_w): UartLineBusy = port();
     let boot_tx = inst boot_banner_tx_gate::<8, 96>(
         clk,
         rst,

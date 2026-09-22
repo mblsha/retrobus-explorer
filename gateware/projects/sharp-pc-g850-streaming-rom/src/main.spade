@@ -5,7 +5,7 @@ use shared_components::{
     boot_banner::au_usb_uart_banner_then_loopback,
     clocking::sampled_bool_clock,
     primitives::{falling_edge, reset_conditioner, rising_edge, sync_bundle, sync_delay, sync_z80_controls_n},
-    serial::{FtBe, FtData, FtWirePort, ft_tap},
+    serial::{FtBe, FtData, FtWire, ft_tap},
 };
 
 use self::streaming_rom::{
@@ -82,7 +82,7 @@ entity main_core(
     let mreq_fall = inst falling_edge(clk, z80_sync.mreq);
     let mreq_rise = inst rising_edge(clk, z80_sync.mreq);
 
-    let (ft_io, ft_io_w): (FtWirePort<FtData, FtBe>, inv FtWirePort<FtData, FtBe>) = port();
+    let (ft_io, ft_io_w): FtWire<FtData, FtBe> = port();
     let stream = inst streaming_rom_core(
         clk,
         rst,
