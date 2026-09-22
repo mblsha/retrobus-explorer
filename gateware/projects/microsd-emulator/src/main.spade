@@ -370,17 +370,24 @@ pub entity sd_frontend(
     let write_command = command_index == CMD_WRITE_SINGLE || command_index == CMD_WRITE_MULTIPLE;
     let deselect = command_index == CMD_SELECT_CARD && command_argument_zero;
     let reset_command = command_index == CMD_GO_IDLE || deselect;
+    // The MMC CMD6 SWITCH argument is four bytes: access mode, EXT_CSD index,
+    // the value to write, and a command set. Only the access mode that writes
+    // one byte of EXT_CSD is honoured, and only for BUS_WIDTH.
+    let MMC_SWITCH_WRITE_BYTE: uint<8> = 3;
+    let MMC_EXT_CSD_BUS_WIDTH: uint<8> = 183;
+    let switch_access: uint<8> = trunc(command_argument >> 24);
+    let switch_index: uint<8> = trunc(command_argument >> 16);
+    let switch_value: uint<8> = trunc(command_argument >> 8);
     reg(clk) wide reset(local_rst: false) = {
         if valid && command_index == CMD_GO_IDLE {
             false
         } else if valid && app && command_index == ACMD_SET_BUS_WIDTH && transfer_idle && (command_argument_zero || command_argument == 2) {
             command_argument == 2
         } else if valid && mmc_mode && command_index == ACMD_SET_BUS_WIDTH && transfer_idle &&
-            trunc::<uint<32>, uint<8>>(command_argument >> 16) == 183 &&
-            (trunc::<uint<32>, uint<8>>(command_argument >> 8) == 0 ||
-                trunc::<uint<32>, uint<8>>(command_argument >> 8) == 1) &&
-            (!h700_mode || trunc::<uint<32>, uint<8>>(command_argument >> 8) == 0) {
-            trunc::<uint<32>, uint<8>>(command_argument >> 8) == 1
+            switch_index == MMC_EXT_CSD_BUS_WIDTH &&
+            (switch_value == 0 || switch_value == 1) &&
+            (!h700_mode || switch_value == 0) {
+            switch_value == 1
         } else {
             wide
         }
@@ -551,11 +558,10 @@ pub entity sd_frontend(
     // width. Retain this error through that status response, then clear it.
     let mmc_width_switch = valid && mmc_mode && !app &&
         command_index == ACMD_SET_BUS_WIDTH && transfer_idle &&
-        trunc::<uint<32>, uint<8>>(command_argument >> 24) == 3 &&
-        trunc::<uint<32>, uint<8>>(command_argument >> 16) == 183;
-    let requested_mmc_width = trunc::<uint<32>, uint<8>>(command_argument >> 8);
+        switch_access == MMC_SWITCH_WRITE_BYTE &&
+        switch_index == MMC_EXT_CSD_BUS_WIDTH;
     let unsupported_mmc_width = mmc_width_switch &&
-        (requested_mmc_width > 1 || (h700_mode && requested_mmc_width != 0));
+        (switch_value > 1 || (h700_mode && switch_value != 0));
     reg(clk) switch_error reset(local_rst: false) = {
         if valid && command_index == CMD_GO_IDLE {
             false
@@ -623,10 +629,10 @@ pub entity sd_frontend(
         // supports the backward-compatible timing mode and x1/x4 widths.
         6 => (app && transfer_idle && (command_argument_zero || command_argument == 2)) ||
             (mmc_mode && transfer_idle &&
-                trunc::<uint<32>, uint<8>>(command_argument >> 24) == 3 &&
-                (trunc::<uint<32>, uint<8>>(command_argument >> 16) != 183 ||
-                    (trunc::<uint<32>, uint<8>>(command_argument >> 8) <= 1 &&
-                        (!h700_mode || trunc::<uint<32>, uint<8>>(command_argument >> 8) == 0)))),
+                switch_access == MMC_SWITCH_WRITE_BYTE &&
+                (switch_index != MMC_EXT_CSD_BUS_WIDTH ||
+                    (switch_value <= 1 &&
+                        (!h700_mode || switch_value == 0)))),
         _ => false,
     };
     let STATUS_WRITE_PROTECT_VIOLATION: uint<32> = 1 << 26;
