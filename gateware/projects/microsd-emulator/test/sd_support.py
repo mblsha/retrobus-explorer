@@ -8,6 +8,9 @@ import cocotb
 from cocotb.triggers import Timer, Edge
 from cocotb_helpers import start_clock, tick
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+from sd_csd import SD_CSD, csd_crc7  # noqa: E402
+
 
 def crc7(data):
     crc = 0
@@ -34,6 +37,17 @@ class Host:
                     await Edge(dut.byte_index)
 
             cocotb.start_soon(serve_sector())
+
+    def supplied_csd(self):
+        """The CSD this card was built to hand back from CMD9.
+
+        `sd_frontend` takes it as a port and `setup()` drives the qualified
+        default. The integration tops (`bram_emulator`, `ddr_emulator`,
+        `ddr_emulator_cdc`) have no such port and fix that same default in
+        `main.spade`, so for them the build's own constant is the answer.
+        """
+        port = getattr(self.d, "sd_csd", None)
+        return SD_CSD if port is None else int(port.value)
 
     async def cycle(self, bit=1, pause=0):
         d = self.d
@@ -119,17 +133,12 @@ class Host:
         assert b"SPADE" in await self.command(2, length=136)
         assert (await self.command(3))[1:5] == bytes.fromhex("00010500")
         csd = int.from_bytes((await self.command(9, 0x10000, length=136))[1:], "big")
+        advertised = self.supplied_csd()
         if writable:
-            sys.path.insert(
-                0, str(Path(__file__).resolve().parents[3] / "tools")
-            )
-            from sd_csd import SD_CSD, csd_crc7
-
             # The card returns whatever CSD the build supplied. Check it
             # against that rather than a fixed constant, and check the build's
             # own default still matches the supported metadata, so neither the
             # advertised speed nor its CRC7 can drift unnoticed.
-            advertised = int(self.d.sd_csd.value)
             assert csd == advertised, "CMD9 response differs from the supplied CSD"
             body = advertised.to_bytes(16, "big")
             assert body[15] == (csd_crc7(body[:15]) << 1) | 1, "CSD CRC7 is stale"
@@ -145,8 +154,7 @@ class Host:
         # The writable card's CSD comes from the build, so the expected
         # TRAN_SPEED is whatever this testbench advertised rather than a
         # constant that would have to be edited alongside it.
-        advertised = (int(self.d.sd_csd.value) >> 96) & 0xFF
-        assert (csd >> 96) & 255 == (advertised if writable else 0x09)
+        assert (csd >> 96) & 255 == ((advertised >> 96) & 0xFF if writable else 0x09)
         assert capacity == (268435456 if writable else 8388608)
         assert bool(csd & (1 << 13)) == (not writable)
         assert bool(csd & (0x10 << 84)) == writable
