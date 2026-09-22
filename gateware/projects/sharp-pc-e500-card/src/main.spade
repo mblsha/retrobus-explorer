@@ -232,14 +232,6 @@ fn overrun_text() -> [uint<8>; 10] {
     b"!OVERRUN\r\n"
 }
 
-fn overrun_text_len() -> uint<4> {
-    10
-}
-
-fn overrun_last_idx() -> uint<4> {
-    overrun_text_len() -. 1
-}
-
 #[no_mangle(all)]
 extern entity card_ram_2k_v(
     clk: clock,
@@ -732,7 +724,7 @@ fn port_overrun_step(
         tx_req_none()
     };
     let sent = tx_req.valid;
-    let last = cur_idx == overrun_last_idx();
+    let last = cur_idx == (overrun.len() -. 1);
     PortOverrunOut$(
         next_state: PortOverrunState$(
             pending_count: if sent && last {
@@ -1438,19 +1430,17 @@ entity main_core(
     set measure_fifo_empty_w = measure_fifo.empty;
     set measure_fifo_dout_w = measure_fifo.dout;
 
-    let measure_queue_inc: MeasureQueueLevel = if measure_report_wput { 1 } else { 0 };
-    let measure_queue_dec: MeasureQueueLevel = if measure_eval.fifo_rget { 1 } else { 0 };
+    // At most one report is queued and one dequeued per cycle, so only a cycle
+    // with exactly one of the two moves the level.
+    let measure_queued = measure_report_wput && !measure_eval.fifo_rget;
+    let measure_dequeued = measure_eval.fifo_rget && !measure_report_wput;
     reg(clk) measure_queue_level: MeasureQueueLevel reset(rst: 0) =
         if measure_clear_request {
             0
-        } else if measure_queue_inc > measure_queue_dec {
-            measure_queue_level +. (measure_queue_inc -. measure_queue_dec)
-        } else if measure_queue_dec > measure_queue_inc {
-            if measure_queue_level > 0 {
-                measure_queue_level -. (measure_queue_dec -. measure_queue_inc)
-            } else {
-                0
-            }
+        } else if measure_queued {
+            measure_queue_level +. 1
+        } else if measure_dequeued && measure_queue_level > 0 {
+            measure_queue_level -. 1
         } else {
             measure_queue_level
         };
