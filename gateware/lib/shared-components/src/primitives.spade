@@ -110,12 +110,12 @@ pub entity reset_conditioner<#uint STAGES = 4>(
 ) -> bool
 where STAGES > 0 else "reset_conditioner needs at least one register stage"
 {
-    // DRY generic implementation of Alchitry-style conditioner:
-    // assert immediately via `in_reset`, release after STAGES clocks.
+    // Alchitry-style conditioner: assert immediately via `in_reset`, then push a
+    // `false` in at the bottom every cycle, so the top of the shift register
+    // only clears once STAGES of them have walked through it.
     reg(clk) stages: [bool; STAGES] reset(in_reset: [true; STAGES]) =
-        [false].concat(stages[0..STAGES - 1]);
-    let top = stages[STAGES - 1..STAGES][0];
-    in_reset || top
+        [false].concat(stages[..STAGES - 1]);
+    in_reset || stages.last()
 }
 
 // The standard library grew these in 0.18 and its versions are identical to the
