@@ -184,6 +184,14 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
     let waiting_ext_drop = waiting_addr_ext_drop || waiting_data_ext_drop;
     let ext_delay: uint<8> = (zext(inputs.cmd_hex_high) << 4) | zext(decoded.value);
 
+    // The single-byte console commands, recognized only between commands.
+    let idle_cmd = inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state();
+    let cmd_counter = idle_cmd && inputs.rx_byte == b'c';
+    let cmd_sync_standard = idle_cmd && inputs.rx_byte == b's';
+    let cmd_sync_memory = idle_cmd && inputs.rx_byte == b'S';
+    let cmd_settling = idle_cmd && (inputs.rx_byte == b't' || inputs.rx_byte == b'T');
+    let cmd_status = idle_cmd && inputs.rx_byte == b'?';
+
     let next_cmd_state = if !inputs.rx_valid {
         inputs.cmd_state
     } else if inputs.cmd_state == cmd_wait_addr_delay() {
@@ -230,26 +238,25 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
         init_organizer_cmd_state()
     };
 
-    let next_saleae_state = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'c' {
+    let next_saleae_state = if cmd_counter {
         SaleaeState::Counter()
-    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() &&
-        (inputs.rx_byte == b's' || inputs.rx_byte == b'S' || inputs.rx_byte == b't' || inputs.rx_byte == b'T') {
+    } else if cmd_sync_standard || cmd_sync_memory || cmd_settling {
         SaleaeState::SyncSignals()
     } else {
         inputs.saleae_state
     };
-    let next_sync_sub_mode = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b's' {
+    let next_sync_sub_mode = if cmd_sync_standard {
         SyncSubMode::StandardSignals()
-    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'S' {
+    } else if cmd_sync_memory {
         SyncSubMode::MemoryBanks()
     } else {
         inputs.sync_sub_mode
     };
-    let next_saleae_mode = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b's' {
+    let next_saleae_mode = if cmd_sync_standard {
         saleae_mode_standard()
-    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'S' {
+    } else if cmd_sync_memory {
         saleae_mode_memory()
-    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && (inputs.rx_byte == b't' || inputs.rx_byte == b'T') {
+    } else if cmd_settling {
         saleae_mode_settling()
     } else {
         inputs.saleae_mode
@@ -268,13 +275,13 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
         inputs.cmd_hex_high
     };
 
-    let usb_msg = if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'c' {
+    let usb_msg = if cmd_counter {
         OrganizerMsg::CounterSelected()
-    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b's' {
+    } else if cmd_sync_standard {
         OrganizerMsg::SyncStandardSelected()
-    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'S' {
+    } else if cmd_sync_memory {
         OrganizerMsg::SyncMemorySelected()
-    } else if inputs.rx_valid && inputs.cmd_state == init_organizer_cmd_state() && inputs.rx_byte == b'?' {
+    } else if cmd_status {
         OrganizerMsg::Status(organizer_status(
             inputs.saleae_state,
             inputs.saleae_mode,
