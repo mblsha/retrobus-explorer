@@ -147,8 +147,28 @@ To bump the compiler:
   struct's own generic ("Struct members cannot have const generics in their
   type"), and routing one through a type alias panics the compiler. They do work
   in a `let` annotation, which is where `memory.spade`'s `FifoAddr<ENTRIES>` and
-  `FifoCount<ENTRIES>` are used. Name a type spelling that repeats more than a
-  few times.
+  `FifoCount<ENTRIES>` are used, and in a `reg` annotation through an alias
+  whose arguments are type expressions (`memory.spade`'s `FifoState`). Name a
+  type spelling that repeats more than a few times. An alias can name a port
+  pair -- `serial::UartLineBusy` is `(UartLineBusyPort, inv UartLineBusyPort)`
+  and `let (a, b): UartLineBusy = port();` works -- which an earlier note here
+  said was impossible; it was, before 0.19.
+- Build a byte string by chaining `[T; N]::concat`, and when the same shape
+  recurs (a key and its help text, a name and its length) put the shape in an
+  `#[inline]` helper. A left-to-right chain shares nothing, because every step
+  has a length no other step has, so a long builder written flat costs a module
+  per step where the old nested `concat_arrays` tree reused its pairs;
+  `console.spade`'s `key_line`/`key_pair_line` are the pattern.
+- Ask a value for its own bit with `msb()`/`lsb()`, read an `Option` with
+  `is_some()`/`unwrap_or()`, and know that none of them is `#[inline]` upstream:
+  each monomorphisation is a one-line module in every project that reaches it.
+  That is a few percent on a module count and worth it for the names; it is not
+  worth it inside something instantiated many times.
+- A `match` pattern is a literal or a constructor. There is no value constant
+  usable as a pattern, so a state machine over `let IDLE: uint<4> = 0;` names
+  stays an `if` chain unless its encoding is free to become an enum -- and the
+  encodings in `ethernet-diagnostic`'s block and native decoders and in
+  `trace.spade`'s readout words are not.
 - Give a generic a default when one value dominates its call sites, so the call
   sites that want something else stand out: `reset_conditioner<#uint STAGES = 4>`,
   `sync_delay<#int STAGES = 2>`, `uart_rx<#uint DATA_WIDTH = 8>`,
@@ -169,7 +189,12 @@ To bump the compiler:
   call. Without it each one is a module in every project that instantiates it.
 - Every project must build with zero compiler warnings. A warning here is
   usually a deprecation with a fix-it attached, and letting them accumulate is
-  what makes the next compiler bump expensive.
+  what makes the next compiler bump expensive. Deprecated *methods* print
+  nothing, though -- only deprecated free units do -- which is how 49
+  `to_bits()` calls survived a zero-warning bump; after the next one, grep for
+  the methods the changelog retires as well as reading the warnings.
+- A `pub fn` nothing calls is still a module in every consumer's SystemVerilog.
+  Delete dead code; do not keep it "for later".
 - Centralize repeated widths, protocol constants, UART helpers, synchronizers,
   FIFOs, counters, and edge detectors in the shared library when their behavior
   is genuinely common.
@@ -192,15 +217,30 @@ machine with no Vivado on it, openXC7 ignores the attribute, and Verilator only
 tells us it parses. Read a synthesis report before relying on it, and do not
 treat it as an MTBF improvement until you have.
 
-Two pieces of known compiler debt, both retryable after a bump:
+Known compiler debt on v0.20.0 (`7e0bf788`), each retryable after a bump:
 
 - `FifoImplState`'s `ADDR_W`/`COUNT_W` and `BootBannerState`'s `IDX_W` are
-  size-only generics that v0.20.0 will not let a struct member compute. The
-  notes beside them say what was tried.
-- The ~70 nested `concat_arrays` calls in `sharp-pc-g850-bus/console.spade` and
-  `uart-saleae-loopback/simple_cmd_uart.spade` should become `[T; N]::concat`.
-  Their `use std::conv::concat_arrays;` lines are what keeps the deprecated
-  prelude re-export out of those builds, so do not simply delete them.
+  size-only generics that a struct member cannot compute. The notes beside them
+  say what was tried.
+- `let [a, b, c, d] = arr;` on an array whose length is a power of two emits
+  index constants one bit too wide (`bits_for(N)` where `bits_for(N - 1)` is
+  needed); Verilator reports `WIDTHTRUNC` on every extraction. Seven elements
+  destructure correctly and plain `arr[3]` is fine, so index instead until it
+  is fixed.
+- Inside a `gen if` recursion, `bits[N - 1]` is typed for an array of half the
+  length ("40 does not fit in an uint<5>"); `bits.last()` is the spelling that
+  works, and is what the CRC helpers in `sd.spade` use.
+- `[0; {8 - N}]` is not accepted (a repeat count cannot be a type expression);
+  `text.concat([0; 8])[..8]` is the workaround in `msg.spade`.
+- Editing one file can rename a register in an untouched module's SystemVerilog
+  (`sd_write_response`'s `state` became `\_` with an alias `assign`, from a
+  change in `storage.spade`); it is the alias-flattening pass choosing a
+  different net, and `--loose` sees through it, but it means "only my module
+  changed" needs checking with the tool, not assumed.
+- `swim build` regenerates `src/build_info.spade` with a fresh timestamp, and a
+  project's Cocotb suite compares its boot banner against that file at import
+  time. Building anything in a project while its suite runs fails every test
+  after the first on the banner.
 
 To check a refactor that is meant to preserve behaviour: build before and after,
 and compare with both `tools/sv_module_surface.py --diff` (what the testbenches
