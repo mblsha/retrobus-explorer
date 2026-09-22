@@ -135,18 +135,26 @@ are at zero, grep for every method the changelog retires.
 
 **When fixed.** Drop that sentence; the warnings are the list again.
 
-## 7. `msb`, `lsb`, `unwrap_or`, `concat`, `shift_front`, `push_front`, `reversed` are not `#[inline]`
+## 7. `msb`, `lsb`, `unwrap_or`, `concat`, `shift_front`, `push_front`, `reversed`, `default` are not `#[inline]`
 
 **Symptom.** Each is a one-line forwarding call or a transmute in the standard
 library, and each monomorphisation is a module in every project that reaches
 it. That is the whole of the module-count growth the elegance pass reports
 (`ethernet-diagnostic` 266 → 281, `sharp-pc-e500-card` 351 → 355).
+`std::default::default` is the same shape (`T::default()`) and is the only way
+to reach a `Default` impl on a generic type, because naming that type's
+associated function is rejected ("Use of undeclared name
+...BootBannerState::default"); the seven projects with a boot banner each carry
+a module for it; the impl it forwards to is `#[inline]`, so the count is the
+same as the free constructor it replaced rather than one higher.
 
 **Where we work around it.** We use `msb()`/`lsb()`/`unwrap_or()` where the
 name is worth a module and index by hand where it is not (see AGENTS.md); the
 reset conditioner keeps `[false].concat(stages[..STAGES - 1])` instead of
 `shift_front`; the CRCs are hand-written `gen if` recursions instead of
-`fold` over `reversed()`.
+`fold` over `reversed()`. `boot_banner_core` pays the `default` module to let
+`BootBannerState` carry its own reset value like every other state record, and
+keeps its own `Default` impl `#[inline]` so that is the only module it pays.
 
 **When fixed.** `reset_conditioner` uses `shift_front`; the CRC helpers become
 `bits.reversed().fold(…)` one-liners; the module counts fall back to where

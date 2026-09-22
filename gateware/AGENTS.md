@@ -181,10 +181,15 @@ To bump the compiler:
   second one. `arrays::enumerate` is for a closure that needs the index as a
   number.
 - A reset value belongs to its type: `impl Default for X { fn default() }` and
-  `reset(rst: X::default())`. An associated function cannot be called on a
-  generic type yet, so a constructor for `ByteMsgStreamState<Msg, N>` and
-  friends stays a free function. `X::default()` is for the power-on state; a
-  protocol sentinel like `tx_req_none()` keeps the name that says what it means.
+  `reset(rst: X::default())`. A generic type gets the same treatment even though
+  naming its associated function is still rejected ("Use of undeclared name
+  ...BootBannerState::default"): implement the trait for it
+  (`impl<#uint IDX_W> Default for BootBannerState<IDX_W>`) and call the standard
+  library's free `default()`, which takes its type from the annotation on the
+  `reg` beside it. A constructor that takes an *argument* -- like
+  `init_byte_msg_stream(none_msg)` -- still stays a free function.
+  `X::default()` is for the power-on state; a protocol sentinel like
+  `tx_req_none()` keeps the name that says what it means.
 - `#[inline]` anything whose whole body is a constant or a single forwarding
   call. Without it each one is a module in every project that instantiates it.
 - Every project must build with zero compiler warnings. A warning here is

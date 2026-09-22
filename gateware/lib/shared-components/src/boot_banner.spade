@@ -22,11 +22,18 @@ pub struct BootBannerTxGateOut {
     app_tx_busy: bool,
 }
 
-pub fn init_boot_banner<#uint IDX_W>() -> BootBannerState<IDX_W> {
-    BootBannerState$(
-        active: true,
-        idx: 0,
-    )
+// The banner is sending from the first cycle out of reset, starting at the
+// first character. `X::<A>::default()` cannot be spelled on a generic type, so
+// the one reader of this reaches the trait through the standard library's free
+// `default()`, which takes its type from the `reg` annotation beside it.
+impl<#uint IDX_W> Default for BootBannerState<IDX_W> {
+    #[inline]
+    fn default() -> Self {
+        BootBannerState$(
+            active: true,
+            idx: 0,
+        )
+    }
 }
 
 pub fn boot_banner_step<#uint IDX_W, #uint N>(
@@ -60,7 +67,7 @@ pub entity boot_banner_core<#uint IDX_W, #uint N>(
     block_tx: bool,
 ) -> BootBannerOut<IDX_W> {
     decl stepped;
-    reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = stepped.state;
+    reg(clk) state: BootBannerState<IDX_W> reset(rst: default()) = stepped.state;
     let stepped = boot_banner_step(state, banner, block_tx);
 
     stepped
