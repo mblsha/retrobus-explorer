@@ -2,7 +2,7 @@ use std::mem::{clocked_memory, read_memory};
 
 fn add16(a: uint<16>, b: uint<16>) -> uint<16> {
     let sum: uint<17> = zext(a) +. zext(b);
-    trunc(sum) +. (if sum.to_bits()[16] { 1 } else { 0 })
+    trunc(sum) +. (if sum.msb() { 1 } else { 0 })
 }
 
 // Fixed IPv4 address 192.168.10.2, MAC 02:00:00:00:00:01, UDP port 4000.
@@ -53,10 +53,10 @@ pub entity network_engine(
     reg(clk) high: uint<8> reset(rst: 0) = if capture { rx_data } else { high };
     let pair: uint<16> = (zext(high) << 8) | zext(rx_data);
     reg(clk) ip_sum: uint<16> reset(rst: 0) = if state == IDLE { 0 }
-        else if capture && index >= 14 && index < 34 && index.to_bits()[0] { add16(ip_sum, pair) } else { ip_sum };
+        else if capture && index >= 14 && index < 34 && index.lsb() { add16(ip_sum, pair) } else { ip_sum };
     reg(clk) transport_sum: uint<16> reset(rst: 0) = if state == IDLE { 0 }
         else if capture && index >= 34 && zext::<11, 16>(index) < ip_length +. 14 {
-            if index.to_bits()[0] { add16(transport_sum, pair) }
+            if index.lsb() { add16(transport_sum, pair) }
             else if zext::<11, 16>(index) == ip_length +. 13 { add16(transport_sum, zext(rx_data) << 8) }
             else { transport_sum }
         } else { transport_sum };

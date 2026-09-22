@@ -32,7 +32,7 @@ pub entity network_frontend(
 ) {
     reg(clk) divider: uint<2> reset(rst: 0) = divider +. 1;
     reg(clk) startup: uint<25> reset(rst: 0) = if startup == 20_000_000 { startup } else { startup +. 1 };
-    set phy_ref = divider.to_bits()[1];
+    set phy_ref = divider.msb();
     set phy_rst_n = (startup >= 1_000_000 && !rst);
     let local_rst = rst || startup != 20_000_000;
     let (rx_read_address, rx_read_address_w): (uint<11>, inv uint<11>) = port();

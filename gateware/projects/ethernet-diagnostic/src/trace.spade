@@ -235,7 +235,7 @@ pub entity sd_trace(
     // either bus mode, and the stage the boot spends its time in is the kernel.
     let wide_bus = protocol_status.to_bits()[30];
     let lane_mask: uint<4> = if wide_bus { 15 } else { 1 };
-    let data_pin = data_pins.to_bits()[0];
+    let data_pin = data_pins.lsb();
     let data_idle = (data_pins & lane_mask) == lane_mask;
     let payload_last: uint<13> = if wide_bus { 1023 } else { 4095 };
     let arm_block = read_request && read_lba == capture_lba &&

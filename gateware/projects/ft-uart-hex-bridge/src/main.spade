@@ -356,6 +356,6 @@ entity main_core(
         !ft_ui_dout_empty,
         !ft_ui_din_full,
         usb_uart.busy,
-        heartbeat.to_bits()[23],
+        heartbeat.msb(),
     ];
 }
