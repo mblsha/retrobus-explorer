@@ -185,18 +185,15 @@ fn sampled_bus_status_bits(
     from_cycle_start: bool,
     ctrl_range: bool,
 ) -> SampledBusStatus {
-    let rw_bit: SampledBusStatus = if rw { 1 } else { 0 };
-    let ce1_bit: SampledBusStatus = if ce1_active { 1 } else { 0 };
-    let ce6_bit: SampledBusStatus = if ce6_active { 1 } else { 0 };
-    let followup_bit: SampledBusStatus = if synthetic_followup { 1 } else { 0 };
-    let cycle_bit: SampledBusStatus = if from_cycle_start { 1 } else { 0 };
-    let ctrl_bit: SampledBusStatus = if ctrl_range { 1 } else { 0 };
-    (ctrl_bit << 5) |
-    (cycle_bit << 4) |
-    (followup_bit << 3) |
-    (ce6_bit << 2) |
-    (ce1_bit << 1) |
-    rw_bit
+    // Element 0 is the LSB, so this reads in the host decoder's bit order.
+    [
+        rw,
+        ce1_active,
+        ce6_active,
+        synthetic_followup,
+        from_cycle_start,
+        ctrl_range,
+    ].as_uint()
 }
 
 fn pack_sampled_bus_word(
