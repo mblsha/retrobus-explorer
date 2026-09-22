@@ -120,9 +120,11 @@ pub entity qualified_ddr(
         } else {
             bist_read_ready
         });
-    set client_cmd_ready = (qualified && !rst && cmd_ready);
-    set client_wdata_ready = (qualified && !rst && wdata_ready);
-    set client_rdata_valid = (qualified && !rst && rdata_valid);
+    // The client sees the port only after qualification, and never in reset.
+    let client_enabled = qualified && !rst;
+    set client_cmd_ready = (client_enabled && cmd_ready);
+    set client_wdata_ready = (client_enabled && wdata_ready);
+    set client_rdata_valid = (client_enabled && rdata_valid);
     set client_rdata = rdata;
 }
 

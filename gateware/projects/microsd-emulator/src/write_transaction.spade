@@ -51,6 +51,9 @@ pub entity sd_write_transaction(
     };
     let accepted = receive_crc_good && saved_lba_valid;
     let commit = receive_complete && accepted;
+    // An accepted packet owns the DDR port from the cycle it is accepted until
+    // the sector writer reports the last beat gone.
+    let committing = commit_active || commit;
     reg(clk) packet_good reset(rst: false) = if start {
         false
     } else if receive_complete {
@@ -100,13 +103,13 @@ pub entity sd_write_transaction(
         start: receive_complete,
         accepted,
         fall,
-        busy: commit_active || commit,
+        busy: committing,
         dat_out,
         dat_oe,
         active: response_active_w,
         complete,
     );
-    set active = (receive_active || response_active || commit_active || commit);
+    set active = (receive_active || response_active || committing);
     set good = (packet_good && !commit_failed);
-    set commit_busy = (commit_active || commit);
+    set commit_busy = committing;
 }

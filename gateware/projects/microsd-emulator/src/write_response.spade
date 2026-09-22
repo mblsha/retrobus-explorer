@@ -24,14 +24,15 @@ pub entity sd_write_response(
 
     decl state, prepared_output, delayed_prepared_output;
     let clear = rst || cancel;
-    reg(clk) ok reset(clear: false) = if start && state == IDLE {
+    let begin = start && state == IDLE;
+    reg(clk) ok reset(clear: false) = if begin {
         accepted
     } else {
         ok
     };
     let hold_busy = ok && (if prepared_mode { !delayed_prepared_output } else { busy });
     let token_drive = state >= TOKEN_START && state <= PROGRAMMING_BUSY;
-    reg(clk) state: uint<4> reset(clear: IDLE) = if start && state == IDLE {
+    reg(clk) state: uint<4> reset(clear: IDLE) = if begin {
         RESPONSE_DELAY
     } else if fall && state != IDLE {
         if state == PROGRAMMING_BUSY {
