@@ -1,14 +1,14 @@
 // SD CRCs are MSB-first; Ethernet/UART image CRC32 is reflected IEEE CRC32.
 pub fn crc7_bit(crc: uint<7>, bit: bool) -> uint<7> {
-    (crc << 1) ^ (if crc.as_bits()[6] ^^ bit { 0x09 } else { 0 })
+    (crc << 1) ^ (if crc.msb() ^^ bit { 0x09 } else { 0 })
 }
 
 pub fn crc16_bit(crc: uint<16>, bit: bool) -> uint<16> {
-    (crc << 1) ^ (if crc.as_bits()[15] ^^ bit { 0x1021 } else { 0 })
+    (crc << 1) ^ (if crc.msb() ^^ bit { 0x1021 } else { 0 })
 }
 
 fn crc32_bit(crc: uint<32>, bit: bool) -> uint<32> {
-    (crc >> 1) ^ (if crc.as_bits()[0] ^^ bit { 0xedb88320 } else { 0 })
+    (crc >> 1) ^ (if crc.lsb() ^^ bit { 0xedb88320 } else { 0 })
 }
 
 pub fn crc32_byte(crc: uint<32>, byte: uint<8>) -> uint<32> {
@@ -24,7 +24,7 @@ pub fn crc32_byte(crc: uint<32>, byte: uint<8>) -> uint<32> {
 }
 
 fn crc8_bit(crc: uint<8>) -> uint<8> {
-    (crc << 1) ^ (if crc.as_bits()[7] { 7 } else { 0 })
+    (crc << 1) ^ (if crc.msb() { 7 } else { 0 })
 }
 
 pub fn crc8_byte(crc: uint<8>, byte: uint<8>) -> uint<8> {
