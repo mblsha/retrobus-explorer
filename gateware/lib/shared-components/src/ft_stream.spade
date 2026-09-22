@@ -21,38 +21,37 @@ pub fn ft_word_stream_step(
     stream_fifo_empty: bool,
     stream_fifo_dout: uint<32>,
 ) -> FtWordStreamOut {
-    let get_fifo = if let FtWordStreamState::GetFifo = state { true } else { false };
-    let stream = if let FtWordStreamState::Stream = state { true } else { false };
     let can_push = !ui_din_full;
-    let next_state = if get_fifo && can_push && !stream_fifo_empty {
-        FtWordStreamState::Stream()
-    } else if stream && can_push {
-        FtWordStreamState::GetFifo()
-    } else {
-        state
+
+    // Each 32-bit word leaves as two 16-bit halves. `take_low` pops a word off
+    // the fifo and sends its low half in the same cycle; `send_high` sends the
+    // half that was held back. Exactly one of them can be true, and only in the
+    // state that owns it.
+    let (take_low, send_high) = match state {
+        FtWordStreamState::GetFifo => (can_push && !stream_fifo_empty, false),
+        FtWordStreamState::Stream => (false, can_push),
     };
-    let next_cur_value = if get_fifo && can_push && !stream_fifo_empty {
-        stream_fifo_dout
-    } else {
-        cur_value
-    };
-    let ui_din_valid = (get_fifo && can_push && !stream_fifo_empty) || (stream && can_push);
-    let ui_din = if get_fifo && can_push && !stream_fifo_empty {
-        trunc(stream_fifo_dout)
-    } else if stream && can_push {
-        trunc(cur_value >> 16)
-    } else {
-        0
-    };
-    let stream_fifo_rget = get_fifo && can_push && !stream_fifo_empty;
+    let ui_din_valid = take_low || send_high;
 
     FtWordStreamOut$(
-        next_state: next_state,
-        next_cur_value: next_cur_value,
+        next_state: if take_low {
+            FtWordStreamState::Stream()
+        } else if send_high {
+            FtWordStreamState::GetFifo()
+        } else {
+            state
+        },
+        next_cur_value: if take_low { stream_fifo_dout } else { cur_value },
         ui_din_valid: ui_din_valid,
-        ui_din: ui_din,
+        ui_din: if take_low {
+            trunc(stream_fifo_dout)
+        } else if send_high {
+            trunc(cur_value >> 16)
+        } else {
+            0
+        },
         ui_din_be: if ui_din_valid { 0x3 } else { 0x0 },
         ui_dout_get: !ui_dout_empty,
-        stream_fifo_rget: stream_fifo_rget,
+        stream_fifo_rget: take_low,
     )
 }
