@@ -217,30 +217,18 @@ machine with no Vivado on it, openXC7 ignores the attribute, and Verilator only
 tells us it parses. Read a synthesis report before relying on it, and do not
 treat it as an MTBF improvement until you have.
 
-Known compiler debt on v0.20.0 (`7e0bf788`), each retryable after a bump:
-
-- `FifoImplState`'s `ADDR_W`/`COUNT_W` and `BootBannerState`'s `IDX_W` are
-  size-only generics that a struct member cannot compute. The notes beside them
-  say what was tried.
-- `let [a, b, c, d] = arr;` on an array whose length is a power of two emits
-  index constants one bit too wide (`bits_for(N)` where `bits_for(N - 1)` is
-  needed); Verilator reports `WIDTHTRUNC` on every extraction. Seven elements
-  destructure correctly and plain `arr[3]` is fine, so index instead until it
-  is fixed.
-- Inside a `gen if` recursion, `bits[N - 1]` is typed for an array of half the
-  length ("40 does not fit in an uint<5>"); `bits.last()` is the spelling that
-  works, and is what the CRC helpers in `sd.spade` use.
-- `[0; {8 - N}]` is not accepted (a repeat count cannot be a type expression);
-  `text.concat([0; 8])[..8]` is the workaround in `msg.spade`.
-- Editing one file can rename a register in an untouched module's SystemVerilog
-  (`sd_write_response`'s `state` became `\_` with an alias `assign`, from a
-  change in `storage.spade`); it is the alias-flattening pass choosing a
-  different net, and `--loose` sees through it, but it means "only my module
-  changed" needs checking with the tool, not assumed.
-- `swim build` regenerates `src/build_info.spade` with a fresh timestamp, and a
-  project's Cocotb suite compares its boot banner against that file at import
-  time. Building anything in a project while its suite runs fails every test
-  after the first on the banner.
+Known compiler issues on v0.20.0, the workaround each one forces on us, and
+the simplification that becomes possible once it is fixed, live in
+[docs/spade-compiler-issues.md](docs/spade-compiler-issues.md) with a
+reproducer apiece. Re-run the reproducers after every compiler bump and retire
+what no longer fails. The short list: a struct member cannot compute a width
+from its own generic (`FifoImplState`, `BootBannerState`); destructuring a
+power-of-two-length array emits an index one bit too wide; `bits[N - 1]`
+inside a `gen if` recursion is typed for half the array (use `last()`); an
+array repeat count cannot be a type expression; a `where` clause cannot say
+"power of two" (`guards.spade` stays); deprecated methods do not warn; and
+`swim build` rewrites `src/build_info.spade`, so never build in a checkout
+while its suites run.
 
 To check a refactor that is meant to preserve behaviour: build before and after,
 and compare with both `tools/sv_module_surface.py --diff` (what the testbenches
