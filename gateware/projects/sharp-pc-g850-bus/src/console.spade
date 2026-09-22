@@ -1,5 +1,3 @@
-use std::conv::concat_arrays;
-
 use shared_components::{
     ascii,
     message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_indexed, tx_req_none},
@@ -106,18 +104,13 @@ impl ConsoleMsgContext {
     }
 
     fn status_byte(self, idx: ConsoleIdx) -> TxReq8 {
-        let ft_field = concat_arrays(b"stat f=", [ascii::bool_char(self.ft_enabled)]);
-        let remote_field = concat_arrays(b" r=", [ascii::bool_char(self.ft_remote_allowed)]);
-        let armed_field = concat_arrays(b" a=", [ascii::bool_char(self.ft_armed)]);
-        let wait_field = concat_arrays(b" w=", [self.wait_char()]);
-        let mode_field = concat_arrays(b" m=", [self.saleae_state.mode_char()]);
-        let msg = concat_arrays(
-            concat_arrays(ft_field, remote_field),
-            concat_arrays(
-                concat_arrays(armed_field, wait_field),
-                concat_arrays(mode_field, b"\r\n"),
-            ),
-        );
+        let msg = b"stat f="
+            .concat([ascii::bool_char(self.ft_enabled)])
+            .concat(b" r=").concat([ascii::bool_char(self.ft_remote_allowed)])
+            .concat(b" a=").concat([ascii::bool_char(self.ft_armed)])
+            .concat(b" w=").concat([self.wait_char()])
+            .concat(b" m=").concat([self.saleae_state.mode_char()])
+            .concat(b"\r\n");
         tx_req_indexed(msg, idx)
     }
 }
@@ -134,33 +127,36 @@ impl SaleaeState {
     }
 
     fn map_byte(self, idx: ConsoleIdx) -> TxReq8 {
-        let header = concat_arrays(
-            concat_arrays(b"map mode=", [self.mode_char()]),
-            b"\r\n",
-        );
-        let data_lines = concat_arrays(
-            concat_arrays(
-                b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n",
-                b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n",
-            ),
-            concat_arrays(
-                b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
-                b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
-            ),
-        );
-        let legend_lines = concat_arrays(
-            concat_arrays(
-                b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n",
-                b"c: d0..d7=ctr[0..7]\r\n",
-            ),
-            concat_arrays(
-                b"legend: u=uart s=sync ^=fall n=active_low\r\n",
-                b"legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
-            ),
-        );
-        let msg = concat_arrays(concat_arrays(header, data_lines), legend_lines);
+        let msg = b"map mode="
+            .concat([self.mode_char()]).concat(b"\r\n")
+            .concat(b"d: d0=wr_sync d1=rd_sync d2=iorq_sync d3=mreq_sync\r\n")
+            .concat(b"   d4=m1_sync d5=data_uart d6=char_uart d7=addr_uart\r\n")
+            .concat(b"s: d0=wr_rise d1=rd_rise d2=mreq_fall d3=m1_sync d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n")
+            .concat(b"e: d0=wr_rise d1=rd_rise d2=iorq_fall d3=mreq_fall d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n")
+            .concat(b"r: d0=wr_raw d1=rd_raw d2=iorq_raw d3=mreq_raw d4=wr_sync d5=rd_sync d6=iorq_sync d7=mreq_sync\r\n")
+            .concat(b"c: d0..d7=ctr[0..7]\r\n")
+            .concat(b"legend: u=uart s=sync ^=fall n=active_low\r\n")
+            .concat(b"legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n");
         tx_req_indexed(msg, idx)
     }
+}
+
+/// ` <key><text>`, the shape of every single-key help line.
+#[inline]
+fn key_line<#uint N>(key: uint<8>, text: [uint<8>; N]) -> [uint<8>; {N + 2}] {
+    b" ".concat([key]).concat(text)
+}
+
+/// ` <on>/<off><text>`, the shape of every help line that names a pair.
+#[inline]
+fn key_pair_line<#uint N>(on: uint<8>, off: uint<8>, text: [uint<8>; N]) -> [uint<8>; {N + 4}] {
+    b" ".concat([on]).concat(b"/").concat([off]).concat(text)
+}
+
+/// `<char><text>`, one entry of the saleae-mode legend.
+#[inline]
+fn mode_legend_entry<#uint N>(state: SaleaeState, text: [uint<8>; N]) -> [uint<8>; {N + 1}] {
+    [state.mode_char()].concat(text)
 }
 
 fn help_msg_byte(idx: ConsoleIdx) -> TxReq8 {
@@ -175,108 +171,26 @@ fn help_msg_byte(idx: ConsoleIdx) -> TxReq8 {
         b'/',
         SaleaeState::Counter().mode_char(),
     ];
-    let help_line = concat_arrays(
-        concat_arrays(b" ", [ConsoleCmd::Help().key()]),
-        b" : show help\r\n",
-    );
-    let status_line = concat_arrays(
-        concat_arrays(b" ", [ConsoleCmd::Status().key()]),
-        b" : show status (f,r,a,w,m)\r\n",
-    );
-    let map_line = concat_arrays(
-        concat_arrays(b" ", [ConsoleCmd::PinMap().key()]),
-        b" : show saleae map + legend\r\n",
-    );
-    let intro = concat_arrays(
-        concat_arrays(b"Help:\r\n", help_line),
-        concat_arrays(
-            status_line,
-            map_line,
-        ),
-    );
-    let mode_select_line = concat_arrays(
-        concat_arrays(b" ", mode_keys),
-        b" : select saleae mode\r\n",
-    );
-    let mode_legend = concat_arrays(
-        concat_arrays(
-            [SaleaeState::DataSignals().mode_char()],
-            b"=data ",
-        ),
-        concat_arrays(
-            concat_arrays(
-                [SaleaeState::SyncSignals().mode_char()],
-                b"=sync ",
-            ),
-            concat_arrays(
-                concat_arrays(
-                    [SaleaeState::EdgeSignals().mode_char()],
-                    b"=edge ",
-                ),
-                concat_arrays(
-                    concat_arrays(
-                        [SaleaeState::RawSignals().mode_char()],
-                        b"=raw ",
-                    ),
-                    concat_arrays(
-                        [SaleaeState::Counter().mode_char()],
-                        b"=counter\r\n",
-                    ),
-                ),
-            ),
-        ),
-    );
-    let wait_line = concat_arrays(
-        b" 0..9 : set wait level (0=min wait)\r\n",
-        concat_arrays(
-            concat_arrays(b" ", [ConsoleCmd::Arm().key()]),
-            concat_arrays(
-                b"/",
-                concat_arrays(
-                    [ConsoleCmd::Lock().key()],
-                    b" : arm or lock FT control\r\n",
-                ),
-            ),
-        ),
-    );
-    let mode_lines = concat_arrays(
-        concat_arrays(
-            mode_select_line,
-            concat_arrays(b"   ", mode_legend),
-        ),
-        wait_line,
-    );
-    let remote_line = concat_arrays(
-        concat_arrays(b" ", [ConsoleCmd::RemoteOn().key()]),
-        concat_arrays(
-            b"/",
-            concat_arrays(
-                [ConsoleCmd::RemoteOff().key()],
-                b" : allow or block FT remote\r\n",
-            ),
-        ),
-    );
-    let ft_line = concat_arrays(
-        concat_arrays(b" ", [ConsoleCmd::FtOn().key()]),
-        concat_arrays(
-            b"/",
-            concat_arrays(
-                [ConsoleCmd::FtOff().key()],
-                b" : force FT stream on/off\r\n",
-            ),
-        ),
-    );
-    let control_lines = concat_arrays(
-        concat_arrays(
-            remote_line,
-            ft_line,
-        ),
-        concat_arrays(
-            b" legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n",
-            b" note: commands are case-insensitive\r\n",
-        ),
-    );
-    let msg = concat_arrays(concat_arrays(intro, mode_lines), control_lines);
+    let msg = b"Help:\r\n"
+        .concat(key_line(ConsoleCmd::Help().key(), b" : show help\r\n"))
+        .concat(key_line(ConsoleCmd::Status().key(), b" : show status (f,r,a,w,m)\r\n"))
+        .concat(key_line(ConsoleCmd::PinMap().key(), b" : show saleae map + legend\r\n"))
+        .concat(b" ").concat(mode_keys).concat(b" : select saleae mode\r\n")
+        .concat(b"   ")
+        .concat(mode_legend_entry(SaleaeState::DataSignals(), b"=data "))
+        .concat(mode_legend_entry(SaleaeState::SyncSignals(), b"=sync "))
+        .concat(mode_legend_entry(SaleaeState::EdgeSignals(), b"=edge "))
+        .concat(mode_legend_entry(SaleaeState::RawSignals(), b"=raw "))
+        .concat(mode_legend_entry(SaleaeState::Counter(), b"=counter\r\n"))
+        .concat(b" 0..9 : set wait level (0=min wait)\r\n")
+        .concat(key_pair_line(ConsoleCmd::Arm().key(), ConsoleCmd::Lock().key(),
+            b" : arm or lock FT control\r\n"))
+        .concat(key_pair_line(ConsoleCmd::RemoteOn().key(), ConsoleCmd::RemoteOff().key(),
+            b" : allow or block FT remote\r\n"))
+        .concat(key_pair_line(ConsoleCmd::FtOn().key(), ConsoleCmd::FtOff().key(),
+            b" : force FT stream on/off\r\n"))
+        .concat(b" legend char_uart: M=op_fetch R=mem_rd r=io_rd W=mem_wr w=io_wr\r\n")
+        .concat(b" note: commands are case-insensitive\r\n");
     tx_req_indexed(msg, idx)
 }
 
