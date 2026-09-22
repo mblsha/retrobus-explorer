@@ -21,7 +21,6 @@ use super::protocol::{
     organizer_trace_event_none,
     organizer_trace_event_overflow,
     organizer_trace_event_sample,
-    organizer_zero_sample,
     sample_addr_value,
     sample_data_value,
     sample_misc_value,
@@ -31,25 +30,14 @@ type AddrSampleState = StableSampleState<20, 8>;
 type DataSampleState = StableSampleState<8, 8>;
 type MiscSampleState = StableSampleState<11, 8>;
 
-struct QueuedSample {
-    valid: bool,
-    sample: OrganizerSample,
-}
-
-struct OrganizerQueuedSamples {
-    first: QueuedSample,
-    second: QueuedSample,
-    third: QueuedSample,
-}
+/// Up to three samples can be taken in one cycle -- address, data and misc --
+/// while the stream drains at most one per cycle, so the monitor holds a
+/// three-deep queue of them.
+type OrganizerQueuedSamples = [Option<OrganizerSample>; 3];
 
 struct QueuePushOut {
     queue: OrganizerQueuedSamples,
     dropped: OrganizerOverflowCount,
-}
-
-struct QueuePopOut {
-    queue: OrganizerQueuedSamples,
-    head: QueuedSample,
 }
 
 pub(lib) struct OrganizerMonitorState {
@@ -104,22 +92,6 @@ entity organizer_monitor_uart<#uint WIDTH>(
     uart.line
 }
 
-impl Default for QueuedSample {
-    fn default() -> Self {
-        QueuedSample$(valid: false, sample: organizer_zero_sample())
-    }
-}
-
-impl Default for OrganizerQueuedSamples {
-    fn default() -> Self {
-        OrganizerQueuedSamples$(
-            first: QueuedSample::default(),
-            second: QueuedSample::default(),
-            third: QueuedSample::default(),
-        )
-    }
-}
-
 impl Default for OrganizerMonitorState {
     fn default() -> Self {
         OrganizerMonitorState$(
@@ -133,49 +105,18 @@ impl Default for OrganizerMonitorState {
 }
 
 fn queue_push(queue: OrganizerQueuedSamples, sample_valid: bool, sample: OrganizerSample) -> QueuePushOut {
+    let entry = Some(sample);
     if !sample_valid {
         QueuePushOut$(queue: queue, dropped: 0)
-    } else if !queue.first.valid {
-        QueuePushOut$(
-            queue: OrganizerQueuedSamples$(
-                first: QueuedSample$(valid: true, sample: sample),
-                second: queue.second,
-                third: queue.third,
-            ),
-            dropped: 0,
-        )
-    } else if !queue.second.valid {
-        QueuePushOut$(
-            queue: OrganizerQueuedSamples$(
-                first: queue.first,
-                second: QueuedSample$(valid: true, sample: sample),
-                third: queue.third,
-            ),
-            dropped: 0,
-        )
-    } else if !queue.third.valid {
-        QueuePushOut$(
-            queue: OrganizerQueuedSamples$(
-                first: queue.first,
-                second: queue.second,
-                third: QueuedSample$(valid: true, sample: sample),
-            ),
-            dropped: 0,
-        )
+    } else if queue[0].is_none() {
+        QueuePushOut$(queue: [entry, queue[1], queue[2]], dropped: 0)
+    } else if queue[1].is_none() {
+        QueuePushOut$(queue: [queue[0], entry, queue[2]], dropped: 0)
+    } else if queue[2].is_none() {
+        QueuePushOut$(queue: [queue[0], queue[1], entry], dropped: 0)
     } else {
         QueuePushOut$(queue: queue, dropped: 1)
     }
-}
-
-fn queue_pop(queue: OrganizerQueuedSamples) -> QueuePopOut {
-    QueuePopOut$(
-        head: queue.first,
-        queue: OrganizerQueuedSamples$(
-            first: queue.second,
-            second: queue.third,
-            third: QueuedSample::default(),
-        ),
-    )
 }
 
 fn live_samples(
@@ -261,17 +202,16 @@ impl OrganizerMonitorState {
                 next_state: self,
                 stream_event: organizer_trace_event_none(),
             )
-        } else if self.queued.first.valid {
-            let popped = queue_pop(self.queued);
+        } else if let Some(head) = self.queued[0] {
             OrganizerMonitorTransportOut$(
                 next_state: OrganizerMonitorState$(
                     addr: self.addr,
                     data: self.data,
                     misc: self.misc,
-                    queued: popped.queue,
+                    queued: self.queued.shift_back(None),
                     overflow_count: self.overflow_count,
                 ),
-                stream_event: organizer_trace_event_sample(popped.head.sample),
+                stream_event: organizer_trace_event_sample(head),
             )
         } else if self.overflow_count != 0 {
             OrganizerMonitorTransportOut$(
