@@ -1470,7 +1470,6 @@ entity bram_emulator(
     let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port();
     let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port();
     let (read_release, read_release_w): (bool, inv bool) = port();
-    let (_, unused_selector): (uint<7>, inv uint<7>) = port();
     let _ = inst loader::image_loader$(
         clk,
         rst,
@@ -1485,7 +1484,8 @@ entity bram_emulator(
         load_address: loader_address_w,
         load_byte: loader_byte_w,
         armed: card_armed_w,
-        status_selector: unused_selector,
+        // The BRAM card has one image bank, so no sector selects a status word.
+        status_selector: port().1,
     );
     let _ = inst storage::bram_backend$(
         clk,
@@ -1504,26 +1504,8 @@ entity bram_emulator(
         byte_index: read_byte_index,
         sector_byte: read_byte_w,
     );
-    let (unused_wc, unused_wc_w): (bool, inv bool) = port();
-    let (unused_wa, unused_wa_w): (uint<24>, inv uint<24>) = port();
-    let (unused_wv, unused_wv_w): (bool, inv bool) = port();
-    let (unused_wd, unused_wd_w): (uint<128>, inv uint<128>) = port();
-    let (unused_wm, unused_wm_w): (uint<16>, inv uint<16>) = port();
-    let (unused_wb, unused_wb_w): (bool, inv bool) = port();
-    let (_, unused_trace_clock): (bool, inv bool) = port();
-    let (_, unused_trace_frame): (bool, inv bool) = port();
-    let (_, unused_trace_valid): (bool, inv bool) = port();
-    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port();
-    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_response): (bool, inv bool) = port();
-    let (_, unused_trace_response_complete): (bool, inv bool) = port();
-    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_data_release): (bool, inv bool) = port();
-    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port();
+    // This card is read-only and has no trace service: the DDR write channel
+    // and every observation tap terminate in their own `port().1` sink.
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1560,30 +1542,30 @@ entity bram_emulator(
         dat_in: 15,
 
         // DDR write command
-        write_cmd_valid: unused_wc_w,
+        write_cmd_valid: port().1,
         write_cmd_ready: false,
-        write_cmd_address: unused_wa_w,
+        write_cmd_address: port().1,
 
         // DDR write data
-        write_data_valid: unused_wv_w,
+        write_data_valid: port().1,
         write_data_ready: false,
-        write_data: unused_wd_w,
-        write_mask: unused_wm_w,
-        write_busy: unused_wb_w,
-        trace_clock_tick: unused_trace_clock,
-        trace_frame: unused_trace_frame,
-        trace_valid: unused_trace_valid,
-        trace_command: unused_trace_command,
-        trace_argument: unused_trace_argument,
-        trace_response: unused_trace_response,
-        trace_response_complete: unused_trace_response_complete,
-        trace_response_payload: unused_trace_response_payload,
-        trace_data_release: unused_trace_data_release,
-        trace_protocol_status: unused_trace_protocol_status,
-        trace_pin_response: unused_trace_pin_response,
-        trace_pin_response_mismatch: unused_trace_pin_response_mismatch,
-        trace_pin_data: unused_trace_pin_data,
-        trace_pin_data_mismatch: unused_trace_pin_data_mismatch,
+        write_data: port().1,
+        write_mask: port().1,
+        write_busy: port().1,
+        trace_clock_tick: port().1,
+        trace_frame: port().1,
+        trace_valid: port().1,
+        trace_command: port().1,
+        trace_argument: port().1,
+        trace_response: port().1,
+        trace_response_complete: port().1,
+        trace_response_payload: port().1,
+        trace_data_release: port().1,
+        trace_protocol_status: port().1,
+        trace_pin_response: port().1,
+        trace_pin_response_mismatch: port().1,
+        trace_pin_data: port().1,
+        trace_pin_data_mismatch: port().1,
     );
     set armed_status = card_armed;
 }
@@ -1816,20 +1798,8 @@ entity ddr_emulator(
     set ddr_wdata_valid = (if sd_owner { sd_write_data_valid } else { loader_data_valid });
     set ddr_wdata = (if sd_owner { sd_write_data } else { loader_data });
     set ddr_wdata_mask = (if sd_owner { sd_write_mask } else { loader_mask });
-    let (_, unused_trace_clock): (bool, inv bool) = port();
-    let (_, unused_trace_frame): (bool, inv bool) = port();
-    let (_, unused_trace_valid): (bool, inv bool) = port();
-    let (_, unused_trace_command): (uint<6>, inv uint<6>) = port();
-    let (_, unused_trace_argument): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_response): (bool, inv bool) = port();
-    let (_, unused_trace_response_complete): (bool, inv bool) = port();
-    let (_, unused_trace_response_payload): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_data_release): (bool, inv bool) = port();
-    let (_, unused_trace_protocol_status): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_response): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_response_mismatch): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_data): (uint<32>, inv uint<32>) = port();
-    let (_, unused_trace_pin_data_mismatch): (uint<32>, inv uint<32>) = port();
+    // Only the Ethernet build subscribes to the observation taps; here each
+    // one terminates in its own `port().1` sink.
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1876,20 +1846,20 @@ entity ddr_emulator(
         write_data: sd_write_data_w,
         write_mask: sd_write_mask_w,
         write_busy: sd_commit_busy_w,
-        trace_clock_tick: unused_trace_clock,
-        trace_frame: unused_trace_frame,
-        trace_valid: unused_trace_valid,
-        trace_command: unused_trace_command,
-        trace_argument: unused_trace_argument,
-        trace_response: unused_trace_response,
-        trace_response_complete: unused_trace_response_complete,
-        trace_response_payload: unused_trace_response_payload,
-        trace_data_release: unused_trace_data_release,
-        trace_protocol_status: unused_trace_protocol_status,
-        trace_pin_response: unused_trace_pin_response,
-        trace_pin_response_mismatch: unused_trace_pin_response_mismatch,
-        trace_pin_data: unused_trace_pin_data,
-        trace_pin_data_mismatch: unused_trace_pin_data_mismatch,
+        trace_clock_tick: port().1,
+        trace_frame: port().1,
+        trace_valid: port().1,
+        trace_command: port().1,
+        trace_argument: port().1,
+        trace_response: port().1,
+        trace_response_complete: port().1,
+        trace_response_payload: port().1,
+        trace_data_release: port().1,
+        trace_protocol_status: port().1,
+        trace_pin_response: port().1,
+        trace_pin_response_mismatch: port().1,
+        trace_pin_data: port().1,
+        trace_pin_data_mismatch: port().1,
     );
     set armed_status = (card_armed && initialized);
 }
