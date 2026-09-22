@@ -1,5 +1,4 @@
 use shared_components::{
-    ascii,
     message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_indexed, tx_req_none},
 };
 
@@ -105,9 +104,9 @@ impl ConsoleMsgContext {
 
     fn status_byte(self, idx: ConsoleIdx) -> TxReq8 {
         let msg = b"stat f="
-            .concat([ascii::bool_char(self.ft_enabled)])
-            .concat(b" r=").concat([ascii::bool_char(self.ft_remote_allowed)])
-            .concat(b" a=").concat([ascii::bool_char(self.ft_armed)])
+            .concat([self.ft_enabled.digit_char()])
+            .concat(b" r=").concat([self.ft_remote_allowed.digit_char()])
+            .concat(b" a=").concat([self.ft_armed.digit_char()])
             .concat(b" w=").concat([self.wait_char()])
             .concat(b" m=").concat([self.saleae_state.mode_char()])
             .concat(b"\r\n");

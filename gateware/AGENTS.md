@@ -159,6 +159,14 @@ To bump the compiler:
   has a length no other step has, so a long builder written flat costs a module
   per step where the old nested `concat_arrays` tree reused its pairs;
   `console.spade`'s `key_line`/`key_pair_line` are the pattern.
+- A method is chosen from the receiver's type, and the receiver's type has to be
+  known already, while `trunc` and `zext` take theirs from the context. So
+  `trunc(word >> 12).hex_char()` does not compile although
+  `hex_char(trunc(word >> 12))` did: name the narrowed value in a typed `let`
+  first. That is usually the better spelling anyway -- one `match` that picks
+  the nibble and one call that renders it, as `msg.spade`'s `offset_hex_char`
+  and `u32_hex_char` do -- because a `hex_char` per arm is a module instance
+  per arm.
 - Ask a value for its own bit with `msb()`/`lsb()`, read an `Option` with
   `is_some()`/`unwrap_or()`, and know that none of them is `#[inline]` upstream:
   each monomorphisation is a one-line module in every project that reaches it.

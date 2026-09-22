@@ -18,32 +18,42 @@ impl Default for DigitDecode {
     }
 }
 
-pub fn hex_char(value: uint<4>) -> uint<8> {
-    let value_u8: uint<8> = zext(value);
-    if value < 10 {
-        b'0' +. value_u8
-    } else {
-        b'A' +. (value_u8 -. 10)
+// A nibble renders itself. A method's receiver has to have a known type, and
+// `trunc`/`zext` take theirs from the context, so a caller slicing a nibble out
+// of a wider word names it in a typed `let` first.
+impl uint<4> {
+    pub fn hex_char(self) -> uint<8> {
+        let value: uint<8> = zext(self);
+        if self < 10 {
+            b'0' +. value
+        } else {
+            b'A' +. (value -. 10)
+        }
+    }
+
+    pub fn digit_char(self) -> uint<8> {
+        b'0' +. zext(self)
     }
 }
 
-pub fn digit_char(value: uint<4>) -> uint<8> {
-    b'0' +. zext(value)
-}
-
-pub fn bool_char(value: bool) -> uint<8> {
-    if value { b'1' } else { b'0' }
-}
-
-pub fn byte_hex_high(value: uint<8>) -> uint<8> {
-    hex_char(trunc(value >> 4))
-}
-
-pub fn byte_hex_low(value: uint<8>) -> uint<8> {
-    hex_char(trunc(value))
+// A flag renders as one digit, exactly as a nibble does.
+impl bool {
+    pub fn digit_char(self) -> uint<8> {
+        if self { b'1' } else { b'0' }
+    }
 }
 
 impl uint<8> {
+    pub fn hex_high(self) -> uint<8> {
+        let nibble: uint<4> = trunc(self >> 4);
+        nibble.hex_char()
+    }
+
+    pub fn hex_low(self) -> uint<8> {
+        let nibble: uint<4> = trunc(self);
+        nibble.hex_char()
+    }
+
     pub fn to_upper(self) -> uint<8> {
         let case_delta: uint<8> = b'a' -. b'A';
         if self >= b'a' && self <= b'z' {

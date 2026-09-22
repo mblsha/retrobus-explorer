@@ -1,5 +1,4 @@
 use shared_components::{
-    ascii,
     message_stream::{
         TxReq8,
         schedule_one_current_latest_pending,
@@ -361,17 +360,17 @@ fn status_byte(status: OrganizerStatus, phase: StatusPhase, idx: ByteIdx, ch: ui
         tx_req_indexed(b",A=", idx)
     } else if phase == 3 {
         tx_req_byte(if idx == 0 {
-            ascii::byte_hex_high(trunc(status.addr_delay))
+            status.addr_delay.hex_high()
         } else {
-            ascii::byte_hex_low(trunc(status.addr_delay))
+            status.addr_delay.hex_low()
         })
     } else if phase == 4 {
         tx_req_indexed(b",D=", idx)
     } else if phase == 5 {
         tx_req_byte(if idx == 0 {
-            ascii::byte_hex_high(trunc(status.data_delay))
+            status.data_delay.hex_high()
         } else {
-            ascii::byte_hex_low(trunc(status.data_delay))
+            status.data_delay.hex_low()
         })
     } else if phase == 6 {
         tx_req_indexed(b",P0=", idx)
@@ -392,7 +391,7 @@ fn status_byte(status: OrganizerStatus, phase: StatusPhase, idx: ByteIdx, ch: ui
     } else if phase == 14 {
         tx_req_indexed(b",FT=", idx)
     } else if phase == 15 {
-        tx_req_byte(ascii::bool_char(status.ft_enabled))
+        tx_req_byte(status.ft_enabled.digit_char())
     } else if phase == 16 {
         tx_req_indexed(b"\r\nCH=", idx)
     } else if phase == phase_channel() {

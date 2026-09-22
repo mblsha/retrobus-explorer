@@ -1,5 +1,4 @@
 use super::{
-    ascii,
     message_stream::{
         ByteMsgStreamState,
         TxReq8,
@@ -42,11 +41,11 @@ entity tb_ascii_message_helpers(
         TxReq8$(valid: low_valid, byte: low_byte),
     );
 
-    set hex_char_out = ascii::hex_char(nibble);
-    set byte_hex_high = ascii::byte_hex_high(value);
-    set byte_hex_low = ascii::byte_hex_low(value);
-    set digit_char = ascii::digit_char(digit);
-    set bool_char = ascii::bool_char(flag);
+    set hex_char_out = nibble.hex_char();
+    set byte_hex_high = value.hex_high();
+    set byte_hex_low = value.hex_low();
+    set digit_char = digit.digit_char();
+    set bool_char = flag.digit_char();
     set text_valid = indexed.valid;
     set text_byte = indexed.byte;
     set arbiter_valid = arbitrated.valid;

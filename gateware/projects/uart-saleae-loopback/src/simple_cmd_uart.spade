@@ -1,5 +1,5 @@
 use shared_components::{
-    ascii::{DigitDecode, digit_char},
+    ascii::DigitDecode,
     message_stream::{ByteMsgStreamOut, ByteMsgStreamState, TxReq8, tx_req_byte, tx_req_none},
 };
 
@@ -105,7 +105,7 @@ impl MsgKind {
 
     fn template(self, mode: Mode, freq_code: uint<4>) -> MsgTemplate<64> {
         let m = mode.char();
-        let f = digit_char(freq_code);
+        let f = freq_code.digit_char();
 
         match self {
             Self::None => MsgTemplate$(len: 0, bytes: [0; 64]),
