@@ -359,8 +359,7 @@ where DATA_WIDTH > 0 else "uart_rx needs at least one data bit"
         reset(rst: UartRxCapture$(valid: false, byte: 0, parity_error: false))
         = {
         match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity) if !parity && time == last && bit_idx == last_bit_idx => {
-                let _ = odd_parity;
+            RxState::WaitData$(time, bit_idx, data, odd_parity: _) if !parity && time == last && bit_idx == last_bit_idx => {
                 UartRxCapture$(
                     valid: true,
                     byte: uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync),
