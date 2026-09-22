@@ -369,14 +369,16 @@ pub entity sd_trace(
             tick_period
         } else { maximum_tick_period };
 
-    let armed_flag: uint<32> = if armed { 1 } else { 0 };
-    let initialized_flag: uint<32> = if initialized { 2 } else { 0 };
-    let clock_flag: uint<32> = if clock_tick { 4 } else { 0 };
-    let command_flag: uint<32> = if command_frame { 8 } else { 0 };
-    let write_flag: uint<32> = if write_busy { 16 } else { 0 };
-    let read_flag: uint<32> = if read_request { 32 } else { 0 };
-    let flags: uint<32> = armed_flag | initialized_flag | clock_flag |
-        command_flag | write_flag | read_flag;
+    // Word 1 of the readout: PROTOCOL.md's ARM, DDR, clock, command, write and
+    // read flags, least significant bit first. This order is the wire order.
+    let flags: uint<32> = zext([
+        armed,
+        initialized,
+        clock_tick,
+        command_frame,
+        write_busy,
+        read_request,
+    ].as_uint());
     let enhanced_magic: uint<32> = 0x32435453;
     let switch_summary: uint<32> = zext(cmd6_count) |
         (zext(cmd13_count) << 8) |
