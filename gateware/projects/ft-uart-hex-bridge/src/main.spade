@@ -230,20 +230,11 @@ entity main_core(
         } else {
             state.pending_tx_valid || send_word_valid
         };
-        let next_pending_tx_word = if tx_write {
-            send_word
-        } else if send_word_valid && !state.pending_tx_valid {
-            send_word
-        } else {
-            state.pending_tx_word
-        };
-        let next_pending_tx_be = if tx_write {
-            send_be
-        } else if send_word_valid && !state.pending_tx_valid {
-            send_be
-        } else {
-            state.pending_tx_be
-        };
+        // The parsed word takes the slot when this cycle empties it, or when
+        // it was already empty; otherwise the held word stays and is dropped.
+        let take_send_word = tx_write || (send_word_valid && !state.pending_tx_valid);
+        let next_pending_tx_word = if take_send_word { send_word } else { state.pending_tx_word };
+        let next_pending_tx_be = if take_send_word { send_be } else { state.pending_tx_be };
 
         MainState$(
             parser: parse.state,
