@@ -33,87 +33,44 @@ pub entity bram_backend(
 
     decl state, saved_epoch, offset, saved_lba;
     let accept_load = !armed && load_address < 65536 && !rst;
-    // Independent 4 KiB banks avoid RAMB36 cascade placement in nextpnr-xilinx.
     let image_address: uint<12> = (trunc::<uint<32>, uint<12>>(saved_lba) << 9) | zext(offset);
-    let image_0: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 0, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    // A load reaches exactly one bank; every bank sees the same offset inside
+    // it and the same read address. Independent 4 KiB banks avoid RAMB36
+    // cascade placement in nextpnr-xilinx, so the sixteen stay written out.
+    let bank_write = load_valid && accept_load;
+    let load_bank = load_address >> 12;
+    let load_offset: uint<12> = trunc(load_address);
+    let image_0: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 0, load_offset, load_byte)]);
     reg(clk) read_0 = inst read_memory(image_0, image_address);
-    let image_1: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 1, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_1: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 1, load_offset, load_byte)]);
     reg(clk) read_1 = inst read_memory(image_1, image_address);
-    let image_2: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 2, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_2: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 2, load_offset, load_byte)]);
     reg(clk) read_2 = inst read_memory(image_2, image_address);
-    let image_3: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 3, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_3: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 3, load_offset, load_byte)]);
     reg(clk) read_3 = inst read_memory(image_3, image_address);
-    let image_4: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 4, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_4: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 4, load_offset, load_byte)]);
     reg(clk) read_4 = inst read_memory(image_4, image_address);
-    let image_5: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 5, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_5: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 5, load_offset, load_byte)]);
     reg(clk) read_5 = inst read_memory(image_5, image_address);
-    let image_6: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 6, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_6: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 6, load_offset, load_byte)]);
     reg(clk) read_6 = inst read_memory(image_6, image_address);
-    let image_7: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 7, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_7: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 7, load_offset, load_byte)]);
     reg(clk) read_7 = inst read_memory(image_7, image_address);
-    let image_8: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 8, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_8: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 8, load_offset, load_byte)]);
     reg(clk) read_8 = inst read_memory(image_8, image_address);
-    let image_9: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 9, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_9: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 9, load_offset, load_byte)]);
     reg(clk) read_9 = inst read_memory(image_9, image_address);
-    let image_10: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 10, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_10: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 10, load_offset, load_byte)]);
     reg(clk) read_10 = inst read_memory(image_10, image_address);
-    let image_11: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 11, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_11: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 11, load_offset, load_byte)]);
     reg(clk) read_11 = inst read_memory(image_11, image_address);
-    let image_12: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 12, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_12: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 12, load_offset, load_byte)]);
     reg(clk) read_12 = inst read_memory(image_12, image_address);
-    let image_13: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 13, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_13: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 13, load_offset, load_byte)]);
     reg(clk) read_13 = inst read_memory(image_13, image_address);
-    let image_14: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 14, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_14: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 14, load_offset, load_byte)]);
     reg(clk) read_14 = inst read_memory(image_14, image_address);
-    let image_15: ImageBank = inst clocked_memory(
-        clk,
-        [(load_valid && accept_load && (load_address >> 12) == 15, trunc::<uint<32>, uint<12>>(load_address), load_byte)],
-    );
+    let image_15: ImageBank = inst clocked_memory(clk, [(bank_write && load_bank == 15, load_offset, load_byte)]);
     reg(clk) read_15 = inst read_memory(image_15, image_address);
     let bank: uint<4> = trunc(saved_lba >> 3);
     let image_byte = [read_0, read_1, read_2, read_3, read_4, read_5, read_6, read_7, read_8, read_9, read_10, read_11, read_12, read_13, read_14, read_15][bank];
