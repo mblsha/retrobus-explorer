@@ -60,11 +60,11 @@ pub entity boot_banner_core<#uint IDX_W, #uint N>(
     banner: [uint<8>; N],
     block_tx: bool,
 ) -> BootBannerOut<IDX_W> {
-    reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = {
-        boot_banner_step(state, banner, block_tx).state
-    };
+    decl stepped;
+    reg(clk) state: BootBannerState<IDX_W> reset(rst: init_boot_banner()) = stepped.state;
+    let stepped = boot_banner_step(state, banner, block_tx);
 
-    boot_banner_step(state, banner, block_tx)
+    stepped
 }
 
 #[inline]

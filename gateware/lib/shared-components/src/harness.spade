@@ -386,9 +386,8 @@ entity tb_elastic_buffer_u8(
     accepted: inv bool,
     dropped: inv bool,
 ) {
-    reg(clk) slot: ElasticSlotState<uint<8>> reset(rst: elastic_slot_reset(0)) = {
-        elastic_slot_step(slot, capture_valid, capture_data, sink_full).next_state
-    };
+    decl step;
+    reg(clk) slot: ElasticSlotState<uint<8>> reset(rst: elastic_slot_reset(0)) = step.next_state;
     let step = elastic_slot_step(slot, capture_valid, capture_data, sink_full);
 
     set pending_valid = step.pending_valid;

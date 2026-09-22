@@ -91,16 +91,8 @@ entity tb_message_stream(
     scheduled_pending_is_none: inv bool,
     scheduled_current_loaded: inv bool,
 ) {
-    reg(clk) state: ByteMsgStreamState<uint<8>, 2> reset(rst: init_byte_msg_stream(0)) = {
-        state.step_with(
-            0,
-            fn |msg| { msg == 0 },
-            fn |msg, idx| { harness_msg_byte(msg, idx) },
-            block_tx,
-            enqueue_valid,
-            enqueue_msg,
-        ).state
-    };
+    decl step;
+    reg(clk) state: ByteMsgStreamState<uint<8>, 2> reset(rst: init_byte_msg_stream(0)) = step.state;
     let step = state.step_with(
         0,
         fn |msg| { msg == 0 },
