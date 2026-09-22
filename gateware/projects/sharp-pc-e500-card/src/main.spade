@@ -1631,10 +1631,8 @@ entity main_core(
     set ft_oe = ft_io.ft_oe;
     set data_drive = bus_data_out;
     set data_oe = bus_drive_cycle;
-    let _unused_ft_ui_dout = ft_io.ui_dout;
-    let _unused_ft_ui_dout_be = ft_io.ui_dout_be;
-    let _unused_rst_n = rst_n;
-    let _unused_vcc2 = vcc2;
-    let _unused_nc = nc;
-    let _unused_oe = oe;
+    // `vcc2` and `oe` are card-edge pins the ACF maps but this design never
+    // reads, and the FT600's read side is drained by `ui_dout_get` without the
+    // words being looked at, because the card only streams outward. Spade does
+    // not warn about an input that goes unread, so none of that needs tying off.
 }
