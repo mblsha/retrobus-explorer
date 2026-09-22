@@ -973,10 +973,10 @@ entity main_core(
     let default_classify_last = default_classify_last();
     let default_ctrl_write_last = default_ctrl_write_last();
 
-    let addr_sync_bits = inst sync_bundle::<2, 18>(clk, addr.to_bits());
-    let data_sync_bits = inst sync_bundle::<2, 8>(clk, data_in.to_bits());
-    let addr_now: BusAddr = addr_sync_bits.to_uint();
-    let data_now: CardData = data_sync_bits.to_uint();
+    let addr_sync_bits = inst sync_bundle::<2, 18>(clk, addr.as_bits());
+    let data_sync_bits = inst sync_bundle::<2, 8>(clk, data_in.as_bits());
+    let addr_now: BusAddr = addr_sync_bits.as_uint();
+    let data_now: CardData = data_sync_bits.as_uint();
     let data_uart_now: CardData = data_in;
 
     let (mem_dout, mem_dout_w): (CardData, inv CardData) = port();

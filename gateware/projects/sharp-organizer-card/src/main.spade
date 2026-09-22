@@ -289,8 +289,8 @@ entity main_core(
 
     let conn_core_sync = inst sync_bundle::<2, 4>(clk, [conn_rw, conn_oe, conn_ci, conn_e2]);
     let conn_aux_sync = inst sync_bundle::<2, 7>(clk, [conn_mskrom, conn_sram1, conn_sram2, conn_eprom, conn_stnby, conn_vbatt, conn_vpp]);
-    let addr_sync_bits = inst sync_bundle::<2, 20>(clk, addr.to_bits());
-    let data_sync_bits = inst sync_bundle::<2, 8>(clk, data.to_bits());
+    let addr_sync_bits = inst sync_bundle::<2, 20>(clk, addr.as_bits());
+    let data_sync_bits = inst sync_bundle::<2, 8>(clk, data.as_bits());
 
     let conn_rw_sync = conn_core_sync[0];
     let conn_oe_sync = conn_core_sync[1];
@@ -305,8 +305,8 @@ entity main_core(
     let conn_vbatt_sync = conn_aux_sync[5];
     let conn_vpp_sync = conn_aux_sync[6];
 
-    let addr_sync: OrganizerAddr = addr_sync_bits.to_uint();
-    let data_sync: OrganizerData = data_sync_bits.to_uint();
+    let addr_sync: OrganizerAddr = addr_sync_bits.as_uint();
+    let data_sync: OrganizerData = data_sync_bits.as_uint();
     reg(clk) addr_sync_last: OrganizerAddr reset(rst: 0) = addr_sync;
     reg(clk) data_sync_last: OrganizerData reset(rst: 0) = data_sync;
     let addr_changed = addr_sync != addr_sync_last;

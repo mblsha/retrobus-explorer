@@ -137,7 +137,7 @@ pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
             inputs.ft_ui_din_full,
         ],
         saleae: if let SaleaeState::Counter = inputs.state.saleae_state {
-            inputs.state.saleae_counter.to_bits()
+            inputs.state.saleae_counter.as_bits()
         } else if inputs.state.saleae_mode == 2 {
             saleae_settling(inputs)
         } else if inputs.state.saleae_mode == 1 {

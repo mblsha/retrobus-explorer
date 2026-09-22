@@ -181,5 +181,5 @@ pub fn misc_word(
         conn_ci_sync,
         conn_oe_sync,
         conn_rw_sync,
-    ].to_uint()
+    ].as_uint()
 }
