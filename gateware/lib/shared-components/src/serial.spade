@@ -30,6 +30,12 @@ pub struct UartLineBusyPort {
     busy: bool,
 }
 
+/// The `port()` pair of a `UartLineBusyPort`, which is the only way anyone uses
+/// it. Until 0.20 a type alias could not name a port type and every site spelled
+/// the pair out; it can now, so `let (uart, uart_w): UartLineBusy = port();`
+/// says it once.
+pub type UartLineBusy = (UartLineBusyPort, inv UartLineBusyPort);
+
 pub entity usb_loopback(
     usb_rx: bool,
     usb_tx: inv bool,

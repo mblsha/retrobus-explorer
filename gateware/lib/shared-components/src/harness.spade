@@ -6,7 +6,7 @@ use super::{
     message_stream::TxReq8,
     monitoring::async_uart_monitor,
     primitives::{counter, falling_edge, reset_conditioner, rising_edge, sync_delay},
-    serial::{BitTime, FtBe, FtData, FtOut, StopBits, UartLineBusyPort, ft, ft_out_tap, uart_rx, uart_tx, uart_tx_tap},
+    serial::{BitTime, FtBe, FtData, FtOut, StopBits, ft, ft_out_tap, uart_rx, uart_tx, uart_tx_tap},
     sharp::{banked_rom_byte, count_on_event, gate_byte8, wait_hold},
 };
 
@@ -410,31 +410,23 @@ entity tb_uart_tx_adapter_equiv(
     adapter_line: inv bool,
     adapter_busy: inv bool,
 ) {
-    let (direct, direct_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
-    let (adapter, adapter_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
-
     inst au_usb_uart_tx8_tap(
         clk,
         rst,
         block,
         tx_byte,
         tx_valid,
-        direct_w.line,
-        direct_w.busy,
+        direct_line,
+        direct_busy,
     );
     inst au_usb_uart_tx8_req_tap(
         clk,
         rst,
         block,
         TxReq8$(valid: tx_valid, byte: tx_byte),
-        adapter_w.line,
-        adapter_w.busy,
+        adapter_line,
+        adapter_busy,
     );
-
-    set direct_line = direct.line;
-    set direct_busy = direct.busy;
-    set adapter_line = adapter.line;
-    set adapter_busy = adapter.busy;
 }
 
 #[no_mangle(all)]
@@ -450,21 +442,18 @@ entity tb_uart_tx_tap_equiv(
     tap_busy: inv bool,
 ) {
     let core = inst uart_tx::<40, 10, 8>(clk, rst, block, tx_byte, tx_valid);
-    let (tap, tap_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
     inst uart_tx_tap::<40, 10, 8>(
         clk,
         rst,
         block,
         tx_byte,
         tx_valid,
-        tap_w.line,
-        tap_w.busy,
+        tap_line,
+        tap_busy,
     );
 
     set core_line = core.tx;
     set core_busy = core.busy;
-    set tap_line = tap.line;
-    set tap_busy = tap.busy;
 }
 
 #[no_mangle(all)]

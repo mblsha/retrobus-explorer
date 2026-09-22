@@ -1,4 +1,4 @@
-use super::{memory::async_fifo, serial::{UartLineBusyPort, uart_tx_tap}};
+use super::{memory::async_fifo, serial::{UartLineBusy, uart_tx_tap}};
 
 pub struct UartFifoBridgeOut<TData, #uint DROP_COUNT_W> {
     line: bool,
@@ -29,15 +29,16 @@ pub entity uart_fifo_bridge<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #uint
     send_enable: bool,
     policy: BridgePolicy,
 ) -> UartBridgeOut<WIDTH, DROP_COUNT_W> {
-    let (bridge, bridge_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
-    let (fifo_rget, fifo_rget_w): (bool, inv bool) = port();
+    let (bridge, bridge_w): UartLineBusy = port();
 
+    // The fifo's `rget` is decided by what comes out of it, so the name has to
+    // exist before the instantiation that produces it.
+    decl fifo_take;
     let drop_when_busy = if let BridgePolicy::DropWhenBusy = policy { true } else { false };
-    let fifo = inst async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(wclk, wrst, din, wput, rclk, rrst, fifo_rget);
+    let fifo = inst async_fifo::<WIDTH, ENTRIES, SYNC_STAGES>(wclk, wrst, din, wput, rclk, rrst, fifo_take);
     let tx_fire = send_enable && !fifo.empty && !bridge.busy;
     let drop_fire = send_enable && !fifo.empty && bridge.busy && drop_when_busy;
     let fifo_take = tx_fire || drop_fire;
-    set fifo_rget_w = fifo_take;
 
     reg(rclk) dropped_count: uint<DROP_COUNT_W> reset(rrst: 0) = {
         if drop_fire {

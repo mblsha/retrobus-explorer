@@ -49,8 +49,10 @@ pub entity au_usb_uart_tx8_req_tap(
     tx_line: inv bool,
     busy: inv bool,
 ) {
-    let (busy_sig, busy_sig_w): (bool, inv bool) = port();
-    let tx_fire = tx_req.valid && !block && !busy_sig;
+    // `busy` is this entity's own output and also the thing that gates the
+    // send, so it is read back through `inspect` rather than duplicated.
+    let (busy_value, busy_w) = busy.inspect();
+    let tx_fire = tx_req.valid && !block && !busy_value;
 
     inst au_usb_uart_tx8_tap(
         clk,
@@ -59,9 +61,8 @@ pub entity au_usb_uart_tx8_req_tap(
         tx_req.byte,
         tx_fire,
         tx_line,
-        busy_sig_w,
+        busy_w,
     );
-    set busy = busy_sig;
 }
 
 #[inline]
