@@ -92,13 +92,20 @@ GitLab URL compiled in -- can still fetch this pin; it will never see a
 later release. Codeberg is run by volunteers on donated hardware and is less
 available than GitLab was, so expect the occasional failed clone and retry.
 
+The development machine has been on the Codeberg swim since 2026-09-22
+(`swim --version` says `v0.20.0-r351-c88f2f4` or later; the previous binary is
+kept as `~/.cargo/bin/swim-0.18.0-r317`), and every cached `build/spade`
+checkout has had its `origin` re-pointed at Codeberg. Swim fetches from a
+checkout's own `origin`, so a checkout made before the move keeps talking to
+GitLab until it is re-pointed or discarded.
+
 To bump the compiler:
 
-1. Install swim from Codeberg:
+1. On a machine that still has a pre-move swim, install it from Codeberg:
    `cargo install --git https://codeberg.org/spade-lang/swim swim`.
-2. In each project whose `build/` predates the move, run
-   `swim clean --and-spade`, so the old GitLab checkout under `build/spade`
-   is discarded rather than fetched from a frozen repository.
+2. For each `build/spade` whose `origin` is still GitLab, either
+   `git -C build/spade remote set-url origin https://codeberg.org/spade-lang/spade.git`
+   or `swim clean --and-spade` (which also throws away the compiler build).
 3. Edit `[spade].commit` in all fourteen `swim.lock` files to the release
    commit you want. Do **not** run `swim update-spade`: it moves the pin to
    whatever the branch head is, and these locks name exact release tags.
