@@ -20,13 +20,12 @@ pub entity wait_hold_n<#uint RELOAD>(
 where RELOAD > 0 else "wait_hold_n needs a non-zero reload count"
 {
     let wait_reload: uint<{uint::bits_for(RELOAD)}> = RELOAD;
-    let wait_zero: uint<{uint::bits_for(RELOAD)}> = 0;
     reg(clk) wait_counter: uint<{uint::bits_for(RELOAD)}> reset(rst: 0) = if mreq_fall || iorq_fall {
         wait_reload
     } else if wait_counter != 0 {
         wait_counter -. 1
     } else {
-        wait_zero
+        0
     };
     wait_counter != 0
 }
@@ -63,8 +62,7 @@ pub entity gate_bits<#uint WIDTH>(
     enable: bool,
     value: [bool; WIDTH],
 ) -> [bool; WIDTH] {
-    let zero = [false; WIDTH];
-    if enable { value } else { zero }
+    if enable { value } else { [false; WIDTH] }
 }
 
 #[inline]

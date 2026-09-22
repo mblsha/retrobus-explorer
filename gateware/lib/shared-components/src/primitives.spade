@@ -90,17 +90,12 @@ pub entity sync_z80_controls_n<#int M1_STAGES, #int MREQ_STAGES, #int IORQ_STAGE
     rd: bool,
     wr: bool,
 ) -> Z80ControlSync {
-    let m1_sync = inst sync_delay::<M1_STAGES>(clk, m1);
-    let mreq_sync = inst sync_delay::<MREQ_STAGES>(clk, mreq);
-    let iorq_sync = inst sync_delay::<IORQ_STAGES>(clk, iorq);
-    let rd_sync = inst sync_delay::<RD_STAGES>(clk, rd);
-    let wr_sync = inst sync_delay::<WR_STAGES>(clk, wr);
     Z80ControlSync$(
-        m1: m1_sync,
-        mreq: mreq_sync,
-        iorq: iorq_sync,
-        rd: rd_sync,
-        wr: wr_sync,
+        m1: inst sync_delay::<M1_STAGES>(clk, m1),
+        mreq: inst sync_delay::<MREQ_STAGES>(clk, mreq),
+        iorq: inst sync_delay::<IORQ_STAGES>(clk, iorq),
+        rd: inst sync_delay::<RD_STAGES>(clk, rd),
+        wr: inst sync_delay::<WR_STAGES>(clk, wr),
     )
 }
 
