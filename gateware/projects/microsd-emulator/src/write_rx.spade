@@ -84,13 +84,16 @@ pub entity sd_write_receiver(
     } else {
         crc_index
     };
-    let mismatch = crcs.enumerate().map(fn |(lane, crc)| {
-            (width || lane == 0) && (dat.to_bits()[lane] != (crc >> zext::<4, 16>(15 -. crc_index)).to_bits()[0])
+    // In one-bit mode the host sends a CRC on DAT0 only; the other three lanes
+    // are idle and their staged CRCs mean nothing.
+    let checked = [true, width, width, width];
+    let mismatch = checked.zip(crcs.zip(dat.to_bits())).any(fn |(check, (crc, bit))| {
+            check && bit != (crc >> zext::<4, 16>(15 -. crc_index)).to_bits()[0]
         });
     reg(clk) bad reset(clear: false) = if start {
         false
     } else if sample && state == RECEIVE_CRC {
-        bad || mismatch[0] || mismatch[1] || mismatch[2] || mismatch[3]
+        bad || mismatch
     } else {
         bad
     };
