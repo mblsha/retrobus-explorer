@@ -25,6 +25,7 @@ class Host:
         self.d = dut
         self.cycles = 0
         self.half_ns = float(os.environ.get("MICROSD_HALF_NS", "500"))
+        self.sys_period_ns = float(os.environ.get("MICROSD_SYS_PERIOD_NS", "12.5"))
         self.clock_jitter = int(os.environ.get("MICROSD_CLOCK_JITTER", "1"))
         self.sample_advance_ns = float(os.environ.get("MICROSD_SAMPLE_ADVANCE_NS", "0"))
         assert 0 <= self.sample_advance_ns < self.half_ns
