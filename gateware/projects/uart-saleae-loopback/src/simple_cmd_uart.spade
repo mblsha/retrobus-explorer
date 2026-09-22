@@ -169,63 +169,61 @@ struct CmdDecode {
     freq_value: uint<4>,
 }
 
-fn cmd_decode_none() -> CmdDecode {
-    CmdDecode$(
-        msg: MsgKind::None(),
-        msg_valid: false,
-        mode_write: false,
-        mode_value: Mode::ClockTester(),
-        freq_write: false,
-        freq_value: 0,
-    )
-}
+impl CmdDecode {
+    fn none() -> Self {
+        Self$(
+            msg: MsgKind::None(),
+            msg_valid: false,
+            mode_write: false,
+            mode_value: Mode::ClockTester(),
+            freq_write: false,
+            freq_value: 0,
+        )
+    }
 
-fn cmd_decode_msg(msg: MsgKind) -> CmdDecode {
-    CmdDecode$(
-        msg: msg,
-        msg_valid: true,
-        mode_write: false,
-        mode_value: Mode::ClockTester(),
-        freq_write: false,
-        freq_value: 0,
-    )
-}
+    fn reply(msg: MsgKind) -> Self {
+        Self$(
+            msg: msg,
+            msg_valid: true,
+            mode_write: false,
+            mode_value: Mode::ClockTester(),
+            freq_write: false,
+            freq_value: 0,
+        )
+    }
 
-fn cmd_decode_set_mode(mode: Mode) -> CmdDecode {
-    CmdDecode$(
-        msg: MsgKind::Ok(),
-        msg_valid: true,
-        mode_write: true,
-        mode_value: mode,
-        freq_write: false,
-        freq_value: 0,
-    )
-}
+    fn set_mode(mode: Mode) -> Self {
+        Self$(
+            msg: MsgKind::Ok(),
+            msg_valid: true,
+            mode_write: true,
+            mode_value: mode,
+            freq_write: false,
+            freq_value: 0,
+        )
+    }
 
-fn cmd_decode_set_freq(freq: uint<4>) -> CmdDecode {
-    CmdDecode$(
-        msg: MsgKind::Ok(),
-        msg_valid: true,
-        mode_write: false,
-        mode_value: Mode::ClockTester(),
-        freq_write: true,
-        freq_value: freq,
-    )
+    fn set_freq(freq: uint<4>) -> Self {
+        Self$(
+            msg: MsgKind::Ok(),
+            msg_valid: true,
+            mode_write: false,
+            mode_value: Mode::ClockTester(),
+            freq_write: true,
+            freq_value: freq,
+        )
+    }
 }
 
 fn decode_bang_cmd(rx_upper: uint<8>) -> CmdDecode {
-    if rx_upper == b'H' {
-        cmd_decode_msg(MsgKind::Help())
-    } else if rx_upper == b'S' {
-        cmd_decode_msg(MsgKind::Status())
-    } else if rx_upper == b'C' {
-        cmd_decode_set_mode(Mode::ClockTester())
-    } else if rx_upper == b'E' {
-        cmd_decode_set_mode(Mode::Echo())
-    } else if rx_upper == b'F' {
-        cmd_decode_none()
-    } else {
-        cmd_decode_msg(MsgKind::ErrCmd())
+    match rx_upper {
+        b'H' => CmdDecode::reply(MsgKind::Help()),
+        b'S' => CmdDecode::reply(MsgKind::Status()),
+        b'C' => CmdDecode::set_mode(Mode::ClockTester()),
+        b'E' => CmdDecode::set_mode(Mode::Echo()),
+        // `!F` only opens the frequency prompt; the digit that follows decides.
+        b'F' => CmdDecode::none(),
+        _ => CmdDecode::reply(MsgKind::ErrCmd()),
     }
 }
 
@@ -236,13 +234,13 @@ fn decode_cmd(
     rx_digit: DigitDecode,
 ) -> CmdDecode {
     if !rx_ok {
-        cmd_decode_none()
+        CmdDecode::none()
     } else {
         match state {
             CmdParseState::Bang => decode_bang_cmd(rx_upper),
-            CmdParseState::Freq if rx_digit.valid => cmd_decode_set_freq(rx_digit.value),
-            CmdParseState::Freq => cmd_decode_msg(MsgKind::ErrFreq()),
-            _ => cmd_decode_none(),
+            CmdParseState::Freq if rx_digit.valid => CmdDecode::set_freq(rx_digit.value),
+            CmdParseState::Freq => CmdDecode::reply(MsgKind::ErrFreq()),
+            _ => CmdDecode::none(),
         }
     }
 }

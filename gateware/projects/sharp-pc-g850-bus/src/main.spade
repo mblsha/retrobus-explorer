@@ -216,22 +216,20 @@ impl Default for MainState {
     }
 }
 
-fn console_effect_keep(ft: FtRegs, enabled: bool, msg: ConsoleMsg) -> ConsoleCmdEffect {
-    ConsoleCmdEffect$(
-        next_ft_enabled: enabled,
-        next_ft_remote_allowed: ft.remote_allowed,
-        next_ft_armed: ft.armed,
-        msg: msg,
-    )
-}
+impl ConsoleCmdEffect {
+    /// Leave the FT control flags where they are and just answer.
+    fn keep(ft: FtRegs, enabled: bool, msg: ConsoleMsg) -> Self {
+        Self::with_flags(enabled, ft.remote_allowed, ft.armed, msg)
+    }
 
-fn console_effect_set(enabled: bool, remote_allowed: bool, armed: bool, msg: ConsoleMsg) -> ConsoleCmdEffect {
-    ConsoleCmdEffect$(
-        next_ft_enabled: enabled,
-        next_ft_remote_allowed: remote_allowed,
-        next_ft_armed: armed,
-        msg: msg,
-    )
+    fn with_flags(enabled: bool, remote_allowed: bool, armed: bool, msg: ConsoleMsg) -> Self {
+        Self$(
+            next_ft_enabled: enabled,
+            next_ft_remote_allowed: remote_allowed,
+            next_ft_armed: armed,
+            msg: msg,
+        )
+    }
 }
 
 fn eval_console_stream(
@@ -251,19 +249,19 @@ fn eval_console_stream(
 impl ConsoleCmd {
     fn effect(self, ft: FtRegs, next_ft_enabled_default: bool) -> ConsoleCmdEffect {
         match self {
-            Self::None => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::None()),
-            Self::Arm => console_effect_set(next_ft_enabled_default, ft.remote_allowed, true, ConsoleMsg::Ok()),
-            Self::Lock => console_effect_set(false, false, false, ConsoleMsg::Ok()),
-            Self::RemoteOn if ft.armed => console_effect_set(next_ft_enabled_default, true, ft.armed, ConsoleMsg::Ok()),
-            Self::RemoteOn => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Err()),
-            Self::RemoteOff => console_effect_set(next_ft_enabled_default, false, ft.armed, ConsoleMsg::Ok()),
-            Self::FtOn if ft.armed => console_effect_set(true, ft.remote_allowed, ft.armed, ConsoleMsg::Ok()),
-            Self::FtOn => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Err()),
-            Self::FtOff => console_effect_set(false, ft.remote_allowed, ft.armed, ConsoleMsg::Ok()),
-            Self::Help => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Help()),
-            Self::Status => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Status()),
-            Self::PinMap => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::PinMap()),
-            Self::Unknown => console_effect_keep(ft, next_ft_enabled_default, ConsoleMsg::Help()),
+            Self::None => ConsoleCmdEffect::keep(ft, next_ft_enabled_default, ConsoleMsg::None()),
+            Self::Arm => ConsoleCmdEffect::with_flags(next_ft_enabled_default, ft.remote_allowed, true, ConsoleMsg::Ok()),
+            Self::Lock => ConsoleCmdEffect::with_flags(false, false, false, ConsoleMsg::Ok()),
+            Self::RemoteOn if ft.armed => ConsoleCmdEffect::with_flags(next_ft_enabled_default, true, ft.armed, ConsoleMsg::Ok()),
+            Self::RemoteOn => ConsoleCmdEffect::keep(ft, next_ft_enabled_default, ConsoleMsg::Err()),
+            Self::RemoteOff => ConsoleCmdEffect::with_flags(next_ft_enabled_default, false, ft.armed, ConsoleMsg::Ok()),
+            Self::FtOn if ft.armed => ConsoleCmdEffect::with_flags(true, ft.remote_allowed, ft.armed, ConsoleMsg::Ok()),
+            Self::FtOn => ConsoleCmdEffect::keep(ft, next_ft_enabled_default, ConsoleMsg::Err()),
+            Self::FtOff => ConsoleCmdEffect::with_flags(false, ft.remote_allowed, ft.armed, ConsoleMsg::Ok()),
+            Self::Help => ConsoleCmdEffect::keep(ft, next_ft_enabled_default, ConsoleMsg::Help()),
+            Self::Status => ConsoleCmdEffect::keep(ft, next_ft_enabled_default, ConsoleMsg::Status()),
+            Self::PinMap => ConsoleCmdEffect::keep(ft, next_ft_enabled_default, ConsoleMsg::PinMap()),
+            Self::Unknown => ConsoleCmdEffect::keep(ft, next_ft_enabled_default, ConsoleMsg::Help()),
         }
     }
 }
