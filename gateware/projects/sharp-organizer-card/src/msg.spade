@@ -86,30 +86,6 @@ impl Default for OrganizerMsgStreamState {
     }
 }
 
-pub fn organizer_status(
-    saleae_state: SaleaeState,
-    saleae_mode: SaleaeModeCode,
-    addr_delay: SampleCount,
-    data_delay: SampleCount,
-    pin0: SaleaePinSource,
-    pin1: SaleaePinSource,
-    pin2: SaleaePinSource,
-    pin3: SaleaePinSource,
-    ft_enabled: bool,
-) -> OrganizerStatus {
-    OrganizerStatus$(
-        saleae_state: saleae_state,
-        saleae_mode: saleae_mode,
-        addr_delay: addr_delay,
-        data_delay: data_delay,
-        pin0: pin0,
-        pin1: pin1,
-        pin2: pin2,
-        pin3: pin3,
-        ft_enabled: ft_enabled,
-    )
-}
-
 pub fn organizer_msg_combine(primary: OrganizerMsg, secondary: OrganizerMsg) -> OrganizerMsg {
     if primary.is_none() {
         secondary

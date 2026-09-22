@@ -1,7 +1,7 @@
 use shared_components::{ascii, serial::{FtBe, FtData}};
 
 use super::{
-    msg::{OrganizerMsg, organizer_msg_combine, organizer_status},
+    msg::{OrganizerMsg, OrganizerStatus, organizer_msg_combine},
     protocol::{SaleaeModeCode, SaleaePinSource, SampleCount, SaleaeState, SyncSubMode},
 };
 
@@ -278,16 +278,16 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
     } else if cmd_sync_memory {
         OrganizerMsg::SyncMemorySelected()
     } else if cmd_status {
-        OrganizerMsg::Status(organizer_status(
-            inputs.saleae_state,
-            inputs.saleae_mode,
-            inputs.addr_stable_delay,
-            inputs.data_stable_delay,
-            inputs.pin0,
-            inputs.pin1,
-            inputs.pin2,
-            inputs.pin3,
-            inputs.ft_enabled,
+        OrganizerMsg::Status(OrganizerStatus$(
+            saleae_state: inputs.saleae_state,
+            saleae_mode: inputs.saleae_mode,
+            addr_delay: inputs.addr_stable_delay,
+            data_delay: inputs.data_stable_delay,
+            pin0: inputs.pin0,
+            pin1: inputs.pin1,
+            pin2: inputs.pin2,
+            pin3: inputs.pin3,
+            ft_enabled: inputs.ft_enabled,
         ))
     } else {
         OrganizerMsg::None()
