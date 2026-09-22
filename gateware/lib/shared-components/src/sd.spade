@@ -1,4 +1,12 @@
 // SD CRCs are MSB-first; Ethernet/UART image CRC32 is reflected IEEE CRC32.
+//
+// The three `*_over`/`*_rounds` helpers are the loops these CRCs used to be
+// written out a step at a time. Each is `#[inline]` and `gen`-recursive, so it
+// elaborates to exactly the chain of `crc*_bit` instances it replaces and costs
+// no module of its own. `[T; N]::fold` says the same thing in one line, but
+// `response48` needs the bits most significant first and the `reversed()` that
+// gets them there drags eleven `split_at`/`concat` modules into every project
+// that links this file -- the same trade `arrays::indices_from` documents.
 pub fn crc7_bit(crc: uint<7>, bit: bool) -> uint<7> {
     (crc << 1) ^ (if crc.msb() ^^ bit { 0x09 } else { 0 })
 }
@@ -11,77 +19,53 @@ fn crc32_bit(crc: uint<32>, bit: bool) -> uint<32> {
     (crc >> 1) ^ (if crc.lsb() ^^ bit { 0xedb88320 } else { 0 })
 }
 
+/// `crc32_bit` over `bits`, least significant first.
+#[inline]
+fn crc32_over<#uint N>(crc: uint<32>, bits: [bool; N]) -> uint<32> {
+    gen if N == 0 {
+        crc
+    } else {
+        crc32_over(crc32_bit(crc, bits[0]), bits[1..])
+    }
+}
+
 pub fn crc32_byte(crc: uint<32>, byte: uint<8>) -> uint<32> {
-    let b = byte.as_bits();
-    let c0 = crc32_bit(crc, b[0]);
-    let c1 = crc32_bit(c0, b[1]);
-    let c2 = crc32_bit(c1, b[2]);
-    let c3 = crc32_bit(c2, b[3]);
-    let c4 = crc32_bit(c3, b[4]);
-    let c5 = crc32_bit(c4, b[5]);
-    let c6 = crc32_bit(c5, b[6]);
-    crc32_bit(c6, b[7])
+    crc32_over(crc, byte.as_bits())
 }
 
 fn crc8_bit(crc: uint<8>) -> uint<8> {
     (crc << 1) ^ (if crc.msb() { 7 } else { 0 })
 }
 
+/// `crc8_bit` applied `N` times. This polynomial feeds on the register alone,
+/// so unlike the other two the loop counts rather than walking an array.
+#[inline]
+fn crc8_rounds<#uint N>(crc: uint<8>) -> uint<8> {
+    gen if N == 0 {
+        crc
+    } else {
+        crc8_rounds::<{N - 1}>(crc8_bit(crc))
+    }
+}
+
 pub fn crc8_byte(crc: uint<8>, byte: uint<8>) -> uint<8> {
-    let c0 = crc8_bit(crc ^ byte);
-    let c1 = crc8_bit(c0);
-    let c2 = crc8_bit(c1);
-    let c3 = crc8_bit(c2);
-    let c4 = crc8_bit(c3);
-    let c5 = crc8_bit(c4);
-    let c6 = crc8_bit(c5);
-    crc8_bit(c6)
+    crc8_rounds::<8>(crc ^ byte)
+}
+
+/// `crc7_bit` over `bits`, most significant first -- the order an SD response
+/// puts them on CMD.
+#[inline]
+fn crc7_over<#uint N>(crc: uint<7>, bits: [bool; N]) -> uint<7> {
+    gen if N == 0 {
+        crc
+    } else {
+        crc7_over(crc7_bit(crc, bits.last()), bits[..N - 1])
+    }
 }
 
 // CRC over the 40 transmitted header/payload bits of an R1/R6/R7 response.
 pub fn response48(index: uint<6>, payload: uint<32>) -> uint<48> {
     let body: uint<40> = (zext(index) << 32) | zext(payload);
-    let bits = body.as_bits();
-    let c0: uint<7> = 0;
-    let c1 = crc7_bit(c0, bits[39]);
-    let c2 = crc7_bit(c1, bits[38]);
-    let c3 = crc7_bit(c2, bits[37]);
-    let c4 = crc7_bit(c3, bits[36]);
-    let c5 = crc7_bit(c4, bits[35]);
-    let c6 = crc7_bit(c5, bits[34]);
-    let c7 = crc7_bit(c6, bits[33]);
-    let c8 = crc7_bit(c7, bits[32]);
-    let c9 = crc7_bit(c8, bits[31]);
-    let c10 = crc7_bit(c9, bits[30]);
-    let c11 = crc7_bit(c10, bits[29]);
-    let c12 = crc7_bit(c11, bits[28]);
-    let c13 = crc7_bit(c12, bits[27]);
-    let c14 = crc7_bit(c13, bits[26]);
-    let c15 = crc7_bit(c14, bits[25]);
-    let c16 = crc7_bit(c15, bits[24]);
-    let c17 = crc7_bit(c16, bits[23]);
-    let c18 = crc7_bit(c17, bits[22]);
-    let c19 = crc7_bit(c18, bits[21]);
-    let c20 = crc7_bit(c19, bits[20]);
-    let c21 = crc7_bit(c20, bits[19]);
-    let c22 = crc7_bit(c21, bits[18]);
-    let c23 = crc7_bit(c22, bits[17]);
-    let c24 = crc7_bit(c23, bits[16]);
-    let c25 = crc7_bit(c24, bits[15]);
-    let c26 = crc7_bit(c25, bits[14]);
-    let c27 = crc7_bit(c26, bits[13]);
-    let c28 = crc7_bit(c27, bits[12]);
-    let c29 = crc7_bit(c28, bits[11]);
-    let c30 = crc7_bit(c29, bits[10]);
-    let c31 = crc7_bit(c30, bits[9]);
-    let c32 = crc7_bit(c31, bits[8]);
-    let c33 = crc7_bit(c32, bits[7]);
-    let c34 = crc7_bit(c33, bits[6]);
-    let c35 = crc7_bit(c34, bits[5]);
-    let c36 = crc7_bit(c35, bits[4]);
-    let c37 = crc7_bit(c36, bits[3]);
-    let c38 = crc7_bit(c37, bits[2]);
-    let c39 = crc7_bit(c38, bits[1]);
-    let c40 = crc7_bit(c39, bits[0]);
-    (zext(body) << 8) | (zext(c40) << 1) | 1
+    let crc = crc7_over(0, body.as_bits());
+    (zext(body) << 8) | (zext(crc) << 1) | 1
 }
