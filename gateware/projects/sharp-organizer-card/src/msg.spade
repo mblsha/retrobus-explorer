@@ -1,5 +1,6 @@
 use shared_components::{
     message_stream::{
+        OneCurrentLatestPendingArgs,
         TxReq8,
         schedule_one_current_latest_pending,
         tx_req_byte,
@@ -550,16 +551,16 @@ pub fn organizer_msg_stream_step(
     };
     let progressed = progress_state(state, tx_req.valid);
     let progressed_none = progressed.cur_msg.is_none();
-    let scheduled = schedule_one_current_latest_pending(
-        OrganizerMsg::None(),
-        progressed.cur_msg,
-        progressed_none,
-        state.pending_msg,
-        pending_none,
-        msg_valid,
-        msg,
-        msg.is_none(),
-    );
+    let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs$(
+        none_value: OrganizerMsg::None(),
+        current: progressed.cur_msg,
+        current_is_none: progressed_none,
+        pending: state.pending_msg,
+        pending_is_none: pending_none,
+        incoming_valid: msg_valid,
+        incoming: msg,
+        incoming_is_none: msg.is_none(),
+    ));
     let reset_cursor = progressed_none || scheduled.current_loaded;
     OrganizerMsgStreamOut$(
         state: OrganizerMsgStreamState$(

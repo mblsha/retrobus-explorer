@@ -1,6 +1,7 @@
 use super::{
     message_stream::{
         ByteMsgStreamState,
+        OneCurrentLatestPendingArgs,
         TxReq8,
         init_byte_msg_stream,
         schedule_one_current_latest_pending,
@@ -100,16 +101,16 @@ entity tb_message_stream(
         enqueue_valid,
         enqueue_msg,
     );
-    let scheduled = schedule_one_current_latest_pending(
-        0,
-        schedule_current,
-        schedule_current_is_none,
-        schedule_pending,
-        schedule_pending_is_none,
-        schedule_incoming_valid,
-        schedule_incoming,
-        schedule_incoming_is_none,
-    );
+    let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs$(
+        none_value: 0,
+        current: schedule_current,
+        current_is_none: schedule_current_is_none,
+        pending: schedule_pending,
+        pending_is_none: schedule_pending_is_none,
+        incoming_valid: schedule_incoming_valid,
+        incoming: schedule_incoming,
+        incoming_is_none: schedule_incoming_is_none,
+    ));
 
     set tx_valid = step.tx_req.valid;
     set tx_byte = step.tx_req.byte;

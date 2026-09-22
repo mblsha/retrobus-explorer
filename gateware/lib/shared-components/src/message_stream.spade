@@ -66,7 +66,10 @@ pub struct OneCurrentLatestPendingOut<T> {
     current_loaded: bool,
 }
 
-pub fn schedule_one_current_latest_pending<T>(
+/// What the scheduler is given. Three of these eight are a value immediately
+/// followed by the flag that says whether that value is the caller's "none",
+/// and as positional arguments the three pairs lined up only by eye.
+pub struct OneCurrentLatestPendingArgs<T> {
     none_value: T,
     current: T,
     current_is_none: bool,
@@ -75,21 +78,25 @@ pub fn schedule_one_current_latest_pending<T>(
     incoming_valid: bool,
     incoming: T,
     incoming_is_none: bool,
-) -> OneCurrentLatestPendingOut<T> {
-    let promote_pending = current_is_none && !pending_is_none;
-    let loaded_current = if promote_pending { pending } else { current };
-    let loaded_current_is_none = if promote_pending { false } else { current_is_none };
-    let loaded_pending = if promote_pending { none_value } else { pending };
-    let loaded_pending_is_none = if promote_pending { true } else { pending_is_none };
+}
 
-    let enqueue = incoming_valid && !incoming_is_none;
+pub fn schedule_one_current_latest_pending<T>(
+    args: OneCurrentLatestPendingArgs<T>,
+) -> OneCurrentLatestPendingOut<T> {
+    let promote_pending = args.current_is_none && !args.pending_is_none;
+    let loaded_current = if promote_pending { args.pending } else { args.current };
+    let loaded_current_is_none = if promote_pending { false } else { args.current_is_none };
+    let loaded_pending = if promote_pending { args.none_value } else { args.pending };
+    let loaded_pending_is_none = if promote_pending { true } else { args.pending_is_none };
+
+    let enqueue = args.incoming_valid && !args.incoming_is_none;
     let replace_empty_current = enqueue && loaded_current_is_none;
     let queue_latest_pending = enqueue && !loaded_current_is_none;
 
     OneCurrentLatestPendingOut$(
-        current: if replace_empty_current { incoming } else { loaded_current },
+        current: if replace_empty_current { args.incoming } else { loaded_current },
         current_is_none: if replace_empty_current { false } else { loaded_current_is_none },
-        pending: if queue_latest_pending { incoming } else { loaded_pending },
+        pending: if queue_latest_pending { args.incoming } else { loaded_pending },
         pending_is_none: if queue_latest_pending { false } else { loaded_pending_is_none },
         current_loaded: promote_pending || replace_empty_current,
     )
@@ -132,16 +139,16 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             self.cur_idx
         };
         let post_msg_none = args.cur_msg_is_none || drained;
-        let scheduled = schedule_one_current_latest_pending(
-            none_msg,
-            post_cur_msg,
-            post_msg_none,
-            self.pending_msg,
-            args.pending_msg_is_none,
-            args.next_msg_valid,
-            args.next_msg,
-            args.next_msg_is_none,
-        );
+        let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs$(
+            none_value: none_msg,
+            current: post_cur_msg,
+            current_is_none: post_msg_none,
+            pending: self.pending_msg,
+            pending_is_none: args.pending_msg_is_none,
+            incoming_valid: args.next_msg_valid,
+            incoming: args.next_msg,
+            incoming_is_none: args.next_msg_is_none,
+        ));
         ByteMsgStreamOut$(
             state: ByteMsgStreamState$(
                 cur_msg: scheduled.current,
