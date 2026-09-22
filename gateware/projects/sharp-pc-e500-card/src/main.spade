@@ -1014,36 +1014,26 @@ entity main_core(
             echo: usb_parse.echo,
         );
     let parser_event = parser_front.event;
-    let (usb_ram_read_valid, usb_ram_read_addr): (bool, CardOffset) = if let Some(addr) = parser_event.ram_read() {
-        (true, addr)
-    } else {
-        (false, 0)
-    };
-    let (usb_rom_read_valid, usb_rom_read_addr): (bool, CardOffset) = if let Some(addr) = parser_event.rom_read() {
-        (true, addr)
-    } else {
-        (false, 0)
-    };
-    let (uart_ram_write_valid, uart_ram_write_addr, uart_ram_write_data): (bool, CardOffset, CardData) = if let Some((addr, data)) = parser_event.ram_write() {
-        (true, addr, data)
-    } else {
-        (false, 0, 0)
-    };
-    let (uart_rom_write_valid, uart_rom_write_addr, uart_rom_write_data): (bool, CardOffset, CardData) = if let Some((addr, data)) = parser_event.rom_write() {
-        (true, addr, data)
-    } else {
-        (false, 0, 0)
-    };
-    let (classify_delay_update_valid, classify_delay_cycles): (bool, ClassifyCtr) = if let Some(cycles) = parser_event.classify_delay() {
-        (true, cycles)
-    } else {
-        (false, 0)
-    };
-    let (ctrl_write_delay_update_valid, ctrl_write_delay_cycles): (bool, ClassifyCtr) = if let Some(cycles) = parser_event.ctrl_write_delay() {
-        (true, cycles)
-    } else {
-        (false, 0)
-    };
+    let usb_ram_read = parser_event.ram_read();
+    let usb_ram_read_valid = usb_ram_read.is_some();
+    let usb_ram_read_addr: CardOffset = usb_ram_read.unwrap_or(0);
+    let usb_rom_read = parser_event.rom_read();
+    let usb_rom_read_valid = usb_rom_read.is_some();
+    let usb_rom_read_addr: CardOffset = usb_rom_read.unwrap_or(0);
+    let uart_ram_write = parser_event.ram_write();
+    let uart_ram_write_valid = uart_ram_write.is_some();
+    let (uart_ram_write_addr, uart_ram_write_data): (CardOffset, CardData) =
+        uart_ram_write.unwrap_or((0, 0));
+    let uart_rom_write = parser_event.rom_write();
+    let uart_rom_write_valid = uart_rom_write.is_some();
+    let (uart_rom_write_addr, uart_rom_write_data): (CardOffset, CardData) =
+        uart_rom_write.unwrap_or((0, 0));
+    let classify_delay_update = parser_event.classify_delay();
+    let classify_delay_update_valid = classify_delay_update.is_some();
+    let classify_delay_cycles: ClassifyCtr = classify_delay_update.unwrap_or(0);
+    let ctrl_write_delay_update = parser_event.ctrl_write_delay();
+    let ctrl_write_delay_update_valid = ctrl_write_delay_update.is_some();
+    let ctrl_write_delay_cycles: ClassifyCtr = ctrl_write_delay_update.unwrap_or(0);
     let ft_uart_enable_request = parser_event.ft_uart_enable_request();
     let ft_uart_disable_request = parser_event.ft_uart_disable_request();
     let ft_status_request = parser_event.ft_status_request();
