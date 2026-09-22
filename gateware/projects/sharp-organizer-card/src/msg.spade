@@ -143,109 +143,100 @@ fn source_name_kind(source: SaleaePinSource) -> NameKind {
     }
 }
 
-fn name_len(kind: NameKind) -> ByteIdx {
+/// A channel name padded out to the longest one, carried with its own length
+/// so the two cannot drift apart the way two parallel `if` chains could.
+struct ChannelName {
+    text: [uint<8>; 8],
+    len: ByteIdx,
+}
+
+#[inline]
+fn channel_name<#uint N>(text: [uint<8>; N]) -> Option<ChannelName>
+where
+    N <= 8 else "a Saleae channel name must fit in eight characters"
+{
+    // Concatenating a full eight zeros and slicing back is what pads here:
+    // `[0; {8 - N}]` is rejected with "not supported in a type expression".
+    let padded: [uint<8>; 8] = text.concat([0; 8])[..8];
+    Some(ChannelName$(text: padded, len: N))
+}
+
+fn name_of(kind: NameKind) -> Option<ChannelName> {
     if kind == 0 {
-        3
+        channel_name(b"LOW")
     } else if kind == 1 {
-        4
+        channel_name(b"HIGH")
     } else if kind == 2 {
-        2
+        channel_name(b"RW")
     } else if kind == 3 {
-        2
+        channel_name(b"OE")
     } else if kind == 4 {
-        2
+        channel_name(b"CI")
     } else if kind == 5 {
-        2
+        channel_name(b"E2")
     } else if kind == 6 {
-        6
+        channel_name(b"MSKROM")
     } else if kind == 7 {
-        5
+        channel_name(b"SRAM1")
     } else if kind == 8 {
-        5
+        channel_name(b"SRAM2")
     } else if kind == 9 {
-        5
+        channel_name(b"EPROM")
     } else if kind == 10 {
-        5
+        channel_name(b"STNBY")
     } else if kind == 11 {
-        5
+        channel_name(b"VBATT")
     } else if kind == 12 {
-        3
+        channel_name(b"VPP")
     } else if kind == 14 {
-        8
+        channel_name(b"ADDR_CHG")
     } else if kind == 15 {
-        8
+        channel_name(b"DATA_CHG")
     } else if kind == 16 {
-        6
+        channel_name(b"ADDR_U")
     } else if kind == 17 {
-        6
+        channel_name(b"DATA_U")
     } else if kind == 18 {
-        6
+        channel_name(b"MISC_U")
     } else if kind == name_kind_addr_sample() {
-        6
+        channel_name(b"ADDR_S")
     } else if kind == name_kind_data_sample() {
-        6
+        channel_name(b"DATA_S")
+    } else if kind == name_kind_counter0() {
+        channel_name(b"COUNTER0")
+    } else if kind == name_kind_counter0() +. 1 {
+        channel_name(b"COUNTER1")
+    } else if kind == name_kind_counter0() +. 2 {
+        channel_name(b"COUNTER2")
+    } else if kind == name_kind_counter0() +. 3 {
+        channel_name(b"COUNTER3")
+    } else if kind == name_kind_counter0() +. 4 {
+        channel_name(b"COUNTER4")
+    } else if kind == name_kind_counter0() +. 5 {
+        channel_name(b"COUNTER5")
+    } else if kind == name_kind_counter0() +. 6 {
+        channel_name(b"COUNTER6")
+    } else if kind == name_kind_counter0() +. 7 {
+        channel_name(b"COUNTER7")
     } else {
-        8
+        None
     }
 }
 
+/// Kind 13 and anything past COUNTER7 have no name. No reachable pin source or
+/// channel maps to one, and the eight bytes claimed here are never sent, so the
+/// `CH=` phase would stall rather than print rubbish.
+fn name_len(kind: NameKind) -> ByteIdx {
+    if let Some(name) = name_of(kind) { name.len } else { 8 }
+}
+
 fn name_byte(kind: NameKind, idx: ByteIdx) -> TxReq8 {
-    if kind == 0 {
-        tx_req_indexed(b"LOW", idx)
-    } else if kind == 1 {
-        tx_req_indexed(b"HIGH", idx)
-    } else if kind == 2 {
-        tx_req_indexed(b"RW", idx)
-    } else if kind == 3 {
-        tx_req_indexed(b"OE", idx)
-    } else if kind == 4 {
-        tx_req_indexed(b"CI", idx)
-    } else if kind == 5 {
-        tx_req_indexed(b"E2", idx)
-    } else if kind == 6 {
-        tx_req_indexed(b"MSKROM", idx)
-    } else if kind == 7 {
-        tx_req_indexed(b"SRAM1", idx)
-    } else if kind == 8 {
-        tx_req_indexed(b"SRAM2", idx)
-    } else if kind == 9 {
-        tx_req_indexed(b"EPROM", idx)
-    } else if kind == 10 {
-        tx_req_indexed(b"STNBY", idx)
-    } else if kind == 11 {
-        tx_req_indexed(b"VBATT", idx)
-    } else if kind == 12 {
-        tx_req_indexed(b"VPP", idx)
-    } else if kind == 14 {
-        tx_req_indexed(b"ADDR_CHG", idx)
-    } else if kind == 15 {
-        tx_req_indexed(b"DATA_CHG", idx)
-    } else if kind == 16 {
-        tx_req_indexed(b"ADDR_U", idx)
-    } else if kind == 17 {
-        tx_req_indexed(b"DATA_U", idx)
-    } else if kind == 18 {
-        tx_req_indexed(b"MISC_U", idx)
-    } else if kind == name_kind_addr_sample() {
-        tx_req_indexed(b"ADDR_S", idx)
-    } else if kind == name_kind_data_sample() {
-        tx_req_indexed(b"DATA_S", idx)
-    } else if kind == name_kind_counter0() {
-        tx_req_indexed(b"COUNTER0", idx)
-    } else if kind == name_kind_counter0() +. 1 {
-        tx_req_indexed(b"COUNTER1", idx)
-    } else if kind == name_kind_counter0() +. 2 {
-        tx_req_indexed(b"COUNTER2", idx)
-    } else if kind == name_kind_counter0() +. 3 {
-        tx_req_indexed(b"COUNTER3", idx)
-    } else if kind == name_kind_counter0() +. 4 {
-        tx_req_indexed(b"COUNTER4", idx)
-    } else if kind == name_kind_counter0() +. 5 {
-        tx_req_indexed(b"COUNTER5", idx)
-    } else if kind == name_kind_counter0() +. 6 {
-        tx_req_indexed(b"COUNTER6", idx)
-    } else if kind == name_kind_counter0() +. 7 {
-        tx_req_indexed(b"COUNTER7", idx)
+    if let Some(name) = name_of(kind) {
+        if idx < name.len {
+            tx_req_byte(name.text[trunc(idx)])
+        } else {
+            tx_req_none()
+        }
     } else {
         tx_req_none()
     }
