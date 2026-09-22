@@ -59,12 +59,19 @@ async def native_ddr_read_write_roundtrips(d):
         await h.command(13, 0x10000)
         await h.command(17, 127 * 512)
         assert await h.data(wide=wide) == image[127 * 512 : 128 * 512]
-    # Cancel a read while the slower memory side is still fetching its sector,
-    # then immediately request a new generation. Delayed responses must drain
-    # without being accepted as the new sector.
+    # Stop a read the card has already begun and then read somewhere else. The
+    # memory model answers well inside the read command's own clocks, so the
+    # stop always lands mid-block and the card finishes it; a CMD17 issued
+    # before that block drains arrives while the card is not transfer-idle,
+    # is rejected out of sequence, and leaves the next data phase to
+    # resynchronise onto the tail of the block being abandoned.
     for _ in range(4):
         await h.command(17, 524287 * 512)
         await h.command(12)
-        await h.command(17, 127 * 512)
+        await h.drain_read()
+        response = await h.command(17, 127 * 512)
+        assert not int.from_bytes(response[1:5], "big") & 0xFFF80000, (
+            "the read after the stop was rejected"
+        )
         assert await h.data(wide=True) == image[127 * 512 : 128 * 512]
     task.kill()
