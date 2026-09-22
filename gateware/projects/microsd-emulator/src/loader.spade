@@ -42,12 +42,20 @@ pub entity image_loader(
         2 => 0x44,
         _ => 0x31
     };
+    // Every register below advances on the same event: a byte arriving while
+    // the packet is being received. A stalled sender abandons the packet after
+    // a million idle cycles, and a byte that breaks the magic either restarts
+    // the packet, if it is itself an 'M', or drops it.
+    let took_byte = receiving && rx_valid;
+    let abandoned = timeout == 1_000_000;
+    let magic_broken = count < 4 && rx_byte != expected_magic;
+    let magic_restart = magic_broken && rx_byte == 0x4d;
     reg(clk) count: uint<10> reset(rst: 0) = {
-        if !receiving || timeout == 1_000_000 {
+        if !receiving || abandoned {
             0
         } else if rx_valid {
-            if count < 4 && rx_byte != expected_magic {
-                if rx_byte == 0x4d {
+            if magic_broken {
+                if magic_restart {
                     1
                 } else {
                     0
@@ -61,26 +69,26 @@ pub entity image_loader(
             count
         }
     };
-    reg(clk) timeout: uint<20> reset(rst: 0) = if !receiving || count == 0 || rx_valid || timeout == 1_000_000 {
+    reg(clk) timeout: uint<20> reset(rst: 0) = if !receiving || count == 0 || rx_valid || abandoned {
         0
     } else {
         timeout +. 1
     };
     reg(clk) crc: uint<32> reset(rst: 0xffffffff) = {
-        if receiving && rx_valid && (count == 0 || (count < 4 && rx_byte != expected_magic && rx_byte == 0x4d)) {
+        if took_byte && (count == 0 || magic_restart) {
             crc32_byte(0xffffffff, rx_byte)
-        } else if receiving && rx_valid && count < 528 {
+        } else if took_byte && count < 528 {
             crc32_byte(crc, rx_byte)
         } else {
             crc
         }
     };
-    reg(clk) expected_crc: uint<32> reset(rst: 0) = if receiving && rx_valid && count >= 528 {
+    reg(clk) expected_crc: uint<32> reset(rst: 0) = if took_byte && count >= 528 {
         (expected_crc >> 8) | (zext(rx_byte) << 24)
     } else {
         expected_crc
     };
-    reg(clk) header: uint<96> reset(rst: 0) = if receiving && rx_valid && count >= 4 && count < 16 {
+    reg(clk) header: uint<96> reset(rst: 0) = if took_byte && count >= 4 && count < 16 {
         (header >> 8) | (zext(rx_byte) << 88)
     } else {
         header
@@ -91,10 +99,10 @@ pub entity image_loader(
     let header_ok = (header & 0xffffff00) == 0;
     let packet_memory: Memory<uint<8>, 512> = inst clocked_memory(
         clk,
-        [(receiving && rx_valid && count >= 16 && count < 528, trunc::<uint<10>, uint<9>>(count -. 16), rx_byte)],
+        [(took_byte && count >= 16 && count < 528, trunc::<uint<10>, uint<9>>(count -. 16), rx_byte)],
     );
     let packet_byte = inst read_memory(packet_memory, copy_index);
-    let complete = receiving && rx_valid && count == 531 && timeout != 1_000_000;
+    let complete = took_byte && count == 531 && !abandoned;
     let crc_ok = expected_crc == (crc ^ 0xffffffff);
     let all_loaded = loaded == 0xffffffffffffffffffffffffffffffff;
     let status: uint<8> = if !crc_ok {
