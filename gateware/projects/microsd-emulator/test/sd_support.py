@@ -29,6 +29,14 @@ class Host:
         self.sample_advance_ns = float(os.environ.get("MICROSD_SAMPLE_ADVANCE_NS", "0"))
         assert 0 <= self.sample_advance_ns < self.half_ns
         self.sector = bytes((i * 37 + (i >> 8)) & 255 for i in range(512))
+        # A real host either drives the data lines or releases them to its
+        # pull-ups, so a lane the card is not driving reads high, never the
+        # last level the card drove. Track that host-side level here; the
+        # read-only integration tops tie `dat_in` high in the design and
+        # expose no port for it.
+        self.dat = getattr(dut, "dat_in", None)
+        self.dat_level = 15
+        self.dat_written = None
         if hasattr(dut, "sector_byte"):
 
             async def serve_sector():
@@ -63,12 +71,22 @@ class Host:
             round_mode="round",
         )
         sample = tuple(int(s.value) for s in (d.cmd_oe, d.cmd_out, d.dat_oe, d.dat_out))
-        # Model the IOBUF input readback: while the card drives CMD, its pin
-        # value is visible at cmd_in; otherwise the host supplies the line.
+        # Model the IOBUF input readback: while the card drives a line, its pin
+        # value is visible at the card's own input; otherwise the host supplies
+        # it, by driving it or through its pull-ups. Releasing matters as much
+        # as driving. A caller that wrote `dat_in` since the last cycle is
+        # stating a new host level; otherwise the host keeps presenting the one
+        # it had, and the card's own R1b busy low is released rather than left
+        # latched in `dat_in` for the next write command to read as that
+        # packet's start bit.
         d.cmd_in.value = sample[1] if sample[0] else bit
-        if sample[2]:
-            current_data = int(d.dat_in.value)
-            d.dat_in.value = (current_data & ~sample[2]) | (sample[3] & sample[2])
+        if self.dat is not None:
+            seen = int(self.dat.value)
+            if seen != self.dat_written:
+                self.dat_level = seen
+            level = (self.dat_level & ~sample[2]) | (sample[3] & sample[2])
+            d.dat_in.value = level
+            self.dat_written = level
         if self.sample_advance_ns:
             await Timer(self.sample_advance_ns, units="ns", round_mode="round")
         d.sd_clk.value = 1
