@@ -16,7 +16,7 @@ entity tb_counter_bits<#uint WIDTH>(
     value_bits: inv [bool; WIDTH],
 ) {
     let value = inst counter::<WIDTH>(clk, rst);
-    let bits = value.to_bits();
+    let bits = value.as_bits();
     set value_bits = bits;
 }
 
@@ -27,7 +27,7 @@ entity tb_count_on_event_bits<#uint WIDTH>(
     value_bits: inv [bool; WIDTH],
 ) {
     let value = inst count_on_event::<WIDTH>(clk, rst, event_in);
-    let bits = value.to_bits();
+    let bits = value.as_bits();
     set value_bits = bits;
 }
 

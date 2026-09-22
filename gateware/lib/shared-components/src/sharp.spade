@@ -46,7 +46,7 @@ pub entity banked_rom_byte(
     addr_bnk: [bool; 2],
     stream_counter: uint<8>,
 ) -> [bool; 8] {
-    let c = stream_counter.to_bits();
+    let c = stream_counter.as_bits();
     [
         addr[0] != addr_bnk[0],
         addr[1] != addr_bnk[1],

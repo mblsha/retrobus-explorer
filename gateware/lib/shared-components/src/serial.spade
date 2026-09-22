@@ -200,7 +200,7 @@ where
                     }
                 },
                 UartTxState::Data => {
-                    let tx_bit = saved_data.to_bits()[trunc(bit_ctr)];
+                    let tx_bit = saved_data.as_bits()[trunc(bit_ctr)];
                     if ctr == ctr_last {
                         let bit_ctr_inc: uint<32> = bit_ctr +. 1;
                         if bit_ctr == DATA_WIDTH - 1 {
