@@ -113,53 +113,48 @@ impl OrganizerFtCmd {
     }
 }
 
-fn pin_source_valid(byte: uint<8>) -> bool {
+/// The pin-source letters, or `None` for a byte that names no source. `L` is a
+/// source like any other: it drives the pin low.
+fn pin_source_from_byte(byte: uint<8>) -> Option<SaleaePinSource> {
     let upper = byte.to_upper();
-    upper == b'L' || upper == b'H' || upper == b'R' || upper == b'O' ||
-        upper == b'C' || upper == b'E' || upper == b'M' || byte == b'1' ||
-        byte == b'2' || upper == b'P' || upper == b'Y' || upper == b'B' ||
-        upper == b'V' || upper == b'A' || upper == b'D' ||
-        upper == b'X' || upper == b'Z' || upper == b'J'
-}
-
-fn pin_source_from_byte(byte: uint<8>) -> SaleaePinSource {
-    let upper = byte.to_upper();
-    if upper == b'H' {
-        1
+    if upper == b'L' {
+        Some(0)
+    } else if upper == b'H' {
+        Some(1)
     } else if upper == b'R' {
-        2
+        Some(2)
     } else if upper == b'O' {
-        3
+        Some(3)
     } else if upper == b'C' {
-        4
+        Some(4)
     } else if upper == b'E' {
-        5
+        Some(5)
     } else if upper == b'M' {
-        6
+        Some(6)
     } else if byte == b'1' {
-        7
+        Some(7)
     } else if byte == b'2' {
-        8
+        Some(8)
     } else if upper == b'P' {
-        9
+        Some(9)
     } else if upper == b'Y' {
-        10
+        Some(10)
     } else if upper == b'B' {
-        11
+        Some(11)
     } else if upper == b'V' {
-        12
+        Some(12)
     } else if upper == b'A' {
-        14
+        Some(14)
     } else if upper == b'D' {
-        15
+        Some(15)
     } else if upper == b'X' {
-        pin_source_addr_uart()
+        Some(pin_source_addr_uart())
     } else if upper == b'Z' {
-        pin_source_data_uart()
+        Some(pin_source_data_uart())
     } else if upper == b'J' {
-        pin_source_misc_uart()
+        Some(pin_source_misc_uart())
     } else {
-        0
+        None
     }
 }
 
@@ -167,8 +162,9 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
     let ft_effect = organizer_ft_cmd_from_word(inputs.ft_ui_dout_empty, inputs.ft_ui_dout, inputs.ft_ui_dout_be)
         .effect(inputs.ft_enabled);
     let decoded = inputs.rx_byte.decode_hex();
-    let source = pin_source_from_byte(inputs.rx_byte);
-    let source_valid = pin_source_valid(inputs.rx_byte);
+    let decoded_source = pin_source_from_byte(inputs.rx_byte);
+    let source_valid = decoded_source.is_some();
+    let source = decoded_source.unwrap_or(0);
     let waiting_pin = inputs.cmd_state == cmd_wait_pin0() ||
         inputs.cmd_state == cmd_wait_pin1() ||
         inputs.cmd_state == cmd_wait_pin2() ||
