@@ -55,45 +55,43 @@ fn command_bank(byte: uint<8>) -> uint<3> {
     trunc(byte -. b'0')
 }
 
-fn pin_tester_step(
-    state: PinTesterState,
-    rx_valid: bool,
-    rx_byte: uint<8>,
-) -> PinTesterStep {
-    let send_mode = state.mode.is_send();
-    let bank_command = rx_valid && is_bank_command(rx_byte);
-    let switch_to_send = rx_valid && !send_mode && is_send_command(rx_byte);
-    let switch_to_receive = rx_valid && send_mode && is_receive_command(rx_byte);
+impl PinTesterState {
+    fn step(self, rx_valid: bool, rx_byte: uint<8>) -> PinTesterStep {
+        let send_mode = self.mode.is_send();
+        let bank_command = rx_valid && is_bank_command(rx_byte);
+        let switch_to_send = rx_valid && !send_mode && is_send_command(rx_byte);
+        let switch_to_receive = rx_valid && send_mode && is_receive_command(rx_byte);
 
-    let counter = if send_mode {
-        state.counter +. 1
-    } else {
-        state.counter
-    };
-    let mode = if switch_to_send {
-        PinTesterMode::Send()
-    } else if switch_to_receive {
-        PinTesterMode::Receive()
-    } else {
-        state.mode
-    };
-    let bank = if bank_command {
-        command_bank(rx_byte)
-    } else if switch_to_send || switch_to_receive {
-        0
-    } else {
-        state.bank
-    };
-    let accepted = bank_command || switch_to_send || switch_to_receive;
+        let counter = if send_mode {
+            self.counter +. 1
+        } else {
+            self.counter
+        };
+        let mode = if switch_to_send {
+            PinTesterMode::Send()
+        } else if switch_to_receive {
+            PinTesterMode::Receive()
+        } else {
+            self.mode
+        };
+        let bank = if bank_command {
+            command_bank(rx_byte)
+        } else if switch_to_send || switch_to_receive {
+            0
+        } else {
+            self.bank
+        };
+        let accepted = bank_command || switch_to_send || switch_to_receive;
 
-    PinTesterStep$(
-        next_state: PinTesterState$(
-            mode: mode,
-            bank: bank,
-            counter: counter,
-        ),
-        echo: if accepted { tx_req_byte(rx_byte) } else { tx_req_none() },
-    )
+        PinTesterStep$(
+            next_state: PinTesterState$(
+                mode: mode,
+                bank: bank,
+                counter: counter,
+            ),
+            echo: if accepted { tx_req_byte(rx_byte) } else { tx_req_none() },
+        )
+    }
 }
 
 fn receive_bank_byte(ffc_data: uint<48>, bank: uint<3>) -> uint<8> {
@@ -129,8 +127,8 @@ entity main_core(
 
     reg(clk) state: PinTesterState
         reset(rst: PinTesterState::default())
-        = pin_tester_step(state, rx_valid, rx.byte).next_state;
-    let step = pin_tester_step(state, rx_valid, rx.byte);
+        = state.step(rx_valid, rx.byte).next_state;
+    let step = state.step(rx_valid, rx.byte);
 
     let (uart, uart_w): (UartLineBusyPort, inv UartLineBusyPort) = port();
     let _tx = inst au_usb_uart_tx8_req_tap(
