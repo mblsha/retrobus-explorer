@@ -166,6 +166,8 @@ pub entity sd_frontend(
     reg(clk) cmd_sync reset(rst: true) = cmd_meta;
     reg(clk) dat_meta: uint<4> reset(rst: 15) = dat_in;
     reg(clk) dat_sync: uint<4> reset(rst: 15) = dat_meta;
+    // Disarming is a reset for everything the card does on the SD side.
+    let local_rst = rst || !armed;
     let (write_transaction_active, write_transaction_active_w): (bool, inv bool) = port();
     let (committing, committing_w): (bool, inv bool) = port();
     let (write_done, write_done_w): (bool, inv bool) = port();
@@ -177,7 +179,7 @@ pub entity sd_frontend(
     let prepared_data_mode = fast_mode || h700_mode || mmc_only;
     // A packet spans hundreds of SD edges. Register its aggregate activity
     // in prepared-data modes to keep reset/CRC-response decode out of read arbitration.
-    reg(clk) delayed_write_transaction_active reset(rst || !armed: false) = write_transaction_active;
+    reg(clk) delayed_write_transaction_active reset(local_rst: false) = write_transaction_active;
     let write_active = write_mode != WRITE_IDLE || (if prepared_data_mode { delayed_write_transaction_active } else { write_transaction_active });
     // The two synchronized SD edges every output stage is timed against.
     let sd_sample_tick = clk_sync && !clk_prev;
@@ -191,10 +193,10 @@ pub entity sd_frontend(
     // floating-input noise puts a thousandth of one. The decision is
     // registered, so an armed FPGA stops driving an unpowered target within
     // two windows, about 128 us.
-    reg(clk) host_clock_window: uint<12> reset(rst || !armed: 0) =
+    reg(clk) host_clock_window: uint<12> reset(local_rst: 0) =
         host_clock_window +. 1;
     let host_clock_window_end = host_clock_window == 0;
-    reg(clk) host_clock_edges: uint<3> reset(rst || !armed: 0) =
+    reg(clk) host_clock_edges: uint<3> reset(local_rst: 0) =
         if host_clock_window_end {
             0
         } else if clk_sync != clk_prev && host_clock_edges != 7 {
@@ -202,7 +204,7 @@ pub entity sd_frontend(
         } else {
             host_clock_edges
         };
-    reg(clk) host_clock_active reset(rst || !armed: false) =
+    reg(clk) host_clock_active reset(local_rst: false) =
         if host_clock_window_end {
             host_clock_edges >= 4
         } else {
@@ -236,7 +238,6 @@ pub entity sd_frontend(
         let level = clk.as_bool();
         (if prepared_data_mode { !level } else { level }).as_clock()
     };
-    let local_rst = rst || !armed;
     reg(clk) registered_output_reset reset(rst: true) = !armed;
     let command_output_reset = if fast_mode {
         registered_output_reset
@@ -968,8 +969,12 @@ pub entity sd_frontend(
     // that block, including its CRC and end bit, but do not start another one.
     // Reset/deselect still abort immediately, as does CMD12 before data starts.
     let read_stop_now = reset_stop || (command_stop && data_state == READ_IDLE);
+    // Either way the backend's sector buffer stops being this transfer's, so
+    // the same event ends the block, releases the buffer and clears the
+    // register-read and stop-after-block flags.
+    let sector_done = read_stop_now || data_end;
     reg(clk) read_stop_after_block reset(local_rst: false) = {
-        if read_stop_now || data_end {
+        if sector_done {
             false
         } else if command_stop {
             true
@@ -1034,7 +1039,7 @@ pub entity sd_frontend(
     } else {
         pending
     };
-    reg(clk) buffer_valid reset(local_rst: false) = if read_stop_now || data_end {
+    reg(clk) buffer_valid reset(local_rst: false) = if sector_done {
         false
     } else if pending && sector_arrived {
         true
@@ -1072,7 +1077,7 @@ pub entity sd_frontend(
     } else {
         sending_ext_csd
     };
-    reg(clk) register_read_pending reset(local_rst: false) = if read_stop_now || data_end {
+    reg(clk) register_read_pending reset(local_rst: false) = if sector_done {
         false
     } else if scr || ssr || ext_csd {
         true
@@ -1448,7 +1453,7 @@ pub entity sd_frontend(
     // Break command-decode fanout into backend control. Generation changes on
     // the original event, so a late backend response is already stale before
     // this registered release arrives one management cycle later.
-    reg(clk) release_event reset(rst: false) = read_stop_now || data_end;
+    reg(clk) release_event reset(rst: false) = sector_done;
     set sector_release = release_event;
 }
 
