@@ -179,7 +179,9 @@ pub entity sd_frontend(
     // in prepared-data modes to keep reset/CRC-response decode out of read arbitration.
     reg(clk) delayed_write_transaction_active reset(rst || !armed: false) = write_transaction_active;
     let write_active = write_mode != WRITE_IDLE || (if prepared_data_mode { delayed_write_transaction_active } else { write_transaction_active });
+    // The two synchronized SD edges every output stage is timed against.
     let sd_sample_tick = clk_sync && !clk_prev;
+    let sd_launch_tick = !clk_sync && clk_prev;
     // A live host clocks SD_CLK continuously; an unpowered one leaves the line
     // floating, where measured noise still produces a few hundred transitions
     // per second. Any compatibility drive is therefore gated on an edge *rate*
@@ -212,17 +214,17 @@ pub entity sd_frontend(
     let command_output_advance = if fast_mode || (h700_mode && h700_early_command) {
         sd_sample_tick
     } else {
-        !clk_sync && clk_prev
+        sd_launch_tick
     };
     // Prepared profiles advance immediately after the synchronized host
     // sample. The opposite-edge pad register then holds the next value for a
     // full external clock cycle before the host's following rising edge.
     let data_output_advance = if h700_mode && h700_falling_phase {
-        !clk_sync && clk_prev
+        sd_launch_tick
     } else if prepared_data_mode {
         sd_sample_tick
     } else {
-        !clk_sync && clk_prev
+        sd_launch_tick
     };
     // Prepared output registers use the opposite fabric edge. The mode is
     // static in hardware wrappers and is checked in the routed netlist.
@@ -1020,18 +1022,21 @@ pub entity sd_frontend(
     } else {
         half
     };
+    // A backend answer only counts if it carries the generation this frontend
+    // is still waiting for; a stale one is dropped without clearing anything.
+    let sector_arrived = sector_ready && sector_generation == epoch;
     reg(clk) pending reset(local_rst: false) = if read_stop_now {
         false
     } else if read || next_sector {
         true
-    } else if sector_ready && sector_generation == epoch {
+    } else if sector_arrived {
         false
     } else {
         pending
     };
     reg(clk) buffer_valid reset(local_rst: false) = if read_stop_now || data_end {
         false
-    } else if pending && sector_ready && sector_generation == epoch {
+    } else if pending && sector_arrived {
         true
     } else {
         buffer_valid
@@ -1335,7 +1340,11 @@ pub entity sd_frontend(
     let observed_data_start = observed_data_enable && observed_data_enable_previous == 0;
     let observed_data_finish = !observed_data_enable && observed_data_enable_previous != 0;
     let observed_data_sample = armed && sd_sample_tick && observed_data_enable;
+    // A sample taken on an enabled lane whose pin readback disagrees with the
+    // value the pad register launched. Every counter below keys off this one
+    // event, so the burst statistics cannot drift apart.
     let observed_data_mismatch_now = ((dat_sync ^ data_output) & pad_data_enable) != 0;
+    let observed_data_bad = observed_data_sample && observed_data_mismatch_now;
     reg(clk) observed_data_samples: uint<16> reset(local_rst: 0) = {
         if observed_data_start {
             if observed_data_sample { 1 } else { 0 }
@@ -1347,8 +1356,8 @@ pub entity sd_frontend(
     };
     reg(clk) observed_data_mismatch reset(local_rst: false) = {
         if observed_data_start {
-            observed_data_sample && observed_data_mismatch_now
-        } else if observed_data_sample && observed_data_mismatch_now {
+            observed_data_bad
+        } else if observed_data_bad {
             true
         } else {
             observed_data_mismatch
@@ -1356,8 +1365,8 @@ pub entity sd_frontend(
     };
     reg(clk) observed_data_mismatch_count: uint<16> reset(local_rst: 0) = {
         if observed_data_start {
-            if observed_data_sample && observed_data_mismatch_now { 1 } else { 0 }
-        } else if observed_data_sample && observed_data_mismatch_now {
+            if observed_data_bad { 1 } else { 0 }
+        } else if observed_data_bad {
             observed_data_mismatch_count +. 1
         } else {
             observed_data_mismatch_count
@@ -1365,9 +1374,8 @@ pub entity sd_frontend(
     };
     reg(clk) observed_data_first_mismatch: uint<16> reset(local_rst: 0xffff) = {
         if observed_data_start {
-            if observed_data_sample && observed_data_mismatch_now { 0 } else { 0xffff }
-        } else if observed_data_sample && observed_data_mismatch_now &&
-            observed_data_first_mismatch == 0xffff {
+            if observed_data_bad { 0 } else { 0xffff }
+        } else if observed_data_bad && observed_data_first_mismatch == 0xffff {
             observed_data_samples
         } else {
             observed_data_first_mismatch
