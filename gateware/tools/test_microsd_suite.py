@@ -38,6 +38,38 @@ CASES = [
     ("microsd-emulator", "ddr_sector_writer", "test_sector_writer"),
     ("microsd-emulator", "sd_write_transaction", "test_write_transaction"),
 ]
+# `--fast-sd` replaces the profile rather than adding one, so CI exercised the
+# native write path only at 25 MHz with the prepared output registers, and a
+# default-profile regression in that path survived twenty commits unnoticed.
+# These two cases run in both profiles. That costs about nine more minutes and
+# covers the 1 MHz card clock, the slow command and data launch edges, and the
+# H700/MMC cases the fast profile cannot build. The `test_ddr_rw` suites stay
+# fast-only: ten to fifteen minutes each for the write path `test_sd_write`
+# already covers here in three.
+BOTH_PROFILES = {
+    ("sd_frontend", "test_sd"),
+    ("sd_frontend", "test_sd_write"),
+}
+
+
+def fast_profile(top):
+    """The 100 MHz / 25 MHz SD path and 100-to-80 MHz CDC overrides."""
+    env = dict(
+        MICROSD_SYS_PERIOD_NS="12.5",
+        MICROSD_FAST_MODE="0",
+        MICROSD_HALF_NS="41",
+    )
+    if top in ("sd_frontend", "ddr_emulator", "ddr_emulator_cdc"):
+        env.update(
+            MICROSD_SYS_PERIOD_NS="10",
+            MICROSD_FAST_MODE="1",
+            MICROSD_HALF_NS="19.9",
+            MICROSD_CLOCK_JITTER="0",
+            MICROSD_SAMPLE_ADVANCE_NS="8",
+        )
+    if top == "native_cdc":
+        env.update(MICROSD_CDC_SRC_NS="10", MICROSD_CDC_DST_NS="12.5")
+    return env
 
 
 def main():
@@ -75,52 +107,50 @@ def main():
                 continue
             if module == "test_sd" and not args.fast_sd:
                 continue
-        env = dict(os.environ)
-        if args.fast_sd:
-            env.update(
-                MICROSD_SYS_PERIOD_NS="12.5",
-                MICROSD_FAST_MODE="0",
-                MICROSD_HALF_NS="41",
-            )
-            if top in ("sd_frontend", "ddr_emulator", "ddr_emulator_cdc"):
-                env.update(
-                    MICROSD_SYS_PERIOD_NS="10",
-                    MICROSD_FAST_MODE="1",
-                    MICROSD_HALF_NS="19.9",
-                    MICROSD_CLOCK_JITTER="0",
-                    MICROSD_SAMPLE_ADVANCE_NS="8",
+        profiles = [("", fast_profile(top) if args.fast_sd else {})]
+        if args.fast_sd and (top, module) in BOTH_PROFILES:
+            profiles.append(("-default", None))
+        for suffix, overrides in profiles:
+            if overrides is None:
+                # The default profile is the absence of every knob, so drop
+                # any the caller exported rather than layering over them.
+                env = {
+                    k: v
+                    for k, v in os.environ.items()
+                    if not k.startswith("MICROSD_")
+                }
+            else:
+                env = dict(os.environ)
+                env.update(overrides)
+            print(f"Testing {project}: {top} ({module}{suffix})", flush=True)
+            name = f"{top}-{module}{suffix}"
+            (out / f"{name}-parameters.json").write_text(
+                json.dumps(
+                    {k: v for k, v in env.items() if k.startswith("MICROSD_")}, indent=2
                 )
-            if top == "native_cdc":
-                env.update(MICROSD_CDC_SRC_NS="10", MICROSD_CDC_DST_NS="12.5")
-        print(f"Testing {project}: {top}", flush=True)
-        name = f"{top}-{module}"
-        (out / f"{name}-parameters.json").write_text(
-            json.dumps(
-                {k: v for k, v in env.items() if k.startswith("MICROSD_")}, indent=2
+                + "\n"
             )
-            + "\n"
-        )
-        with (out / f"{name}.log").open("w") as log:
-            subprocess.run(
-                [
-                    sys.executable,
-                    "tools/run_tb.py",
-                    "--project",
-                    f"projects/{project}",
-                    "--top",
-                    top,
-                    "--test-module",
-                    module,
-                ],
-                cwd=GATEWARE,
-                env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                check=True,
+            with (out / f"{name}.log").open("w") as log:
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "tools/run_tb.py",
+                        "--project",
+                        f"projects/{project}",
+                        "--top",
+                        top,
+                        "--test-module",
+                        module,
+                    ],
+                    cwd=GATEWARE,
+                    env=env,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                )
+            (out / f"{name}.xml").write_bytes(
+                (GATEWARE / f"projects/{project}/test/results.xml").read_bytes()
             )
-        (out / f"{name}.xml").write_bytes(
-            (GATEWARE / f"projects/{project}/test/results.xml").read_bytes()
-        )
     print("All microSD tests passed.", flush=True)
 
 
