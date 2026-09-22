@@ -162,6 +162,7 @@ pub entity ddr_backend(
     let start = state == IDLE && request_valid && available && !buffer_release && request_lba < 524288;
     let sparse = (saved_lba << 9) >= resident_bytes;
     let issue = state == ISSUE_READ && !stale && !sparse;
+    let word_copied = state == COPY_WORD_BYTES && byte_offset == 15;
     let address: uint<24> = (trunc::<uint<32>, uint<24>>(saved_lba) << 5) | zext(word);
     reg(clk) saved_epoch: uint<32> reset(rst: 0) = if start {
         generation
@@ -180,10 +181,13 @@ pub entity ddr_backend(
     } else {
         discarded
     };
+    // A read the caller no longer wants, either because the generation moved
+    // on while it was outstanding or because it was already written off.
+    let abandoned = stale || discarded;
     reg(clk) state: uint<3> reset(rst: IDLE) = {
         if state == WAIT_READ_DATA {
             if rdata_valid {
-                if stale || discarded {
+                if abandoned {
                     IDLE
                 } else {
                     COPY_WORD_BYTES
@@ -191,7 +195,7 @@ pub entity ddr_backend(
             } else {
                 WAIT_READ_DATA
             }
-        } else if state != IDLE && (stale || discarded) {
+        } else if state != IDLE && abandoned {
             IDLE
         } else if start {
             ISSUE_READ
@@ -203,7 +207,7 @@ pub entity ddr_backend(
             } else {
                 ISSUE_READ
             }
-        } else if state == COPY_WORD_BYTES && byte_offset == 15 {
+        } else if word_copied {
             if word == 31 {
                 SECTOR_READY
             } else {
@@ -222,7 +226,7 @@ pub entity ddr_backend(
     };
     reg(clk) word: uint<5> reset(rst: 0) = if start {
         0
-    } else if state == COPY_WORD_BYTES && byte_offset == 15 {
+    } else if word_copied {
         word +. 1
     } else {
         word
@@ -236,13 +240,13 @@ pub entity ddr_backend(
     let selected: uint<8> = trunc(held_word >> (zext::<4, 128>(byte_offset) << 3));
     let buffer: Memory<uint<8>, 512> = inst clocked_memory(
         clk,
-        [(state == COPY_WORD_BYTES && !stale && !discarded, address_byte, selected)],
+        [(state == COPY_WORD_BYTES && !abandoned, address_byte, selected)],
     );
     let data = inst read_memory(buffer, byte_index);
     set cmd_valid = issue;
     set cmd_address = address;
     set rdata_ready = (state == WAIT_READ_DATA);
-    set sector_ready = (state == SECTOR_READY && !stale && !discarded);
+    set sector_ready = (state == SECTOR_READY && !abandoned);
     set sector_generation = saved_epoch;
     set sector_byte = data;
 }
@@ -349,13 +353,16 @@ pub entity ddr_sector_writer(
     decl state, offset, word_index, command_sent, data_sent;
     let begin = state == IDLE && start;
     let sent = state == SEND_WORD && (command_sent || cmd_ready) && (data_sent || wdata_ready);
+    // The advertised capacity. A sector past it is reported as a failed commit
+    // rather than written anywhere, so the engine skips straight to complete.
+    let beyond_capacity = lba >= 524288;
     reg(clk) saved_lba: uint<32> reset(rst: 0) = if begin {
         lba
     } else {
         saved_lba
     };
     reg(clk) error reset(rst: false) = if begin {
-        lba >= 524288
+        beyond_capacity
     } else {
         error
     };
@@ -385,7 +392,7 @@ pub entity ddr_sector_writer(
     reg(clk) command_sent reset(rst: false) = state == SEND_WORD && (command_sent || cmd_ready);
     reg(clk) data_sent reset(rst: false) = state == SEND_WORD && (data_sent || wdata_ready);
     reg(clk) state: uint<3> reset(rst: IDLE) = if begin {
-        if lba >= 524288 {
+        if beyond_capacity {
             COMMIT_COMPLETE
         } else {
             WAIT_SECTOR_BYTE
