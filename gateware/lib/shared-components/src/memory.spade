@@ -66,9 +66,16 @@ pub type FifoAddr<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES - 1)}>;
 /// bit more than an address does.
 pub type FifoCount<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES)}>;
 
+/// `FifoImplState` with the two widths `ENTRIES` already implies. The struct
+/// cannot compute them itself (see below), but a `reg` annotation can name an
+/// alias whose arguments are type expressions, so the restatement happens once
+/// here instead of at every mention of the register's type.
+type FifoState<#uint WIDTH, #uint ENTRIES> =
+    FifoImplState<{uint::bits_for(ENTRIES - 1)}, {uint::bits_for(ENTRIES)}, WIDTH, ENTRIES>;
+
 // `ADDR_W` and `COUNT_W` are not independent: they are `FifoAddr<ENTRIES>` and
-// `FifoCount<ENTRIES>`, restated by the one caller. They stay anyway, because
-// v0.20.0 will not evaluate a type expression in a struct member:
+// `FifoCount<ENTRIES>`. They stay parameters anyway, because v0.20.0 will not
+// evaluate a type expression in a struct member:
 //
 //     waddr: uint<{uint::bits_for(ENTRIES - 1)}>,
 //     error: Struct members cannot have const generics in their type
@@ -76,9 +83,9 @@ pub type FifoCount<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES)}>;
 // and routing it through the `FifoAddr<ENTRIES>` alias instead crashes the
 // compiler outright ("internal error: entered unreachable code: Const generic in
 // type_expr_to_concrete", spade-typeinference/src/mir_type_lowering.rs:201).
-// Same answer for `BootBannerState`'s `IDX_W`. Worth retrying after a compiler
-// bump; until then the two widths are passed in and the `where` clause above is
-// what keeps a caller from passing something inconsistent.
+// Both were retried on v0.20.0 and both still do this. Same answer for
+// `BootBannerState`'s `IDX_W`. Until a compiler bump fixes it, `FifoState`
+// above is what ties the two widths back to `ENTRIES`, in one place.
 struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
     waddr: uint<ADDR_W>,
     waddr_delay: uint<ADDR_W>,
@@ -105,8 +112,29 @@ where
 {
     let _ = require_power_of_two::<ENTRIES>();
 
-    // Packed state to avoid declaration-order dependency issues across interlocked regs.
-    reg(clk) state: FifoImplState<{uint::bits_for(ENTRIES - 1)}, {uint::bits_for(ENTRIES)}, WIDTH, ENTRIES>
+    // One packed register rather than six interlocked ones, so that the write
+    // pointer, its delayed copy and the occupancy count are updated from the
+    // same snapshot. `decl` lets that snapshot be read above the register that
+    // holds it, so the pointer comparisons below are written once and used both
+    // to compute the next state and to report full/empty.
+    decl state;
+
+    let waddr: FifoAddr<ENTRIES> = state.waddr;
+    let waddr_delay: FifoAddr<ENTRIES> = state.waddr_delay;
+    let raddr: FifoAddr<ENTRIES> = state.raddr;
+    let used: FifoCount<ENTRIES> = state.used;
+    let storage: [uint<WIDTH>; ENTRIES] = state.storage;
+
+    let next_write = ptr_inc(waddr);
+    let wrdy = next_write != raddr;
+    let rrdy = raddr != waddr_delay;
+    let do_write = wput && wrdy;
+    let do_read = rget && rrdy;
+    // Also where the next read lands, which is why first-word-fall-through
+    // works: the storage read is launched a cycle before its data is asked for.
+    let next_raddr = if do_read { ptr_inc(raddr) } else { raddr };
+
+    reg(clk) state: FifoState<WIDTH, ENTRIES>
         reset(rst: FifoImplState$(
             waddr: 0,
             waddr_delay: 0,
@@ -115,61 +143,29 @@ where
             read_data: 0,
             storage: [0; ENTRIES],
         ))
-        = {
-            let waddr: FifoAddr<ENTRIES> = state.waddr;
-            let waddr_delay: FifoAddr<ENTRIES> = state.waddr_delay;
-            let raddr: FifoAddr<ENTRIES> = state.raddr;
-            let used: FifoCount<ENTRIES> = state.used;
-            let storage: [uint<WIDTH>; ENTRIES] = state.storage;
-
-            let next_write = ptr_inc(waddr);
-            let wrdy = next_write != raddr;
-            let rrdy = raddr != waddr_delay;
-            let do_write = wput && wrdy;
-            let do_read = rget && rrdy;
-
-            let next_waddr = if do_write { next_write } else { waddr };
-            let next_raddr = if do_read { ptr_inc(raddr) } else { raddr };
-            let next_used = if do_write && !do_read {
+        = FifoImplState$(
+            waddr: if do_write { next_write } else { waddr },
+            waddr_delay: waddr,
+            raddr: next_raddr,
+            used: if do_write && !do_read {
                 used +. 1
             } else if do_read && !do_write {
                 used -. 1
             } else {
                 used
-            };
-            let read_addr = if do_read { ptr_inc(raddr) } else { raddr };
-            let next_read_data = storage[read_addr];
-            let next_storage = if do_write {
+            },
+            read_data: storage[next_raddr],
+            storage: if do_write {
                 storage.write_at(waddr, din)
             } else {
                 storage
-            };
+            },
+        );
 
-            FifoImplState$(
-                waddr: next_waddr,
-                waddr_delay: waddr,
-                raddr: next_raddr,
-                used: next_used,
-                read_data: next_read_data,
-                storage: next_storage,
-            )
-        };
-
-    let waddr: FifoAddr<ENTRIES> = state.waddr;
-    let waddr_delay: FifoAddr<ENTRIES> = state.waddr_delay;
-    let raddr: FifoAddr<ENTRIES> = state.raddr;
-    let used: FifoCount<ENTRIES> = state.used;
-    let read_data: uint<WIDTH> = state.read_data;
-
-    let next_write = ptr_inc(waddr);
-    let wrdy = next_write != raddr;
-    let rrdy = raddr != waddr_delay;
-    let full = !wrdy;
-    let empty = !rrdy;
     FifoUsedOut$(
-        full: full,
-        empty: empty,
-        dout: read_data,
+        full: !wrdy,
+        empty: !rrdy,
+        dout: state.read_data,
         used: used,
     )
 }
