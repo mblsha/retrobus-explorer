@@ -1903,7 +1903,9 @@ entity ddr_uart_core<#uint CLK_FREQ>(
     dat_out: inv uint<4>,
     dat_oe: inv uint<4>,
     armed_status: inv bool,
-) {
+) where
+    CLK_FREQ >= 1_000_000 else "the 1 Mbaud console needs at least one system clock cycle per bit"
+{
     let rx_cycles: uint<32> = CLK_FREQ `std::ops::comb_div` 1_000_000;
     let rx = inst shared_components::serial::uart_rx$(
         clk,
