@@ -43,13 +43,20 @@ pub(lib) enum OrganizerMsg {
     SyncMemoryThenFtDisabled,
 }
 
-pub struct OrganizerMsgStreamState {
-    cur_msg: OrganizerMsg,
-    pending_msg: OrganizerMsg,
+/// How far through the current message the byte stream has got. A status
+/// message walks `status_phase`/`status_idx` and, inside the `CH=` phase,
+/// `status_ch`; every other message is one or two bytes counted by `simple_idx`.
+pub struct MsgCursor {
     status_phase: StatusPhase,
     status_idx: ByteIdx,
     status_ch: uint<3>,
     simple_idx: uint<1>,
+}
+
+pub struct OrganizerMsgStreamState {
+    cur_msg: OrganizerMsg,
+    pending_msg: OrganizerMsg,
+    cursor: MsgCursor,
 }
 
 pub struct OrganizerMsgStreamOut {
@@ -60,10 +67,13 @@ pub struct OrganizerMsgStreamOut {
 
 struct ProgressedState {
     cur_msg: OrganizerMsg,
-    status_phase: StatusPhase,
-    status_idx: ByteIdx,
-    status_ch: uint<3>,
-    simple_idx: uint<1>,
+    cursor: MsgCursor,
+}
+
+impl Default for MsgCursor {
+    fn default() -> Self {
+        MsgCursor$(status_phase: 0, status_idx: 0, status_ch: 0, simple_idx: 0)
+    }
 }
 
 impl Default for OrganizerMsgStreamState {
@@ -71,10 +81,7 @@ impl Default for OrganizerMsgStreamState {
         OrganizerMsgStreamState$(
             cur_msg: OrganizerMsg::None(),
             pending_msg: OrganizerMsg::None(),
-            status_phase: 0,
-            status_idx: 0,
-            status_ch: 0,
-            simple_idx: 0,
+            cursor: MsgCursor::default(),
         )
     }
 }
@@ -495,84 +502,70 @@ impl OrganizerMsg {
         }
     }
 
-    fn tx_req(self, status_phase: StatusPhase, status_idx: ByteIdx, status_ch: uint<3>, simple_idx: uint<1>) -> TxReq8 {
+    fn tx_req(self, at: MsgCursor) -> TxReq8 {
         if let Self::Status$(status) = self {
-            status_byte(status, status_phase, status_idx, status_ch)
-        } else if zext(simple_idx) < self.simple_len() {
-            tx_req_byte(self.simple_byte(simple_idx))
+            status_byte(status, at.status_phase, at.status_idx, at.status_ch)
+        } else if zext(at.simple_idx) < self.simple_len() {
+            tx_req_byte(self.simple_byte(at.simple_idx))
         } else {
             tx_req_none()
         }
     }
 
-    fn last_byte(self, status_phase: StatusPhase, status_idx: ByteIdx, status_ch: uint<3>, simple_idx: uint<1>) -> bool {
+    fn last_byte(self, at: MsgCursor) -> bool {
         if let Self::Status$(status) = self {
-            status_last_byte(status, status_phase, status_idx, status_ch)
+            status_last_byte(status, at.status_phase, at.status_idx, at.status_ch)
         } else {
-            zext(simple_idx) == self.simple_len() -. 1
+            zext(at.simple_idx) == self.simple_len() -. 1
         }
     }
 }
 
 impl Default for ProgressedState {
     fn default() -> Self {
-        ProgressedState$(
-            cur_msg: OrganizerMsg::None(),
-            status_phase: 0,
-            status_idx: 0,
-            status_ch: 0,
-            simple_idx: 0,
+        ProgressedState$(cur_msg: OrganizerMsg::None(), cursor: MsgCursor::default())
+    }
+}
+
+fn advance_cursor(msg: OrganizerMsg, at: MsgCursor) -> MsgCursor {
+    if let OrganizerMsg::Status$(status) = msg {
+        if !status_phase_done(status, at.status_phase, at.status_idx, at.status_ch) {
+            MsgCursor$(
+                status_phase: at.status_phase,
+                status_idx: at.status_idx +. 1,
+                status_ch: at.status_ch,
+                simple_idx: at.simple_idx,
+            )
+        } else {
+            // The CH= phase repeats once per channel; only the eighth leaves it.
+            let more_channels = at.status_phase == phase_channel() && at.status_ch != 7;
+            MsgCursor$(
+                status_phase: if more_channels { at.status_phase } else { at.status_phase +. 1 },
+                status_idx: 0,
+                status_ch: if more_channels { at.status_ch +. 1 } else { at.status_ch },
+                simple_idx: at.simple_idx,
+            )
+        }
+    } else {
+        MsgCursor$(
+            status_phase: at.status_phase,
+            status_idx: at.status_idx,
+            status_ch: at.status_ch,
+            simple_idx: at.simple_idx +. 1,
         )
     }
 }
 
 fn progress_state(state: OrganizerMsgStreamState, sent: bool) -> ProgressedState {
     if !sent {
-        ProgressedState$(
-            cur_msg: state.cur_msg,
-            status_phase: state.status_phase,
-            status_idx: state.status_idx,
-            status_ch: state.status_ch,
-            simple_idx: state.simple_idx,
-        )
-    } else if state.cur_msg.last_byte(state.status_phase, state.status_idx, state.status_ch, state.simple_idx) {
+        ProgressedState$(cur_msg: state.cur_msg, cursor: state.cursor)
+    } else if state.cur_msg.last_byte(state.cursor) {
         ProgressedState::default()
     } else {
-        if let OrganizerMsg::Status$(status) = state.cur_msg {
-            if status_phase_done(status, state.status_phase, state.status_idx, state.status_ch) {
-                ProgressedState$(
-                    cur_msg: state.cur_msg,
-                    status_phase: if state.status_phase == phase_channel() && state.status_ch != 7 {
-                        state.status_phase
-                    } else {
-                        state.status_phase +. 1
-                    },
-                    status_idx: 0,
-                    status_ch: if state.status_phase == phase_channel() && state.status_ch != 7 {
-                        state.status_ch +. 1
-                    } else {
-                        state.status_ch
-                    },
-                    simple_idx: state.simple_idx,
-                )
-            } else {
-                ProgressedState$(
-                    cur_msg: state.cur_msg,
-                    status_phase: state.status_phase,
-                    status_idx: state.status_idx +. 1,
-                    status_ch: state.status_ch,
-                    simple_idx: state.simple_idx,
-                )
-            }
-        } else {
-            ProgressedState$(
-                cur_msg: state.cur_msg,
-                status_phase: state.status_phase,
-                status_idx: state.status_idx,
-                status_ch: state.status_ch,
-                simple_idx: state.simple_idx +. 1,
-            )
-        }
+        ProgressedState$(
+            cur_msg: state.cur_msg,
+            cursor: advance_cursor(state.cur_msg, state.cursor),
+        )
     }
 }
 
@@ -585,7 +578,7 @@ pub fn organizer_msg_stream_step(
     let cur_none = state.cur_msg.is_none();
     let pending_none = state.pending_msg.is_none();
     let tx_req = if !cur_none && !block_tx {
-        state.cur_msg.tx_req(state.status_phase, state.status_idx, state.status_ch, state.simple_idx)
+        state.cur_msg.tx_req(state.cursor)
     } else {
         tx_req_none()
     };
@@ -606,26 +599,7 @@ pub fn organizer_msg_stream_step(
         state: OrganizerMsgStreamState$(
             cur_msg: scheduled.current,
             pending_msg: scheduled.pending,
-            status_phase: if reset_cursor {
-                0
-            } else {
-                progressed.status_phase
-            },
-            status_idx: if reset_cursor {
-                0
-            } else {
-                progressed.status_idx
-            },
-            status_ch: if reset_cursor {
-                0
-            } else {
-                progressed.status_ch
-            },
-            simple_idx: if reset_cursor {
-                0
-            } else {
-                progressed.simple_idx
-            },
+            cursor: if reset_cursor { MsgCursor::default() } else { progressed.cursor },
         ),
         tx_req: tx_req,
         msg_none: scheduled.current_is_none,
