@@ -276,6 +276,24 @@ class Host:
         assert int.from_bytes(ext_csd[212:216], "little") == 524288
         await self.command(6, 0x03AF0100)
 
+    async def drain_read(self, limit=6000):
+        """Clock until the card has released the data lines.
+
+        CMD12 arriving inside a block finishes that block, including its CRC
+        and end bit, rather than aborting it. A host that follows the stop
+        with a write therefore has to let the block in flight complete before
+        it may drive DAT itself.
+        """
+        released = 0
+        for _ in range(limit):
+            if (await self.cycle())[2]:
+                released = 0
+            else:
+                released += 1
+                if released == 4:
+                    return
+        assert False, "the card never released the data lines after the stop"
+
     async def supply(self):
         d = self.d
         assert int(d.request_valid.value)

@@ -48,6 +48,10 @@ async def native_ddr_read_write_roundtrips(d):
         for expected in expected_blocks:
             assert await h.data(wide=wide) == expected
         await h.command(12)
+        # The backend has already handed over the next sector, so this stop
+        # lands inside a block the card will finish rather than abort. Let it,
+        # before the write below wants the data lines for itself.
+        await h.drain_read()
         before = dict(memory)
         await h.command(24, 128 * 512)
         await send_packet(h, wide, 244, corrupt=True)
