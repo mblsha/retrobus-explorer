@@ -1,5 +1,5 @@
 use super::{
-    trace_events::{TraceEvent, TraceEventReq, TraceEventWord, overflow_trace_event, pack_trace_event_word, trace_event, trace_event_none},
+    trace_events::{TraceEventReq, TraceEventWord, overflow_trace_event, trace_event, trace_event_none},
     trace_words::{TaggedTraceKind, TaggedTracePayload},
 };
 
@@ -41,7 +41,6 @@ pub struct OrganizerSampleReq {
     sample: OrganizerSample,
 }
 
-pub type OrganizerTraceEvent = TraceEvent;
 pub type OrganizerTraceEventReq = TraceEventReq;
 
 pub fn organizer_zero_sample() -> OrganizerSample {
@@ -122,26 +121,6 @@ pub fn organizer_trace_event_sample(sample: OrganizerSample) -> OrganizerTraceEv
 
 pub fn organizer_trace_event_overflow(count: OrganizerOverflowCount) -> OrganizerTraceEventReq {
     overflow_trace_event(count)
-}
-
-pub fn pack_addr_word(addr: OrganizerAddr) -> OrganizerTraceWord {
-    pack_trace_event_word(TraceEvent$(kind: TaggedTraceKind::Addr(), payload: zext(addr)))
-}
-
-pub fn pack_data_word(data: OrganizerData) -> OrganizerTraceWord {
-    pack_trace_event_word(TraceEvent$(kind: TaggedTraceKind::Data(), payload: zext(data)))
-}
-
-pub fn pack_misc_word(misc: MiscWord) -> OrganizerTraceWord {
-    pack_trace_event_word(TraceEvent$(kind: TaggedTraceKind::Misc(), payload: zext(misc)))
-}
-
-pub fn pack_overflow_word(count: OrganizerOverflowCount) -> OrganizerTraceWord {
-    pack_trace_event_word(TraceEvent$(kind: TaggedTraceKind::Overflow(), payload: count))
-}
-
-pub fn pack_sample_word(sample: OrganizerSample) -> OrganizerTraceWord {
-    pack_trace_event_word(TraceEvent$(kind: sample_trace_kind(sample), payload: sample_payload(sample)))
 }
 
 pub fn sample_addr_value(req: OrganizerSampleReq) -> OrganizerAddr {
