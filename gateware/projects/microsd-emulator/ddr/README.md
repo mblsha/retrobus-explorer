@@ -57,7 +57,7 @@ python3 experiments/openxc7-macos/build_ddr.py \
 The H700 profile boots an Anbernic RG35XX Plus from the emulated card:
 
 ```sh
-DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib \
   ./.venv/bin/python experiments/openxc7-macos/build_ddr.py \
   --ethernet --slow-mmc --h700-mmc --sd-io-clock-hz 64000000 --seed 8
 ```
@@ -79,7 +79,7 @@ routing the finished netlist costs about ninety seconds, so search first and
 feed the winner back to `--seed`:
 
 ```sh
-DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib \
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib \
   ./.venv/bin/python tools/search_placement_seeds.py \
   --output build/microsd-ddr-ethernet-h700 --h700-mmc \
   --seeds 8 9 10 11 12 19 21 30

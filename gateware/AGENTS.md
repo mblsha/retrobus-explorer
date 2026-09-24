@@ -37,7 +37,7 @@ to need attention.
 
 Bitstream builds are the one exception to `uv run`: `nextpnr-xilinx` is linked
 against Homebrew's Boost by absolute path, so they need
-`DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.90.0/lib` and must be launched
+`DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib` and must be launched
 with `./.venv/bin/python`, because macOS strips that variable through `uv run`.
 
 Run these from `gateware/`:

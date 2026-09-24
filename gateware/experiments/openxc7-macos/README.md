@@ -9,10 +9,10 @@ prerequisites and the complete build command.
 ## Toolchain build
 
 Tested on macOS 26.6.2 arm64 with Apple Clang 21.0.0, CMake 3.30.2,
-Boost 1.90.0, Eigen 5.0.1, Homebrew Flex 2.6.4, and Python 3.11.9.
+Boost 1.92.0, Eigen 5.0.1, Homebrew Flex 2.6.4, and Python 3.11.9.
 Only Eigen and Flex needed to be installed with Homebrew on this machine.
 The SD frontend uses negative-edge slice registers and additionally requires
-[`nextpnr-negative-edge-timing.patch`](nextpnr-negative-edge-timing.patch): upstream 0.9.4 otherwise reports every register as rising-edge, missing half-cycle
+[`nextpnr-negative-edge-timing.patch`](nextpnr-negative-edge-timing.patch): upstream (still as of 0.9.7) otherwise reports every register as rising-edge, missing half-cycle
 timing paths. This patch fixes edge classification; the timing model remains
 an estimate rather than vendor timing signoff.
 
@@ -20,10 +20,10 @@ Source revisions:
 
 | Repository | Commit |
 | --- | --- |
-| [nextpnr-xilinx](https://github.com/openXC7/nextpnr-xilinx) | `ece39e171b03180c0efd6ba024ef175ce3ad0aad` |
+| [nextpnr-xilinx](https://github.com/openXC7/nextpnr-xilinx) | `0eae9fbb19dfb83cdd30d5048d8b0ba744180ad0` |
 | [Yosys](https://github.com/YosysHQ/yosys) | `435977e97008578a4532da60e70f75b5e88d076d` |
 | [Project X-Ray](https://github.com/openXC7/prjxray) | `57c33a1f88ec6b5c4dc37f05bd760210a6fe9e15` |
-| nextpnr's prjxray-db submodule | `e8b8e8e46a91334f6232df84d36954323e15a1d1` |
+| nextpnr's prjxray-db submodule | `a90f27c1caefee5276f47440f4c730b50519a86f` |
 | nextpnr's metadata submodule | `a4af910cac907f2cbd3a545f26f8e26573e860de` |
 
 To install, clone these revisions and run the following with absolute `SOURCE`
@@ -40,7 +40,7 @@ brew install cmake ninja boost eigen flex bison python@3.11 uv
 # On a fresh installation, populate SOURCE (skip these clones if already present).
 mkdir -p "$SOURCE"
 git clone https://github.com/openXC7/nextpnr-xilinx.git "$SOURCE/nextpnr-xilinx"
-git -C "$SOURCE/nextpnr-xilinx" checkout ece39e171b03180c0efd6ba024ef175ce3ad0aad
+git -C "$SOURCE/nextpnr-xilinx" checkout 0eae9fbb19dfb83cdd30d5048d8b0ba744180ad0
 git -C "$SOURCE/nextpnr-xilinx" submodule update --init \
   xilinx/external/prjxray-db xilinx/external/nextpnr-xilinx-meta
 git clone https://github.com/YosysHQ/yosys.git "$SOURCE/yosys"
@@ -108,13 +108,20 @@ router account for half-cycle paths. The build runs a timing probe to detect
 an unpatched binary. Passing nextpnr estimates is not vendor timing signoff;
 retain routed reports and repeat host integrity tests after programming.
 
-Release [0.9.5](https://github.com/openXC7/nextpnr-xilinx/releases/tag/0.9.5)
-adds constant-sink routing and BUFHCE enable fixes, including a RAM32M
-corruption fix. It has not been qualified for this design. Its
-[tagged timing implementation](https://github.com/openXC7/nextpnr-xilinx/blob/0.9.5/xilinx/arch.cc#L2641-L2650)
-still reports rising-edge registers unconditionally, so the local negative-edge
-patch and preflight remain necessary. Keep the FIFO/bank register-storage
-workarounds until a separate upgrade is built and tested on hardware.
+The pinned commit is release
+[0.9.7](https://github.com/openXC7/nextpnr-xilinx/releases/tag/0.9.7). Its
+[timing implementation](https://github.com/openXC7/nextpnr-xilinx/blob/0.9.7/xilinx/arch.cc#L2641-L2650)
+still reports rising-edge registers unconditionally, so the local patch and
+preflight remain necessary; the patch applies to it unchanged. Against the
+previously pinned 0.9.4 (`ece39e17`), the same netlist and seed reach
+identical clock timing, and the bitstream differs in three ways: LVCMOS33
+outputs carry Vivado's 12 mA drive encoding (`DRIVE.I12_I16`, was `I12_I8`), input-only pads
+no longer carry `SLEW.SLOW`, and set-type registers with an undefined initial
+value power up at 1, the primitive default, instead of 0. The release line
+since 0.9.4 also fixes constant-sink routing, the BUFHCE pass-through enable,
+LUT-RAM write-clock inversion and RAMB36 cascade placement. None of this has
+been qualified on hardware yet; keep the FIFO/bank register-storage workarounds
+until it is.
 
 The locked simulation dependency Cocotb 1.9.2 can fail to compile with newer
 Apple linkers (`unsupported mach-o filetype`). The extraction was tested using
