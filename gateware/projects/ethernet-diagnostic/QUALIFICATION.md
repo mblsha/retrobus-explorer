@@ -24,6 +24,42 @@ would route to. Until that work is done, treat `build/microsd-ddr-ethernet-h700`
 as the only qualified artifact and leave it alone; a measurement taken against
 a rebuilt card is a measurement about a different card.
 
+## nextpnr 0.9.7 H700 candidate, 2026-09-25
+
+`--profile h700-rg35xx` rebuilt from Spade v0.20.0 sources with patched
+nextpnr-xilinx 0.9.7, into `build/microsd-ddr-ethernet-h700-np097`. Seed 19
+misses `fclk` on this netlist (63.18/64 MHz); of seeds 1-32 only **seed 6**
+passed every clock and the direct-output check: `fclk` 76.92/64 MHz, `dclk`
+81.77/80 MHz, 838,659 verified configuration bits, bitstream SHA-256
+`dfb5fccd813399e01ee82b62fe78d57ff53ecd4c6068f236415057e37bca0a75`.
+The qualified seed-19 build was not touched and remains the qualified card.
+
+Measured on the RG35XX Plus with the `linux-consoles` job-runner image
+(`4389c576…`, `--card-max-hz 6000000`), unattended under the lab lease:
+
+- Deploy uploaded all 268,288 sectors with windowed readback; the card
+  reported the file's SHA-256. The 34 host tests passed.
+- Fifteen cold starts: thirteen reached userspace, median 5.75 s (5.72-5.81),
+  card clock 6.00 MHz, 0-3 invalid command frames per boot (10 in total). The
+  other two were 25-second windows the host did not start in for 20.6 and 24.7
+  seconds; both served U-Boot without error until the window closed, and every
+  45-second window reached userspace.
+- Job 28 (six awake windows, a 256 MiB md5 each) ended `done exit=0` with all
+  eight stages and its output returned through the debug partition.
+- Same-day control on the qualified seed-19 card: five of five reached
+  userspace, median 5.76 s (5.73-5.79), 0-1 invalid frames (2 in total).
+
+Before Ethernet was connected, UART-loader builds from the same sources with
+`--sd-pullups --sd-io-clock-hz 64000000`, seed 6, built once with 0.9.7 and
+once with 0.9.4, passed full BIST and behaved identically across four
+alternating cold starts on an SPL-only 64 KiB prefix (12.001 MHz 1 ms peak,
+then a 201.2 kHz idle clock). The UART top ignores `--h700-mmc` and
+`--slow-mmc`, and its loader baud scales with the SD fabric clock (640 kbaud
+at 64 MHz).
+
+Not repeated for this candidate: the GKD full-memory stress, filesystem and
+bulk-download campaign above, which needs the GKD host.
+
 ## Current revision qualification, 2026-09-14
 
 Functional source `ae2a4b7` was built and programmed on the Arty A7-35T.
