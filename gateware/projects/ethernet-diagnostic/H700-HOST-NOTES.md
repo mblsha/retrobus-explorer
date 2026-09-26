@@ -11,8 +11,10 @@ link that works until a display controller starts competing for the bus.
 the sleep ladder and the suspend firmware live in the **`linux-consoles`**
 repository, under `docs/rg35xx-plus/` and `devices/rg35xx-plus/`, and it reaches
 this repository's client through `SD_EMULATOR_CLIENT_DIR` and
-`SD_EMULATOR_BUILD_DIR`. This note keeps only what is about *this* gateware, so
-that an emulator maintainer does not have to read a handheld's notes to find it.
+`SD_EMULATOR_BUILD_DIR`. That repository is not published, so its file names
+below are pointers for whoever has it, not links. This note keeps only what is
+about *this* gateware, so that an emulator maintainer does not have to read a
+handheld's notes to find it.
 Each item says where it was measured and which file in those notes tells the
 story; every claim about this repository's behaviour carries a `file:line`.
 
