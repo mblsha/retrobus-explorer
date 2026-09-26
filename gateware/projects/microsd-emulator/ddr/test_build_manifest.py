@@ -121,6 +121,12 @@ class ProfileTests(unittest.TestCase):
         plain = build_ddr.recorded_settings(build_ddr.parse_arguments([]))
         self.assertIsNone(plain["profile"], "an unprofiled build says so")
 
+    def test_a_capture_lba_of_zero_is_recorded_as_zero(self):
+        """Sector zero is the partition table, a real choice; the manifest has
+        to say what the -D flag built rather than fall back to the default."""
+        args = build_ddr.parse_arguments(["--trace-capture-lba", "0"])
+        self.assertEqual(build_ddr.recorded_settings(args)["trace_capture_lba"], 0)
+
     def test_an_unencodable_transfer_speed_is_refused(self):
         with self.assertRaises(SystemExit):
             with contextlib.redirect_stderr(io.StringIO()) as complaint:

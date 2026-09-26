@@ -463,7 +463,6 @@ class Images:
                 "open_drain_reply": bool(fields[14] & (1 << 13)),
                 "select_busy": bool(fields[14] & (1 << 14)),
                 "idle_data_high": bool(fields[14] & (1 << 15)),
-                "select_ready": bool(fields[14] & (1 << 15)),
                 "last_response_command": (fields[14] >> 16) & 0x3F,
                 "command_drive": bool(fields[14] & (1 << 22)),
                 "command_level": bool(fields[14] & (1 << 23)),

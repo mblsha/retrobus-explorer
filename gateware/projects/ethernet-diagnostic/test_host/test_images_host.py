@@ -505,7 +505,6 @@ class BulkHostTests(unittest.TestCase):
                 "open_drain_reply": False,
                 "select_busy": False,
                 "idle_data_high": True,
-                "select_ready": True,
                 "last_response_command": 7,
                 "command_drive": False,
                 "command_level": True,

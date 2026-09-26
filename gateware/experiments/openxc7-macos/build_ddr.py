@@ -158,7 +158,9 @@ def recorded_settings(args):
         "fast_sd": not args.slow_mmc,
         "h700_mmc": args.h700_mmc,
         "h700_early_command": args.h700_early_command,
-        "trace_capture_lba": args.trace_capture_lba or 32985,
+        "trace_capture_lba": (
+            32985 if args.trace_capture_lba is None else args.trace_capture_lba
+        ),
         "mmc_only": args.mmc_only,
         "native_fifo_registers": True,
         "sd_io_slew": "SLOW" if args.slow_mmc else "FAST",
@@ -475,7 +477,7 @@ def main():
     ]:
         shutil.copy2(out / source_name, out / target_name)
     from ddr_cdc_timing import verify_native_cdc
-    from ddr_output_timing import verify_direct_sd_outputs
+    from ddr_output_timing import verify_profile_outputs
 
     cdc_paths = verify_native_cdc(
         out / f"routed-seed-{selected_seed}.json",
@@ -487,22 +489,13 @@ def main():
     (out / "cdc-timing.json").write_text(json.dumps(cdc_paths, indent=2) + "\n")
     routed = out / f"routed-seed-{selected_seed}.json"
     routed_sdf = out / f"routed-seed-{selected_seed}.sdf"
-    if args.h700_mmc or args.mmc_only:
-        # Legacy-MMC profiles keep the same-edge command path for
-        # identification while data uses opposite-edge launch.
-        output_paths = verify_direct_sd_outputs(
-            routed, routed_sdf, pins=frozenset({2}), inverted=False
-        )
-        output_paths += verify_direct_sd_outputs(
-            routed, routed_sdf, pins=frozenset({0, 1, 3, 7}), inverted=True
-        )
-    else:
-        output_paths = verify_direct_sd_outputs(
-            routed,
-            routed_sdf,
-            pins=frozenset({2}) if args.slow_mmc else frozenset({0, 1, 2, 3, 7}),
-            inverted=not args.slow_mmc,
-        )
+    output_paths = verify_profile_outputs(
+        routed,
+        routed_sdf,
+        slow_mmc=args.slow_mmc,
+        h700_mmc=args.h700_mmc,
+        mmc_only=args.mmc_only,
+    )
     (out / "output-timing.json").write_text(json.dumps(output_paths, indent=2) + "\n")
     if not all(v[1] == "PASS" for v in clocks.values()):
         raise RuntimeError(f"Selected placement failed clock timing: {clocks}")

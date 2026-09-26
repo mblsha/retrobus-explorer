@@ -73,9 +73,10 @@ def route(output: Path, toolchain: Path, seed: int, device: str) -> Path:
     return log
 
 
-def evaluate(output: Path, seed: int, h700: bool) -> dict[str, object]:
+def evaluate(output: Path, seed: int, **profile) -> dict[str, object]:
+    """Judge one routed seed the way `build_ddr.py` would for this profile."""
     sys.path.insert(0, str(EXPERIMENTS))
-    from ddr_output_timing import verify_direct_sd_outputs
+    from ddr_output_timing import verify_profile_outputs
 
     log = output / f"route-seed-{seed}.log"
     clocks = parse_clocks(log.read_text())
@@ -88,16 +89,7 @@ def evaluate(output: Path, seed: int, h700: bool) -> dict[str, object]:
     routed = output / f"routed-seed-{seed}.json"
     sdf = output / f"routed-seed-{seed}.sdf"
     try:
-        if h700:
-            # Legacy-MMC profiles keep the same-edge command path.
-            paths = verify_direct_sd_outputs(
-                routed, sdf, pins=frozenset({2}), inverted=False
-            )
-            paths += verify_direct_sd_outputs(
-                routed, sdf, pins=frozenset({0, 1, 3, 7}), inverted=True
-            )
-        else:
-            paths = verify_direct_sd_outputs(routed, sdf, pins=frozenset({2}))
+        paths = verify_profile_outputs(routed, sdf, **profile)
     except Exception as failure:  # the checker raises with the offending pin
         return {"seed": seed, "usable": False, "reason": f"output delay {failure}",
                 "clocks": {k: v[0] for k, v in clocks.items()}}
@@ -117,8 +109,14 @@ def main() -> None:
     parser.add_argument("--toolchain", type=Path,
                         default=GATEWARE / "build/openxc7-macos")
     parser.add_argument("--device", default="xc7a35tcsg324")
+    # The output-edge rules depend on the profile, so these mirror the
+    # build_ddr.py flags the netlist was synthesized with; pass the same ones.
+    parser.add_argument("--slow-mmc", action="store_true",
+                        help="The netlist was built with --slow-mmc")
     parser.add_argument("--h700-mmc", action="store_true",
-                        help="Apply the legacy-MMC output-edge expectations")
+                        help="The netlist was built with --h700-mmc")
+    parser.add_argument("--mmc-only", action="store_true",
+                        help="The netlist was built with --mmc-only")
     parser.add_argument("--jobs", type=int, default=4)
     arguments = parser.parse_args()
     if not (arguments.output / "design.json").exists():
@@ -131,7 +129,13 @@ def main() -> None:
             ),
             arguments.seeds,
         ))
-    results = [evaluate(arguments.output, seed, arguments.h700_mmc)
+    profile = {
+        # build_ddr.py refuses the legacy-MMC profiles without --slow-mmc.
+        "slow_mmc": arguments.slow_mmc or arguments.h700_mmc or arguments.mmc_only,
+        "h700_mmc": arguments.h700_mmc,
+        "mmc_only": arguments.mmc_only,
+    }
+    results = [evaluate(arguments.output, seed, **profile)
                for seed in arguments.seeds]
     print(json.dumps(results, indent=2))
     usable = [result["seed"] for result in results if result["usable"]]

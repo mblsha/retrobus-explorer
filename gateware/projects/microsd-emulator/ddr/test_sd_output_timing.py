@@ -9,7 +9,11 @@ from pathlib import Path
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[3] / "experiments/openxc7-macos")
 )
-from ddr_output_timing import verify_direct_sd_outputs
+from ddr_output_timing import (
+    profile_output_checks,
+    verify_direct_sd_outputs,
+    verify_profile_outputs,
+)
 
 
 class SDOutputTimingTest(unittest.TestCase):
@@ -79,3 +83,37 @@ class SDOutputTimingTest(unittest.TestCase):
         self.sdf.write_text(self.sdf.read_text().replace("2500", "4000", 1))
         with self.assertRaises(RuntimeError):
             self.check()
+
+    def test_each_profile_names_its_pins_and_edges(self):
+        data = frozenset({0, 1, 3, 7})
+        self.assertEqual(
+            profile_output_checks(slow_mmc=False),
+            [(frozenset({0, 1, 2, 3, 7}), True)],
+        )
+        self.assertEqual(
+            profile_output_checks(slow_mmc=True), [(frozenset({2}), False)]
+        )
+        for legacy in ({"h700_mmc": True}, {"mmc_only": True}):
+            with self.subTest(**legacy):
+                self.assertEqual(
+                    profile_output_checks(slow_mmc=True, **legacy),
+                    [(frozenset({2}), False), (data, True)],
+                )
+
+    def test_the_fast_profile_holds_the_data_pins_too(self):
+        """A rising-edge DAT register is wrong for the fast profile even when
+        CMD is right, so checking CMD alone would pass a placement the build
+        rejects."""
+        self.module["cells"]["ff3"]["parameters"]["IS_CLK_INVERTED"] = "0"
+        self.routed.write_text(json.dumps({"modules": {"board": self.module}}))
+        with self.assertRaises(RuntimeError):
+            verify_profile_outputs(self.routed, self.sdf, slow_mmc=False)
+
+    def test_the_h700_profile_launches_command_on_the_rising_edge(self):
+        self.module["cells"]["ff2"]["parameters"]["IS_CLK_INVERTED"] = "0"
+        self.routed.write_text(json.dumps({"modules": {"board": self.module}}))
+        paths = verify_profile_outputs(
+            self.routed, self.sdf, slow_mmc=True, h700_mmc=True
+        )
+        self.assertEqual(sorted(p["signal"] for p in paths),
+                         ["CMD", "DAT0", "DAT1", "DAT2", "DAT3"])

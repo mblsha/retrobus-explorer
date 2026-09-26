@@ -76,7 +76,9 @@ qualified seed-19 build was made.
 misses a constraint, and this design is close enough to its bounds that a seed
 often does. Re-synthesizing to try another costs about ten minutes, while
 routing the finished netlist costs about ninety seconds, so search first and
-feed the winner back to `--seed`:
+feed the winner back to `--seed`. Give the search the same `--slow-mmc`,
+`--h700-mmc` or `--mmc-only` the netlist was built with; they decide which SD
+outputs it holds to which launch edge, as the build does:
 
 ```sh
 DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib \

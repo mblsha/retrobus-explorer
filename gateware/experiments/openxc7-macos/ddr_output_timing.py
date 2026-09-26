@@ -62,3 +62,27 @@ def verify_direct_sd_outputs(
             )
         )
     return result
+
+
+def profile_output_checks(*, slow_mmc, h700_mmc=False, mmc_only=False):
+    """The pins each SD profile drives directly, grouped by launch edge.
+
+    Returns (pins, inverted) pairs for `verify_direct_sd_outputs`. The build
+    and the seed search both ask this, so a seed the search calls usable is one
+    the build will accept.
+    """
+    if h700_mmc or mmc_only:
+        # Legacy-MMC profiles keep the same-edge command path for
+        # identification while data uses opposite-edge launch.
+        return [(frozenset({2}), False), (frozenset({0, 1, 3, 7}), True)]
+    if slow_mmc:
+        return [(frozenset({2}), False)]
+    return [(frozenset({0, 1, 2, 3, 7}), True)]
+
+
+def verify_profile_outputs(routed: Path, sdf: Path, **profile):
+    """Check every directly driven SD output for the profile's launch edges."""
+    paths = []
+    for pins, inverted in profile_output_checks(**profile):
+        paths += verify_direct_sd_outputs(routed, sdf, pins=pins, inverted=inverted)
+    return paths
