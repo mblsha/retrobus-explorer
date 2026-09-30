@@ -1,4 +1,4 @@
-# Ethernet image protocol
+# Image protocol over Ethernet and USB UART
 
 ## Network and packet format
 
@@ -13,7 +13,7 @@ protocol and UDP destination port; a nonzero UDP checksum is verified with its
 pseudo-header. Transmitted IPv4 UDP packets use checksum zero, which is allowed
 for IPv4. Every block request and reply has a mandatory application CRC32.
 
-Legacy requests/replies are 540 bytes. Bulk-read and TRACE requests can use the
+Legacy requests/replies are 540 bytes. Bulk-read, TRACE, and INFO requests can use the
 compact 28-byte header-plus-CRC form; bulk reads also accept the original
 540-byte padded form. Successful
 two-sector bulk-read replies are 1052 bytes (1024 data bytes at offset 24,
@@ -33,7 +33,7 @@ followed by CRC32); one-sector and error replies remain 540 bytes:
 | 536–539 | IEEE CRC32 of bytes 0–535, little endian |
 
 Opcodes: 1 BEGIN (sequence zero, count is upload sectors), 2 WRITE, 3 READ,
-4 ARM, 5 DISARM, 6 STATUS, 7 BULK_READ, 8 TRACE. Legacy READ/WRITE count must be one. After BEGIN, sequences
+4 ARM, 5 DISARM, 6 STATUS, 7 BULK_READ, 8 TRACE, 9 INFO. Legacy READ/WRITE count must be one. After BEGIN, sequences
 start at one. Legacy operations have one request outstanding at a time. The FPGA caches the last
 ordered response, including read data, and replays it only when the session,
 sequence, and request CRC match. A repeated key with different contents is
@@ -48,8 +48,11 @@ service availability; it does not yet expose detailed BIST counters over UDP.
 The host journal is executable recovery state. It is validated before network
 I/O, and `images.py --inspect` displays its session, next sequence, pending
 operation, and initial-upload verification marker without sending packets.
-Journal request recovery completes one ordered operation; it does not resume a
-partially uploaded image. A new `--upload` starts at sector zero.
+Journal request recovery completes one ordered operation. A new `--upload`
+starts at sector zero; `--resume-upload` requires the identical image digest
+and sector count, resolves an identical pending write, reconciles the FPGA's
+session and sequence through INFO, and continues from its written prefix.
+The full image is read back and compared before the host permits ARM.
 
 ## Passive SD trace
 
@@ -126,3 +129,70 @@ The default without `--bulk` remains compatible with the earlier gateware.
 
 For measurement, add `--bulk --window N` to `benchmark_reads.py`; compare several
 window sizes with real data checks rather than assuming the largest is fastest.
+
+
+## USB UART fallback
+
+The combined gateware always includes a 1,000,000 baud 8N1 UART packet adapter.
+Its divisor is derived from the selected fabric clock, including 64 MHz H700.
+UDP and UART share one block service, session, retry cache and ARM register.
+A complete request gets exclusive service until its reply is buffered; its
+reply returns only to the originating transport. The serial reply then drains
+independently, so it cannot hold the service while Ethernet is ready.
+
+Serial carries the exact RBS1/RBA1 bytes between `0x7e` delimiters. A data byte
+`0x7e` or `0x7d` is encoded as `0x7d` followed by that byte XOR `0x20`. CRC32
+remains over the unescaped application bytes. There is one outstanding UART
+request. Malformed escapes, oversize frames, and frames arriving while the
+UART slot is occupied are discarded; a delimiter restores framing. Retries
+send identical application bytes. A retry may use either transport, preserving
+the shared application sequence and CRC.
+
+UART TX drives the registered shift bit directly; ready-counter decoding is
+kept off the physical line. USB begins with the DDR BIOS console at 115200 baud. The first complete framed
+request selects the binary UART transmitter exclusively until FPGA reset;
+BIOS output cannot corrupt subsequent replies. Opening the host port leaves
+DTR and RTS inactive. The UART and shared service use the fabric reset and
+clock, independently of Ethernet startup and PHY RX/TX clocks.
+
+`images.py --ftdi-serial <arty-ftdi-serial>` selects the exact FT2232H board's
+interface B directly through libftdi 1.5 or newer 1.x. Interface A remains
+available for JTAG. The adapter holds DTR/RTS inactive, restores the previous
+latency setting and requests kernel-driver reattachment on close. It does not
+write EEPROM configuration. `--serial-port <arty-uart>` instead uses pySerial
+and the host TTY driver. These are two host backends for the same physical
+UART and packet protocol; do not open them concurrently.
+
+`SD_EMULATOR_FTDI_SERIAL` and `SD_EMULATOR_SERIAL_PORT` select these backends
+for clients that import Images, including linux-consoles. An explicit selector
+overrides the environment; two explicit selectors are rejected. If both
+environment variables are set, direct FTDI takes precedence. With neither,
+UDP remains the default. Keep the same `--state` and logical `--host` identity
+when switching transports. Serial bulk reads use one token at a time; UDP
+retains its existing window. The padded v1 packet format is intentionally slow:
+each ordered write exchanges two 540-byte packets before framing overhead.
+
+## Recovery snapshot
+
+Opcode 9 (`INFO`) accepts a compact 28-byte request, conventionally with
+session, sequence, LBA and count zero. The 540-byte reply contains these
+little-endian 32-bit words at payload offset 24, followed by zero padding:
+
+| Word | Meaning |
+| --- | --- |
+| 0 | `RBI1` magic |
+| 1 | Physical capacity in sectors |
+| 2 | Current session |
+| 3 | Next ordered sequence |
+| 4 | Successfully written prefix, in sectors |
+| 5 | Declared image length, in sectors |
+| 6 | Flags: bit 0 armed, 1 initialized, 2 quiescent, 3 retry cache valid |
+| 7 | Last cached ordered sequence |
+| 8 | Last cached request CRC32 |
+
+The snapshot is captured atomically at dispatch. INFO is available before DDR
+initialization and while armed. It never recovers a host's pending request,
+updates the cache, issues a DDR transaction, or changes ARM. With no saved
+session, explicit host `--disarm` can recover the current session and sequence
+through INFO. Only one mutating client may operate the bench at a time; packet
+arbitration is not a lease between independent host applications.

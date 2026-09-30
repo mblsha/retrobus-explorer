@@ -29,9 +29,15 @@ inout wire [7:0] pmod
 wire dclk,drst;
 wire bios_tx,sd_tx;
 wire [6:0] sd_status_selector;
-// Both UARTs idle high. Read BIOS boot at 115200; use the Spade loader at
-// 1 Mbaud after boot output has stopped. Do not send loader packets during boot.
+// BIOS starts on USB at 115200. The combined service takes exclusive TX
+// ownership after its first complete serial frame, until FPGA reset. The
+// legacy small-image build retains its original idle-high UART composition.
+`ifdef ETHERNET_SD
+wire serial_active;
+assign usb_tx = serial_active ? sd_tx : bios_tx;
+`else
 assign usb_tx = bios_tx & sd_tx;
+`endif
 wire fcv,fcr,fcw,fwv,fwr,frv,frr;
 wire [23:0] fa;
 wire [127:0] fwdata,frdata;
@@ -56,6 +62,7 @@ end
 BUFG eth_rx_buffer(.I(eth_rx_clk), .O(eth_rx_global));
 BUFG eth_tx_buffer(.I(eth_tx_clk), .O(eth_tx_global));
 network_ddr sd(
+.uart_bit_time(`UART_BIT_TIME), .usb_active(serial_active),
 .rx_clk(eth_rx_global), .tx_clk(eth_tx_global),
 `ifdef SLOW_MMC
 .fast_mode(1'b0),

@@ -1,0 +1,108 @@
+use std::mem::{clocked_memory, read_memory};
+use shared_components::serial::uart_rx;
+
+// HDLC-style byte framing: 7e delimiter, 7d escape, escaped byte XOR 20.
+// A complete frame is immutable until the service has copied its reply. UART
+// has no backpressure: frames received while occupied are discarded whole.
+#[no_mangle(all)]
+pub entity serial_packet(
+    clk: clock, rst: bool,
+    rx_valid: bool, rx_byte: uint<8>,
+    tx_ready: bool, tx_valid: inv bool, tx_byte: inv uint<8>,
+    request: inv bool, request_length: inv uint<11>,
+    request_address: uint<10>, request_data: inv uint<8>,
+    reply_write: bool, reply_address: uint<11>, reply_data: uint<8>,
+    reply_done: bool, reply_length: uint<11>, active: inv bool,
+) {
+    let IDLE: uint<3> = 0;
+    let START: uint<3> = 1;
+    let ADDRESS: uint<3> = 2;
+    let CAPTURE: uint<3> = 3;
+    let EMIT: uint<3> = 4;
+    let ESCAPED: uint<3> = 5;
+    let END: uint<3> = 6;
+    decl pending, count, collecting, escaped, invalid, tx_state, tx_index;
+    let available = !pending && tx_state == IDLE;
+    let delimiter = rx_valid && rx_byte == 0x7e;
+    let decoded = if escaped { rx_byte ^ 0x20 } else { rx_byte };
+    let valid_escape = !escaped || rx_byte == 0x5e || rx_byte == 0x5d;
+    let store = available && collecting && rx_valid && !delimiter &&
+        (escaped || rx_byte != 0x7d) && !invalid && valid_escape && count < 540;
+    let finish = available && delimiter && collecting && count != 0 && !invalid && !escaped;
+    let incoming: Memory<uint<8>, 1024> = inst clocked_memory(clk, [(store, trunc(count), decoded)]);
+    reg(clk) received = inst read_memory(incoming, request_address);
+    reg(clk) pending reset(rst: false) = if finish { true }
+        else if pending && reply_done { false } else { pending };
+    reg(clk) count: uint<11> reset(rst: 0) = if !available || delimiter { 0 }
+        else if store { count +. 1 } else { count };
+    reg(clk) length: uint<11> reset(rst: 0) = if finish { count } else { length };
+    reg(clk) collecting reset(rst: false) = if !available { false }
+        else if delimiter { true } else { collecting };
+    reg(clk) escaped reset(rst: false) = if !available || delimiter { false }
+        else if rx_valid && collecting { !escaped && rx_byte == 0x7d } else { escaped };
+    reg(clk) invalid reset(rst: false) = if !available || delimiter { false }
+        else if rx_valid && collecting && (!valid_escape || (count == 540 && (escaped || rx_byte != 0x7d))) { true }
+        else { invalid };
+    reg(clk) activated reset(rst: false) = activated || finish;
+    let outgoing: Memory<uint<8>, 2048> = inst clocked_memory(clk, [(pending && reply_write, reply_address, reply_data)]);
+    reg(clk) outgoing_byte = inst read_memory(outgoing, tx_index);
+    reg(clk) saved_byte: uint<8> reset(rst: 0) = if tx_state == CAPTURE { outgoing_byte } else { saved_byte };
+    let needs_escape = saved_byte == 0x7e || saved_byte == 0x7d;
+    let sending = tx_state == START || tx_state == EMIT || tx_state == ESCAPED || tx_state == END;
+    let advance = sending && tx_ready;
+    reg(clk) tx_length: uint<11> reset(rst: 0) = if pending && reply_done { reply_length } else { tx_length };
+    reg(clk) tx_state: uint<3> reset(rst: IDLE) = {
+        if tx_state == IDLE && pending && reply_done && reply_length > 0 && reply_length <= 1052 { START }
+        else if tx_state == START && advance { ADDRESS }
+        else if tx_state == ADDRESS { CAPTURE }
+        else if tx_state == CAPTURE { EMIT }
+        else if tx_state == EMIT && advance { if needs_escape { ESCAPED } else if tx_index +. 1 == tx_length { END } else { ADDRESS } }
+        else if tx_state == ESCAPED && advance { if tx_index +. 1 == tx_length { END } else { ADDRESS } }
+        else if tx_state == END && advance { IDLE } else { tx_state }
+    };
+    reg(clk) tx_index: uint<11> reset(rst: 0) = if tx_state == IDLE { 0 }
+        else if advance && ((tx_state == EMIT && !needs_escape) || tx_state == ESCAPED) { tx_index +. 1 }
+        else { tx_index };
+    set tx_valid = sending;
+    set tx_byte = (if tx_state == START || tx_state == END { 0x7e }
+        else if tx_state == ESCAPED { saved_byte ^ 0x20 }
+        else if needs_escape { 0x7d } else { saved_byte });
+    set request = pending;
+    set request_length = length;
+    set request_data = received;
+    set active = activated;
+}
+
+// One configurable divisor governs RX and TX, including the 64 MHz H700
+// fabric. The transmitter accepts a byte only while idle and keeps one full
+// stop bit before exposing ready again.
+#[no_mangle(all)]
+pub entity serial_frontend(
+    clk: clock, rst: bool, bit_time: uint<15>,
+    usb_rx: bool, usb_tx: inv bool, active: inv bool,
+    request: inv bool, request_length: inv uint<11>,
+    request_address: uint<10>, request_data: inv uint<8>,
+    reply_write: bool, reply_address: uint<11>, reply_data: uint<8>,
+    reply_done: bool, reply_length: uint<11>,
+) {
+    let rx = inst uart_rx(clk, rst, usb_rx, bit_time, false, 1);
+    let (valid, valid_w): (bool, inv bool) = port();
+    let (byte, byte_w): (uint<8>, inv uint<8>) = port();
+    decl bits_left, timer;
+    let ready = bits_left == 0;
+    let accept = ready && valid;
+    let elapsed = timer +. 1 >= bit_time;
+    reg(clk) bits_left: uint<4> reset(rst: 0) = if accept { 10 }
+        else if !ready && elapsed { bits_left -. 1 } else { bits_left };
+    reg(clk) timer: uint<15> reset(rst: 0) = if ready || elapsed { 0 } else { timer +. 1 };
+    reg(clk) shift: uint<10> reset(rst: 0x3ff) = if accept { (zext(byte) << 1) | 0x200 }
+        else if !ready && elapsed { (shift >> 1) | 0x200 } else { shift };
+    // Shift already contains idle-high bits after the stop bit. Drive its
+    // registered LSB directly: decoding the multi-bit ready counter onto
+    // the physical UART line can create edges as that counter changes.
+    set usb_tx = shift.lsb();
+    let _ = inst serial_packet(clk, rst, rx.valid && !rx.parity_error, rx.byte,
+        ready, valid_w, byte_w,
+        request, request_length, request_address, request_data,
+        reply_write, reply_address, reply_data, reply_done, reply_length, active);
+}
