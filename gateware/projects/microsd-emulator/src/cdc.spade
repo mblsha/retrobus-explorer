@@ -66,7 +66,7 @@ pub entity native_cdc(
     set s_cmd_ready = (!cmds.full && !s_rst);
     set m_cmd_valid = (cmd_hold_valid && !m_rst);
     set m_cmd_address = trunc(cmd_payload);
-    set m_cmd_write = cmd_payload.to_bits()[24];
+    set m_cmd_write = cmd_payload.as_bits()[24];
     let write: uint<144> = zext(s_wdata) | (zext::<16, 144>(s_wmask) << 128);
     decl write_hold_valid;
     let writes = inst async_fifo::<144, 2>$(

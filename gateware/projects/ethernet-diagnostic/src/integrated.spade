@@ -1,3 +1,4 @@
+use shared_components::serial::BitTime;
 use super::{server, native, trace};
 
 // Native DDR remains exclusively owned by SD until pending reads and accepted
@@ -20,7 +21,7 @@ pub entity network_ddr(
     mmc_only: bool,
     writable: bool,
     dat_in: uint<4>,
-    uart_bit_time: uint<15>,
+    uart_bit_time: BitTime,
     usb_active: inv bool,
     usb_rx: bool,
     usb_tx: inv bool,

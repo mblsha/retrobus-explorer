@@ -19,9 +19,13 @@ pub entity request_arbiter(
     reg(clk) owner reset(rst: false) = if state == 0 {
         serial_request && (!ethernet_request || !last_serial)
     } else { owner };
-    reg(clk) state: uint<2> reset(rst: 0) = if state == 0 && (ethernet_request || serial_request) { 1 }
-        else if state == 1 && reply_done { 2 }
-        else if state == 2 { 3 } else if state == 3 { 0 } else { state };
+    reg(clk) state: uint<2> reset(rst: 0) = match state {
+        0 if ethernet_request || serial_request => 1,
+        1 if reply_done => 2,
+        2 => 3,
+        3 => 0,
+        _ => state,
+    };
     let granted = state == 1;
     set request = granted;
     set request_length = (if owner { serial_length } else { ethernet_length });

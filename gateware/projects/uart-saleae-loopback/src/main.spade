@@ -85,8 +85,8 @@ entity main(
     );
 
     reg(clk_fast) clk_div: uint<10> reset(rst: 0) = clk_div +. 1;
-    let clk_100_div = clk_div.to_bits()[1];
-    let clk_50_div = clk_div.to_bits()[2];
+    let clk_100_div = clk_div.as_bits()[1];
+    let clk_50_div = clk_div.as_bits()[2];
     let selected_clk = clock_from_code(cmd_core.freq_code, clk_div, clk200_probe, clk400_probe);
 
     reg(clk) heartbeat: uint<24> reset(rst: 0) = heartbeat +. 1;
@@ -114,6 +114,6 @@ entity main(
         usb_uart.busy,
         can_accept,
         dropped,
-        heartbeat.to_bits()[22],
+        heartbeat.as_bits()[22],
     ];
 }

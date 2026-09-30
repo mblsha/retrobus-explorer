@@ -53,7 +53,7 @@ entity probe_core(
     reg(clk) seen_high: uint<8> reset(rst: 0) = if clear { 0 } else if settling == 7 { seen_high | pins } else { seen_high };
     reg(clk) seen_low: uint<8> reset(rst: 0) = if clear { 0 } else if settling == 7 { seen_low | (pins ^ 255) } else { seen_low };
     reg(clk) edges: [uint<32>; 8] reset(rst: [0; 8]) = {
-        edges.zip(changed.to_bits()).map(fn |(count, pin_changed)| {
+        edges.zip(changed.as_bits()).map(fn |(count, pin_changed)| {
             if clear { 0 }
             else if settling == 7 && pin_changed && count != 0xffffffff { count +. 1 }
             else { count }
@@ -62,8 +62,8 @@ entity probe_core(
 
     let clock_index: uint<3> = if top_header != 0 { 6 } else { 2 };
     let command_index: uint<3> = if top_header != 0 { 2 } else { 6 };
-    let sd_edge = settling == 7 && pins.to_bits()[clock_index] && !previous.to_bits()[clock_index];
-    let command_bit = pins.to_bits()[command_index];
+    let sd_edge = settling == 7 && pins.as_bits()[clock_index] && !previous.as_bits()[clock_index];
+    let command_bit = pins.as_bits()[command_index];
     reg(clk) bits_left: uint<6> reset(rst: 0) = {
         if clear { 0 }
         else if sd_edge {
@@ -81,7 +81,7 @@ entity probe_core(
         else { command_crc }
     };
     let complete = sd_edge && bits_left == 1 && command_bit &&
-        trunc::<uint<48>, uint<7>>(command) == command_crc && command.to_bits()[45] && !command.to_bits()[46];
+        trunc::<uint<48>, uint<7>>(command) == command_crc && command.as_bits()[45] && !command.as_bits()[46];
     reg(clk) last_command: uint<48> reset(rst: 0) = {
         if clear { 0 } else if complete { (command << 1) | 1 } else { last_command }
     };

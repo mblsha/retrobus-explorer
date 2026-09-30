@@ -509,6 +509,6 @@ pub fn saleae_mux(
                 z80_mreq_sync,
             ]
         },
-        SaleaeState::Counter => saleae_counter.to_bits(),
+        SaleaeState::Counter => saleae_counter.as_bits(),
     }
 }

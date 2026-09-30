@@ -146,8 +146,8 @@ pub entity sd_trace(
     // Capture the MMC width-switch transcript that determines whether U-Boot
     // changes its host controller to four-bit mode. This records responses,
     // rather than inferring host behavior from the card's local width state.
-    let mmc_mode = protocol_status.to_bits()[12];
-    let switch_error = response_payload.to_bits()[7];
+    let mmc_mode = protocol_status.as_bits()[12];
+    let switch_error = response_payload.as_bits()[7];
     reg(clk) cmd6_count: uint<8> reset(rst || !armed: 0) =
         if command_valid && mmc_mode && command_index == 6 {
             cmd6_count +. 1
@@ -233,7 +233,7 @@ pub entity sd_trace(
     // boot path, leaving every timestamp below dead. Arming on a backend read
     // of a chosen sector measures whichever stage that sector belongs to, in
     // either bus mode, and the stage the boot spends its time in is the kernel.
-    let wide_bus = protocol_status.to_bits()[30];
+    let wide_bus = protocol_status.as_bits()[30];
     let lane_mask: uint<4> = if wide_bus { 15 } else { 1 };
     let data_pin = data_pins.lsb();
     let data_idle = (data_pins & lane_mask) == lane_mask;

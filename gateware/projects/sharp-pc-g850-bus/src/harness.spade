@@ -27,7 +27,7 @@ entity tb_bus_debug(
     saleae_out: inv [bool; 8],
     should_emit_overflow: inv bool,
 ) {
-    let signals = saleae_inputs.to_bits();
+    let signals = saleae_inputs.as_bits();
     let state = match saleae_mode {
         0 => SaleaeState::DataSignals(),
         1 => SaleaeState::SyncSignals(),

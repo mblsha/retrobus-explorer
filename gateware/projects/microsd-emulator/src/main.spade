@@ -36,13 +36,13 @@ fn card_status_word(
 // Select a four-bit transfer or DAT0 bit without changing serializer state.
 fn read_data_nibble(data_byte: uint<8>, bit_index: uint<12>, wide: bool) -> uint<4> {
     if wide {
-        if bit_index.to_bits()[2] {
+        if bit_index.as_bits()[2] {
             trunc(data_byte)
         } else {
             trunc(data_byte >> 4)
         }
     } else {
-        if data_byte.to_bits()[7 -. trunc::<uint<12>, uint<3>>(bit_index)] {
+        if data_byte.as_bits()[7 -. trunc::<uint<12>, uint<3>>(bit_index)] {
             15
         } else {
             14
@@ -283,7 +283,7 @@ pub entity sd_frontend(
     };
     let frame_complete = armed && sd_sample_tick && response_left == 0 && remaining == 1;
     let raw_valid = frame_complete && cmd_sync &&
-    trunc::<uint<48>, uint<7>>(command) == command_crc && command.to_bits()[45] && !command.to_bits()[46];
+    trunc::<uint<48>, uint<7>>(command) == command_crc && command.as_bits()[45] && !command.as_bits()[46];
     // Complete CRC/framing validation before executing a command. SD edges
     // are about 40 ns apart at the fast target; validation adds one fabric cycle.
     reg(clk) valid reset(local_rst: false) = raw_valid;
@@ -678,7 +678,7 @@ pub entity sd_frontend(
     // first probe. Linux/U-Boot may still repeat CMD1 with its selected OCR.
     // Bit 7 is part of the legacy MMC window used by the H616/H700 family.
     let r3: uint<48> = if command_index == CMD_SEND_OP_COND {
-        if command_argument == 0 || command_argument.to_bits()[30] {
+        if command_argument == 0 || command_argument.as_bits()[30] {
             0x3fc0ff8080ff
         } else {
             0x3f80ff8080ff
@@ -821,7 +821,7 @@ pub entity sd_frontend(
         command_drive
     };
     reg(clk) prepared_command_enable reset(local_rst: false) = response_bit_ready;
-    reg(clk) prepared_command_bit reset(local_rst: true) = response.to_bits()[135];
+    reg(clk) prepared_command_bit reset(local_rst: true) = response.as_bits()[135];
     let pad_command_enable = if fast_mode {
         prepared_command_enable
     } else {
@@ -830,7 +830,7 @@ pub entity sd_frontend(
     let pad_command_bit = if fast_mode {
         prepared_command_bit
     } else {
-        response.to_bits()[135]
+        response.as_bits()[135]
     };
     reg(command_output_clk) command_output reset(command_output_reset: true) = if command_output_advance {
         if pad_command_enable {
@@ -950,8 +950,8 @@ pub entity sd_frontend(
         }
     };
     let observed_end_flag: uint<32> = if observed_response_end { 1 << 28 } else { 0 };
-    let observed_start_flag: uint<32> = if observed_response_header.to_bits()[7] { 1 << 29 } else { 0 };
-    let observed_transmission_flag: uint<32> = if observed_response_header.to_bits()[6] { 1 << 30 } else { 0 };
+    let observed_start_flag: uint<32> = if observed_response_header.as_bits()[7] { 1 << 29 } else { 0 };
+    let observed_transmission_flag: uint<32> = if observed_response_header.as_bits()[6] { 1 << 30 } else { 0 };
     let observed_mismatch_flag: uint<32> = if observed_response_mismatch { 1 << 31 } else { 0 };
     set trace_pin_response = (zext(observed_response_bits) |
         (zext(observed_response_crc) << 8) | (zext(observed_received_crc) << 15) |
@@ -1176,7 +1176,7 @@ pub entity sd_frontend(
         if data_state == READ_IDLE {
             [0; 4]
         } else if data_output_advance && data_state == READ_PAYLOAD {
-            crcs.zip(nibble.to_bits()).map(fn |(crc, bit)| {
+            crcs.zip(nibble.as_bits()).map(fn |(crc, bit)| {
                     crc16_bit(crc, bit)
                 })
         } else {
@@ -1191,7 +1191,7 @@ pub entity sd_frontend(
         crc_index
     };
     let crc_bits = crcs.map(fn |crc| {
-            crc.to_bits()[15 -. crc_index]
+            crc.as_bits()[15 -. crc_index]
         });
     // Decode during a full fabric cycle; opposite-edge pad registers only
     // select prepared values. Index/CRC state advances after each pad launch.
