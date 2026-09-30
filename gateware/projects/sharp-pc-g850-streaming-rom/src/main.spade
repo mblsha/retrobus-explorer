@@ -72,10 +72,10 @@ entity main_core(
         z80_rd,
         z80_wr,
     );
-    let addr_sync_bits = inst sync_bundle::<2, 16>(clk, addr.to_bits());
-    let bank_sync_bits = inst sync_bundle::<2, 2>(clk, addr_bnk.to_bits());
-    let addr_sync: RomAddr = addr_sync_bits.to_uint();
-    let bank_sync: RomBank = bank_sync_bits.to_uint();
+    let addr_sync_bits = inst sync_bundle::<2, 16>(clk, addr.as_bits());
+    let bank_sync_bits = inst sync_bundle::<2, 2>(clk, addr_bnk.as_bits());
+    let addr_sync: RomAddr = addr_sync_bits.as_uint();
+    let bank_sync: RomBank = bank_sync_bits.as_uint();
     let addr_ceram2_sync = inst sync_delay(clk, addr_ceram2);
     let addr_cerom2_sync = inst sync_delay(clk, addr_cerom2);
 
@@ -129,8 +129,8 @@ entity main_core(
         usb_tx,
     );
 
-    let read_bits = stream.read_state_code.to_bits();
-    let streaming_bits = stream.streaming_state_code.to_bits();
+    let read_bits = stream.read_state_code.as_bits();
+    let streaming_bits = stream.streaming_state_code.as_bits();
     set led = [
         read_bits[0],
         read_bits[1],

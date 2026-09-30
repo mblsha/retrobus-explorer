@@ -1,5 +1,5 @@
 use std::mem::{clocked_memory, read_memory};
-use shared_components::serial::uart_rx;
+use shared_components::serial::{uart_rx, BitTime};
 
 // HDLC-style byte framing: 7e delimiter, 7d escape, escaped byte XOR 20.
 // A complete frame is immutable until the service has copied its reply. UART
@@ -78,7 +78,7 @@ pub entity serial_packet(
 // stop bit before exposing ready again.
 #[no_mangle(all)]
 pub entity serial_frontend(
-    clk: clock, rst: bool, bit_time: uint<15>,
+    clk: clock, rst: bool, bit_time: BitTime,
     usb_rx: bool, usb_tx: inv bool, active: inv bool,
     request: inv bool, request_length: inv uint<11>,
     request_address: uint<10>, request_data: inv uint<8>,

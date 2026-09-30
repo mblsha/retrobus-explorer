@@ -11,5 +11,5 @@ entity main(
     let counter = inst counter::<26>(clk, rst);
     let led_counter: uint<8> = trunc(counter >> 18);
 
-    set led = led_counter.to_bits();
+    set led = led_counter.as_bits();
 }

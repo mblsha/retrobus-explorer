@@ -25,6 +25,13 @@ struct UartRxCapture<#uint DATA_WIDTH> {
     parity_error: bool,
 }
 
+impl<#uint DATA_WIDTH> Default for UartRxCapture<DATA_WIDTH> {
+    #[inline]
+    fn default() -> Self {
+        Self$(valid: false, byte: 0, parity_error: false)
+    }
+}
+
 pub struct UartLineBusyPort {
     line: bool,
     busy: bool,
@@ -140,6 +147,14 @@ struct UartTxRegs<#uint DATA_WIDTH> {
     block_flag: bool,
 }
 
+impl<#uint DATA_WIDTH> Default for UartTxRegs<DATA_WIDTH> {
+    #[inline]
+    fn default() -> Self {
+        Self$(state: UartTxState::Idle(), ctr: 0, bit_ctr: 0,
+            saved_data: 0, tx_reg: true, block_flag: false)
+    }
+}
+
 pub entity uart_tx<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
     clk: clock,
     rst: bool,
@@ -158,7 +173,7 @@ where
     let ctr_last = clk_per_bit - 1;
 
     reg(clk) regs: UartTxRegs<DATA_WIDTH>
-        reset(rst: UartTxRegs$(state: UartTxState::Idle(), ctr: 0, bit_ctr: 0, saved_data: 0, tx_reg: true, block_flag: false))
+        reset(rst: default())
         = {
             let state = regs.state;
             let ctr = regs.ctr;
@@ -356,7 +371,7 @@ where DATA_WIDTH > 0 else "uart_rx needs at least one data bit"
     };
 
     reg(clk) capture: UartRxCapture<DATA_WIDTH>
-        reset(rst: UartRxCapture$(valid: false, byte: 0, parity_error: false))
+        reset(rst: default())
         = {
         match state {
             RxState::WaitData$(time, bit_idx, data, odd_parity: _) if !parity && time == last && bit_idx == last_bit_idx => {

@@ -3,10 +3,12 @@ pub struct TxReq8 {
     byte: uint<8>,
 }
 
+#[inline]
 pub fn tx_req_none() -> TxReq8 {
     TxReq8$(valid: false, byte: 0)
 }
 
+#[inline]
 pub fn tx_req_byte(byte: uint<8>) -> TxReq8 {
     TxReq8$(valid: true, byte: byte)
 }

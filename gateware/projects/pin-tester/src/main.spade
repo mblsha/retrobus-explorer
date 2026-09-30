@@ -147,11 +147,11 @@ entity main_core(
     let ffc_drive: uint<48> = zext(send_byte);
     let ffc_oe: uint<48> = if send_mode { 255 } else { 0 };
 
-    set led = display_byte.to_bits();
+    set led = display_byte.as_bits();
     set usb_tx = uart.line;
     set ffc_data_drive = ffc_drive;
     set ffc_data_oe = ffc_oe;
-    set saleae = display_byte.to_bits();
+    set saleae = display_byte.as_bits();
     set send_mode_debug = send_mode;
     set bank_debug = state.bank;
     set counter_debug = state.counter;

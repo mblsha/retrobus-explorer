@@ -35,7 +35,7 @@ pub entity sd_write_receiver(
     reg(clk) state: uint<3> reset(clear: IDLE) = if start {
         WAIT_START_BIT
     } else if sample {
-        if state == WAIT_START_BIT && (if width { dat == 0 } else { !dat.to_bits()[0] }) {
+        if state == WAIT_START_BIT && (if width { dat == 0 } else { !dat.as_bits()[0] }) {
             RECEIVE_DATA
         } else if state == RECEIVE_DATA && bit_index == 4095 {
             RECEIVE_CRC
@@ -75,7 +75,7 @@ pub entity sd_write_receiver(
     reg(clk) crcs: [uint<16>; 4] reset(clear: [0; 4]) = if start {
         [0; 4]
     } else if take_bits {
-        crcs.zip(dat.to_bits()).map(fn |(crc, bit)| {
+        crcs.zip(dat.as_bits()).map(fn |(crc, bit)| {
                 crc16_bit(crc, bit)
             })
     } else {
@@ -91,8 +91,8 @@ pub entity sd_write_receiver(
     // In one-bit mode the host sends a CRC on DAT0 only; the other three lanes
     // are idle and their staged CRCs mean nothing.
     let checked = [true, width, width, width];
-    let mismatch = checked.zip(crcs.zip(dat.to_bits())).any(fn |(check, (crc, bit))| {
-            check && bit != (crc >> zext::<4, 16>(15 -. crc_index)).to_bits()[0]
+    let mismatch = checked.zip(crcs.zip(dat.as_bits())).any(fn |(check, (crc, bit))| {
+            check && bit != (crc >> zext::<4, 16>(15 -. crc_index)).as_bits()[0]
         });
     reg(clk) bad reset(clear: false) = if start {
         false
@@ -105,7 +105,7 @@ pub entity sd_write_receiver(
     reg(clk) accepted reset(clear: false) = if start {
         false
     } else if take_end {
-        !bad && (if width { dat == 15 } else { dat.to_bits()[0] })
+        !bad && (if width { dat == 15 } else { dat.as_bits()[0] })
     } else {
         accepted
     };

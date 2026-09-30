@@ -108,6 +108,14 @@ Projects that include generated build information keep their existing
 `swim.toml` package name and UART boot-banner identity. Directory cleanup does
 not imply a wire-protocol or package rename.
 
+## Maintain the Spade source
+
+The [2026-10-01 modernization review](docs/spade-modernization-2026-10-01.md)
+maps the previous year's Spade posts to the code, records the syntax changes
+and their verification, and identifies features that were already applied.
+Use [the compiler issue record](docs/spade-compiler-issues.md) when deciding
+whether a language feature can replace an existing workaround.
+
 ## Build and flash hardware
 
 The shared project entrypoint also exposes synthesis and flashing workflows:

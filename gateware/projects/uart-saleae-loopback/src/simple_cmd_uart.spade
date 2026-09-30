@@ -129,7 +129,7 @@ impl MsgKind {
 }
 
 pub fn clock_from_code(freq_code: uint<4>, clk_div: uint<10>, clk200: bool, clk400: bool) -> bool {
-    let bits = clk_div.to_bits();
+    let bits = clk_div.as_bits();
     let sources: [bool; 6] = [
         bits[4],
         bits[3],
