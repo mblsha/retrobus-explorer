@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reliable UDP image upload/download and exclusive SD ownership control."""
+"""Reliable UDP or USB UART image transfer and exclusive SD ownership control."""
 
 import argparse
 import fcntl
@@ -39,6 +39,7 @@ class Opcode(IntEnum):
     STATUS = 6
     BULK_READ = 7
     TRACE = 8
+    INFO = 9
 
 
 ORDERED_OPCODES = frozenset(
@@ -73,8 +74,8 @@ def encode(opcode, session, sequence, lba=0, count=0, data=b"", compact=False):
     """Encode a request without changing the legacy padded wire format."""
     if len(data) > SECTOR_BYTES:
         raise ValueError("A block is at most 512 bytes")
-    if compact and (opcode not in (Opcode.BULK_READ, Opcode.TRACE) or data):
-        raise ValueError("Only bulk reads and SD trace requests are compact")
+    if compact and (opcode not in (Opcode.BULK_READ, Opcode.TRACE, Opcode.INFO) or data):
+        raise ValueError("Only bulk reads, SD trace, and INFO requests are compact")
     body = (
         b"RBS1"
         + bytes([opcode, 0, 0, 0])
@@ -245,6 +246,118 @@ class PendingRead:
     retries: int = 0
 
 
+def serial_frame(packet):
+    encoded = bytearray([0x7E])
+    for byte in packet:
+        if byte in (0x7D, 0x7E):
+            encoded.extend((0x7D, byte ^ 0x20))
+        else:
+            encoded.append(byte)
+    encoded.append(0x7E)
+    return bytes(encoded)
+
+
+class SerialTransport:
+    """Packet socket interface over one framed UART transaction at a time.
+
+    DTR and RTS are inactive before opening the port: opening a fallback link
+    must not reset the FPGA and lose its DDR image or session.
+    """
+    def __init__(self, port=None, baud=1_000_000, timeout=0.5, *, ftdi_serial=None):
+        self.timeout = timeout
+        self.frame = bytearray()
+        self.escaped = False
+        self.collecting = False
+        self.invalid = False
+        self.replies = []
+        if ftdi_serial:
+            # images.py is also imported by absolute path by linux-consoles.
+            # Load the sibling by its path without changing sys.path.
+            import importlib.util
+            name = "retrobus_ftdi_uart"
+            module = sys.modules.get(name)
+            if module is None:
+                specification = importlib.util.spec_from_file_location(
+                    name, Path(__file__).with_name("ftdi_uart.py"))
+                module = importlib.util.module_from_spec(specification)
+                sys.modules[name] = module
+                try:
+                    specification.loader.exec_module(module)
+                except BaseException:
+                    del sys.modules[name]
+                    raise
+            self.port = module.FtdiUart(ftdi_serial, baud, timeout)
+        else:
+            import serial
+            self.port = serial.Serial(port=None, baudrate=baud, timeout=timeout,
+                                      write_timeout=1, exclusive=True)
+            try:
+                self.port.dtr = False
+                self.port.rts = False
+                self.port.port = port
+                self.port.open()
+            except BaseException:
+                self.port.close()
+                raise
+
+    def gettimeout(self):
+        return self.timeout
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def send(self, packet):
+        wire = serial_frame(packet)
+        offset = 0
+        while offset < len(wire):
+            sent = self.port.write(wire[offset:])
+            if not sent:
+                raise OSError("UART write made no progress")
+            offset += sent
+        self.port.flush()
+        return len(packet)
+
+    def _feed(self, data):
+        for byte in data:
+            if byte == 0x7E:
+                if self.collecting and self.frame and not self.invalid and not self.escaped:
+                    self.replies.append(bytes(self.frame))
+                self.frame.clear()
+                self.collecting, self.escaped, self.invalid = True, False, False
+            elif self.collecting and not self.invalid:
+                if self.escaped:
+                    if byte not in (0x5D, 0x5E):
+                        self.invalid = True
+                    else:
+                        self.frame.append(byte ^ 0x20)
+                    self.escaped = False
+                elif byte == 0x7D:
+                    self.escaped = True
+                else:
+                    self.frame.append(byte)
+                if len(self.frame) > 1052:
+                    self.invalid = True
+
+    def recv(self, size):
+        deadline = time.monotonic() + self.timeout
+        while not self.replies:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout()
+            self.port.timeout = remaining
+            data = self.port.read(max(1, self.port.in_waiting))
+            if not data:
+                raise socket.timeout()
+            self._feed(data)
+        packet = self.replies.pop(0)
+        if len(packet) > size:
+            raise OSError("UART packet exceeds receive buffer")
+        return packet
+
+    def close(self):
+        self.port.close()
+
+
 class Images:
     def __init__(
         self,
@@ -253,10 +366,23 @@ class Images:
         state=None,
         timeout=0.5,
         progress=None,
+        serial_port=None,
+        baud=1_000_000,
+        ftdi_serial=None,
     ):
         self.state_path = Path(state) if state else None
         self._lock = None
         self.socket = None
+        if serial_port is not None and ftdi_serial is not None:
+            raise ValueError("Choose one UART backend: serial port or FTDI serial number")
+        for selector in (serial_port, ftdi_serial):
+            if selector is not None and (not selector or "\0" in selector):
+                raise ValueError("An explicit UART selector must be nonempty without NUL bytes")
+        self.ftdi_serial = ftdi_serial or (None if serial_port is not None else
+                                         os.environ.get("SD_EMULATOR_FTDI_SERIAL"))
+        self.serial_port = serial_port or (None if self.ftdi_serial else
+                                          os.environ.get("SD_EMULATOR_SERIAL_PORT"))
+        self.serial_transport = bool(self.serial_port or self.ftdi_serial)
         try:
             if self.state_path:
                 self._lock = self.state_path.with_suffix(
@@ -282,10 +408,15 @@ class Images:
                     self.pending,
                     self.initial_upload,
                 ) = load_journal(self.state_path, host)
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.socket.bind((source, 0))
-            self.socket.connect((host, 4000))
-            self.socket.settimeout(timeout)
+            if self.ftdi_serial:
+                self.socket = SerialTransport(baud=baud, timeout=timeout, ftdi_serial=self.ftdi_serial)
+            elif self.serial_port:
+                self.socket = SerialTransport(self.serial_port, baud, timeout)
+            else:
+                self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.socket.bind((source, 0))
+                self.socket.connect((host, 4000))
+                self.socket.settimeout(timeout)
         except BaseException:
             self.close()
             raise
@@ -333,6 +464,33 @@ class Images:
             raise TimeoutError(f"No validated reply after {retries} identical attempts")
         finally:
             self.socket.settimeout(timeout)
+
+    def info(self):
+        """Read a coherent snapshot without recovering or changing the journal."""
+        status, payload = self.exchange(encode(Opcode.INFO, 0, 0, compact=True))
+        if status:
+            raise RemoteError(status)
+        words = struct.unpack_from("<9I", payload)
+        if words[0] != 0x31494252 or words[1] != CAPACITY_SECTORS:
+            raise RuntimeError("Unsupported FPGA INFO response")
+        return dict(capacity_sectors=words[1], session=words[2],
+                    next_sequence=words[3], written_sectors=words[4],
+                    declared_sectors=words[5], armed=bool(words[6] & 1),
+                    initialized=bool(words[6] & 2), quiescent=bool(words[6] & 4),
+                    cached=bool(words[6] & 8), last_sequence=words[7],
+                    last_request_crc=words[8])
+
+    def disarm(self):
+        """Recover control using INFO when no local session survived."""
+        if not self.session:
+            remote = self.info()
+            if not remote["session"]:
+                if remote["armed"]:
+                    raise RuntimeError("Armed FPGA has no recoverable session")
+                return
+            self.session, self.sequence = remote["session"], remote["next_sequence"]
+            self.save()
+        self.command(Opcode.DISARM)
 
     def begin(self, blocks, wait=90):
         if not 1 <= blocks <= CAPACITY_SECTORS:
@@ -559,18 +717,41 @@ class Images:
             result["enhanced"] = None
         return result
 
-    def upload(self, image, window=0):
+    def upload(self, image, window=0, *, resume=False):
         if not image or len(image) % SECTOR_BYTES:
             raise ValueError("Image must be nonempty and a multiple of 512 bytes")
         if window and not 1 <= window <= MAX_WINDOW:
             raise ValueError("Invalid upload readback window")
-        self.begin(len(image) // SECTOR_BYTES)
-        self.initial_upload["sha256"] = hashlib.sha256(image).hexdigest()
-        self.save()
         blocks = len(image) // SECTOR_BYTES
+        digest = hashlib.sha256(image).hexdigest()
+        first = 0
+        if resume:
+            marker = self.initial_upload or {}
+            if marker.get("sha256") != digest or marker.get("sectors") != blocks:
+                raise RuntimeError("Resume requires the identical image and upload journal")
+            if self.pending and self.pending[4] == Opcode.WRITE:
+                lba = struct.unpack_from("<I", self.pending, 16)[0]
+                if self.pending[24:536] != image[lba * 512:(lba + 1) * 512]:
+                    raise RuntimeError("Pending write differs from the resume image")
+            if self.pending and self.pending[4] not in (
+                    Opcode.WRITE, Opcode.READ, Opcode.STATUS):
+                raise RuntimeError("Resume cannot recover a pending control operation")
+            self.recover()
+            remote = self.info()
+            if (remote["session"] != self.session or remote["next_sequence"] != self.sequence
+                    or remote["declared_sectors"] != blocks or remote["armed"]
+                    or not remote["initialized"] or not remote["quiescent"]
+                    or not 0 <= remote["written_sectors"] <= blocks):
+                raise RuntimeError("FPGA session cannot resume this upload")
+            first = remote["written_sectors"]
+            self.initial_upload["verified"] = False
+        else:
+            self.begin(blocks)
+            self.initial_upload["sha256"] = digest
+        self.save()
         self.report(f"Uploading {blocks} sectors")
         progress_interval = max(1, blocks // 100)
-        for lba in range(blocks):
+        for lba in range(first, blocks):
             self.command(
                 Opcode.WRITE,
                 lba,
@@ -614,6 +795,10 @@ class Images:
         if not 1 <= window <= MAX_WINDOW or retry_seconds <= 0:
             raise ValueError("Require window 1..16 and a positive retry interval")
         self.recover(read_only=True)
+        if self.serial_transport:
+            # Serial has one receive slot; windowing is useful only for UDP.
+            window = 1
+            retry_seconds = max(retry_seconds, self.socket.gettimeout())
         self.report(
             f"Downloading {blocks} sectors from LBA {start} with window {window}"
         )
@@ -622,6 +807,8 @@ class Images:
         next_block = 0
         token = secrets.randbelow(0xFFFFFFFF)
         old_timeout = self.socket.gettimeout()
+        progress_interval = max(1, blocks // 100)
+        reported_blocks = 0
         try:
             while next_block < blocks or pending:
                 while next_block < blocks and len(pending) < window:
@@ -646,6 +833,10 @@ class Images:
                 )
                 self.socket.settimeout(max(0.0001, deadline - now))
                 self._receive_bulk_reply(pending, output)
+                completed_blocks = next_block - sum(item.sector_count for item in pending.values())
+                if completed_blocks - reported_blocks >= progress_interval or completed_blocks == blocks:
+                    self.report(f"Downloaded {completed_blocks}/{blocks} sectors")
+                    reported_blocks = completed_blocks
                 self._retry_bulk_reads(pending, retry_seconds)
             return bytes(output)
         finally:
@@ -714,6 +905,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="192.168.10.2")
     parser.add_argument("--source", default="192.168.10.1")
+    uart = parser.add_mutually_exclusive_group()
+    uart.add_argument("--serial-port", help="Arty USB UART tty port")
+    uart.add_argument("--ftdi-serial", help="Direct Arty USB UART by exact FTDI serial number (libftdi)")
+    parser.add_argument("--baud", type=int, default=1_000_000)
+    parser.add_argument("--resume-upload", action="store_true",
+                        help="Continue the identical image using the saved journal")
     parser.add_argument(
         "--state", required=True, help="Private local session/sequence file"
     )
@@ -723,6 +920,7 @@ def main():
     action.add_argument("--arm", action="store_true")
     action.add_argument("--disarm", action="store_true")
     action.add_argument("--status", action="store_true")
+    action.add_argument("--info", action="store_true")
     action.add_argument(
         "--trace",
         action="store_true",
@@ -742,6 +940,8 @@ def main():
     parser.add_argument("--blocks", type=int)
     parser.add_argument("--start", type=int)
     args = parser.parse_args()
+    if args.resume_upload and not args.upload:
+        parser.error("--resume-upload requires --upload")
     if args.download and args.blocks is None:
         parser.error("--download requires --blocks")
     if not args.download and (args.blocks is not None or args.start is not None):
@@ -764,7 +964,8 @@ def main():
     def progress(message):
         print(message, file=sys.stderr, flush=True)
 
-    client = Images(args.host, args.source, args.state, progress=progress)
+    client = Images(args.host, args.source, args.state, progress=progress,
+                    serial_port=args.serial_port, baud=args.baud, ftdi_serial=args.ftdi_serial)
     started = time.monotonic()
     operation = (
         "upload"
@@ -783,7 +984,7 @@ def main():
         result = {}
         if args.upload:
             image = args.upload.read_bytes()
-            client.upload(image, window=args.window if args.bulk else 0)
+            client.upload(image, window=args.window if args.bulk else 0, resume=args.resume_upload)
             result = {
                 "uploaded_bytes": len(image),
                 "verified_sha256": hashlib.sha256(image).hexdigest(),
@@ -800,6 +1001,8 @@ def main():
                 "downloaded_bytes": len(image),
                 "sha256": hashlib.sha256(image).hexdigest(),
             }
+        elif args.info:
+            result = {"info": client.info()}
         elif args.trace:
             result = {"sd_trace": client.trace()}
         else:
@@ -809,7 +1012,10 @@ def main():
                 opcode = Opcode.DISARM
             else:
                 opcode = Opcode.STATUS
-            client.command(opcode)
+            if args.disarm:
+                client.disarm()
+            else:
+                client.command(opcode)
             result = {
                 "command": "arm" if args.arm else "disarm" if args.disarm else "status",
                 "acknowledged": True,
@@ -826,7 +1032,7 @@ def main():
             else "no pending request is journaled"
         )
         print(
-            f"{operation} failed after {client.retries} network retries; {detail}",
+            f"{operation} failed after {client.retries} transport retries; {detail}",
             file=sys.stderr,
             flush=True,
         )

@@ -1,4 +1,4 @@
-use super::{mac, network, blocks};
+use super::{mac, network, blocks, serial, arbiter};
 
 #[no_mangle(all)]
 pub entity network_frontend(
@@ -8,6 +8,8 @@ pub entity network_frontend(
     rst: bool,
     initialized: bool,
     sd_quiescent: bool,
+    uart_bit_time: uint<15>,
+    usb_rx: bool, usb_tx: inv bool, usb_active: inv bool,
     rxd: uint<4>,
     rx_dv: bool,
     rx_er: bool,
@@ -72,10 +74,34 @@ pub entity network_frontend(
         app_request_w, app_request_length_w, app_read_address, app_read_data_w,
         app_reply_write, app_reply_address, app_reply_data, app_reply_done, app_reply_length,
     );
+    let (serial_request, serial_request_w): (bool, inv bool) = port();
+    let (serial_length, serial_length_w): (uint<11>, inv uint<11>) = port();
+    let (serial_address, serial_address_w): (uint<10>, inv uint<10>) = port();
+    let (serial_data, serial_data_w): (uint<8>, inv uint<8>) = port();
+    let (serial_reply_write, serial_reply_write_w): (bool, inv bool) = port();
+    let (serial_reply_done, serial_reply_done_w): (bool, inv bool) = port();
+    let (service_request, service_request_w): (bool, inv bool) = port();
+    let (service_length, service_length_w): (uint<11>, inv uint<11>) = port();
+    let (service_address, service_address_w): (uint<10>, inv uint<10>) = port();
+    let (service_data, service_data_w): (uint<8>, inv uint<8>) = port();
+    let (service_reply_write, service_reply_write_w): (bool, inv bool) = port();
+    let (service_reply_done, service_reply_done_w): (bool, inv bool) = port();
+    let _ = inst serial::serial_frontend(clk, rst, uart_bit_time,
+        usb_rx, usb_tx, usb_active,
+        serial_request_w, serial_length_w, serial_address, serial_data_w,
+        serial_reply_write, app_reply_address, app_reply_data,
+        serial_reply_done, app_reply_length);
+    let _ = inst arbiter::request_arbiter(clk, rst,
+        app_request, app_request_length, app_read_data, app_read_address_w,
+        app_reply_write_w, app_reply_done_w,
+        serial_request, serial_length, serial_data, serial_address_w,
+        serial_reply_write_w, serial_reply_done_w,
+        service_request_w, service_length_w, service_data_w, service_address,
+        service_reply_write, service_reply_done);
     let _ = inst blocks::block_service(
-        clk, local_rst, initialized, sd_quiescent,
-        app_request, app_request_length, app_read_address_w, app_read_data,
-        app_reply_write_w, app_reply_address_w, app_reply_data_w, app_reply_done_w, app_reply_length_w,
+        clk, rst, initialized, sd_quiescent,
+        service_request, service_length, service_address_w, service_data,
+        service_reply_write_w, app_reply_address_w, app_reply_data_w, service_reply_done_w, app_reply_length_w,
         memory_request, memory_write, memory_lba, memory_count,
         memory_write_index, memory_write_data,
         memory_read_valid, memory_read_index, memory_read_data, memory_done, memory_error, sd_trace, trace_word_index,

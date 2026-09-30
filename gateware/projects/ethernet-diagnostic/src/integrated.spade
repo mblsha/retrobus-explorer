@@ -20,6 +20,8 @@ pub entity network_ddr(
     mmc_only: bool,
     writable: bool,
     dat_in: uint<4>,
+    uart_bit_time: uint<15>,
+    usb_active: inv bool,
     usb_rx: bool,
     usb_tx: inv bool,
     ddr_cmd_valid: inv bool,
@@ -139,6 +141,7 @@ pub entity network_ddr(
     let network_owner = owner_grant && !sd_armed;
     let quiescent = network_owner && !network_busy && native_stage_empty;
     let _ = inst server::network_frontend(clk, rx_clk, tx_clk, rst, initialized, quiescent,
+        uart_bit_time, usb_rx, usb_tx, usb_active,
         eth_rxd, eth_rx_dv, eth_rxerr, eth_txd, eth_tx_en, eth_ref_clk, eth_rstn,
         network_request_w, network_write_w, network_lba_w, network_count_w, network_write_index,
             network_write_byte_w, network_read_valid, network_read_index, network_read_byte,
@@ -199,7 +202,6 @@ pub entity network_ddr(
     set client_wdata_mask_w = (if sd_commit_owner { write_mask } else { network_wmask });
     set armed_status = (sd_armed && initialized);
     set status_selector = 0;
-    set usb_tx = true;
     let _ = inst microsd_emulator::cdc::native_stage(
         clk, rst,
         client_cmd_valid, client_cmd_ready_w, client_cmd_address, client_cmd_write,

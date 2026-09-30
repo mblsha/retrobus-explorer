@@ -4,5 +4,7 @@ pub mod network;
 pub mod blocks;
 pub mod native;
 pub mod server;
+pub mod serial;
+pub mod arbiter;
 pub mod integrated;
 pub mod trace;

@@ -1,20 +1,21 @@
-# Arty A7 Ethernet SD image service
+# Arty A7 Ethernet and USB SD image service
 
 Load and retrieve the Arty A7-35T's 256 MiB DDR-backed microSD image over
 100 Mbps Ethernet. SD remains a writable, four-bit, 13 MHz card on JD using
-the bottom-header microSD-Pmod adapter and a common ground. The Ethernet
-transport replaces the UART image loader; it reuses the reviewed SD frontend,
+the bottom-header microSD-Pmod adapter and a common ground. New combined
+builds include a full-image USB UART fallback alongside Ethernet; it reuses the reviewed SD frontend,
 DDR controller, full-memory BIST, and board wiring.
 
 ## Integration status
 
 The implementation at `805c5f7` was requalified on Arty/GKD hardware on
 2026-09-14: full 256 MiB SD integrity, cross-interface read/write, filesystem
-checks, and about 90 Mbps Ethernet reads passed. The subsequent client, CDC,
-and PHY-reset review changes have not been programmed or hardware-qualified.
-See [qualification provenance](QUALIFICATION.md) for the current build checks
-and the exact revisions, bitstream identities, rates, and retry counts behind
-the hardware results.
+checks, and about 90 Mbps Ethernet reads passed. See [qualification provenance](QUALIFICATION.md) for the historical
+build checks and exact revisions, bitstream identities, rates and retries.
+The new combined candidate passed USB transfer and RG35XX Plus boot checks
+with Ethernet disconnected on 2026-10-01; see the
+[USB qualification record](../../docs/hardware/arty-usb-fallback-2026-10-01.md)
+for its separate artifact identity and the scope of that campaign.
 
 ## Build and test
 
@@ -79,7 +80,7 @@ In reading order:
 
 | document | what it is | when to read it |
 | --- | --- | --- |
-| [PROTOCOL.md](PROTOCOL.md) | the wire protocol of the Ethernet image service: packet formats, the ordered-command API, bulk reads and TRACE | you are writing or debugging a client |
+| [PROTOCOL.md](PROTOCOL.md) | the shared image protocol over Ethernet and USB: packet formats, the ordered-command API, bulk reads, TRACE and INFO | you are writing or debugging a client |
 | [H700-HOST-NOTES.md](H700-HOST-NOTES.md) | what a real Allwinner H700 host taught this emulator: the clock ladder it picks, how the frontend samples, the pull-up findings, what TRACE keeps and loses, and how the qualified H700 bitstream was built | you are changing the SD frontend, the trace, or an H700 build |
 | [QUALIFICATION.md](QUALIFICATION.md) | the provenance of the hardware results: revisions, bitstream hashes, rates and retry counts, campaign by campaign | you need to know exactly what was tested, and on what |
 
@@ -140,8 +141,9 @@ openFPGALoader -b arty_a7_35t -m build/microsd-ddr-ethernet/design.bit
 ping -c 3 192.168.10.2
 ```
 
-BIOS output remains on USB UART at 115200 baud. The 1 Mbaud UART image commands
-are unavailable in this build. Full-memory BIST takes tens of seconds;
+BIOS output starts on USB UART at 115200 baud. In new combined builds the
+1 Mbaud framed image service takes exclusive transmit ownership on its first
+complete request. The qualified historical artifact predates this fallback. Full-memory BIST takes tens of seconds;
 `--upload` waits for readiness. STATUS acknowledges a session, rather than
 reporting detailed BIST counters.
 
@@ -191,10 +193,11 @@ writes are not explicitly synchronised to storage and are not promised to
 survive sudden host power loss. Transfer phases and progress go to stderr;
 stdout remains machine-readable JSON.
 
-Recovering one pending ordered request is not partial-upload resume. `--upload`
-always starts a new session at sector zero and performs a complete readback
-comparison. True upload resume would need to reconcile the image identity and
-FPGA-accepted sector count and is not implemented.
+Recovering one pending ordered request completes that operation. A normal
+`--upload` starts again at LBA zero. `--resume-upload --upload IMAGE` instead
+requires the same saved image identity, reconciles the FPGA session through
+INFO and continues from the written prefix, then compares the entire readback.
+It refuses an FPGA reload, a different image, or a pending control operation.
 
 ## Passive SD trace
 
@@ -259,10 +262,13 @@ with the same state file and an independently known `--expected-sha256`.
 - `src/network.spade`: ARP, ICMP echo, IPv4/UDP validation and replies.
 - `src/blocks.spade`: image session, ordered retry cache, bounds, and arm control.
 - `src/native.spade`: one/two-sector transfers over the native DDR interface.
-- `src/server.spade`: packet-layer composition and PHY startup.
+- `src/serial.spade`: UART framing, immutable request buffer and reply serializer.
+- `src/arbiter.spade`: fair request ownership and reply routing between transports.
+- `src/server.spade`: shared block-service composition and independent PHY startup.
 - `src/integrated.spade`: exclusive SD/network DDR ownership and draining.
 - `src/trace.spade`: passive SD activity counters and registered word readout.
-- `scripts/images.py`: validated UDP client and persistent ordered-request state.
+- `scripts/images.py`: validated UDP/serial client and persistent ordered-request state.
+- `scripts/ftdi_uart.py`: exact-board FT2232H interface B stream via libftdi.
 
 See [wire protocol and bulk reads](PROTOCOL.md) and
 [historical hardware qualification](QUALIFICATION.md). There is no DHCP, VLAN,
@@ -285,3 +291,79 @@ The fixed startup timer does not detect stopped clocks or guarantee recovery
 from arbitrarily late PHY-clock startup. Simulation covers delayed clock start,
 reassertion, and release near both sides of a clock edge; it does not model
 metastability or replace physical reset/CDC analysis.
+
+
+## USB fallback on the H700 card
+
+Build a separate candidate; preserve the qualified historical artifact:
+
+```sh
+DYLD_LIBRARY_PATH=<boost-lib> ./.venv/bin/python \
+  experiments/openxc7-macos/build_ddr.py --profile h700-rg35xx \
+  --output build/microsd-ddr-ethernet-usb-h700-registered-tx --seed <timing-passing-seed>
+```
+
+Require successful timing and bitstream verification before programming.
+Keep the target's exact PSU2 channel off, hold the lab device lease, program
+the candidate, and wait for DDR initialization. Ethernet may remain unplugged.
+Use the Arty's FT2232H UART interface B, leaving DTR/RTS inactive. The
+direct USB backend requires libftdi 1.5 or newer 1.x and selects the exact
+board by its USB serial number; interface A remains the JTAG interface:
+
+```sh
+uv run --frozen python projects/ethernet-diagnostic/scripts/images.py \
+  --ftdi-serial <arty-ftdi-serial> --state <session.json> --info
+uv run --frozen python projects/ethernet-diagnostic/scripts/images.py \
+  --ftdi-serial <arty-ftdi-serial> --state <session.json> --upload <image.img> --bulk
+```
+
+The direct backend temporarily claims interface B and requests kernel-driver
+reattachment on close. It restores the previous USB latency setting and never
+writes the EEPROM. Use one UART client at a time. On the tested Mac, the TTY
+path produced truncated/corrupt 1 Mbaud replies; the direct libftdi path
+received the complete CRC-valid replies from the same FPGA artifact.
+`--serial-port <arty-uart>` remains available through pySerial on hosts where
+the TTY stream works. Both backends use the same UART framing and baud rate.
+
+Upload includes complete DDR readback comparison and leaves the image
+disarmed. ARM only for the powered target test under its lease, capture the
+target's debug-partition evidence, then disarm and prove PSU2 off. The existing
+linux-consoles trial/job tooling uses direct USB when
+`SD_EMULATOR_FTDI_SERIAL=<arty-ftdi-serial>` is set, or the TTY path with
+`SD_EMULATOR_SERIAL_PORT=<arty-uart>`. It keeps the same client, journal,
+6 MHz card limit and supply discipline.
+
+Additional focused simulations are `--top serial_packet --test-module
+test_serial` and `--top request_arbiter --test-module test_arbiter`, alongside
+the expanded `test_blocks` and default `test_network_sd`. Host discovery must
+include all `test_*.py` files to cover serial framing and upload recovery.
+
+
+### Repeat the USB qualification
+
+`scripts/qualify_rg35xx_usb.py` uses the linux-consoles bench and trial tools
+through their checkout, and requires the exact device and emulator leases.
+The default UART backend is direct libftdi; `--uart-backend tty` selects
+pySerial instead. `--port` identifies the 115200 baud BIOS capture port in
+the smoke phase. The smoke phase reconfigures the FPGA and replaces its
+volatile DDR image:
+
+```sh
+<zaurus>/lab lease --device anbernic-rg35xx-plus --sd-emulator -- \
+  <gateware>/.venv/bin/python \
+  <gateware>/projects/ethernet-diagnostic/scripts/qualify_rg35xx_usb.py \
+  --gateware <gateware> --consoles <linux-consoles> \
+  --build <candidate-build> --port <arty-uart> --ftdi-serial <arty-ftdi-serial> \
+  --output <private-evidence-dir> --image <rg35xx-sleep-image> --phase smoke
+```
+
+Repeat with the same arguments and `--phase full`, then `--phase boot`.
+Full transfer includes complete readback; `--phase full --resume` recovers an
+interrupted transfer of the identical image using its saved journal. Boot
+performs three cold starts and requires userspace and job-runner records from
+the debug partition. Each phase ends disarmed with exact PSU2 read back OFF.
+
+For the normal linux-consoles deployment, select this candidate explicitly
+with `deploy --build-dir <candidate-build>` and set
+`SD_EMULATOR_FTDI_SERIAL=<arty-ftdi-serial>`. The default build directory names the
+historical Ethernet artifact, which does not contain the UART fallback.

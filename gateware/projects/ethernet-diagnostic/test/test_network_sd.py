@@ -7,6 +7,59 @@ from cocotb.clock import Clock
 from cocotb.triggers import FallingEdge, RisingEdge, Timer, with_timeout
 from packet_support import packet, udp
 
+
+def framed(data):
+    wire = bytearray([0x7e])
+    for byte in data:
+        wire.extend((0x7d, byte ^ 0x20) if byte in (0x7d, 0x7e) else (byte,))
+    return bytes(wire + b"\x7e")
+
+
+async def uart_send(d, data, bit_ns=80):
+    for byte in data:
+        for bit in [0] + [(byte >> n) & 1 for n in range(8)] + [1]:
+            d.usb_rx.value = bit
+            await Timer(bit_ns, units="ns")
+    d.usb_rx.value = 1
+
+
+async def uart_receive(d, bit_ns=80):
+    frame = bytearray()
+    collecting, escaped = False, False
+    while True:
+        await FallingEdge(d.usb_tx)
+        await Timer(bit_ns * 1.5, units="ns")
+        byte = 0
+        for bit in range(8):
+            byte |= int(d.usb_tx.value) << bit
+            await Timer(bit_ns, units="ns")
+        assert int(d.usb_tx.value), "UART stop bit"
+        if byte == 0x7e:
+            if collecting and frame:
+                assert not escaped
+                return bytes(frame)
+            collecting, escaped = True, False
+        elif collecting:
+            if escaped:
+                assert byte in (0x5e, 0x5d)
+                frame.append(byte ^ 0x20)
+                escaped = False
+            elif byte == 0x7d:
+                escaped = True
+            else:
+                frame.append(byte)
+
+
+async def usb_exchange(d, request, status=0, *, bit_ns=80):
+    receiver = cocotb.start_soon(uart_receive(d, bit_ns))
+    await uart_send(d, framed(request), bit_ns)
+    response = await with_timeout(receiver, 20000, "us")
+    assert response[:4] == b"RBA1"
+    assert response[4] == request[4] and response[5] == status
+    assert zlib.crc32(response[:-4]) == int.from_bytes(response[-4:], "little")
+    await Timer(1000, units="ns")
+    return response
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "microsd-emulator/test"))
 from ddr_support import memory_model
 from sd_support import Host
@@ -27,6 +80,7 @@ async def ethernet_sd_ethernet_roundtrip(d):
     # testbench has to supply the qualified default.
     d.sd_csd.value = 0x0026001A115903FFC002800002400023
     d.dat_in.value = 15
+    d.uart_bit_time.value = 8
     d.usb_rx.value = 1
     d.diagnostic_status.value = 0
     d.sd_clk.value = 0
@@ -124,7 +178,8 @@ async def ethernet_sd_ethernet_roundtrip(d):
     first = bytes((i * 31 + 7) & 255 for i in range(512))
     await exchange(packet(1, 0, count=2))
     request = packet(2, 1, count=1, data=first)
-    ack = await exchange(request)
+    ack = await usb_exchange(d, request)
+    # The Ethernet retry uses the shared cache and must not write twice.
     assert await exchange(request) == ack
     await exchange(packet(2, 2, lba=1, count=1, data=first[::-1]))
     await exchange(packet(4, 3))
@@ -210,3 +265,35 @@ async def ethernet_sd_ethernet_roundtrip(d):
     assert reply[24:536] == changed
     assert memory == before_read
     model.kill()
+
+
+@cocotb.test()
+async def usb_info_with_absent_phy_clocks_and_uninitialized_ddr(d):
+    # A 64 MHz period is 15625 ps; its half-period needs alternating
+    # integer delays at Verilator's 1 ps precision.
+    async def fabric_clock():
+        while True:
+            d.clk.value = 0
+            await Timer(7812, units="ps")
+            d.clk.value = 1
+            await Timer(7813, units="ps")
+    cocotb.start_soon(fabric_clock())
+    for name in ("rx_clk", "tx_clk", "initialized", "diagnostic_status",
+                 "fast_mode", "h700_mode", "h700_falling_phase", "h700_early_command",
+                 "sd_csd", "capture_lba", "mmc_only", "writable", "sd_clk",
+                 "eth_rxd", "eth_rx_dv", "eth_rxerr", "ddr_cmd_ready",
+                 "ddr_wdata_ready", "ddr_rdata_valid", "ddr_rdata"):
+        getattr(d, name).value = 0
+    d.uart_bit_time.value = 64
+    d.usb_rx.value, d.cmd_in.value, d.dat_in.value = 1, 1, 15
+    d.rst.value = 1
+    await Timer(100, units="ns")
+    d.rst.value = 0
+    head = packet(9, 0, session=0)[:24]
+    query = head + zlib.crc32(head).to_bytes(4, "little")
+    result = await usb_exchange(d, query, bit_ns=1000)
+    assert result[24:28] == b"RBI1"
+    assert int.from_bytes(result[48:52], "little") & 3 == 0
+    assert int(d.usb_active.value)
+    assert not int(d.armed_status.value)
+    assert not int(d.ddr_cmd_valid.value)

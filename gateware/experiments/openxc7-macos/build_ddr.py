@@ -69,7 +69,7 @@ def parse_arguments(argv=None):
     parser.add_argument(
         "--ethernet",
         action="store_true",
-        help="Use UDP image management instead of the UART image loader",
+        help="Use the full-image service over UDP with its USB UART fallback",
     )
     parser.add_argument(
         "--slow-mmc",
@@ -155,6 +155,8 @@ def recorded_settings(args):
         "with_sd": True,
         "profile": args.profile,
         "ethernet_sd": args.ethernet,
+        "serial_image_service": args.ethernet,
+        "serial_baud": 1_000_000 if args.ethernet else None,
         "fast_sd": not args.slow_mmc,
         "h700_mmc": args.h700_mmc,
         "h700_early_command": args.h700_early_command,
@@ -368,6 +370,7 @@ def main():
         flag
         for enabled, flag in (
             (args.ethernet, "-D ETHERNET_SD"),
+            (args.ethernet, f"-D UART_BIT_TIME=15'd{sd_io_clk_freq // 1_000_000}"),
             (args.slow_mmc, "-D SLOW_MMC"),
             (args.h700_mmc, "-D H700_MMC"),
             (args.h700_early_command, "-D H700_EARLY_COMMAND"),

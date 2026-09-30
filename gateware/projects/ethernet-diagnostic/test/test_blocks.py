@@ -125,3 +125,33 @@ async def protocol_conformance_read_while_armed(dut):
     ) == scenario.caches_reply
     assert (list(writes), list(reads), list(requests)) == memory_before
     assert not scenario.memory_effect
+
+
+@cocotb.test()
+async def info_is_available_before_ddr_and_preserves_retry_cache(dut):
+    memory, writes, reads, requests, exchange = await block_fixture(dut)
+    header = packet(9, 0, session=0)[:24]
+    query = header + zlib.crc32(header).to_bytes(4, "little")
+    dut.initialized.value = 0
+    result = await exchange(query)
+    words = struct.unpack("<9I", result[24:60])
+    assert words[:3] == (0x31494252, 524288, 0)
+    assert words[6] == 4
+    assert not requests
+    dut.initialized.value = 1
+    await exchange(packet(1, 0, count=1))
+    request = packet(2, 1, count=1, data=bytes(range(256)) * 2)
+    ack = await exchange(request)
+    result = await exchange(query)
+    words = struct.unpack("<9I", result[24:60])
+    assert words[2:6] == (0x12345678, 2, 1, 1)
+    assert words[6] == 14
+    assert words[7:] == (1, int.from_bytes(request[-4:], "little"))
+    assert await exchange(request) == ack
+    assert writes == [0]
+    await exchange(packet(4, 2))
+    dut.sd_quiescent.value = 0
+    result = await exchange(query)
+    words = struct.unpack("<9I", result[24:60])
+    assert words[6] == 11
+    assert int(dut.armed.value) and len(requests) == 1

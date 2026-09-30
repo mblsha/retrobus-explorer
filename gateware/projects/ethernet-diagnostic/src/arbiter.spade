@@ -1,0 +1,35 @@
+// A transport owns one application transaction through reply_done. The
+// reply is buffered by that transport before it transmits, so a slow serial
+// drain never locks out Ethernet. Two release cycles honor block_service's
+// request-release handshake. Round robin prevents starvation.
+#[no_mangle(all)]
+pub entity request_arbiter(
+    clk: clock, rst: bool,
+    ethernet_request: bool, ethernet_length: uint<11>, ethernet_data: uint<8>,
+    ethernet_address: inv uint<10>, ethernet_reply_write: inv bool,
+    ethernet_reply_done: inv bool,
+    serial_request: bool, serial_length: uint<11>, serial_data: uint<8>,
+    serial_address: inv uint<10>, serial_reply_write: inv bool,
+    serial_reply_done: inv bool,
+    request: inv bool, request_length: inv uint<11>, request_data: inv uint<8>,
+    request_address: uint<10>, reply_write: bool, reply_done: bool,
+) {
+    decl state, owner;
+    reg(clk) last_serial reset(rst: false) = if state == 1 && reply_done { owner } else { last_serial };
+    reg(clk) owner reset(rst: false) = if state == 0 {
+        serial_request && (!ethernet_request || !last_serial)
+    } else { owner };
+    reg(clk) state: uint<2> reset(rst: 0) = if state == 0 && (ethernet_request || serial_request) { 1 }
+        else if state == 1 && reply_done { 2 }
+        else if state == 2 { 3 } else if state == 3 { 0 } else { state };
+    let granted = state == 1;
+    set request = granted;
+    set request_length = (if owner { serial_length } else { ethernet_length });
+    set request_data = (if owner { serial_data } else { ethernet_data });
+    set ethernet_address = request_address;
+    set serial_address = request_address;
+    set ethernet_reply_write = (granted && !owner && reply_write);
+    set serial_reply_write = (granted && owner && reply_write);
+    set ethernet_reply_done = (granted && !owner && reply_done);
+    set serial_reply_done = (granted && owner && reply_done);
+}

@@ -57,6 +57,7 @@ pub entity block_service(
     let OP_STATUS: uint<8> = 6;
     let OP_BULK_READ: uint<8> = 7;
     let OP_TRACE: uint<8> = 8;
+    let OP_INFO: uint<8> = 9;
 
     let STATUS_OK: uint<8> = 0;
     let STATUS_BAD_FORMAT: uint<8> = 1;
@@ -91,27 +92,28 @@ pub entity block_service(
     let lba: uint<32> = trunc(header >> 128);
     let count: uint<32> = trunc(header >> 160);
     let format_ok = trunc::<uint<192>, uint<32>>(header) == 0x31534252 &&
-        trunc::<uint<192>, uint<24>>(header >> 40) == 0 && opcode >= OP_BEGIN && opcode <= OP_TRACE && (!compact || opcode == OP_BULK_READ || opcode == OP_TRACE) && expected_crc == (crc ^ 0xffffffff);
+        trunc::<uint<192>, uint<24>>(header >> 40) == 0 && opcode >= OP_BEGIN && opcode <= OP_INFO && (!compact || opcode == OP_BULK_READ || opcode == OP_TRACE || opcode == OP_INFO) && expected_crc == (crc ^ 0xffffffff);
     let bulk = opcode == OP_BULK_READ;
     let trace = opcode == OP_TRACE;
+    let info = opcode == OP_INFO;
     let read_operation = opcode == OP_READ || bulk;
     // Freeze reply size before DDR starts; avoid a count/status decode on every byte.
     reg(clk) long_reply reset(rst: false) = if state == DISPATCH { bulk && count == 2 && saved_status == STATUS_OK }
         else if state == DDR_TRANSFER && memory_done && memory_error { false } else { long_reply };
     let payload_bytes: uint<11> = if long_reply { 1024 } else { 512 };
     let response_length: uint<11> = payload_bytes +. COMPACT_BYTES;
-    let same_key = !bulk && cached && requested_session == session && sequence == last_sequence;
+    let same_key = !bulk && !trace && !info && cached && requested_session == session && sequence == last_sequence;
     let is_exact_retry = format_ok && same_key && expected_crc == last_crc;
     let is_new_session = opcode == OP_BEGIN && requested_session != 0 && requested_session != session && sequence == 0;
     let has_expected_sequence = requested_session == session && session != 0 && sequence == next_sequence;
     let admitted_ordered_request = (is_new_session && !arm && initialized && count >= 1 && count <= SECTOR_CAPACITY) ||
-        (opcode != OP_BEGIN && !bulk && has_expected_sequence);
+        (opcode != OP_BEGIN && !bulk && !trace && !info && has_expected_sequence);
     let status: uint<8> = if !format_ok { STATUS_BAD_FORMAT }
         else if same_key && !is_exact_retry { STATUS_CONFLICTING_RETRY }
         else if opcode == OP_BEGIN && arm { STATUS_IMAGE_BUSY }
-        else if !initialized && !trace { STATUS_NOT_INITIALIZED }
+        else if !initialized && !trace && !info { STATUS_NOT_INITIALIZED }
         else if bulk && (requested_session != session || session == 0) { STATUS_BAD_SESSION }
-        else if !admitted_ordered_request && !bulk && !trace { if requested_session != session { STATUS_BAD_SESSION } else { STATUS_BAD_SEQUENCE } }
+        else if !admitted_ordered_request && !bulk && !trace && !info { if requested_session != session { STATUS_BAD_SESSION } else { STATUS_BAD_SEQUENCE } }
         else if (opcode == OP_WRITE || read_operation) && (arm || !sd_quiescent) { STATUS_IMAGE_BUSY }
         else if (opcode == OP_WRITE || read_operation) && (lba >= SECTOR_CAPACITY || (if bulk { count < 1 || count > 2 || (count == 2 && lba == LAST_SECTOR) } else { count != 1 })) { STATUS_BAD_RANGE }
         else if opcode == OP_WRITE && (lba != written_sectors || written_sectors >= declared_sectors) { STATUS_BAD_RANGE }
@@ -150,6 +152,20 @@ pub entity block_service(
         else if state == REQUEST_CAPTURE || state == REPLY_EMIT { index +. 1 } else { index };
     let reply_header: uint<192> = (header & 0xffffffffffffffffffffffffffffffff0000000000000000) |
         zext::<32, 192>(0x31414252) | (zext(opcode) << 32) | (zext(saved_status) << 40);
+    // INFO is an atomic diagnostic snapshot, outside the ordered session.
+    // Reading it never mutates the retry cache, ARM state or DDR contents.
+    let arm_flag: uint<32> = if arm { 1 } else { 0 };
+    let init_flag: uint<32> = if initialized { 2 } else { 0 };
+    let quiet_flag: uint<32> = if sd_quiescent { 4 } else { 0 };
+    let cache_flag: uint<32> = if cached { 8 } else { 0 };
+    let flags = arm_flag | init_flag | quiet_flag | cache_flag;
+    reg(clk) info_snapshot: uint<288> reset(rst: 0) = if state == DISPATCH && info {
+        zext::<32, 288>(0x31494252) | (zext(SECTOR_CAPACITY) << 32) |
+        (zext(session) << 64) | (zext(next_sequence) << 96) |
+        (zext(written_sectors) << 128) | (zext(declared_sectors) << 160) |
+        (zext(flags) << 192) | (zext(last_sequence) << 224) | (zext(last_crc) << 256)
+    } else { info_snapshot };
+    let info_byte: uint<8> = trunc(info_snapshot >> (zext::<11, 288>(index -. 24) << 3));
     let trace_byte_index: uint<2> = trunc(index -. 24);
     let trace_byte: uint<8> = trunc(sd_trace >> (zext(trace_byte_index) << 3));
     decl out_byte;
@@ -162,6 +178,8 @@ pub entity block_service(
         else if index < response_length -. 4 {
             if read_operation && saved_status == STATUS_OK {
                 read_byte
+            } else if info && saved_status == STATUS_OK && index < 60 {
+                info_byte
             } else if trace && saved_status == STATUS_OK && index < 28 {
                 trace_byte
             } else {

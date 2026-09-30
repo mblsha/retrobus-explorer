@@ -58,3 +58,11 @@ Its bitstream SHA-256 was
 The local nextpnr 0.9.4 copy was relinked to its original Boost 1.90 libraries
 after a Homebrew upgrade; its timing patch was unchanged. This was build and
 simulation validation only; the new image was not programmed or hardware-qualified.
+
+## USB fallback qualification on RG35XX Plus
+
+The [2026-10-01 record](arty-usb-fallback-2026-10-01.md) covers a separate
+Spade v0.20.0 combined candidate: interrupted USB upload recovery, a complete
+131 MiB Linux image upload/readback and three RG35XX Plus cold starts with
+Ethernet disconnected. It records the artifact identity and safe final state;
+the historical Ethernet and GKD campaign was not repeated.
