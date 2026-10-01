@@ -34,6 +34,7 @@ async def uart_receive(d, bit_ns=80):
             byte |= int(d.usb_tx.value) << bit
             await Timer(bit_ns, units="ns")
         assert int(d.usb_tx.value), "UART stop bit"
+        assert int(d.usb_active.value), "binary ownership must cover the final stop bit"
         if byte == 0x7e:
             if collecting and frame:
                 assert not escaped
@@ -291,6 +292,9 @@ async def usb_info_with_absent_phy_clocks_and_uninitialized_ddr(d):
     d.rst.value = 0
     head = packet(9, 0, session=0)[:24]
     query = head + zlib.crc32(head).to_bytes(4, "little")
+    corrupt = query[:-1] + bytes([query[-1] ^ 1])
+    await usb_exchange(d, corrupt, status=1, bit_ns=1000)
+    assert not int(d.usb_active.value), "bad CRC must release the BIOS console"
     result = await usb_exchange(d, query, bit_ns=1000)
     assert result[24:28] == b"RBI1"
     assert int.from_bytes(result[48:52], "little") & 3 == 0

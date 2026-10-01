@@ -37,6 +37,11 @@ class Library:
             return ftdi_uart.Version(1, 5, 0, b"1.5", b"")
         if name == "ftdi_new":
             return ctypes.addressof(self.context)
+        if name == "ftdi_set_interface":
+            self.context.interface, self.context.index = 1, 2
+            self.context.in_ep, self.context.out_ep = 0x04, 0x83
+        if name == "ftdi_usb_open_desc":
+            self.context.type, self.context.max_packet_size = 4, 512
         if name == "ftdi_get_error_string":
             return b"injected USB configuration failure"
         if name == "ftdi_get_latency_timer":
@@ -116,3 +121,35 @@ class FtdiTests(unittest.TestCase):
                                 images.Images(**{key: value})
                 udp.assert_not_called()
                 uart.assert_not_called()
+
+    def test_context_layout_mismatch_closes_usb_before_configuration(self):
+        library = Library()
+        call = library.call
+        def drifted(name, args):
+            result = call(name, args)
+            if name == "ftdi_usb_open_desc":
+                library.context.max_packet_size = 64
+            return result
+        library.call = drifted
+        with patch.object(ftdi_uart, "load_library", return_value=library):
+            with self.assertRaisesRegex(RuntimeError, "context layout"):
+                ftdi_uart.FtdiUart("exact-board")
+        names = [name for name, _ in library.calls]
+        self.assertNotIn("ftdi_set_baudrate", names)
+        self.assertIn("ftdi_usb_close", names)
+        self.assertIn("ftdi_free", names)
+
+    def test_context_layout_mismatch_prevents_direct_writes_before_open(self):
+        library = Library()
+        call = library.call
+        def drifted(name, args):
+            result = call(name, args)
+            if name == "ftdi_set_interface":
+                library.context.index = 9
+            return result
+        library.call = drifted
+        with patch.object(ftdi_uart, "load_library", return_value=library):
+            with self.assertRaisesRegex(RuntimeError, "context layout"):
+                ftdi_uart.FtdiUart("exact-board")
+        self.assertEqual(library.context.module_detach_mode, 0)
+        self.assertNotIn("ftdi_usb_open_desc", [name for name, _ in library.calls])

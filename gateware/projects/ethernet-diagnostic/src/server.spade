@@ -124,6 +124,7 @@ pub entity network_frontend(
         request_data: service_data_w, request_address: service_address,
         reply_write: service_reply_write, reply_done: service_reply_done,
     );
+    // USB service starts on fabric reset release, independently of PHY startup.
     let _ = inst blocks::block_service$(
         clk, rst,
         initialized, sd_quiescent,

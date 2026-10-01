@@ -74,9 +74,52 @@ async def framing_recovery_and_buffered_reply(d):
     else:
         assert False, "serial reply timeout"
     await Timer(50, units="ns")
+    assert int(d.active.value), "recognized reply must retain binary ownership"
     assert not int(d.request.value)
     await send(framed(b"new packet"))
     assert int(d.request.value)
     d.rst.value = 1
     await Timer(30, units="ns")
+    assert not int(d.request.value) and not int(d.active.value)
+
+
+@cocotb.test()
+async def rejected_frame_releases_console_after_error_reply(d):
+    cocotb.start_soon(Clock(d.clk, 10, units="ns").start())
+    for name in ("rx_valid", "rx_byte", "tx_ready", "request_address",
+                 "reply_write", "reply_address", "reply_data", "reply_done", "reply_length"):
+        getattr(d, name).value = 0
+    d.rst.value = 1
+    await Timer(40, units="ns")
+    d.rst.value = 0
+    assert not int(d.active.value)
+    for byte in framed(b"stray terminal frame"):
+        await FallingEdge(d.clk)
+        d.rx_valid.value, d.rx_byte.value = 1, byte
+        await FallingEdge(d.clk)
+        d.rx_valid.value = 0
+    await Timer(30, units="ns")
+    assert int(d.request.value) and int(d.active.value)
+    reply = b"RBA1\x09\x01" + bytes(534)
+    for index, byte in enumerate(reply):
+        await FallingEdge(d.clk)
+        d.reply_write.value, d.reply_address.value, d.reply_data.value = 1, index, byte
+    await FallingEdge(d.clk)
+    d.reply_write.value = 0
+    d.reply_length.value, d.reply_done.value = len(reply), 1
+    await FallingEdge(d.clk)
+    d.reply_done.value = 0
+    output = bytearray()
+    for cycle in range(9000):
+        await FallingEdge(d.clk)
+        ready = cycle % 3 == 0
+        d.tx_ready.value = int(ready)
+        assert int(d.active.value), "temporary TX ownership must cover the entire error frame"
+        if ready and int(d.tx_valid.value):
+            output.append(int(d.tx_byte.value))
+        if bytes(output) == framed(reply):
+            break
+    else:
+        assert False, "error reply did not drain"
+    await Timer(50, units="ns")
     assert not int(d.request.value) and not int(d.active.value)

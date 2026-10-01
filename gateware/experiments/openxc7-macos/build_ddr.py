@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,8 @@ from build_common import (
 # imports its siblings: by bare name, off sys.path.
 sys.path.insert(0, str(GATEWARE / "tools"))
 from sd_csd import sd_csd_with_speed, sd_properties, tran_speed_code
+
+SERIAL_BAUD = runpy.run_path(str(GATEWARE / "projects/ethernet-diagnostic/scripts/uart_config.py"))["SERIAL_BAUD"]
 
 CONFIG = GATEWARE / "projects/microsd-emulator/ddr/arty-bios-80-depth2.yml"
 BOARD = GATEWARE / "projects/microsd-emulator/ddr/board.v"
@@ -156,7 +159,7 @@ def recorded_settings(args):
         "profile": args.profile,
         "ethernet_sd": args.ethernet,
         "serial_image_service": args.ethernet,
-        "serial_baud": 1_000_000 if args.ethernet else None,
+        "serial_baud": SERIAL_BAUD if args.ethernet else None,
         "fast_sd": not args.slow_mmc,
         "h700_mmc": args.h700_mmc,
         "h700_early_command": args.h700_early_command,
@@ -370,7 +373,7 @@ def main():
         flag
         for enabled, flag in (
             (args.ethernet, "-D ETHERNET_SD"),
-            (args.ethernet, f"-D UART_BIT_TIME=15'd{sd_io_clk_freq // 1_000_000}"),
+            (args.ethernet, f"-D UART_BIT_TIME=15'd{sd_io_clk_freq // SERIAL_BAUD}"),
             (args.slow_mmc, "-D SLOW_MMC"),
             (args.h700_mmc, "-D H700_MMC"),
             (args.h700_early_command, "-D H700_EARLY_COMMAND"),

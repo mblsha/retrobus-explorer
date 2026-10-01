@@ -66,3 +66,5 @@ Spade v0.20.0 combined candidate: interrupted USB upload recovery, a complete
 131 MiB Linux image upload/readback and three RG35XX Plus cold starts with
 Ethernet disconnected. It records the artifact identity and safe final state;
 the historical Ethernet and GKD campaign was not repeated.
+
+- [Arty USB TTY retest, 2026-10-01](arty-usb-tty-retest-2026-10-01.md): fixed timeout, 100 INFO queries and 128 KiB readback comparison with zero retries.
