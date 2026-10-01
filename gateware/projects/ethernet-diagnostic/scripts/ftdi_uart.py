@@ -3,8 +3,12 @@
 import ctypes
 import ctypes.util
 import math
+import runpy
 from pathlib import Path
 import time
+
+
+SERIAL_BAUD = runpy.run_path(str(Path(__file__).with_name("uart_config.py")))["SERIAL_BAUD"]
 
 
 class Context(ctypes.Structure):
@@ -47,7 +51,7 @@ class FtdiUart:
     Bulk writes are synchronous. The application acknowledgement confirms
     UART drain. Kernel-driver attachment and latency are restored on close.
     """
-    def __init__(self, serial_number, baud=1_000_000, timeout=0.5):
+    def __init__(self, serial_number, baud=SERIAL_BAUD, timeout=0.5):
         if not serial_number or "\0" in serial_number:
             raise ValueError("An exact, nonempty FTDI serial number is required")
         self.lib = load_library()
@@ -87,11 +91,14 @@ class FtdiUart:
             if not self.handle:
                 raise RuntimeError("Cannot allocate FTDI context")
             self.context = ctypes.cast(self.handle, ctypes.POINTER(Context)).contents
+            self.check("ftdi_set_interface", 2)  # interface B; A remains JTAG
+            # Check the public layout before any direct context write.
+            self.validate_layout(opened=False)
             self.context.module_detach_mode = 2  # detach and reattach the kernel driver
             self.context.usb_write_timeout = 1000
-            self.check("ftdi_set_interface", 2)  # interface B; A remains JTAG
             self.check("ftdi_usb_open_desc", 0x0403, 0x6010, None, serial_number.encode())
             self.opened = True
+            self.validate_layout(opened=True)
             self.check("ftdi_setdtr_rts", 0, 0)
             self.check("ftdi_disable_bitbang")
             self.check("ftdi_set_line_property2", 8, 0, 0, 0)  # 8N1, break off
@@ -105,6 +112,13 @@ class FtdiUart:
         except BaseException:
             self.close()
             raise
+
+    def validate_layout(self, *, opened):
+        context = self.context
+        if (context.interface, context.index, context.in_ep, context.out_ep) != (1, 2, 0x04, 0x83):
+            raise RuntimeError("Unsupported libftdi context layout: interface B fields do not match")
+        if opened and (context.type != 4 or context.max_packet_size != 512):
+            raise RuntimeError("Unsupported libftdi context layout or device: expected FT2232H with 512-byte packets")
 
     def check(self, name, *arguments):
         if not self.handle:

@@ -25,7 +25,7 @@ followed by CRC32); one-sector and error replies remain 540 bytes:
 | 4 | Opcode |
 | 5 | Request zero / reply status |
 | 6–7 | Reserved zero |
-| 8–11 | Nonzero session ID, little endian; zero for TRACE |
+| 8–11 | Nonzero session ID, little endian; zero for TRACE and INFO |
 | 12–15 | Sequence ID, little endian |
 | 16–19 | LBA, little endian |
 | 20–23 | Count, little endian |
@@ -149,9 +149,11 @@ send identical application bytes. A retry may use either transport, preserving
 the shared application sequence and CRC.
 
 UART TX drives the registered shift bit directly; ready-counter decoding is
-kept off the physical line. USB begins with the DDR BIOS console at 115200 baud. The first complete framed
-request selects the binary UART transmitter exclusively until FPGA reset;
-BIOS output cannot corrupt subsequent replies. Opening the host port leaves
+kept off the physical line. USB begins with the DDR BIOS console at 115200 baud.
+The first reply whose status is not BAD_FORMAT
+selects binary UART TX until FPGA reset. A rejected format/CRC request selects
+binary TX temporarily through its error frame's final stop bit, then releases
+the BIOS console. BIOS output cannot corrupt binary replies. Opening the host port leaves
 DTR and RTS inactive. The UART and shared service use the fabric reset and
 clock, independently of Ethernet startup and PHY RX/TX clocks.
 
@@ -167,7 +169,9 @@ UART and packet protocol; do not open them concurrently.
 for clients that import Images, including linux-consoles. An explicit selector
 overrides the environment; two explicit selectors are rejected. If both
 environment variables are set, direct FTDI takes precedence. With neither,
-UDP remains the default. Keep the same `--state` and logical `--host` identity
+UDP remains the default. CLI JSON and journal transport metadata identify the
+actual backend and selection source; host/source addresses apply only to UDP.
+Keep the same `--state` and logical `--host` identity
 when switching transports. Serial bulk reads use one token at a time; UDP
 retains its existing window. The padded v1 packet format is intentionally slow:
 each ordered write exchanges two 540-byte packets before framing overhead.
@@ -193,6 +197,11 @@ little-endian 32-bit words at payload offset 24, followed by zero padding:
 The snapshot is captured atomically at dispatch. INFO is available before DDR
 initialization and while armed. It never recovers a host's pending request,
 updates the cache, issues a DDR transaction, or changes ARM. With no saved
-session, explicit host `--disarm` can recover the current session and sequence
-through INFO. Only one mutating client may operate the bench at a time; packet
+session, host `--disarm` refuses to adopt another client's session. Explicit
+`--recover-session --disarm` can recover its session and sequence through INFO
+after the caller acquires exclusive device and emulator ownership. Only one
+mutating client may operate the bench at a time; packet
 arbitration is not a lease between independent host applications.
+
+TRACE and INFO are both unsequenced diagnostics: neither advances the ordered
+session sequence or replaces its cached reply.

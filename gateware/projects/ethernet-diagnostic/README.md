@@ -143,7 +143,9 @@ ping -c 3 192.168.10.2
 
 BIOS output starts on USB UART at 115200 baud. In new combined builds the
 1 Mbaud framed image service takes exclusive transmit ownership on its first
-complete request. The qualified historical artifact predates this fallback. Full-memory BIST takes tens of seconds;
+recognized service reply. A format/CRC failure temporarily selects binary TX
+only while its error reply drains, then restores BIOS TX. The qualified
+historical artifact predates this fallback. Full-memory BIST takes tens of seconds;
 `--upload` waits for readiness. STATUS acknowledges a session, rather than
 reporting detailed BIST counters.
 
@@ -319,11 +321,24 @@ uv run --frozen python projects/ethernet-diagnostic/scripts/images.py \
 
 The direct backend temporarily claims interface B and requests kernel-driver
 reattachment on close. It restores the previous USB latency setting and never
-writes the EEPROM. Use one UART client at a time. On the tested Mac, the TTY
-path produced truncated/corrupt 1 Mbaud replies; the direct libftdi path
-received the complete CRC-valid replies from the same FPGA artifact.
-`--serial-port <arty-uart>` remains available through pySerial on hosts where
-the TTY stream works. Both backends use the same UART framing and baud rate.
+writes the EEPROM. Use one UART client at a time. The original macOS TTY test
+produced truncated/corrupt replies. After keeping
+the pySerial read timeout fixed, a read-only 1 Mbaud retest passed 100 INFO
+queries and a 128 KiB DDR comparison against direct libftdi, with zero retries;
+see [the TTY retest record](../../docs/hardware/arty-usb-tty-retest-2026-10-01.md).
+`--serial-port <arty-uart>` selects this pySerial backend. Both backends use the
+same UART framing and baud rate. The rate is fixed in
+`uart_config.py` when building the FPGA. Pass `--build-manifest
+<candidate-build>/result.json` to check the host rate before opening USB; a
+nondefault `--baud` requires this manifest. The default rate assumes the
+standard combined build. CLI results and journals record the actual backend,
+selector, rate, and whether it was selected by argument or environment;
+`--host` and `--source` apply only to UDP. Transport provenance is advisory so
+the same session can resume over the other link.
+
+Without a saved session, `--disarm` queries INFO but refuses to adopt another
+client's session. Use `--recover-session --disarm` only after acquiring exclusive
+device and emulator ownership under the lab lease.
 
 Upload includes complete DDR readback comparison and leaves the image
 disarmed. ARM only for the powered target test under its lease, capture the
@@ -341,29 +356,25 @@ include all `test_*.py` files to cover serial framing and upload recovery.
 
 ### Repeat the USB qualification
 
-`scripts/qualify_rg35xx_usb.py` uses the linux-consoles bench and trial tools
-through their checkout, and requires the exact device and emulator leases.
-The default UART backend is direct libftdi; `--uart-backend tty` selects
-pySerial instead. `--port` identifies the 115200 baud BIOS capture port in
-the smoke phase. The smoke phase reconfigures the FPGA and replaces its
-volatile DDR image:
+The device harness lives in linux-consoles as `devices/rg35xx-plus/rg35xx.py
+qualify-usb`; its device and supply gates run under both normal and optimized
+Python. It imports this repository's client through `SD_EMULATOR_CLIENT_DIR`.
+The smoke phase reconfigures the FPGA and replaces its volatile DDR image:
 
 ```sh
 <zaurus>/lab lease --device anbernic-rg35xx-plus --sd-emulator -- \
-  <gateware>/.venv/bin/python \
-  <gateware>/projects/ethernet-diagnostic/scripts/qualify_rg35xx_usb.py \
-  --gateware <gateware> --consoles <linux-consoles> \
-  --build <candidate-build> --port <arty-uart> --ftdi-serial <arty-ftdi-serial> \
+  <gateware>/.venv/bin/python <linux-consoles>/devices/rg35xx-plus/rg35xx.py \
+  qualify-usb --gateware <gateware> --build <candidate-build> \
+  --port <arty-uart> --ftdi-serial <arty-ftdi-serial> \
   --output <private-evidence-dir> --image <rg35xx-sleep-image> --phase smoke
 ```
 
 Repeat with the same arguments and `--phase full`, then `--phase boot`.
-Full transfer includes complete readback; `--phase full --resume` recovers an
-interrupted transfer of the identical image using its saved journal. Boot
-performs three cold starts and requires userspace and job-runner records from
-the debug partition. Each phase ends disarmed with exact PSU2 read back OFF.
+The default backend is direct libftdi; `--uart-backend tty` selects pySerial.
+`--port` also identifies the 115200 baud BIOS capture port in the smoke phase.
 
-For the normal linux-consoles deployment, select this candidate explicitly
+For normal linux-consoles deployment, select the combined candidate explicitly
 with `deploy --build-dir <candidate-build>` and set
-`SD_EMULATOR_FTDI_SERIAL=<arty-ftdi-serial>`. The default build directory names the
-historical Ethernet artifact, which does not contain the UART fallback.
+`SD_EMULATOR_FTDI_SERIAL=<arty-ftdi-serial>` or `SD_EMULATOR_SERIAL_PORT=<arty-uart>`.
+The default build directory still names the historical Ethernet artifact,
+which does not contain the UART fallback.

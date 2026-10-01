@@ -134,6 +134,7 @@ async def info_is_available_before_ddr_and_preserves_retry_cache(dut):
     query = header + zlib.crc32(header).to_bytes(4, "little")
     dut.initialized.value = 0
     result = await exchange(query)
+    assert result[60:-4] == bytes(476), "INFO must zero-fill all payload bytes after the snapshot"
     words = struct.unpack("<9I", result[24:60])
     assert words[:3] == (0x31494252, 524288, 0)
     assert words[6] == 4
@@ -143,6 +144,7 @@ async def info_is_available_before_ddr_and_preserves_retry_cache(dut):
     request = packet(2, 1, count=1, data=bytes(range(256)) * 2)
     ack = await exchange(request)
     result = await exchange(query)
+    assert result[60:-4] == bytes(476), "INFO must zero-fill all payload bytes after the snapshot"
     words = struct.unpack("<9I", result[24:60])
     assert words[2:6] == (0x12345678, 2, 1, 1)
     assert words[6] == 14
@@ -152,6 +154,7 @@ async def info_is_available_before_ddr_and_preserves_retry_cache(dut):
     await exchange(packet(4, 2))
     dut.sd_quiescent.value = 0
     result = await exchange(query)
+    assert result[60:-4] == bytes(476), "INFO must zero-fill all payload bytes after the snapshot"
     words = struct.unpack("<9I", result[24:60])
     assert words[6] == 11
     assert int(dut.armed.value) and len(requests) == 1

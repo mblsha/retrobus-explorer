@@ -1,6 +1,5 @@
 import hashlib
 import json
-import socket
 import struct
 import tempfile
 import unittest
@@ -106,6 +105,62 @@ class SerialTests(unittest.TestCase):
         with patch.object(images.socket, "socket", return_value=peer):
             client = images.Images()
             self.addCleanup(client.close)
-            client.disarm()
+            with self.assertRaisesRegex(RuntimeError, "recover-session"):
+                client.disarm()
+            self.assertEqual(client.session, 0)
+            self.assertTrue(peer.armed)
+            client.disarm(recover_session=True)
         self.assertFalse(peer.armed)
-        self.assertEqual([p[4] for p in peer.sent], [9, 5])
+        self.assertEqual([p[4] for p in peer.sent], [9, 9, 5])
+
+    def test_recv_keeps_tty_settings_fixed_through_empty_and_partial_reads(self):
+        chunks = iter([b"", b"noise\x7eR", b"BA1", b"\x7e"])
+        class Port:
+            in_waiting = 0
+            def __init__(self, **kwargs):
+                self.timeout = kwargs["timeout"]
+            def __setattr__(self, name, value):
+                if name == "timeout" and hasattr(self, "timeout"):
+                    raise AssertionError("A live TTY must never be reconfigured")
+                object.__setattr__(self, name, value)
+            def open(self):
+                pass
+            def close(self):
+                pass
+            def read(self, size):
+                return next(chunks)
+        with patch.dict("sys.modules", serial=SimpleNamespace(Serial=Port)):
+            transport = images.SerialTransport("test-uart")
+            self.addCleanup(transport.close)
+            transport.settimeout(0.01)
+            self.assertEqual(transport.recv(2048), b"RBA1")
+            self.assertEqual(transport.port.timeout, images.TTY_READ_SECONDS)
+
+    def test_uart_rate_mismatch_is_refused_before_opening_the_device(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "result.json"
+            manifest.write_text(json.dumps(dict(serial_image_service=True, serial_baud=500000)))
+            with patch.object(images, "SerialTransport") as transport:
+                with self.assertRaisesRegex(ValueError, "manifest"):
+                    images.Images(serial_port="uart", build_manifest=manifest)
+                with self.assertRaisesRegex(ValueError, "manifest"):
+                    images.Images(serial_port="uart", baud=500000)
+                client = images.Images(serial_port="uart", baud=500000, build_manifest=manifest)
+                client.close()
+                self.assertEqual(transport.call_count, 1)
+
+    def test_selected_transport_is_recorded_and_remains_advisory_on_resume(self):
+        peer = InfoPeer()
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "session.json"
+            with patch.object(images, "SerialTransport", return_value=peer):
+                client = images.Images(state=state, serial_port="fallback")
+                client.begin(1)
+                client.close()
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved["transport"]["backend"], "tty")
+            with patch.object(images.socket, "socket", return_value=peer):
+                client = images.Images(state=state)
+                self.assertEqual(client.session, saved["session"])
+                self.assertEqual(client.transport["backend"], "udp")
+                client.close()

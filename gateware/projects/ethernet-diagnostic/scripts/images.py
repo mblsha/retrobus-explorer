@@ -11,11 +11,27 @@ import hashlib
 import json
 from pathlib import Path
 import secrets
+import runpy
 import socket
 import struct
 import sys
 import time
 import zlib
+
+
+SERIAL_BAUD = runpy.run_path(str(Path(__file__).with_name("uart_config.py")))["SERIAL_BAUD"]
+TTY_READ_SECONDS = 0.005
+
+
+def validate_serial_baud(baud, manifest=None):
+    """Reject a host rate inconsistent with the selected fixed-rate build."""
+    if manifest is None:
+        if baud != SERIAL_BAUD:
+            raise ValueError("A nondefault UART rate requires --build-manifest")
+        return
+    settings = json.loads(Path(manifest).read_text())
+    if settings.get("serial_image_service") is not True or settings.get("serial_baud") != baud:
+        raise ValueError("UART baud does not match the image service in the build manifest")
 
 
 SECTOR_BYTES = 512
@@ -263,13 +279,14 @@ class SerialTransport:
     DTR and RTS are inactive before opening the port: opening a fallback link
     must not reset the FPGA and lose its DDR image or session.
     """
-    def __init__(self, port=None, baud=1_000_000, timeout=0.5, *, ftdi_serial=None):
+    def __init__(self, port=None, baud=SERIAL_BAUD, timeout=0.5, *, ftdi_serial=None):
         self.timeout = timeout
         self.frame = bytearray()
         self.escaped = False
         self.collecting = False
         self.invalid = False
         self.replies = []
+        self.direct_ftdi = bool(ftdi_serial)
         if ftdi_serial:
             # images.py is also imported by absolute path by linux-consoles.
             # Load the sibling by its path without changing sys.path.
@@ -289,7 +306,7 @@ class SerialTransport:
             self.port = module.FtdiUart(ftdi_serial, baud, timeout)
         else:
             import serial
-            self.port = serial.Serial(port=None, baudrate=baud, timeout=timeout,
+            self.port = serial.Serial(port=None, baudrate=baud, timeout=TTY_READ_SECONDS,
                                       write_timeout=1, exclusive=True)
             try:
                 self.port.dtr = False
@@ -344,10 +361,13 @@ class SerialTransport:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise socket.timeout()
-            self.port.timeout = remaining
+            # Changing a pyserial timeout reapplies termios, including the
+            # macOS custom baud ioctl. Never reconfigure a live TTY reply.
+            if self.direct_ftdi:
+                self.port.timeout = remaining
             data = self.port.read(max(1, self.port.in_waiting))
             if not data:
-                raise socket.timeout()
+                continue
             self._feed(data)
         packet = self.replies.pop(0)
         if len(packet) > size:
@@ -367,8 +387,9 @@ class Images:
         timeout=0.5,
         progress=None,
         serial_port=None,
-        baud=1_000_000,
+        baud=SERIAL_BAUD,
         ftdi_serial=None,
+        build_manifest=None,
     ):
         self.state_path = Path(state) if state else None
         self._lock = None
@@ -383,6 +404,13 @@ class Images:
         self.serial_port = serial_port or (None if self.ftdi_serial else
                                           os.environ.get("SD_EMULATOR_SERIAL_PORT"))
         self.serial_transport = bool(self.serial_port or self.ftdi_serial)
+        if self.serial_transport:
+            validate_serial_baud(baud, build_manifest)
+        selection = "argument" if serial_port is not None or ftdi_serial is not None else "environment"
+        self.transport = (dict(backend="ftdi" if self.ftdi_serial else "tty",
+                               selector=self.ftdi_serial or self.serial_port, baud=baud,
+                               selection=selection) if self.serial_transport else
+                          dict(backend="udp", host=host, source=source, port=4000))
         try:
             if self.state_path:
                 self._lock = self.state_path.with_suffix(
@@ -428,6 +456,8 @@ class Images:
                 json.dumps(
                     {
                         "host": self.host,
+                        # Advisory provenance: a session can switch transports.
+                        "transport": self.transport,
                         "session": self.session,
                         "sequence": self.sequence,
                         "pending": self.pending.hex() if self.pending else None,
@@ -480,14 +510,16 @@ class Images:
                     cached=bool(words[6] & 8), last_sequence=words[7],
                     last_request_crc=words[8])
 
-    def disarm(self):
-        """Recover control using INFO when no local session survived."""
+    def disarm(self, *, recover_session=False):
+        """Disarm the journaled session; recovery requires explicit ownership."""
         if not self.session:
             remote = self.info()
             if not remote["session"]:
                 if remote["armed"]:
                     raise RuntimeError("Armed FPGA has no recoverable session")
                 return
+            if not recover_session:
+                raise RuntimeError("No local session; use --recover-session only after acquiring exclusive device ownership")
             self.session, self.sequence = remote["session"], remote["next_sequence"]
             self.save()
         self.command(Opcode.DISARM)
@@ -908,7 +940,11 @@ def main():
     uart = parser.add_mutually_exclusive_group()
     uart.add_argument("--serial-port", help="Arty USB UART tty port")
     uart.add_argument("--ftdi-serial", help="Direct Arty USB UART by exact FTDI serial number (libftdi)")
-    parser.add_argument("--baud", type=int, default=1_000_000)
+    parser.add_argument("--baud", type=int, default=SERIAL_BAUD,
+                        help="Fixed FPGA image-service rate; must match the build")
+    parser.add_argument("--build-manifest", type=Path, help="Candidate result.json; check its fixed UART rate before opening USB")
+    parser.add_argument("--recover-session", action="store_true",
+                        help="Adopt INFO session for disarm after acquiring exclusive device ownership")
     parser.add_argument("--resume-upload", action="store_true",
                         help="Continue the identical image using the saved journal")
     parser.add_argument(
@@ -940,6 +976,8 @@ def main():
     parser.add_argument("--blocks", type=int)
     parser.add_argument("--start", type=int)
     args = parser.parse_args()
+    if args.recover_session and not args.disarm:
+        parser.error("--recover-session requires --disarm")
     if args.resume_upload and not args.upload:
         parser.error("--resume-upload requires --upload")
     if args.download and args.blocks is None:
@@ -965,7 +1003,8 @@ def main():
         print(message, file=sys.stderr, flush=True)
 
     client = Images(args.host, args.source, args.state, progress=progress,
-                    serial_port=args.serial_port, baud=args.baud, ftdi_serial=args.ftdi_serial)
+                    serial_port=args.serial_port, baud=args.baud, ftdi_serial=args.ftdi_serial,
+                    build_manifest=args.build_manifest)
     started = time.monotonic()
     operation = (
         "upload"
@@ -978,6 +1017,8 @@ def main():
         if args.disarm
         else "trace"
         if args.trace
+        else "info"
+        if args.info
         else "status"
     )
     try:
@@ -1013,7 +1054,7 @@ def main():
             else:
                 opcode = Opcode.STATUS
             if args.disarm:
-                client.disarm()
+                client.disarm(recover_session=args.recover_session)
             else:
                 client.command(opcode)
             result = {
@@ -1021,7 +1062,8 @@ def main():
                 "acknowledged": True,
             }
         result.update(
-            elapsed_seconds=time.monotonic() - started, retries=client.retries
+            elapsed_seconds=time.monotonic() - started, retries=client.retries,
+            transport=client.transport
         )
         print(json.dumps(result, indent=2))
     except BaseException:

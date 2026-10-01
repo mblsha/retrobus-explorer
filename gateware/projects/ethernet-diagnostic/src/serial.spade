@@ -43,7 +43,13 @@ pub entity serial_packet(
     reg(clk) invalid reset(rst: false) = if !available || delimiter { false }
         else if rx_valid && collecting && (!valid_escape || (count == 540 && (escaped || rx_byte != 0x7d))) { true }
         else { invalid };
-    reg(clk) activated reset(rst: false) = activated || finish;
+    // Reject noise without permanently taking the BIOS console's TX line.
+    // Temporary ownership still allows a BAD_FORMAT reply to drain in full.
+    reg(clk) reply_status: uint<8> reset(rst: 1) = if finish { 1 }
+        else if pending && reply_write && reply_address == 5 { reply_data }
+        else { reply_status };
+    reg(clk) activated reset(rst: false) = activated ||
+        (pending && reply_done && reply_length >= 28 && reply_length <= 1052 && reply_status != 1);
     let outgoing: Memory<uint<8>, 2048> = inst clocked_memory(clk, [(pending && reply_write, reply_address, reply_data)]);
     reg(clk) outgoing_byte = inst read_memory(outgoing, tx_index);
     reg(clk) saved_byte: uint<8> reset(rst: 0) = if tx_state == CAPTURE { outgoing_byte } else { saved_byte };
@@ -70,7 +76,7 @@ pub entity serial_packet(
     set request = pending;
     set request_length = length;
     set request_data = received;
-    set active = activated;
+    set active = activated || pending || tx_state != IDLE;
 }
 
 // One configurable divisor governs RX and TX, including the 64 MHz H700
@@ -101,8 +107,12 @@ pub entity serial_frontend(
     // registered LSB directly: decoding the multi-bit ready counter onto
     // the physical UART line can create edges as that counter changes.
     set usb_tx = shift.lsb();
+    let (packet_active, packet_active_w): (bool, inv bool) = port();
+    // The packet engine releases at delimiter acceptance; keep TX selected
+    // until that delimiter's last stop bit has left the physical UART.
+    set active = packet_active || !ready;
     let _ = inst serial_packet(clk, rst, rx.valid && !rx.parity_error, rx.byte,
         ready, valid_w, byte_w,
         request, request_length, request_address, request_data,
-        reply_write, reply_address, reply_data, reply_done, reply_length, active);
+        reply_write, reply_address, reply_data, reply_done, reply_length, packet_active_w);
 }

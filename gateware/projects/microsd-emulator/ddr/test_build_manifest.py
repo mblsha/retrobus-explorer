@@ -118,8 +118,11 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(recorded["sd_io_clock_hz"], 64_000_000)
         self.assertEqual(recorded["trace_capture_lba"], 32985)
         self.assertTrue(recorded["h700_mmc"])
+        self.assertTrue(recorded["serial_image_service"])
+        self.assertEqual(recorded["serial_baud"], build_ddr.SERIAL_BAUD)
         plain = build_ddr.recorded_settings(build_ddr.parse_arguments([]))
         self.assertIsNone(plain["profile"], "an unprofiled build says so")
+        self.assertIsNone(plain["serial_baud"])
 
     def test_a_capture_lba_of_zero_is_recorded_as_zero(self):
         """Sector zero is the partition table, a real choice; the manifest has

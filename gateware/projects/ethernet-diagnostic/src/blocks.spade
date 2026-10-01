@@ -165,7 +165,8 @@ pub entity block_service(
         (zext(written_sectors) << 128) | (zext(declared_sectors) << 160) |
         (zext(flags) << 192) | (zext(last_sequence) << 224) | (zext(last_crc) << 256)
     } else { info_snapshot };
-    let info_byte: uint<8> = trunc(info_snapshot >> (zext::<11, 288>(index -. 24) << 3));
+    let info_byte_index: uint<6> = trunc(index -. 24);
+    let info_byte: uint<8> = trunc(info_snapshot >> (zext(info_byte_index) << 3));
     let trace_byte_index: uint<2> = trunc(index -. 24);
     let trace_byte: uint<8> = trunc(sd_trace >> (zext(trace_byte_index) << 3));
     decl out_byte;
