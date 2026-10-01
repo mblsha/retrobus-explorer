@@ -153,3 +153,16 @@ class FtdiTests(unittest.TestCase):
                 ftdi_uart.FtdiUart("exact-board")
         self.assertEqual(library.context.module_detach_mode, 0)
         self.assertNotIn("ftdi_usb_open_desc", [name for name, _ in library.calls])
+
+    def test_context_tail_mismatch_prevents_direct_writes_and_open(self):
+        library = Library()
+        library.context.module_detach_mode = 17
+        library.context.usb_write_timeout = 37
+        with patch.object(ftdi_uart, "load_library", return_value=library):
+            with self.assertRaisesRegex(RuntimeError, "initial module detach mode"):
+                ftdi_uart.FtdiUart("exact-board")
+        self.assertEqual(library.context.module_detach_mode, 17)
+        self.assertEqual(library.context.usb_write_timeout, 37)
+        names = [name for name, _ in library.calls]
+        self.assertNotIn("ftdi_usb_open_desc", names)
+        self.assertIn("ftdi_free", names)

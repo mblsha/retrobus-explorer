@@ -113,6 +113,38 @@ class SerialTests(unittest.TestCase):
         self.assertFalse(peer.armed)
         self.assertEqual([p[4] for p in peer.sent], [9, 9, 5])
 
+    def test_fresh_disarm_leaves_an_unarmed_old_session_unadopted(self):
+        for recover in (False, True):
+            with self.subTest(recover_session=recover), tempfile.TemporaryDirectory() as directory:
+                peer = InfoPeer()
+                self.assertNotEqual(peer.session, 0)
+                self.assertFalse(peer.armed)
+                state = Path(directory) / "session.json"
+                with patch.object(images.socket, "socket", return_value=peer):
+                    client = images.Images(state=state)
+                    try:
+                        client.disarm(recover_session=recover)
+                        self.assertEqual((client.session, client.sequence), (0, 0))
+                        self.assertIsNone(client.pending)
+                        self.assertFalse(state.exists(), "no recovery journal should be written")
+                    finally:
+                        client.close()
+                self.assertEqual([p[4] for p in peer.sent], [9])
+
+    def test_fresh_disarm_rejects_an_armed_card_without_a_session(self):
+        peer = InfoPeer()
+        peer.session, peer.armed = 0, True
+        with patch.object(images.socket, "socket", return_value=peer):
+            client = images.Images()
+            try:
+                with self.assertRaisesRegex(RuntimeError, "no recoverable session"):
+                    client.disarm(recover_session=True)
+                self.assertEqual((client.session, client.sequence), (0, 0))
+                self.assertTrue(peer.armed)
+            finally:
+                client.close()
+        self.assertEqual([p[4] for p in peer.sent], [9])
+
     def test_recv_keeps_tty_settings_fixed_through_empty_and_partial_reads(self):
         chunks = iter([b"", b"noise\x7eR", b"BA1", b"\x7e"])
         class Port:

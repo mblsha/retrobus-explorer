@@ -110,7 +110,10 @@ pub entity serial_frontend(
     let (packet_active, packet_active_w): (bool, inv bool) = port();
     // The packet engine releases at delimiter acceptance; keep TX selected
     // until that delimiter's last stop bit has left the physical UART.
-    set active = packet_active || !ready;
+    // Register the board's TX select as well as TX itself, so counter
+    // transitions cannot glitch the mux. Release one cycle after stop.
+    reg(clk) active_r reset(rst: false) = packet_active || !ready;
+    set active = active_r;
     let _ = inst serial_packet(clk, rst, rx.valid && !rx.parity_error, rx.byte,
         ready, valid_w, byte_w,
         request, request_length, request_address, request_data,

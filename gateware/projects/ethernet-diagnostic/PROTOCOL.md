@@ -197,7 +197,9 @@ little-endian 32-bit words at payload offset 24, followed by zero padding:
 The snapshot is captured atomically at dispatch. INFO is available before DDR
 initialization and while armed. It never recovers a host's pending request,
 updates the cache, issues a DDR transaction, or changes ARM. With no saved
-session, host `--disarm` refuses to adopt another client's session. Explicit
+session, host `--disarm` returns without adopting or changing an already
+disarmed card, including one retaining an old session. If the card is armed,
+it refuses to adopt another client's session implicitly. Explicit
 `--recover-session --disarm` can recover its session and sequence through INFO
 after the caller acquires exclusive device and emulator ownership. Only one
 mutating client may operate the bench at a time; packet
