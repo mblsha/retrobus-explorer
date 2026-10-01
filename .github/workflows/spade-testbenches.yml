@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ master, main ]
 
+# A new push to a pull request supersedes its running testbenches; pushes to
+# master always finish.
+concurrency:
+  group: spade-testbenches-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   detect-spade-changes:
     runs-on: ubuntu-latest
@@ -26,10 +32,110 @@ jobs:
               - 'gateware/**'
               - '.github/workflows/spade-testbenches.yml'
 
-  run-spade-testbenches:
+  plan-testbenches:
     needs: detect-spade-changes
     if: needs.detect-spade-changes.outputs.spade == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateware
+    env:
+      GATEWARE_PYTHON: ${{ github.workspace }}/gateware/.venv/bin/python
+      PYTHONUNBUFFERED: "1"
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.7"
+          python-version: "3.12"
+
+      - name: Sync Python dependencies
+        run: |
+          uv sync --locked --all-packages
+          test -x "${GATEWARE_PYTHON}"
+          echo "$(dirname "${GATEWARE_PYTHON}")" >> "${GITHUB_PATH}"
+          "${GATEWARE_PYTHON}" --version
+
+      - name: Split testbenches into parallel jobs
+        id: plan
+        run: |
+          matrix="$("${GATEWARE_PYTHON}" tools/ci_testbenches.py matrix)"
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          echo "${matrix}" | "${GATEWARE_PYTHON}" -m json.tool
+
+  host-checks:
+    needs: detect-spade-changes
+    if: needs.detect-spade-changes.outputs.spade == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gateware
+    env:
+      GATEWARE_PYTHON: ${{ github.workspace }}/gateware/.venv/bin/python
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: "0.12.7"
+          python-version: "3.12"
+
+      - name: Sync Python dependencies
+        run: |
+          uv sync --locked --all-packages
+          test -x "${GATEWARE_PYTHON}"
+          echo "$(dirname "${GATEWARE_PYTHON}")" >> "${GITHUB_PATH}"
+          "${GATEWARE_PYTHON}" --version
+
+      - name: Validate Spade project inventory
+        run: |
+          "${GATEWARE_PYTHON}" -m unittest discover -s tools -p 'test_*.py'
+          "${GATEWARE_PYTHON}" -O -m unittest discover -s tools -p 'test_microsd*.py'
+          "${GATEWARE_PYTHON}" tools/project_inventory.py --check
+
+      - name: Run host-side gateware unit tests
+        run: |
+          "${GATEWARE_PYTHON}" -m unittest discover \
+            -s projects/ft-uart-hex-bridge/test \
+            -p 'test_ft_uart_hex_bridge_host.py'
+          "${GATEWARE_PYTHON}" -m pytest projects/sharp-pc-e500-card/tests
+
+      - name: Test Ethernet host protocol and CDC guards (normal and optimized Python)
+        run: |
+          "${GATEWARE_PYTHON}" -m unittest discover \
+            -t projects/ethernet-diagnostic \
+            -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
+          "${GATEWARE_PYTHON}" -O -m unittest discover \
+            -t projects/ethernet-diagnostic \
+            -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
+          "${GATEWARE_PYTHON}" -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
+          "${GATEWARE_PYTHON}" -O -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
+
+  run-spade-testbenches:
+    needs: plan-testbenches
+    name: tb ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan-testbenches.outputs.matrix) }}
     defaults:
       run:
         working-directory: gateware
@@ -103,30 +209,6 @@ jobs:
           test -x "${GATEWARE_PYTHON}"
           echo "$(dirname "${GATEWARE_PYTHON}")" >> "${GITHUB_PATH}"
           "${GATEWARE_PYTHON}" --version
-
-      - name: Validate Spade project inventory
-        run: |
-          "${GATEWARE_PYTHON}" -m unittest discover -s tools -p 'test_*.py'
-          "${GATEWARE_PYTHON}" -O -m unittest discover -s tools -p 'test_microsd*.py'
-          "${GATEWARE_PYTHON}" tools/project_inventory.py --check
-
-      - name: Run host-side gateware unit tests
-        run: |
-          "${GATEWARE_PYTHON}" -m unittest discover \
-            -s projects/ft-uart-hex-bridge/test \
-            -p 'test_ft_uart_hex_bridge_host.py'
-          "${GATEWARE_PYTHON}" -m pytest projects/sharp-pc-e500-card/tests
-
-      - name: Test Ethernet host protocol and CDC guards (normal and optimized Python)
-        run: |
-          "${GATEWARE_PYTHON}" -m unittest discover \
-            -t projects/ethernet-diagnostic \
-            -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
-          "${GATEWARE_PYTHON}" -O -m unittest discover \
-            -t projects/ethernet-diagnostic \
-            -s projects/ethernet-diagnostic/test_host -p 'test_*.py'
-          "${GATEWARE_PYTHON}" -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
-          "${GATEWARE_PYTHON}" -O -m unittest discover -s projects/microsd-emulator/ddr -p test_native_cdc_timing.py
 
       - name: Prepare shared compiler directories and pin swim compiler paths
         run: |
@@ -232,46 +314,15 @@ jobs:
               print(f"{project_dir.name}: compiler commit {commit} -> {compiler_dir}")
           PY
 
-      - name: Run application characterization testbenches
+      - name: Run this job's testbenches
         run: |
-          set -euo pipefail
-          "${GATEWARE_PYTHON}" tools/run_tb.py \
-            --project projects/sharp-organizer-card \
-            --top tb_trace_events \
-            --test-module test_trace_events \
-            --build-dir build/tb_trace_events_cocotb
-          cp projects/sharp-organizer-card/test/results.xml \
-            projects/sharp-organizer-card/test/trace_events.results.xml
-          "${GATEWARE_PYTHON}" tools/run_tb.py \
-            --project projects/sharp-pc-g850-bus \
-            --top tb_bus_debug \
-            --test-module test_bus_debug \
-            --build-dir build/tb_bus_debug_cocotb
-          cp projects/sharp-pc-g850-bus/test/results.xml \
-            projects/sharp-pc-g850-bus/test/bus_debug.results.xml
-
-      - name: Run project testbenches
-        run: |
-          set -euo pipefail
-          project_list="$("${GATEWARE_PYTHON}" tools/project_inventory.py)"
-          while IFS= read -r project; do
-            echo "== Running ${project} testbench =="
-            "${GATEWARE_PYTHON}" "${project}/scripts/test_with_vcd.py"
-          done <<< "${project_list}"
-
-      - name: Run microSD storage and UART integration testbenches
-        run: |
-          "${GATEWARE_PYTHON}" tools/test_microsd_suite.py --extra-only --fast-sd
-
-      - name: Run shared-components testbenches
-        run: |
-          "${GATEWARE_PYTHON}" lib/shared-components/scripts/test_all_components.py
+          "${GATEWARE_PYTHON}" tools/ci_testbenches.py run ${{ matrix.units }}
 
       - name: Upload Spade waveform artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: spade-waveforms-${{ github.run_number }}-${{ github.run_attempt }}
+          name: spade-waveforms-${{ github.run_number }}-${{ github.run_attempt }}-${{ matrix.id }}
           path: |
             gateware/projects/*/test/dump.vcd
             gateware/projects/*/test/dump.surfer.vcd
@@ -287,7 +338,7 @@ jobs:
 
   spade-testbenches:
     runs-on: ubuntu-latest
-    needs: [detect-spade-changes, run-spade-testbenches]
+    needs: [detect-spade-changes, plan-testbenches, host-checks, run-spade-testbenches]
     if: always()
     steps:
       - name: Report required-check status
@@ -297,7 +348,9 @@ jobs:
             exit 0
           fi
 
-          if [[ "${{ needs.run-spade-testbenches.result }}" == "success" ]]; then
+          if [[ "${{ needs.plan-testbenches.result }}" == "success" &&
+                "${{ needs.host-checks.result }}" == "success" &&
+                "${{ needs.run-spade-testbenches.result }}" == "success" ]]; then
             echo "Spade testbenches required and passed."
             exit 0
           fi

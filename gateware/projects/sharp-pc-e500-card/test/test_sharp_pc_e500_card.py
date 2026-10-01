@@ -261,9 +261,22 @@ async def _force_ft_overflow_seed_burst(dut, *, start_addr: int = 0x0200, count:
     _set_data_bus_z(dut)
 
 
+_clock_tasks = []
+
+
+def _start_clocks(dut):
+    # The collision-phase searches reset the card once per candidate phase.
+    # Starting clocks on every reset stacked another pair of Python clock
+    # coroutines on the same signals each time, so each later cycle cost more
+    # than the last. Cocotb kills a test's clocks when it ends; start new ones
+    # only then.
+    if _clock_tasks and not any(task.done() for task in _clock_tasks):
+        return
+    _clock_tasks[:] = [start_clock(dut.clk), start_clock(dut.ft_clk)]
+
+
 async def _init(dut):
-    start_clock(dut.clk)
-    start_clock(dut.ft_clk)
+    _start_clocks(dut)
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1

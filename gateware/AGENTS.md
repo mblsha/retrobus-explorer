@@ -78,6 +78,17 @@ changed during the run. Runs on one project wait for each other, since they
 share its `build/` and `test/results.xml`; runs on different projects share
 nothing and may overlap.
 
+CI runs the testbenches as parallel jobs planned by `tools/ci_testbenches.py`:
+every registered project, every `tools/test_microsd_suite.py --extra-only
+--fast-sd` case, the characterization benches and the shared components, each
+exactly once. A new project or microSD case joins automatically. Its minutes
+in `UNIT_MINUTES` only balance the jobs, and each job prints the measured
+minutes to paste back. A project whose tests outgrow one job can be listed in
+`PROJECT_SHARDS`; its module must then use plain `@cocotb.test()` decorators,
+with any `skip=` a literal, because shards select tests through `TESTCASE`.
+Start a testbench's clocks once per test: a reset helper that calls
+`start_clock` each time stacks clock coroutines and slows every later cycle.
+
 ## Refactoring and testing
 
 - Before refactoring behavior, add characterization tests that pass against

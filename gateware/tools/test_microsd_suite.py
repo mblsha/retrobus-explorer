@@ -45,7 +45,9 @@ CASES = [
 # covers the 1 MHz card clock, the slow command and data launch edges, and the
 # H700/MMC cases the fast profile cannot build. The `test_ddr_rw` suites stay
 # fast-only: ten to fifteen minutes each for the write path `test_sd_write`
-# already covers here in three.
+# already covers here in three. Under `--extra-only` the default-profile
+# `test_sd` run is the registry's own microsd-emulator run, so it is not
+# repeated here; the registry runs in CI's environment, which sets no knob.
 BOTH_PROFILES = {
     ("sd_frontend", "test_sd"),
     ("sd_frontend", "test_sd_write"),
@@ -72,6 +74,29 @@ def fast_profile(top):
     return env
 
 
+def planned_runs(extra_only=False, fast_sd=False):
+    """Every (name, project, top, module, overrides) the options select.
+
+    ``overrides`` is None for the default profile, which removes every
+    ``MICROSD_*`` knob the caller exported instead of layering over them.
+    """
+    runs = []
+    for project, top, module in CASES:
+        if extra_only and module == "test_probe":
+            continue
+        profiles = [("", fast_profile(top) if fast_sd else {})]
+        if fast_sd and (top, module) in BOTH_PROFILES:
+            profiles.append(("-default", None))
+        for suffix, overrides in profiles:
+            # The registry already runs microsd-emulator's own default top,
+            # sd_frontend/test_sd, in the default profile. With --fast-sd the
+            # first profile here is a different one and stays.
+            if extra_only and module == "test_sd" and (overrides is None or not fast_sd):
+                continue
+            runs.append((f"{top}-{module}{suffix}", project, top, module, overrides))
+    return runs
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -84,10 +109,28 @@ def main():
         action="store_true",
         help="Test the 100 MHz / 25 MHz SD path and 100-to-80 MHz CDC",
     )
+    parser.add_argument(
+        "--list-cases", action="store_true", help="Print the selected case names and exit"
+    )
+    parser.add_argument(
+        "--case",
+        action="append",
+        help="Run only this selected case (repeatable); skips the host checks",
+    )
     args = parser.parse_args()
+    runs = planned_runs(args.extra_only, args.fast_sd)
+    if args.list_cases:
+        for name, *_ in runs:
+            print(name)
+        return
+    if args.case:
+        unknown = sorted(set(args.case) - {name for name, *_ in runs})
+        if unknown:
+            parser.error(f"unknown or unselected case: {', '.join(unknown)}")
+        runs = [run for run in runs if run[0] in args.case]
     out = GATEWARE / "build/microsd-tests"
     out.mkdir(parents=True, exist_ok=True)
-    for command in (
+    host_checks = () if args.case else (
         [sys.executable, "tools/project_inventory.py", "--check"],
         [
             sys.executable,
@@ -99,58 +142,43 @@ def main():
             "-p",
             "test_microsd*.py",
         ],
-    ):
+    )
+    for command in host_checks:
         subprocess.run(command, cwd=GATEWARE, check=True)
-    for project, top, module in CASES:
-        if args.extra_only:
-            if module == "test_probe":
-                continue
-            if module == "test_sd" and not args.fast_sd:
-                continue
-        profiles = [("", fast_profile(top) if args.fast_sd else {})]
-        if args.fast_sd and (top, module) in BOTH_PROFILES:
-            profiles.append(("-default", None))
-        for suffix, overrides in profiles:
-            if overrides is None:
-                # The default profile is the absence of every knob, so drop
-                # any the caller exported rather than layering over them.
-                env = {
-                    k: v
-                    for k, v in os.environ.items()
-                    if not k.startswith("MICROSD_")
-                }
-            else:
-                env = dict(os.environ)
-                env.update(overrides)
-            print(f"Testing {project}: {top} ({module}{suffix})", flush=True)
-            name = f"{top}-{module}{suffix}"
-            (out / f"{name}-parameters.json").write_text(
-                json.dumps(
-                    {k: v for k, v in env.items() if k.startswith("MICROSD_")}, indent=2
-                )
-                + "\n"
+    for name, project, top, module, overrides in runs:
+        if overrides is None:
+            env = {k: v for k, v in os.environ.items() if not k.startswith("MICROSD_")}
+        else:
+            env = dict(os.environ)
+            env.update(overrides)
+        print(f"Testing {project}: {top} ({name.removeprefix(top + '-')})", flush=True)
+        (out / f"{name}-parameters.json").write_text(
+            json.dumps(
+                {k: v for k, v in env.items() if k.startswith("MICROSD_")}, indent=2
             )
-            with (out / f"{name}.log").open("w") as log:
-                subprocess.run(
-                    [
-                        sys.executable,
-                        "tools/run_tb.py",
-                        "--project",
-                        f"projects/{project}",
-                        "--top",
-                        top,
-                        "--test-module",
-                        module,
-                    ],
-                    cwd=GATEWARE,
-                    env=env,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    check=True,
-                )
-            (out / f"{name}.xml").write_bytes(
-                (GATEWARE / f"projects/{project}/test/results.xml").read_bytes()
+            + "\n"
+        )
+        with (out / f"{name}.log").open("w") as log:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "tools/run_tb.py",
+                    "--project",
+                    f"projects/{project}",
+                    "--top",
+                    top,
+                    "--test-module",
+                    module,
+                ],
+                cwd=GATEWARE,
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=True,
             )
+        (out / f"{name}.xml").write_bytes(
+            (GATEWARE / f"projects/{project}/test/results.xml").read_bytes()
+        )
     print("All microSD tests passed.", flush=True)
 
 
