@@ -68,3 +68,5 @@ Ethernet disconnected. It records the artifact identity and safe final state;
 the historical Ethernet and GKD campaign was not repeated.
 
 - [Arty USB TTY retest, 2026-10-01](arty-usb-tty-retest-2026-10-01.md): fixed timeout, 100 INFO queries and 128 KiB readback comparison with zero retries.
+
+- [Arty USB current-source smoke, 2026-10-01](arty-usb-head-smoke-2026-10-01.md): routed review fixes, BIOS recovery after bad CRC, and both USB backends.
