@@ -514,12 +514,10 @@ class Images:
         """Disarm the journaled session; recovery requires explicit ownership."""
         if not self.session:
             remote = self.info()
-            if not remote["session"]:
-                if remote["armed"]:
-                    raise RuntimeError("Armed FPGA has no recoverable session")
-                return
             if not remote["armed"]:
                 return
+            if not remote["session"]:
+                raise RuntimeError("Armed FPGA has no recoverable session")
             if not recover_session:
                 raise RuntimeError("No local session; use --recover-session only after acquiring exclusive device ownership")
             self.session, self.sequence = remote["session"], remote["next_sequence"]
