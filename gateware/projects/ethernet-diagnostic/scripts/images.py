@@ -518,6 +518,8 @@ class Images:
                 if remote["armed"]:
                     raise RuntimeError("Armed FPGA has no recoverable session")
                 return
+            if not remote["armed"]:
+                return
             if not recover_session:
                 raise RuntimeError("No local session; use --recover-session only after acquiring exclusive device ownership")
             self.session, self.sequence = remote["session"], remote["next_sequence"]

@@ -35,6 +35,13 @@ async def uart_receive(d, bit_ns=80):
             await Timer(bit_ns, units="ns")
         assert int(d.usb_tx.value), "UART stop bit"
         assert int(d.usb_active.value), "binary ownership must cover the final stop bit"
+        # Sample again just before the stop bit ends, including the closing
+        # delimiter of a rejected frame. Releasing at its midpoint truncates
+        # the physical reply when board.v switches back to the BIOS UART.
+        await Timer(bit_ns * 0.5 - 1, units="ns")
+        assert int(d.usb_tx.value), "UART stop bit must remain high in full"
+        assert int(d.usb_active.value), "TX ownership must last through the whole stop bit"
+        await Timer(1, units="ns")
         if byte == 0x7e:
             if collecting and frame:
                 assert not escaped
@@ -299,5 +306,9 @@ async def usb_info_with_absent_phy_clocks_and_uninitialized_ddr(d):
     assert result[24:28] == b"RBI1"
     assert int.from_bytes(result[48:52], "little") & 3 == 0
     assert int(d.usb_active.value)
+    # Once a recognized reply claims binary mode, later rejected frames
+    # must leave it active. Test rejection both before and after INFO.
+    await usb_exchange(d, corrupt, status=1, bit_ns=1000)
+    assert int(d.usb_active.value), "bad CRC must retain an established binary session"
     assert not int(d.armed_status.value)
     assert not int(d.ddr_cmd_valid.value)

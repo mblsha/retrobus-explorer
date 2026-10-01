@@ -117,6 +117,11 @@ class FtdiUart:
         context = self.context
         if (context.interface, context.index, context.in_ep, context.out_ep) != (1, 2, 0x04, 0x83):
             raise RuntimeError("Unsupported libftdi context layout: interface B fields do not match")
+        # ftdi_init initializes this final public field to AUTO_DETACH (0).
+        # Check it before the direct write too: endpoint fields cannot detect
+        # an insertion between them and the tail of the context structure.
+        if not opened and context.module_detach_mode != 0:
+            raise RuntimeError("Unsupported libftdi context layout: initial module detach mode does not match")
         if opened and (context.type != 4 or context.max_packet_size != 512):
             raise RuntimeError("Unsupported libftdi context layout or device: expected FT2232H with 512-byte packets")
 
