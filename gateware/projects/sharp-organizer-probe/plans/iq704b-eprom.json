@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "card_label": "IQ-704B",
+  "banks": [
+    {
+      "name": "eprom_00000",
+      "description": "Observed 256 KiB address period of the inserted IQ-704B",
+      "start": "0x00000",
+      "length": "0x40000",
+      "pins": {
+        "RW": [1, 1],
+        "OE": [1, 0],
+        "CI": [1, 1],
+        "E2": [1, 1],
+        "MSKROM": [1, 1],
+        "SRAM1": [1, 1],
+        "SRAM2": [1, 1],
+        "EPROM": [1, 0]
+      }
+    }
+  ]
+}

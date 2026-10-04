@@ -21,6 +21,11 @@ kind = "application"
 ci = true
 
 [[projects]]
+path = "projects/sharp-organizer-probe"
+kind = "diagnostic"
+ci = true
+
+[[projects]]
 path = "projects/sharp-pc-e500-card"
 kind = "application"
 ci = true

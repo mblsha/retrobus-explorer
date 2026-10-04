@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "card_label": "OZ-707",
+  "banks": [
+    {
+      "name": "basic_rom",
+      "description": "128 KiB system ROM; EPROM selection observed to contain Basic header",
+      "start": "0x00000",
+      "length": "0x20000",
+      "pins": {
+        "RW": [1, 1],
+        "OE": [1, 0],
+        "CI": [1, 1],
+        "E2": [1, 1],
+        "MSKROM": [1, 1],
+        "SRAM1": [1, 1],
+        "SRAM2": [1, 1],
+        "EPROM": [1, 0]
+      }
+    },
+    {
+      "name": "basic_sram2",
+      "description": "32 KiB battery-backed RAM address range; SRAM2 selection observed to contain DATA BAS header",
+      "start": "0x00000",
+      "length": "0x08000",
+      "pins": {
+        "RW": [1, 1],
+        "OE": [1, 0],
+        "CI": [1, 1],
+        "E2": [1, 1],
+        "MSKROM": [1, 1],
+        "SRAM1": [1, 1],
+        "SRAM2": [1, 0],
+        "EPROM": [1, 1]
+      }
+    }
+  ]
+}

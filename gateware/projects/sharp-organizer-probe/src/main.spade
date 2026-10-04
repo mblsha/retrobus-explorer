@@ -1,0 +1,458 @@
+use shared_components::{
+    config::{au_usb_uart_rx, au_usb_uart_tx8_req_tap},
+    message_stream::{TxReq8, tx_req_none},
+    primitives::{reset_conditioner, sync_bundle},
+    serial::UartLineBusy,
+};
+
+type Address = uint<20>;
+type Control = uint<8>;
+type Protected = uint<7>;
+type Watchdog = uint<27>;
+
+// Control bit 0 is RW, then OE, CI, E2, MSKROM, SRAM1, SRAM2, EPROM.
+// Protected bit 0 is STNBY, then VBATT, VPP, NC02, NC42, NC43, NC44.
+struct ProbeSnapshot {
+    addr: Address,
+    data: uint<8>,
+    control: Control,
+    protected: Protected,
+    addr_drive: Address,
+    addr_oe: Address,
+    control_drive: Control,
+    control_oe: Control,
+    armed: bool,
+}
+
+struct ProbeState {
+    parser: uint<5>,
+    addr_bytes: [uint<8>; 3],
+    mask_bytes: [uint<8>; 2],
+    control_value_byte: uint<8>,
+    burst_active_byte: uint<8>,
+    burst_phase: uint<2>,
+    burst_timer: uint<9>,
+    burst_remaining: uint<16>,
+    burst_data: uint<8>,
+    burst_idle: uint<8>,
+    burst_active: uint<8>,
+    burst_mask: uint<8>,
+    write_data_byte: uint<8>,
+    write_selected: uint<8>,
+    write_phase: uint<3>,
+    write_timer: uint<9>,
+    addr_drive: Address,
+    addr_oe: Address,
+    data_drive: uint<8>,
+    data_oe: bool,
+    control_drive: Control,
+    control_oe: Control,
+    armed: bool,
+    watchdog: Watchdog,
+    reply_kind: uint<2>,
+    reply_pos: uint<5>,
+    reply_ack: uint<8>,
+    snapshot: ProbeSnapshot,
+}
+
+struct ProbeStep {
+    next_state: ProbeState,
+    tx_req: TxReq8,
+}
+
+impl Default for ProbeSnapshot {
+    fn default() -> Self {
+        ProbeSnapshot$(
+            addr: 0,
+            data: 0,
+            control: 0,
+            protected: 0,
+            addr_drive: 0,
+            addr_oe: 0,
+            control_drive: 0,
+            control_oe: 0,
+            armed: false,
+        )
+    }
+}
+
+impl Default for ProbeState {
+    fn default() -> Self {
+        ProbeState$(
+            parser: 0,
+            addr_bytes: [0, 0, 0],
+            mask_bytes: [0, 0],
+            control_value_byte: 0,
+            burst_active_byte: 0,
+            burst_phase: 0,
+            burst_timer: 0,
+            burst_remaining: 0,
+            burst_data: 0,
+            burst_idle: 0,
+            burst_active: 0,
+            burst_mask: 0,
+            write_data_byte: 0,
+            write_selected: 0xff,
+            write_phase: 0,
+            write_timer: 0,
+            addr_drive: 0,
+            addr_oe: 0,
+            data_drive: 0,
+            data_oe: false,
+            control_drive: 0,
+            control_oe: 0,
+            armed: false,
+            watchdog: 0,
+            reply_kind: 0,
+            reply_pos: 0,
+            reply_ack: 0,
+            snapshot: ProbeSnapshot::default(),
+        )
+    }
+}
+
+fn upper_byte(value: Address) -> uint<8> { trunc(value >> 16) }
+fn middle_byte(value: Address) -> uint<8> { trunc(value >> 8) }
+fn lower_byte(value: Address) -> uint<8> { trunc(value) }
+
+impl ProbeState {
+    fn reply_len(self) -> uint<5> {
+        if self.reply_kind == 1 { 1 }
+        else if self.reply_kind == 2 { 16 }
+        else if self.reply_kind == 3 { 5 }
+        else { 0 }
+    }
+
+    fn reply_byte(self) -> uint<8> {
+        if self.reply_kind == 1 {
+            self.reply_ack
+        } else if self.reply_kind == 3 {
+            if self.reply_pos == 0 { b'O' }
+            else if self.reply_pos == 1 { b'B' }
+            else if self.reply_pos == 2 { b'P' }
+            else if self.reply_pos == 3 { b'3' }
+            else { b'\n' }
+        } else if self.reply_kind == 2 {
+            let snap = self.snapshot;
+            if self.reply_pos == 0 { b'S' }
+            else if self.reply_pos == 1 { upper_byte(snap.addr) }
+            else if self.reply_pos == 2 { middle_byte(snap.addr) }
+            else if self.reply_pos == 3 { lower_byte(snap.addr) }
+            else if self.reply_pos == 4 { snap.data }
+            else if self.reply_pos == 5 { snap.control }
+            else if self.reply_pos == 6 { zext(snap.protected) }
+            else if self.reply_pos == 7 { upper_byte(snap.addr_drive) }
+            else if self.reply_pos == 8 { middle_byte(snap.addr_drive) }
+            else if self.reply_pos == 9 { lower_byte(snap.addr_drive) }
+            else if self.reply_pos == 10 { upper_byte(snap.addr_oe) }
+            else if self.reply_pos == 11 { middle_byte(snap.addr_oe) }
+            else if self.reply_pos == 12 { lower_byte(snap.addr_oe) }
+            else if self.reply_pos == 13 { snap.control_drive }
+            else if self.reply_pos == 14 { snap.control_oe }
+            else { if snap.armed { 1 } else { 0 } }
+        } else {
+            0
+        }
+    }
+
+    fn step(
+        self,
+        rx_valid: bool,
+        rx_byte: uint<8>,
+        tx_busy: bool,
+        addr_sample: Address,
+        data_sample: uint<8>,
+        control_sample: Control,
+        protected_sample: Protected,
+        watchdog_limit: Watchdog,
+    ) -> ProbeStep {
+        let expired = self.watchdog >= watchdog_limit;
+        let parser = if expired { 0 } else { self.parser };
+        let accept = rx_valid && self.reply_kind == 0 && self.burst_phase == 0 && self.write_phase == 0;
+        let burst_abort = rx_valid && rx_byte == b'Z' && self.burst_phase != 0;
+        let write_abort = rx_valid && rx_byte == b'Z' && self.write_phase != 0;
+        let idle = accept && parser == 0;
+        let release = (idle && rx_byte == b'Z') || burst_abort || write_abort;
+        let snapshot = idle && rx_byte == b'?';
+        let identify = idle && rx_byte == b'I';
+        let unlock = accept && parser == 4 && rx_byte == b'D';
+        let unlock_error = accept && parser >= 1 && parser <= 4 &&
+            ((parser == 1 && rx_byte != b'R') ||
+             (parser == 2 && rx_byte != b'E') ||
+             (parser == 3 && rx_byte != b'A') ||
+             (parser == 4 && rx_byte != b'D'));
+        let address_done = accept && parser == 10;
+        let control_done = accept && parser == 12;
+        let burst_done = accept && parser == 20;
+        let write_done = accept && parser == 25;
+        let unknown = idle && rx_byte != b'U' && rx_byte != b'A' &&
+            rx_byte != b'C' && rx_byte != b'R' && rx_byte != b'W' && rx_byte != b'Z' &&
+            rx_byte != b'?' && rx_byte != b'I';
+        let effective_armed = self.armed && !expired;
+        let addressed = address_done && effective_armed;
+        let controlled = control_done && effective_armed;
+
+        let next_parser = if !accept {
+            parser
+        } else if parser == 0 {
+            if rx_byte == b'U' { 1 }
+            else if rx_byte == b'A' { 5 }
+            else if rx_byte == b'C' { 11 }
+            else if rx_byte == b'R' { 13 }
+            else if rx_byte == b'W' { 21 }
+            else { 0 }
+        } else if parser == 1 {
+            if rx_byte == b'R' { 2 } else { 0 }
+        } else if parser == 2 {
+            if rx_byte == b'E' { 3 } else { 0 }
+        } else if parser == 3 {
+            if rx_byte == b'A' { 4 } else { 0 }
+        } else if parser == 4 || parser == 10 || parser == 12 || parser == 20 || parser == 25 {
+            0
+        } else {
+            trunc(parser + 1)
+        };
+
+        let addr_bytes = if accept && (parser == 5 || parser == 13 || parser == 21) {
+            [rx_byte, self.addr_bytes[1], self.addr_bytes[2]]
+        } else if accept && (parser == 6 || parser == 14 || parser == 22) {
+            [self.addr_bytes[0], rx_byte, self.addr_bytes[2]]
+        } else if accept && (parser == 7 || parser == 15 || parser == 23) {
+            [self.addr_bytes[0], self.addr_bytes[1], rx_byte]
+        } else {
+            self.addr_bytes
+        };
+        let mask_bytes = if accept && (parser == 8 || parser == 16) {
+            [rx_byte, self.mask_bytes[1]]
+        } else if accept && (parser == 9 || parser == 17) {
+            [self.mask_bytes[0], rx_byte]
+        } else {
+            self.mask_bytes
+        };
+        let address_value: uint<24> = (zext(addr_bytes[0]) << 16) |
+            (zext(addr_bytes[1]) << 8) | zext(addr_bytes[2]);
+        let address_mask: uint<24> = (zext(mask_bytes[0]) << 16) |
+            (zext(mask_bytes[1]) << 8) | zext(rx_byte);
+        let count: uint<16> = (zext(mask_bytes[0]) << 8) | zext(mask_bytes[1]);
+        let burst_start = burst_done && effective_armed && count != 0 &&
+            address_value < 0x100000 && rx_byte != 0 &&
+            (rx_byte & 1) != 0 && (self.control_value_byte & 1) != 0 &&
+            (self.burst_active_byte & 1) != 0 &&
+            ((self.control_value_byte ^ self.burst_active_byte) & rx_byte) != 0;
+        // W accepts only SRAM1 or SRAM2. OE and every other selector remain high.
+        let write_start = write_done && effective_armed && address_value < 0x100000 &&
+            (rx_byte == 1 || rx_byte == 2);
+        let write_reject = write_done && !write_start;
+        let selected_control: uint<8> = if rx_byte == 1 { 0xdf } else { 0xbf };
+        let setup_done = self.burst_phase == 1 && self.burst_timer == 499;
+        let sample_done = self.burst_phase == 2 && self.burst_timer == 499;
+        let burst_send = self.burst_phase == 3 && !tx_busy && self.reply_kind == 0;
+        let burst_last = burst_send && self.burst_remaining == 1;
+        let write_setup_done = self.write_phase == 1 && self.write_timer == 499;
+        let write_select_done = self.write_phase == 2 && self.write_timer == 499;
+        let write_pulse_done = self.write_phase == 3 && self.write_timer == 499;
+        let write_hold_done = self.write_phase == 4 && self.write_timer == 499;
+        let write_finish = self.write_phase == 5 && self.write_timer == 499;
+        let new_reply_kind: uint<2> = if snapshot { 2 }
+            else if identify { 3 }
+            else if release || unlock || unlock_error || address_done || control_done ||
+                burst_done || write_reject || write_finish || unknown { 1 }
+            else { 0 };
+        let new_reply_ack: uint<8> = if release { b'Z' }
+            else if unlock { b'U' }
+            else if addressed { b'A' }
+            else if controlled { b'C' }
+            else if burst_start { b'R' }
+            else if write_finish { b'W' }
+            else { b'!' };
+        let sending = self.reply_kind != 0 && !tx_busy;
+        let next_reply_pos_wide: uint<6> = zext(self.reply_pos) + 1;
+        let reply_len_wide: uint<6> = zext(self.reply_len());
+        let reply_done = sending && next_reply_pos_wide == reply_len_wide;
+        let next_reply_kind = if new_reply_kind != 0 { new_reply_kind }
+            else if reply_done { 0 }
+            else { self.reply_kind };
+        let next_reply_pos = if new_reply_kind != 0 || reply_done { 0 }
+            else if sending { trunc(self.reply_pos + 1) }
+            else { self.reply_pos };
+        let next_armed = if unlock { true }
+            else if expired || release || unlock_error || burst_last || write_finish || write_reject { false }
+            else { self.armed };
+        let clear_drive = expired || release || unlock_error || burst_last || write_finish || write_reject;
+        let next_burst_phase = if clear_drive { 0 }
+            else if burst_start || (burst_send && !burst_last) { 1 }
+            else if setup_done { 2 }
+            else if sample_done { 3 }
+            else { self.burst_phase };
+        let next_write_phase = if clear_drive { 0 }
+            else if write_start { 1 }
+            else if write_setup_done { 2 }
+            else if write_select_done { 3 }
+            else if write_pulse_done { 4 }
+            else if write_hold_done { 5 }
+            else { self.write_phase };
+
+        ProbeStep$(
+            next_state: ProbeState$(
+                parser: next_parser,
+                addr_bytes: addr_bytes,
+                mask_bytes: mask_bytes,
+                control_value_byte: if accept && (parser == 11 || parser == 18) { rx_byte } else { self.control_value_byte },
+                burst_active_byte: if accept && parser == 19 { rx_byte } else { self.burst_active_byte },
+                burst_phase: next_burst_phase,
+                burst_timer: if clear_drive || burst_start || setup_done || sample_done || burst_send { 0 }
+                    else if self.burst_phase == 1 || self.burst_phase == 2 { trunc(self.burst_timer + 1) }
+                    else { self.burst_timer },
+                burst_remaining: if burst_start { count }
+                    else if burst_send { trunc(self.burst_remaining - 1) }
+                    else { self.burst_remaining },
+                burst_data: if sample_done { data_sample } else { self.burst_data },
+                burst_idle: if burst_start { self.control_value_byte } else { self.burst_idle },
+                burst_active: if burst_start { self.burst_active_byte } else { self.burst_active },
+                burst_mask: if burst_start { rx_byte } else { self.burst_mask },
+                write_data_byte: if accept && parser == 24 { rx_byte } else { self.write_data_byte },
+                write_selected: if write_start { selected_control } else { self.write_selected },
+                write_phase: next_write_phase,
+                write_timer: if clear_drive || write_start || write_setup_done ||
+                    write_select_done || write_pulse_done || write_hold_done { 0 }
+                    else if self.write_phase != 0 { trunc(self.write_timer + 1) }
+                    else { self.write_timer },
+                addr_drive: if clear_drive { 0 }
+                    else if burst_start { trunc(address_value) }
+                    else if write_start { trunc(address_value) }
+                    else if burst_send { trunc(self.addr_drive + 1) }
+                    else if addressed { trunc(address_value) }
+                    else { self.addr_drive },
+                addr_oe: if clear_drive { 0 }
+                    else if burst_start || write_start { 0xfffff }
+                    else if addressed { trunc(address_mask) }
+                    else { self.addr_oe },
+                data_drive: if clear_drive { 0 }
+                    else if write_start { self.write_data_byte }
+                    else { self.data_drive },
+                data_oe: if clear_drive { false }
+                    else if write_start { true }
+                    else { self.data_oe },
+                control_drive: if clear_drive { 0 }
+                    else if burst_start || sample_done { if burst_start { self.control_value_byte } else { self.burst_idle } }
+                    else if setup_done { self.burst_active }
+                    else if write_start || write_hold_done { 0xff }
+                    else if write_setup_done || write_pulse_done { self.write_selected }
+                    else if write_select_done { self.write_selected & 0xfe }
+                    else if controlled { self.control_value_byte }
+                    else { self.control_drive },
+                control_oe: if clear_drive { 0 }
+                    else if burst_start { rx_byte }
+                    else if write_start { 0xff }
+                    else if controlled { rx_byte }
+                    else { self.control_oe },
+                armed: next_armed,
+                watchdog: if rx_valid || setup_done || sample_done || burst_send ||
+                    write_setup_done || write_select_done || write_pulse_done ||
+                    write_hold_done || write_finish { 0 }
+                    else if expired { self.watchdog }
+                    else { trunc(self.watchdog + 1) },
+                reply_kind: next_reply_kind,
+                reply_pos: next_reply_pos,
+                reply_ack: if new_reply_kind != 0 { new_reply_ack } else { self.reply_ack },
+                snapshot: if snapshot {
+                    ProbeSnapshot$(
+                        addr: addr_sample,
+                        data: data_sample,
+                        control: control_sample,
+                        protected: protected_sample,
+                        addr_drive: self.addr_drive,
+                        addr_oe: if effective_armed { self.addr_oe } else { 0 },
+                        control_drive: self.control_drive,
+                        control_oe: if effective_armed { self.control_oe } else { 0 },
+                        armed: effective_armed,
+                    )
+                } else {
+                    self.snapshot
+                },
+            ),
+            tx_req: if sending { TxReq8$(valid: true, byte: self.reply_byte()) }
+                else if burst_send { TxReq8$(valid: true, byte: self.burst_data) }
+                else { tx_req_none() },
+        )
+    }
+}
+
+#[no_mangle(all)]
+entity main_core(
+    clk: clock,
+    rst_n: bool,
+    usb_rx: bool,
+    usb_tx: inv bool,
+    led: inv [bool; 8],
+    addr: Address,
+    data: uint<8>,
+    conn_rw: bool,
+    conn_oe: bool,
+    conn_ci: bool,
+    conn_e2: bool,
+    conn_mskrom: bool,
+    conn_sram1: bool,
+    conn_sram2: bool,
+    conn_eprom: bool,
+    conn_stnby: bool,
+    conn_vbatt: bool,
+    conn_vpp: bool,
+    conn_nc02: bool,
+    conn_nc42: bool,
+    conn_nc43: bool,
+    conn_nc44: bool,
+    watchdog_limit: Watchdog,
+    addr_drive: inv Address,
+    addr_oe: inv Address,
+    data_drive: inv uint<8>,
+    data_oe: inv bool,
+    control_drive: inv Control,
+    control_oe: inv Control,
+    armed_debug: inv bool,
+) {
+    let rst = inst reset_conditioner(clk, !rst_n);
+    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
+    let addr_sync_bits = inst sync_bundle::<2, 20>(clk, addr.as_bits());
+    let data_sync_bits = inst sync_bundle::<2, 8>(clk, data.as_bits());
+    let control_sync_bits = inst sync_bundle::<2, 8>(
+        clk,
+        [conn_rw, conn_oe, conn_ci, conn_e2,
+         conn_mskrom, conn_sram1, conn_sram2, conn_eprom],
+    );
+    let protected_sync_bits = inst sync_bundle::<2, 7>(
+        clk,
+        [conn_stnby, conn_vbatt, conn_vpp, conn_nc02,
+         conn_nc42, conn_nc43, conn_nc44],
+    );
+    let addr_sample: Address = addr_sync_bits.as_uint();
+    let data_sample: uint<8> = data_sync_bits.as_uint();
+    let control_sample: Control = control_sync_bits.as_uint();
+    let protected_sample: Protected = protected_sync_bits.as_uint();
+    let (uart, uart_w): UartLineBusy = port();
+    decl state;
+    let step = state.step(
+        rx.valid && !rx.parity_error,
+        rx.byte,
+        uart.busy,
+        addr_sample,
+        data_sample,
+        control_sample,
+        protected_sample,
+        watchdog_limit,
+    );
+    reg(clk) state: ProbeState reset(rst: ProbeState::default()) = step.next_state;
+    let _tx = inst au_usb_uart_tx8_req_tap(
+        clk, rst, false, step.tx_req, uart_w.line, uart_w.busy,
+    );
+    let active = state.armed && state.watchdog < watchdog_limit;
+    set usb_tx = uart.line;
+    set led = data_sample.as_bits();
+    set addr_drive = state.addr_drive;
+    set addr_oe = if active { state.addr_oe } else { 0 };
+    set data_drive = state.data_drive;
+    set data_oe = active && state.data_oe;
+    set control_drive = state.control_drive;
+    set control_oe = if active { state.control_oe } else { 0 };
+    set armed_debug = active;
+}
