@@ -77,10 +77,9 @@ def publish_result(output, result_text):
         temporary.unlink(missing_ok=True)
 
 
-def pack_and_verify_bitstream(toolchain, output, *, env=None):
-    """Package this Arty's routed FASM and verify the decoded configuration bits."""
+def pack_and_verify_bitstream(toolchain, output, *, env=None, part="xc7a35tcsg324-1"):
+    """Package routed FASM and verify the decoded configuration bits."""
     toolchain, output = Path(toolchain).resolve(), Path(output).resolve()
-    part = "xc7a35tcsg324-1"
     db = toolchain / "share/prjxray/artix7"
     part_file = str(db / part / "part.yaml")
     steps = [
