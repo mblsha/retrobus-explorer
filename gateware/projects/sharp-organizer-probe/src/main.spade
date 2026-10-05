@@ -131,7 +131,7 @@ impl ProbeState {
             if self.reply_pos == 0 { b'O' }
             else if self.reply_pos == 1 { b'B' }
             else if self.reply_pos == 2 { b'P' }
-            else if self.reply_pos == 3 { b'3' }
+            else if self.reply_pos == 3 { b'4' }
             else { b'\n' }
         } else if self.reply_kind == 2 {
             let snap = self.snapshot;
@@ -243,15 +243,19 @@ impl ProbeState {
             (self.burst_active_byte & 1) != 0 &&
             ((self.control_value_byte ^ self.burst_active_byte) & rx_byte) != 0;
         // W accepts only SRAM1 or SRAM2. OE and every other selector remain high.
+        // W config bits 0..1 select SRAM1/SRAM2, bits 2..3 lower CI/E2.
+        // The old 1/2 codes retain their original all-high CI/E2 behavior.
+        let write_config = rx_byte & 0xf3;
         let write_start = write_done && effective_armed && address_value < 0x100000 &&
-            (rx_byte == 1 || rx_byte == 2);
+            (write_config == 1 || write_config == 2);
         let write_reject = write_done && !write_start;
         // One timing unit is 50 ns at 100 MHz. Keep the 5 us default and
         // accept explicit read phases from 200 ns through 5 us while disarmed.
         let timing_valid = timing_done && !effective_armed && rx_byte >= 4 && rx_byte <= 100;
         let timing_units: uint<9> = zext(rx_byte);
         let timing_cycles: uint<9> = trunc((timing_units << 2) + timing_units);
-        let selected_control: uint<8> = if rx_byte == 1 { 0xdf } else { 0xbf };
+        let selected_control: uint<8> =
+            (if (rx_byte & 3) == 1 { 0xdf } else { 0xbf }) & (0xff ^ (rx_byte & 0x0c));
         let setup_done = self.burst_phase == 1 && self.burst_timer == self.burst_phase_last;
         let sample_done = self.burst_phase == 2 && self.burst_timer == self.burst_phase_last;
         let burst_send = self.burst_phase == 3 && !tx_busy && self.reply_kind == 0;

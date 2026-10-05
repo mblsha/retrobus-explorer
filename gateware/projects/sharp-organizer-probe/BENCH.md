@@ -151,3 +151,36 @@ was therefore rejected despite its faster short-run results.
 A 10 Mbaud variant passed simulation but missed the required 100 MHz FPGA
 clock after routing with nextpnr seeds 2, 3, and 4 (96.01, 89.89, and
 95.17 MHz respectively). It was not loaded onto the Au1.
+
+## OBP4 generic discovery and SRAM qualification — 2026-10-05
+
+OBP4 keeps the 5 Mbaud read protocol and adds CI/E2 state to the bounded `W`
+configuration byte. The seed-2 Spade/nextpnr-xilinx build passed the 100 MHz
+target at 102.28 MHz and the bitstream decode check. Its bitstream SHA-256 is
+`c8729120bda58dcbc5d8e2a940add9de9e6b03a72712c42943b8367def476a30`.
+The Au1 identified as `OBP4` after the volatile load.
+
+With the OZ-707 still inserted, the read-only discovery scanned all 16
+single-select CI/E2 states over 1 MiB at the conservative 5 µs read phase.
+Two passes matched in each view. Deduplication produced three images: 128 KiB
+EPROM (`a8a1afb9…112d9d`), 32 KiB SRAM2
+(`76967099…a7dad1`), and a one-byte bus-echo image for SRAM1/MSKROM views.
+The EPROM and SRAM2 hashes exactly match the previously archived OZ-707
+images. All four CI/E2 states expose identical EPROM and SRAM2 data; all
+SRAM1 and MSKROM states track bus hold in the priming test. The full capture
+was committed to `binja-esr-tests` as `08def3e` before any OBP4 write probe.
+
+The automatic probe then skipped SRAM1 and tested two addresses in each of
+the four SRAM2 CI/E2 views. Each trial persisted after priming the data bus
+from EPROM, was visible through the other three SRAM2 views, and restored to
+the committed backup. Full 32 KiB checks passed for every view after each
+trial. The four SRAM2 views therefore form one confirmed physical alias group.
+The result is committed as `8a8707b`.
+
+The general `write-sram` command changed SRAM2 `0x7fff` from `0x9f` to
+`0xc5`, verified the full bank, and committed its before/after images as
+`a19ea8e`. A second transaction used that committed post-write image as its
+expected state, restored `0x9f`, and verified the original 32 KiB SHA-256
+`7696709926e45a3af54e583f03e0bb6f1ea54fc626890529aa548b9948a7dad1`.
+The restore transaction is committed as `d3fa389`. A final bus snapshot
+showed zero address/control drive masks and disarmed state.

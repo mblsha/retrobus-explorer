@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -105,7 +107,7 @@ class Probe:
 
     def identify(self) -> None:
         actual = self.exchange(b"I", 5)
-        if actual not in (b"OBP2\n", b"OBP3\n"):
+        if actual not in (b"OBP2\n", b"OBP3\n", b"OBP4\n"):
             raise RuntimeError(f"wrong gateware or UART framing: {actual!r}")
         self.protocol = actual.decode().strip()
 
@@ -121,8 +123,8 @@ class Probe:
     def set_read_timing(self, phase_ns: int) -> None:
         if phase_ns % 50 or not 200 <= phase_ns <= 5000:
             raise ValueError("read phase must be 200..5000 ns in 50 ns steps")
-        if self.protocol != "OBP3":
-            raise RuntimeError("adjustable read timing requires OBP3 gateware")
+        if self.protocol not in ("OBP3", "OBP4"):
+            raise RuntimeError("adjustable read timing requires OBP3 or OBP4 gateware")
         self.ack(bytes([ord("T"), phase_ns // 50]), b"T")
         self.burst_phase_ns = phase_ns
 
@@ -155,13 +157,25 @@ class Probe:
         return read_exact(self.port, count)
 
     def write_byte(self, address: int, value: int, sram: int) -> None:
-        if self.protocol != "OBP3":
-            raise RuntimeError("SRAM writes require OBP3 gateware")
+        if self.protocol not in ("OBP3", "OBP4"):
+            raise RuntimeError("SRAM writes require OBP3 or OBP4 gateware")
         bounded(address, 20, "address")
         bounded(value, 8, "data")
         if sram not in (1, 2):
             raise ValueError("SRAM selector must be 1 or 2")
         self.ack(b"W" + address.to_bytes(3, "big") + bytes([value, sram]), b"W")
+
+    def write_profiled_byte(self, address: int, value: int, selected: int) -> None:
+        if self.protocol != "OBP4":
+            raise RuntimeError("profiled SRAM writes require OBP4 gateware")
+        bounded(address, 20, "address")
+        bounded(value, 8, "data")
+        bounded(selected, 8, "selected control")
+        if selected & 0x93 != 0x93 or selected & 0x60 not in (0x20, 0x40):
+            raise ValueError("write profile must select exactly one SRAM with RW/OE and ROM selects high")
+        selector = 1 if selected & 0x20 == 0 else 2
+        config = selector | (~selected & 0x0c)
+        self.ack(b"W" + address.to_bytes(3, "big") + bytes([value, config]), b"W")
 
 
 def format_snapshot(s: Snapshot) -> str:
@@ -304,8 +318,8 @@ def verify_committed_backup(image: Path) -> None:
 
 def test_sram_write(probe: Probe, backup_image: Path, result_dir: Path,
                     sram: int, address: int | None) -> dict:
-    if probe.protocol != "OBP3":
-        raise RuntimeError("SRAM write test requires OBP3 gateware")
+    if probe.protocol not in ("OBP3", "OBP4"):
+        raise RuntimeError("SRAM write test requires OBP3 or OBP4 gateware")
     verify_committed_backup(backup_image)
     backup = backup_image.read_bytes()
     if not backup or len(backup) > 1 << 20:
@@ -376,37 +390,6 @@ def test_sram_write(probe: Probe, backup_image: Path, result_dir: Path,
     }
     (result_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
-
-
-def default_card_plan(probe: Probe):
-    from bank_dump import load_plan
-
-    probe.unlock()
-    try:
-        header = probe.burst(0, 32, 0xFF, 0x7D, 0xFF)
-    finally:
-        probe.release()
-    if header[:2] != b"\x10\x12":
-        raise RuntimeError("EPROM selection has no recognized card volume header")
-    volume_id = header[6:17].decode("ascii", errors="replace").strip()
-    if volume_id != "S-C12":
-        raise RuntimeError(
-            f"no complete ROM+SRAM default profile for volume {volume_id!r}; "
-            "supply an explicit bank plan"
-        )
-    expected_rom = "a8a1afb91bf39f07f528a9690a60d45c6cc61232a126fb0fe1ccff95ec112d9d"
-    rom_hash = hashlib.sha256()
-    for start in range(0, 0x20000, BURST_CHUNK):
-        count = min(BURST_CHUNK, 0x20000 - start)
-        probe.unlock()
-        try:
-            rom_hash.update(probe.burst(start, count, 0xFF, 0x7D, 0xFF))
-        finally:
-            probe.release()
-    if rom_hash.hexdigest() != expected_rom:
-        raise RuntimeError("S-C12 ROM differs from the known OZ-707 image; supply an explicit bank plan")
-    plan_path = Path(__file__).resolve().parents[1] / "plans" / "oz707-eprom-sram2.json"
-    return load_plan(plan_path)
 
 
 def shell(probe: Probe) -> None:
@@ -487,10 +470,36 @@ def main() -> None:
     banks.add_argument("--slow", action="store_true", help="use host-timed single-byte cycles")
     banks.add_argument("--settle-us", type=number, default=20)
     banks.add_argument("--dry-run", action="store_true", help="validate and show selections without accessing hardware")
-    card = commands.add_parser("dump-card", help="identify a known card and capture ROM plus SRAM by default")
+    card = commands.add_parser("dump-card", help="discover and capture all single-select card views")
     card.add_argument("--output-dir", type=Path, required=True)
     card.add_argument("--passes", type=int, default=2)
-    card.add_argument("--slow", action="store_true")
+    card.add_argument("--scan-length", type=number, default=1 << 20)
+    card.add_argument("--reported-model")
+    archive = commands.add_parser("capture-card", help="capture, commit backup, then probe SRAM candidates")
+    archive.add_argument("--archive-root", type=Path, required=True,
+                         help="Git repository containing roms/cards/sharp-organizer")
+    archive.add_argument("--capture-id", help="UTC capture directory name; defaults to current UTC time")
+    archive.add_argument("--scan-length", type=number, default=1 << 20)
+    archive.add_argument("--reported-model")
+    archive.add_argument("--read-only", action="store_true", help="commit capture without write probes")
+    archive.add_argument("--passes", type=int, default=2)
+    import_capture = commands.add_parser("archive-discovery", help="archive a completed read-only discovery scan")
+    import_capture.add_argument("--source-dir", type=Path, required=True)
+    import_capture.add_argument("--archive-root", type=Path, required=True)
+    import_capture.add_argument("--capture-id")
+    import_capture.add_argument("--read-only", action="store_true")
+    probe_ram_cmd = commands.add_parser("probe-ram", help="probe SRAM from a committed capture")
+    probe_ram_cmd.add_argument("--capture-dir", type=Path, required=True)
+    probe_ram_cmd.add_argument("--result-dir", type=Path, required=True)
+    write_sram_cmd = commands.add_parser("write-sram", help="write verified SRAM from a committed backup")
+    write_sram_cmd.add_argument("--capture-dir", type=Path, required=True)
+    write_sram_cmd.add_argument("--probe-result", type=Path, required=True)
+    write_sram_cmd.add_argument("--view", required=True)
+    write_sram_cmd.add_argument("--address", type=number, required=True)
+    write_sram_cmd.add_argument("--input", type=Path, required=True)
+    write_sram_cmd.add_argument("--expected-image", type=Path,
+                                help="committed current full-bank image; defaults to original capture")
+    write_sram_cmd.add_argument("--result-dir", type=Path, required=True)
     write_test = commands.add_parser("test-sram-write", help="test one byte and restore it from a committed SRAM backup")
     write_test.add_argument("--backup-image", type=Path, required=True)
     write_test.add_argument("--result-dir", type=Path, required=True)
@@ -534,13 +543,64 @@ def main() -> None:
                               "banks": len(result["banks"]),
                               "plan_sha256": result["plan_sha256"]}, indent=2))
         elif args.command == "dump-card":
-            from bank_dump import run_plan
+            from card_discovery import capture
 
-            plan = default_card_plan(probe)
-            result = run_plan(probe, plan, args.output_dir, args.passes, args.slow)
+            result = capture(probe, args.output_dir, limit=args.scan_length,
+                             passes=args.passes, reported_model=args.reported_model)
             print(json.dumps({"output_dir": str(args.output_dir),
-                              "banks": len(result["banks"]),
-                              "plan_sha256": result["plan_sha256"]}, indent=2))
+                              "images": len(result["images"]),
+                              "views": len(result["views"])}, indent=2))
+        elif args.command in ("capture-card", "archive-discovery"):
+            from datetime import datetime, timezone
+            from card_discovery import capture, validate_capture_files
+            from card_write import commit_capture, commit_directory, probe_ram
+
+            capture_id = args.capture_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", capture_id):
+                raise ValueError("capture ID must use letters, digits, underscore or hyphen")
+            dest = args.archive_root / "roms/cards/sharp-organizer" / capture_id
+            if args.command == "capture-card":
+                result = capture(probe, dest, limit=args.scan_length, passes=args.passes,
+                                 reported_model=args.reported_model)
+            else:
+                source_manifest = validate_capture_files(args.source_dir)
+                if source_manifest.get("gateware_protocol") != probe.protocol:
+                    raise ValueError("source protocol differs from the connected probe")
+                result = source_manifest
+                shutil.copytree(args.source_dir, dest)
+            backup_commit = commit_capture(dest)
+            summary = {"capture_dir": str(dest), "backup_commit": backup_commit,
+                       "images": len(result["images"]), "views": len(result["views"])}
+            if not args.read_only:
+                probe_dir = dest / "write-probes"
+                try:
+                    summary["ram_probe"] = probe_ram(probe, dest, probe_dir)
+                finally:
+                    if (probe_dir / "result.json").exists():
+                        summary["probe_commit"] = commit_directory(probe_dir,
+                            f"Record Sharp organizer SRAM probes {capture_id}")
+            print(json.dumps(summary, indent=2))
+        elif args.command == "probe-ram":
+            from card_write import commit_directory, probe_ram
+
+            try:
+                result = probe_ram(probe, args.capture_dir, args.result_dir)
+            finally:
+                if (args.result_dir / "result.json").exists():
+                    commit_directory(args.result_dir, "Record Sharp organizer SRAM presence probes")
+            print(json.dumps(result, indent=2))
+        elif args.command == "write-sram":
+            from card_write import commit_directory, write_sram
+
+            try:
+                result = write_sram(probe, args.capture_dir, args.probe_result,
+                                    args.view, args.address, args.input.read_bytes(),
+                                    args.result_dir, args.expected_image)
+            finally:
+                if (args.result_dir / "result.json").exists():
+                    commit_directory(args.result_dir,
+                        f"Record Sharp organizer SRAM write {args.view}")
+            print(json.dumps(result, indent=2))
         elif args.command == "test-sram-write":
             result = test_sram_write(probe, args.backup_image, args.result_dir,
                                      args.sram, args.address)

@@ -31,8 +31,8 @@ The IQ-704B was read with idle control `0xff`, active control
 address scan repeated every 256 KiB and matched on two passes. These values
 are observed for that card. The OZ-707 Basic card was then read with EPROM
 selected for its 128 KiB ROM and SRAM2 selected for its 32 KiB data area;
-both matched on two passes. The operator supplies *idle*, *active*, and mask
-for other cards. The FPGA never drives VPP.
+both matched on two passes. Generic discovery tests the four single memory
+selects at each CI/E2 level with RW high. The FPGA never drives VPP.
 
 Before inserting a card into a newly assembled cable/adapter, validate the
 physical FFC orientation and Au1 mapping with `projects/pin-tester`, then use
@@ -46,20 +46,20 @@ From `gateware/`:
 ```sh
 uv run --frozen python tools/run_tb.py --project projects/sharp-organizer-probe
 uv run --frozen python tools/project_inventory.py --check
-DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib ./.venv/bin/python projects/sharp-organizer-probe/scripts/build_nextpnr.py --seed 3
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib ./.venv/bin/python projects/sharp-organizer-probe/scripts/build_nextpnr.py --seed 2
 ```
 
 The last command runs Swim/Spade, Yosys, nextpnr-xilinx, Project X-Ray FASM
 packing, and a bitstream decode round trip for `xc7a35tftg256-1`. It writes
-`build/nextpnr-au1/design.bit` and `result.json`; both are generated files.
-The selected nextpnr seed is 3; its post-route estimate is 100.84 MHz against
-the 100 MHz clock. The bitstream is for the Au1 v1 FPGA, not Au1 v2.
+`build/nextpnr-au1-seed2/design.bit` and `result.json`; both are generated files.
+OBP4 meets the 100 MHz target with nextpnr seed 2. The bitstream is for the
+Au1 v1 FPGA, not Au1 v2.
 
 To load the checked bitstream into FPGA SRAM through the tested Au1 JTAG path:
 
 ```sh
 openFPGALoader -b alchitry_au --ftdi-serial FT4ZS6I3 -m \
-  projects/sharp-organizer-probe/build/nextpnr-au1/design.bit
+  projects/sharp-organizer-probe/build/nextpnr-au1-seed2/design.bit
 ```
 
 Replace the FTDI serial for another Au1. The SRAM load is volatile.
@@ -77,7 +77,7 @@ uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART \
   dump --start 0 --length 0x40000 --idle 0xff --active 0x7d --mask 0xff --output iq704b.bin
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART \
-  --read-phase-ns 500 dump-card --output-dir projects/sharp-organizer-probe/build/oz707-fast
+  dump-card --output-dir projects/sharp-organizer-probe/build/card-discovery
 ```
 
 The control bytes above are the verified IQ-704B read profile. By default,
@@ -132,27 +132,74 @@ from their wiring or measured host cycles. A bank plan describes pin-selected
 banks; it does not perform writes
 to internal bank registers.
 
-For the known OZ-707, `dump-card` checks the whole ROM image and then captures
-both ROM and SRAM2 by default. Unknown images require an explicit
-`dump-banks --plan`, so missing SRAM is not silently treated as captured.
+`dump-card` scans all 16 single-select CI/E2 states over the full 20-bit
+address range. It reads each view twice, finds its fully observed address
+period, and stores one image per unique byte sequence. Every view remains in
+the manifest with its pin levels, full-scan hash, duplicate-data reference,
+and observed mirror relation. Equal bytes do not establish that two selects
+address the same physical chip. Read-only results remain `rom_candidate`,
+`sram_candidate`, or `open_bus_or_echo`; a volume header supplies only a volume
+ID and capacity hint. The scan cannot discover card-specific bank registers,
+simultaneous-select modes, or addresses above 20 bits; use an explicit plan
+for such cards. The default 5 µs phase is conservative for an unqualified card.
+The 16-view, two-pass OZ-707 scan took about seven minutes at that setting.
 
 ```sh
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
   --port /dev/cu.YOUR_AU_UART dump-card --output-dir build/card-capture
 ```
 
-The output is a new directory containing the exact input `plan.json`, a
-`manifest.json`, and one `.bin` plus `.bin.json` sidecar per bank. Each record
-includes the source-plan hash, address range, raw control bytes and mask,
-named driven/undriven pin levels, pins driven low during the read, observed
-preflight pin levels, byte count, and SHA-256. The directory is published only
-after every bank passes comparison. Electrical low is recorded as low; the
-manifest does not infer a pin's assertion polarity.
+The schema-2 output contains `manifest.json`, one `bank-NN.bin` per unique
+image, and JSON sidecars. Its `views` list preserves every tested selection,
+including duplicate and open-bus reads. An observed period is a byte-level
+alias across the scanned address space, not a physical capacity measurement.
+The directory is published only after every two-pass comparison succeeds.
+
+To save a capture in the archive and automatically test backed-up SRAM
+candidates, use `capture-card`. It commits the capture in Git before the first
+write probe, then commits the probe result separately. `--read-only` stops
+after the backup commit. The destination repo must be writable and have a
+configured Git identity.
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
+  --port /dev/cu.YOUR_AU_UART capture-card \
+  --archive-root /path/to/binja-esr-tests --reported-model OZ-707
+```
+
+If `dump-card` already produced a verified read-only directory, avoid another
+full scan with `archive-discovery --source-dir build/card-capture
+--archive-root /path/to/binja-esr-tests`. It validates every stored image and
+full-scan hash, commits the copied backup, then runs the same SRAM probes.
+
+The automatic probe skips selections whose reads track the last data-bus
+value. For stable SRAM-select views it compares the live bank to the committed
+backup, writes two trial addresses, reads after priming the bus from another
+view, checks other SRAM views for physical aliases, restores both original
+bytes, and compares the entire banks with their backups. A view is
+`writable_ram_confirmed` only if both trials persist and restore.
+
+To make an intentional write, supply a committed `write-probes/result.json`
+from the same capture. `write-sram` checks that the live image still matches
+the backup, writes the input bytes, verifies a full-bank read, and commits the
+before/after images and transaction record. Put `--result-dir` inside the
+archive repository. Later writes can use `--expected-image` with the committed
+`after.bin` from the previous transaction; the tool still checks the entire
+live bank before writing.
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
+  --port /dev/cu.YOUR_AU_UART write-sram \
+  --capture-dir /path/to/binja-esr-tests/roms/cards/sharp-organizer/CAPTURE \
+  --probe-result /path/to/CAPTURE/write-probes/result.json \
+  --view sram2-ci1-e21 --address 0x100 --input payload.bin \
+  --result-dir /path/to/CAPTURE/write-transaction-01
+```
 
 ## SRAM write test
 
-Capture the current card with `dump-card`, archive its SRAM bank, and commit
-that image and sidecar before testing writes. `test-sram-write` checks that the
+For the legacy one-bank test, capture the current card with an explicit plan,
+archive its SRAM bank, and commit that image and sidecar. `test-sram-write` checks that the
 backup bytes are in Git `HEAD`, compares the live SRAM against the full backup,
 changes one byte, reads it back, restores the original byte, and compares all
 SRAM bytes again. It writes `before.bin`, `after-restore.bin`, and `result.json`
@@ -178,14 +225,14 @@ bitstream's UART rate. The protocol is binary and deliberately small:
 
 | Request | Reply | Meaning |
 | --- | --- | --- |
-| `I` | `OBP3\n` | Identify gateware and protocol version |
+| `I` | `OBP4\n` | Identify gateware and protocol version |
 | `?` | 16 bytes starting `S` | Latched pin and drive snapshot |
 | `UREAD` | `U` | Unlock address/control outputs |
 | `A` + 3-byte address + 3-byte OE mask | `A` or `!` | Set 20 address values and output enables |
 | `C` + control value + OE mask | `C` or `!` | Set control values and output enables |
 | `R` + 3-byte start + 2-byte count + idle + active + control mask | `R` then count bytes, or `!` | Read sequential bytes and release after the last byte |
 | `T` + one byte in 50 ns units (4–100) | `T` or `!` | While disarmed, set each read phase to 200–5000 ns; default is 5000 ns |
-| `W` + 3-byte address + data byte + SRAM selector (1 or 2) | `W` or `!` | Drive one byte with OE high, pulse RW low for 5 µs, restore idle, and release |
+| `W` + 3-byte address + data byte + config | `W` or `!` | Drive one byte with OE high, pulse RW low for 5 µs, restore idle, and release. Config bits 0–1 select SRAM1 (1) or SRAM2 (2); bits 2–3 lower CI/E2. Other bits must be zero. The original 1/2 codes remain valid. |
 | `Z` | `Z` | Release pins and disarm |
 
 The 16-byte snapshot is `S`, three address bytes, data, control, protected,
