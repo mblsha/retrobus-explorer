@@ -12,6 +12,7 @@ members = [
     "pin-tester-spade",
     "retrobus-gateware",
     "sharp-organizer-card-spade",
+    "sharp-organizer-emulator-spade",
     "sharp-organizer-probe-spade",
     "sharp-pc-e500-card-spade",
     "sharp-pc-g850-bus-spade",
@@ -177,6 +178,17 @@ requires-dist = [{ name = "cocotb", specifier = "<2" }]
 name = "sharp-organizer-card-spade"
 version = "0.1.0"
 source = { virtual = "projects/sharp-organizer-card" }
+
+[[package]]
+name = "sharp-organizer-emulator-spade"
+version = "0.1.0"
+source = { virtual = "projects/sharp-organizer-emulator" }
+dependencies = [
+    { name = "pyserial" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyserial", specifier = ">=3.5" }]
 
 [[package]]
 name = "sharp-organizer-probe-spade"

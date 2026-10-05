@@ -1,10 +1,12 @@
-# Sharp organizer card probe for Alchitry Au1
+# Sharp organizer card dumper and SRAM programmer for Alchitry Au1
 
 See [BENCH.md](./BENCH.md) for live tests, captures, and throughput measurements.
 
-This is a removable-card host for the IQ-7000 system bus. It uses Spade and
-the shared UART primitives at 4 Mbaud. The physical target is the **Sharp
-Organizer Host Adapter v1 (2025-05-11)**, the **Level Shifter Element Au1 v2
+This is an active removable-card host for Sharp organizer cards on the
+IQ-7000-style system bus. It dumps ROM and SRAM with metadata for each pin selection,
+deduplicates identical data, and probes and writes SRAM from committed backups.
+It uses Spade and the shared UART primitives at 4 Mbaud. The physical target
+is the **Sharp Organizer Host Adapter v1 (2025-05-11)**, the **Level Shifter Element Au1 v2
 (2025-05-11)**, and the **inverted FFC cable**. The generated XDC uses the
 existing `constraints/targets/sharp-organizer-card.acf` mapping; it has the
 same 43 card-facing signals as the passive `sharp-organizer-card` project.
@@ -13,6 +15,110 @@ The passive project samples an organizer acting as bus master and streams a
 trace over FT600. This probe instead drives selected address and control pins
 as a card host. UART carries commands and pin snapshots. Sequential data can
 use UART, or the Ft Element's FT600 USB interface with OBP5 or newer gateware.
+
+For **card emulation and native IQ-7000/OZ eval-loop experiments**, use
+[sharp-organizer-emulator](../sharp-organizer-emulator/README.md#quick-start).
+For input-only observation of an organizer, use the
+[passive monitor](../sharp-organizer-card/README.md).
+The [organizer tool guide](../../README.md#choose-an-organizer-tool) describes
+which fixture each project uses and how it releases the bus.
+
+## Quick start
+
+Connect the card to the host adapter with the hardware and cable orientation
+above, and load the probe gateware using [Build and verification](#build-and-verification).
+Run the following commands from `gateware/`, replacing the UART port and path
+placeholders. Choose a new output directory and capture ID for each card.
+Keep the default 5 µs read phases until the card's faster timings are qualified.
+For USB3 payloads, see [FT600 payload transport](#ft600-payload-transport).
+
+| Task | Command |
+| --- | --- |
+| Dump ROM/SRAM without writes | `dump-card` |
+| Dump, commit a backup, and probe SRAM | `capture-card` |
+| Archive an existing dump and probe SRAM | `archive-discovery` |
+| Probe SRAM from an existing committed capture | `probe-ram` |
+| Write a confirmed SRAM view | `write-sram` |
+| Check that the bus is released | `park` |
+
+### 1. Dump ROM and SRAM without writes
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
+  --port /dev/cu.YOUR_AU_UART dump-card \
+  --output-dir build/card-discovery --reported-model MODEL
+```
+
+This reads all 16 single-select CI/E2 settings twice across the 20-bit address
+space. The output includes unique binary images and a manifest preserving
+every tested selection, matching data, observed mirrors, and bus-echo results.
+It does not discover card-specific bank registers; see
+[Generic card discovery and archiving](#generic-card-discovery-and-archiving)
+for coverage limits and the output format.
+
+### 2. Commit the backup and probe SRAM
+
+Keep the same card inserted. To archive the dump above without repeating the
+full scan:
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
+  --port /dev/cu.YOUR_AU_UART archive-discovery \
+  --source-dir build/card-discovery \
+  --archive-dir /path/to/git-repo/card-captures --capture-id CAPTURE_ID
+```
+
+The archive directory must be inside a writable Git repository with a
+configured Git identity. The tool commits the ROM/SRAM backup before any SRAM
+write probe. It then tests SRAM candidates with temporary writes, restores
+the original bytes, verifies complete banks against the backups, and commits
+`CAPTURE_ID/write-probes/result.json`. Add `--read-only` to archive the backup
+without write probes.
+
+To perform the dump, archive, and SRAM probes in one command instead:
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
+  --port /dev/cu.YOUR_AU_UART capture-card \
+  --archive-dir /path/to/git-repo/card-captures --capture-id CAPTURE_ID \
+  --reported-model MODEL
+```
+
+### 3. Write confirmed SRAM
+
+Replace `SRAM_VIEW` with a view marked `writable_ram_confirmed` in the committed
+probe result. Create `payload.bin` with the bytes to write, choose their address,
+and use a new transaction directory:
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
+  --port /dev/cu.YOUR_AU_UART write-sram \
+  --capture-dir /path/to/git-repo/card-captures/CAPTURE_ID \
+  --probe-result /path/to/git-repo/card-captures/CAPTURE_ID/write-probes/result.json \
+  --view SRAM_VIEW --address 0x100 --input payload.bin \
+  --result-dir /path/to/git-repo/card-captures/CAPTURE_ID/write-transaction-01
+```
+
+The tool checks the entire live SRAM bank against its committed backup before
+writing, verifies the complete bank afterward, and commits the before/after
+images and transaction record. See [Verified SRAM writes](#verified-sram-writes)
+for subsequent writes using a committed `after.bin` as the expected image.
+
+### 4. Automatic release and card swaps
+
+After every identified CLI command, including a failed capture or write, the
+client automatically releases the outputs and checks for zero drive masks and
+`armed=False`. To check explicitly:
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
+  --port /dev/cu.YOUR_AU_UART park
+```
+
+Once parking is verified, power off the card adapter before swapping cards.
+Parking releases the pins to high impedance; it does not drive them low.
+See [Electrical behavior](#electrical-behavior) for the watchdog and failed
+release procedure.
 
 ## Electrical behavior
 
@@ -307,6 +413,8 @@ Neither a matching fingerprint nor a repeated address period proves a physical
 bank alias. Preserve the experiment beside the originating capture and record
 its conservative references and coverage limits in the archive's documentation.
 
+## Generic card discovery and archiving
+
 `dump-card` scans all 16 single-select CI/E2 states over the full 20-bit
 address range. It reads each view twice, finds its fully observed address
 period, and stores one image per unique byte sequence. Every view remains in
@@ -354,6 +462,8 @@ backup, writes two trial addresses, reads after priming the bus from another
 view, checks other SRAM views for physical aliases, restores both original
 bytes, and compares the entire banks with their backups. A view is
 `writable_ram_confirmed` only if both trials persist and restore.
+
+## Verified SRAM writes
 
 To make an intentional write, supply a committed `write-probes/result.json`
 from the same capture. `write-sram` checks that the live image still matches

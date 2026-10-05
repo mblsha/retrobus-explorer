@@ -1,0 +1,40 @@
+pub struct MemoryRead {
+    host: uint<8>,
+    bus: uint<8>,
+}
+
+#[no_mangle(all)]
+extern entity card_memory_v<#uint ADDR_BITS>(
+    clk: clock,
+    a_addr: uint<ADDR_BITS>,
+    a_data: uint<8>,
+    a_write: bool,
+    a_read: inv uint<8>,
+    b_addr: uint<ADDR_BITS>,
+    b_data: uint<8>,
+    b_write: bool,
+    b_read: inv uint<8>,
+);
+
+/// Synchronous read latency is one clock. The caller arbitrates collisions.
+pub entity card_memory<#uint ADDR_BITS>(
+    clk: clock,
+    host_addr: uint<ADDR_BITS>,
+    host_data: uint<8>,
+    host_write: bool,
+    bus_addr: uint<ADDR_BITS>,
+    bus_data: uint<8>,
+    bus_write: bool,
+) -> MemoryRead
+where
+    ADDR_BITS > 0 else "memory needs address bits",
+    ADDR_BITS <= 16 else "card memory is limited to 64 KiB",
+{
+    let (out, out_w): (MemoryRead, inv MemoryRead) = port();
+    #[verilog_attrs(keep_hierarchy = "yes")]
+    let _ = inst card_memory_v::<ADDR_BITS>(
+        clk, host_addr, host_data, host_write, out_w.host,
+        bus_addr, bus_data, bus_write, out_w.bus,
+    );
+    out
+}

@@ -13,6 +13,7 @@ from pathlib import Path
 
 
 CASES: dict[str, tuple[str, str]] = {
+    "card_memory": ("tb_card_memory", "test_card_memory"),
     "sync_delay": ("tb_sync_delay", "test_sync_delay"),
     "reset_conditioner": ("tb_reset_conditioner", "test_reset_conditioner"),
     "rising_edge": ("tb_rising_edge", "test_rising_edge"),

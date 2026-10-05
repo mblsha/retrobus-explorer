@@ -4,6 +4,43 @@ This directory is the canonical workspace for RetroBus Explorer FPGA gateware.
 Active designs are written in [Spade](https://spade-lang.org/), compile to
 SystemVerilog with Swim, and are characterized with Cocotb and Verilator.
 
+## Choose an organizer tool
+
+| Task | Project and guide | Physical target / bus role | End of operation |
+| --- | --- | --- | --- |
+| Dump ROM/SRAM, discover banks, or program SRAM | [sharp-organizer-probe](projects/sharp-organizer-probe/README.md#quick-start) | Removable card in the Host Adapter; FPGA drives the host bus | Automatically parks and releases |
+| Observe organizer bus traffic | [sharp-organizer-card](projects/sharp-organizer-card/README.md) | Organizer drives the bus; FPGA samples inputs | Organizer bus pins remain inputs |
+| Emulate ROM/SRAM2, run a native eval loop, or exchange FT600 data | [sharp-organizer-emulator](projects/sharp-organizer-emulator/README.md#quick-start) | Card Adapter in the organizer; FPGA supplies selected read data | Remains armed until explicit disarm/reset |
+
+The native emulator targets the IQ-7000-style card bus and OZ-family
+experiments. Check its [qualification record](projects/sharp-organizer-emulator/QUALIFICATION.md)
+before a live run. The Host Adapter and Card Adapter serve different bus roles.
+
+## Sharp organizer card dumping and SRAM programming
+
+The [card dumper and SRAM programmer](projects/sharp-organizer-probe/README.md#quick-start)
+uses the Au1 as an active card host. Its CLI provides `dump-card` for attributed
+ROM/SRAM reads, `capture-card` for Git backups and reversible SRAM presence
+probes, and `write-sram` for verified writes to confirmed SRAM. The project
+guide includes the Spade/nextpnr build, USB-UART and FT600 transport options,
+and automatic bus release behavior. Supply your own Git archive directory.
+
+Use the [passive organizer monitor](projects/sharp-organizer-card/README.md) for
+organizer bus capture; use the probe to drive and read a removable card.
+
+## Sharp organizer native execution card
+
+Use the [sharp-organizer-emulator quick start](projects/sharp-organizer-emulator/README.md#quick-start) for
+native experiments on an organizer: local code memory, a resident eval loop,
+small SRAM2 scratch, live timing controls, and bidirectional FT600 traces and
+host-fed streams. Pin-level simulation and nextpnr builds are verified; the
+organizer's native launch path remains to be qualified. Its
+[CLI reference](projects/sharp-organizer-emulator/README.md#cli-command-reference)
+lists UART image loading, SRAM2 read/write, live timing controls, native jobs,
+FT600 capture/input, and explicit disarm. The
+[execution and streaming guide](projects/sharp-organizer-emulator/README.md#how-execution-and-streaming-work)
+explains the FPGA buffers and mailbox protocol.
+
 ## Layout
 
 - `projects/` contains buildable applications, diagnostics, and examples. Each
@@ -41,7 +78,7 @@ uv run python tools/project_inventory.py --check
 ```
 
 The single `gateware/.venv` supplies Cocotb to every project. Each project's
-`swim.lock` pins the Spade compiler as `[spade].commit`; all fourteen name the
+`swim.lock` pins the Spade compiler as `[spade].commit`; all projects name the
 same release, currently **v0.20.0**. There are no library dependencies.
 [AGENTS.md](./AGENTS.md) has the compiler-bump procedure.
 
@@ -83,6 +120,8 @@ uv run python -m unittest discover \
   -s projects/ft-uart-hex-bridge/test \
   -p 'test_ft_uart_hex_bridge_host.py'
 uv run python -m pytest projects/sharp-pc-e500-card/tests
+uv run --frozen --no-sync python -m unittest discover \
+  -s projects/sharp-organizer-emulator/test_host -v
 ```
 
 For refactors, add characterization tests before changing behavior, then run

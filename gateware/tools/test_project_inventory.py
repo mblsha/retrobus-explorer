@@ -15,6 +15,8 @@ EXPECTED_PATHS = (
     "projects/ft-uart-hex-bridge",
     "projects/pin-tester",
     "projects/sharp-organizer-card",
+    "projects/sharp-organizer-probe",
+    "projects/sharp-organizer-emulator",
     "projects/sharp-pc-e500-card",
     "projects/sharp-pc-g850-bus",
     "projects/sharp-pc-g850-streaming-rom",

@@ -1,0 +1,16 @@
+; Continuous host-fed experiment. Does not return: it stays busy, and the
+; UART loader cannot overwrite it. Reset/re-enter supervisor to end it.
+.ORG @0400@
+poll:
+    MV A, [@3FF7@]
+    AND A, 0x01
+    JPZ poll
+    MV A, [@3FF8@]
+    MV B, A
+wait_tx:
+    MV A, [@3FFA@]
+    CMP A, 0x00
+    JPZ wait_tx
+    MV A, B
+    MV [@3FF1@], A
+    JP poll

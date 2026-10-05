@@ -1,0 +1,58 @@
+; Native SC62015 supervisor. External launch at CPU base+0100 is required.
+; The IQ/OZ stock firmware launch ABI has NOT been qualified.
+; Leaves IMR untouched. Requires a valid host stack and internal bytes 30/31.
+; Experiment entry base+0400 must RETF and preserve supervisor internal bytes.
+.ORG @0100@
+start:
+    MV (0x30), 0x00
+    MV A, 0x00
+    MV [@3FF5@], A
+    MV X, ready
+    CALL emit_string
+idle:
+    MV A, [@3FDF@]
+    CMP A, 0x00
+    JPZ idle
+    MV (0x31), A
+    MV A, (0x30)
+    XOR A, (0x31)
+    JPZ idle
+    MV A, [@3FC0@]
+    CMP A, 0x58
+    JPNZ idle
+    MV A, [@3FC1@]
+    CMP A, 0x52
+    JPNZ idle
+    MV A, [@3FC2@]
+    CMP A, 0x01
+    JPNZ idle
+    MV A, (0x31)
+    MV (0x30), A
+    MV A, 0x01
+    MV [@3FF5@], A
+    MV A, (0x31)
+    MV [@3FF0@], A
+    CALLF @0400@
+    ; Payload may clobber A/B/X/Y. Rebuild every value used below.
+    MV A, (0x31)
+    MV [@3FF2@], A
+    MV A, 0x00
+    MV [@3FF5@], A
+    JP idle
+emit_string:
+    MV A, [X++]
+    CMP A, 0x00
+    JPZ emitted
+    MV B, A
+wait_tx:
+    MV A, [@3FFA@]
+    CMP A, 0x00
+    JPZ wait_tx
+    MV A, B
+    MV [@3FF1@], A
+    JP emit_string
+emitted:
+    RET
+ready:
+    defm "OEM1,READY"
+    defb 0x0d, 0x0a, 0x00
