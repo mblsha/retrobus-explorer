@@ -259,6 +259,46 @@ from their wiring or measured host cycles. A bank plan describes pin-selected
 banks; it does not perform writes
 to internal bank registers.
 
+### Read-only transition experiments
+
+`scripts/transition_probe.py` captures views selected by an ordered preamble.
+Its [example plan](plans/read-transition-example.json) pulses CI while A16 is
+high and MSKROM/OE are asserted, then samples a short window with the controls
+held. It is a hypothesis to test, not a confirmed bank-selection recipe.
+
+```sh
+uv run --frozen python projects/sharp-organizer-probe/scripts/transition_probe.py \
+  --plan projects/sharp-organizer-probe/plans/read-transition-example.json --dry-run
+uv run --frozen python projects/sharp-organizer-probe/scripts/transition_probe.py \
+  --port /dev/cu.YOUR_AU_UART --ft600-serial YOUR_FT600_SERIAL \
+  --plan /path/to/measured-read-sequences.json --output-dir /path/to/new-experiment
+```
+
+Steps are full-mask `address` or `control` commands, or a `hold_us` delay up to
+100 ms. All control states must keep RW high and select at most one memory.
+Data, VPP, VBATT, STNBY and unknown contacts remain input-only. A preamble starts
+from a verified park, initializes controls to `0xff` and address to zero, then
+replays before **every chunk of every pass**. This initialization is recorded;
+parking does not prove a card latch was reset. Use only with the card adapter
+acting as host, not alongside an organizer driving the bus.
+
+Read mode `burst` uses the existing FPGA-timed read cycle, which applies idle
+controls and the chunk address before sampling. Mode `held_select` preserves
+the preamble's final active controls and changes only addresses during a chunk;
+the preamble must end with the requested active control byte. It samples through
+UART snapshots and is much slower, so use short diagnostic windows. Its timing
+is host latency, not `--read-phase-ns`. Both modes park between chunks.
+
+The bundle stores the exact `plan.json`, source hashes, pass/full-window hashes,
+named pin levels, and compressed `observations.jsonl.gz` containing every
+preamble snapshot, held sample and chunk's verified park. Full pass agreement
+is required before saving an image; a failed run retains an explicitly failed
+manifest and diagnostics, with no automatic retry. Identical byte content shares
+a generic image while every selection sequence remains separately attributed.
+Neither a matching fingerprint nor a repeated address period proves a physical
+bank alias. Preserve the experiment beside the originating capture and record
+its conservative references and coverage limits in the archive's documentation.
+
 `dump-card` scans all 16 single-select CI/E2 states over the full 20-bit
 address range. It reads each view twice, finds its fully observed address
 period, and stores one image per unique byte sequence. Every view remains in

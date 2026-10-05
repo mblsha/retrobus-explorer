@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "reported_model": "REPLACE_WITH_PRINTED_LABEL",
+  "profiles": [
+    {
+      "name": "a16-ci-pulse-mskrom",
+      "description": "Example only: A16 high while CI pulses with MSKROM and OE asserted; no confirmed bank selector",
+      "steps": [
+        {"operation": "address", "value": "0x10000"},
+        {"operation": "control", "value": "0xed"},
+        {"operation": "control", "value": "0xe9"},
+        {"operation": "control", "value": "0xed"}
+      ],
+      "read": {
+        "start": 0,
+        "length": 64,
+        "idle_control": "0xff",
+        "active_control": "0xed",
+        "mode": "held_select"
+      }
+    }
+  ]
+}
