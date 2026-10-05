@@ -93,6 +93,8 @@ class Probe:
         self.port = port
         self.protocol: str | None = None
         self.burst_phase_ns = 5000
+        self.burst_request_bytes = BURST_CHUNK
+        self.read_retry_events: list[dict] = []
 
     def __enter__(self) -> Probe:
         return self
@@ -214,6 +216,25 @@ def validate_cycle(idle: int, active: int, mask: int, settle_us: int) -> None:
         raise ValueError("settle-us must be between 0 and 100000")
 
 
+def read_burst(probe: Probe, start: int, count: int, idle: int, active: int, mask: int) -> bytes:
+    """Retry a short read response only after a verified release resynchronizes UART."""
+    for attempt in range(3):
+        probe.unlock()
+        try:
+            return probe.burst(start, count, idle, active, mask)
+        except TimeoutError as exc:
+            if attempt == 2:
+                raise
+            probe.port.reset_input_buffer()
+            probe.park()
+            event = {"start": start, "length": count, "attempt": attempt + 1,
+                     "idle_control": idle, "active_control": active,
+                     "control_drive_mask": mask, "error": str(exc)}
+            probe.read_retry_events.append(event)
+            print(f"UART read retry at 0x{start:05x}, {count} bytes: {exc}", file=sys.stderr, flush=True)
+    raise AssertionError("read retry loop fell through")
+
+
 def cycle(probe: Probe, address: int, idle: int, active: int, mask: int, settle_us: int) -> Snapshot:
     probe.control(idle, mask)
     probe.address(address, 0xFFFFF)
@@ -241,19 +262,21 @@ def run_dump(probe: Probe, args) -> None:
     if not (args.mask & args.idle & args.active & 1):
         raise ValueError("dumps must drive RW high in both phases")
     baseline: bytearray | None = None
+    chunk_bytes = 1 if args.slow else getattr(probe, "burst_request_bytes", BURST_CHUNK)
+    retry_start = len(getattr(probe, "read_retry_events", []))
     try:
         for pass_index in range(args.passes):
             current = bytearray()
-            for offset in range(0, args.length, 1 if args.slow else BURST_CHUNK):
-                count = min(1 if args.slow else BURST_CHUNK, args.length - offset)
-                probe.unlock()
+            for offset in range(0, args.length, chunk_bytes):
+                count = min(chunk_bytes, args.length - offset)
                 if args.slow:
+                    probe.unlock()
                     data = bytes([cycle(
                         probe, args.start + offset, args.idle, args.active, args.mask,
                         args.settle_us,
                     ).data])
                 else:
-                    data = probe.burst(args.start + offset, count, args.idle, args.active, args.mask)
+                    data = read_burst(probe, args.start + offset, count, args.idle, args.active, args.mask)
                 if baseline is not None:
                     for index, value in enumerate(data):
                         if value != baseline[offset + index]:
@@ -287,7 +310,8 @@ def run_dump(probe: Probe, args) -> None:
         "settle_us": args.settle_us if args.slow else None,
         "mode": "slow" if args.slow else "burst",
         "uart_baud": getattr(probe.port, "baudrate", None),
-        "burst_request_bytes": None if args.slow else BURST_CHUNK,
+        "burst_request_bytes": None if args.slow else chunk_bytes,
+        "read_retry_events": getattr(probe, "read_retry_events", [])[retry_start:],
         "burst_phase_us": None if args.slow else probe.burst_phase_ns / 1000,
         "sha256": hashlib.sha256(baseline).hexdigest(),
     }
@@ -459,6 +483,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", help="Au1 USB-UART device path")
     parser.add_argument("--baud", type=int, default=BAUD, help="USB-UART baud rate (default: 5000000)")
+    parser.add_argument("--burst-bytes", type=number, default=BURST_CHUNK,
+                        help="maximum bytes per sequential UART read request, 1..65535")
     parser.add_argument("--read-phase-ns", type=int, default=5000,
                         help="each burst read phase in ns, 200..5000 in 50 ns steps")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -522,6 +548,8 @@ def main() -> None:
     write_test.add_argument("--sram", type=int, choices=(1, 2), required=True)
     write_test.add_argument("--address", type=number)
     args = parser.parse_args()
+    if not 1 <= args.burst_bytes <= BURST_CHUNK:
+        parser.error("--burst-bytes must be from 1 through 65535")
     if args.command == "dump-banks":
         from bank_dump import describe_plan, load_plan, run_plan
 
@@ -533,6 +561,7 @@ def main() -> None:
         parser.error("--port is required for hardware commands")
     with open_port(args.port, args.baud) as port, Probe(port) as probe:
         probe.identify()
+        probe.burst_request_bytes = args.burst_bytes
         if args.read_phase_ns != 5000:
             probe.set_read_timing(args.read_phase_ns)
         if args.command == "identify":

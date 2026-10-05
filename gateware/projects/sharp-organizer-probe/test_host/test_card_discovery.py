@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from card_discovery import Selection, address_period, capture, selections, volume_header
+from card_discovery import Selection, address_period, capture, read, selections, volume_header
 from card_write import commit_capture, commit_directory, probe_ram, verify_committed_capture, write_sram
 from organizer_probe import Snapshot
 
@@ -27,6 +27,8 @@ class MemoryProbe:
         self.control_value = 0xff
         self.control_mask = 0
         self.writes = []
+        self.burst_calls = []
+        self.read_retry_events = []
 
     def unlock(self):
         self.armed = True
@@ -59,6 +61,7 @@ class MemoryProbe:
                         self.control_mask if self.armed else 0, self.armed)
 
     def burst(self, start, count, idle, active, mask):
+        self.burst_calls.append((start, count))
         return bytes(self._byte(start + offset, active) for offset in range(count))
 
     def write_profiled_byte(self, address, value, selected):
@@ -71,6 +74,13 @@ class MemoryProbe:
 
 
 class DiscoveryTest(unittest.TestCase):
+    def test_discovery_reads_respect_request_limit(self):
+        probe = MemoryProbe()
+        probe.burst_request_bytes = 17
+        self.assertEqual(read(probe, 3, 40, 0x7d), bytes(range(3, 43)))
+        self.assertEqual(probe.burst_calls, [(3, 17), (20, 17), (37, 6)])
+        self.assertFalse(probe.armed)
+
     def test_period_and_header_are_hints(self):
         self.assertEqual(address_period(bytes(range(4)) * 64), 4)
         self.assertEqual(address_period(b"\xa5" * 256), 1)
