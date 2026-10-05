@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -55,7 +56,13 @@ def main() -> None:
         "synthesis",
         [
             str(tc / "bin/yosys"), "-p",
-            f"read_verilog -sv {PROJECT / 'build/spade.sv'} {PROJECT / 'verilog/main_wrapper.v'}; "
+            f"read_verilog -sv {PROJECT / 'build/spade.sv'} {PROJECT / 'verilog/main_wrapper.v'} "
+            f"{GATEWARE / 'lib/shared-components/verilog/fifo_v.v'} "
+            f"{GATEWARE / 'lib/shared-components/verilog/ft_u16_v.v'}; "
+            # The shared FT model has Z on its internal read-side outputs.
+            # Flatten before tri-state lowering; keep real connector IOBs.
+            "hierarchy -top main; setattr -unset keep_hierarchy; "
+            "setattr -mod -unset keep_hierarchy; flatten; tribuf -logic; "
             "synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top main; "
             "check -assert; write_json design.json",
         ],
@@ -65,7 +72,7 @@ def main() -> None:
     for port in INPUT_ONLY:
         if design["ports"][port]["direction"] != "input":
             raise RuntimeError(f"protected port {port} is not input-only")
-    for port in ("addr", "data", "conn_rw", "conn_oe", "conn_ci", "conn_e2", "conn_mskrom", "conn_sram1", "conn_sram2", "conn_eprom"):
+    for port in ("addr", "data", "conn_rw", "conn_oe", "conn_ci", "conn_e2", "conn_mskrom", "conn_sram1", "conn_sram2", "conn_eprom", "ft_data", "ft_be"):
         if design["ports"][port]["direction"] != "inout":
             raise RuntimeError(f"drive-capable port {port} unexpectedly changed direction")
     run_stage(
@@ -81,13 +88,17 @@ def main() -> None:
         env=os.environ.copy(),
     )
     timing = (output / "route.log").read_text()
-    final = timing.split("Max frequency for clock")[-1]
-    if "(PASS at 100.00 MHz)" not in final:
+    final_clocks = {}
+    for name, frequency, outcome in re.findall(
+            r"Max frequency for clock\s+'([^']+)': ([0-9.]+) MHz \((PASS|FAIL) at 100.00 MHz\)", timing):
+        final_clocks[name] = {"mhz": float(frequency), "outcome": outcome}
+    if len(final_clocks) < 2 or any(clock["outcome"] != "PASS" for clock in final_clocks.values()):
         raise RuntimeError("post-route timing did not pass at 100 MHz")
     verified_bits = pack_and_verify_bitstream(tc, output, part=PART, env=os.environ.copy())
     result = {
         "part": PART,
         "clock_mhz": 100,
+        "post_route_clocks": final_clocks,
         "seed": args.seed,
         "input_only_ports": list(INPUT_ONLY),
         "verified_configuration_bits": verified_bits,

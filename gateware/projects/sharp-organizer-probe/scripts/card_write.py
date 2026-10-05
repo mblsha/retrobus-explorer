@@ -143,8 +143,8 @@ def _physical_alias_groups(probes: list[dict]) -> list[list[str]]:
 
 def probe_ram(probe: Probe, capture_dir: Path, result_dir: Path) -> dict:
     """Try reversible writes only to stable, backed-up SRAM-select views."""
-    if probe.protocol != "OBP4":
-        raise RuntimeError("automatic SRAM probes require OBP4 gateware")
+    if probe.protocol not in ("OBP4", "OBP5"):
+        raise RuntimeError("automatic SRAM probes require OBP4 or newer gateware")
     manifest = verify_committed_capture(capture_dir)
     verify_live_identity(probe, capture_dir, manifest)
     if result_dir.exists():
@@ -240,8 +240,8 @@ def probe_ram(probe: Probe, capture_dir: Path, result_dir: Path) -> dict:
 def write_sram(probe: Probe, capture_dir: Path, probe_result: Path, view_name: str,
                address: int, replacement: bytes, result_dir: Path,
                expected_image: Path | None = None) -> dict:
-    if probe.protocol != "OBP4":
-        raise RuntimeError("profiled SRAM writes require OBP4 gateware")
+    if probe.protocol not in ("OBP4", "OBP5"):
+        raise RuntimeError("profiled SRAM writes require OBP4 or newer gateware")
     manifest = verify_committed_capture(capture_dir)
     view = _view(manifest, view_name)
     if view["memory_select"] not in ("SRAM1", "SRAM2"):

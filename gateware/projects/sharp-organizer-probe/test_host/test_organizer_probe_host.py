@@ -5,6 +5,7 @@ import subprocess
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from organizer_probe import Probe, Snapshot, cycle, read_burst, run_dump, validate_cycle, verify_committed_backup
@@ -15,6 +16,12 @@ class FakePort:
         self.responses = list(responses)
         self.pending = b""
         self.requests = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
     def write(self, request):
         self.requests.append(request)
@@ -37,6 +44,68 @@ RELEASED_SNAPSHOT = b"S" + bytes(15)
 
 
 class ProbeHostTest(unittest.TestCase):
+    def test_ft600_burst_ack_is_uart_and_payload_uses_ft600(self):
+        fake = FakePort([b"OBP5\n", b"F"])
+        ft600 = Mock()
+        ft600.read_payload.return_value = b"abc"
+        probe = Probe(fake, ft600)
+        probe.identify()
+        self.assertEqual(probe.burst(0x123, 3, 0xff, 0x7d, 0xff), b"abc")
+        self.assertEqual(fake.requests[-1], b"F\x00\x01\x23\x00\x03\xff\x7d\xff")
+        ft600.read_payload.assert_called_once_with(3, 5000)
+
+    def test_ft600_burst_rejects_older_gateware_before_request(self):
+        fake = FakePort([])
+        probe = Probe(fake, Mock())
+        probe.protocol = "OBP4"
+        with self.assertRaisesRegex(RuntimeError, "OBP5"):
+            probe.burst(0, 1, 0xff, 0x7d, 0xff)
+        self.assertEqual(fake.requests, [])
+
+    def test_ft600_chunk_limit_is_applied_and_overflow_never_sent(self):
+        fake = FakePort([])
+        probe = Probe(fake, Mock())
+        probe.protocol = "OBP5"
+        self.assertEqual(probe.burst_request_bytes, 8191)
+        probe.burst_request_bytes = 4096
+        self.assertEqual(probe.burst_request_bytes, 4096)
+        probe.burst_request_bytes = 65535
+        self.assertEqual(probe.burst_request_bytes, 8191)
+        with self.assertRaisesRegex(ValueError, "8191"):
+            probe.burst(0, 8192, 0xff, 0x7d, 0xff)
+        self.assertEqual(fake.requests, [])
+
+    def test_ft600_failures_never_replay_a_possibly_queued_burst(self):
+        for acknowledgement, error in ((b"", TimeoutError), (b"F", OSError)):
+            with self.subTest(acknowledgement=acknowledgement):
+                fake = FakePort([b"U", acknowledgement])
+                ft600 = Mock()
+                ft600.read_payload.side_effect = OSError("bad FT payload")
+                probe = Probe(fake, ft600)
+                probe.protocol = "OBP5"
+                with self.assertRaises(error):
+                    read_burst(probe, 0, 3, 0xff, 0x7d, 0xff)
+                self.assertEqual(len(fake.requests), 2)
+                self.assertEqual(probe.read_retry_events, [])
+
+    def test_cli_explicitly_restores_default_hardware_read_timing(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from organizer_probe import main
+
+        fake = FakePort([b"OBP4\n", b"T", b"U", b"R\x10", b"U", b"R\x10",
+                         b"Z", b"Z", RELEASED_SNAPSHOT])
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "read.bin"
+            argv = ["organizer_probe.py", "--port", "fake", "dump", "--length", "1",
+                    "--idle", "0xff", "--active", "0x7d", "--mask", "0xff",
+                    "--output", str(output)]
+            with patch("sys.argv", argv), patch("organizer_probe.open_port", return_value=fake):
+                main()
+            self.assertEqual(fake.requests[:2], [b"I", b"T\x64"])
+            self.assertEqual(json.loads(output.with_suffix(".bin.json").read_text())["burst_phase_us"], 5.0)
+
     def test_short_read_retries_same_range_after_verified_release(self):
         fake = FakePort([b"U", b"R\x10", b"Z", RELEASED_SNAPSHOT, b"U", b"R\x10\x11"])
         probe = Probe(fake)

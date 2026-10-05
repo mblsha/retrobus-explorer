@@ -1,12 +1,12 @@
 """UART integration and fail-released pin behavior of the Au1 card probe."""
 
 import cocotb
-from cocotb.triggers import FallingEdge, Timer
+from cocotb.triggers import FallingEdge, RisingEdge, Timer
 
 from cocotb_helpers import start_clock, tick
 
 
-BIT_NS = 200
+BIT_NS = 250
 
 
 async def send_byte(dut, byte):
@@ -43,6 +43,9 @@ async def command(dut, payload, response_len):
 
 async def initialize(dut):
     start_clock(dut.clk)
+    start_clock(dut.ft_clk)
+    dut.ft_rxf.value = 1
+    dut.ft_txe.value = 1
     dut.rst_n.value = 0
     dut.usb_rx.value = 1
     dut.addr_host.value = 0x12345
@@ -73,7 +76,7 @@ def released(dut):
 async def uart_probe_and_watchdog(dut):
     await initialize(dut)
     released(dut)
-    assert await command(dut, b"I", 5) == b"OBP4\n"
+    assert await command(dut, b"I", 5) == b"OBP5\n"
     snap = await command(dut, b"?", 16)
     assert snap == bytes.fromhex("53 01 23 45 a6 82 35 00 00 00 00 00 00 00 00 00")
     assert await command(dut, b"A\x01\x23\x45\x0f\xff\xff", 1) == b"!"
@@ -194,3 +197,90 @@ async def profiled_sram_write_checks_select_and_meta_pins(dut):
     assert all(control & 0x92 == 0x92 for _, _, _, control, _ in driven)
     assert any(control == 0xd2 for _, _, _, control, _ in driven)
     assert all(control in (0xff, 0xd3, 0xd2) for _, _, _, control, _ in driven)
+
+
+@cocotb.test()
+async def ft600_buffers_slow_reads_before_transmitting(dut):
+    await initialize(dut)
+    dut.ft_txe.value = 0
+    async def card_rom():
+        while True:
+            dut.data_host.value = (int(dut.addr_drive_debug.value) ^ 0x5A) & 0xFF
+            await Timer(100, units="ns")
+    async def receive_words():
+        observed = []
+        for _ in range(100000):
+            await FallingEdge(dut.ft_clk)
+            await Timer(1, units="ps")
+            write = int(dut.ft_oe.value) and not int(dut.ft_wr.value)
+            word, be = int(dut.ft_data.value), int(dut.ft_be.value)
+            await RisingEdge(dut.ft_clk)
+            if write:
+                assert be == 3
+                released(dut)
+                observed.append(word)
+                if len(observed) == 32:
+                    return observed
+        raise AssertionError("slow FT600 stream timed out")
+    model = cocotb.start_soon(card_rom())
+    response = cocotb.start_soon(receive_words())
+    assert await command(dut, b"UREAD", 1) == b"U"
+    assert await command(dut, b"F\x00\x01\x23\x00\x20\xff\x7d\xff", 1) == b"F"
+    assert await response == [0xA500 | (((0x123+i) ^ 0x5A) & 0xFF) for i in range(32)]
+    released(dut)
+    model.kill()
+
+
+@cocotb.test()
+async def ft600_full_chunk_releases_before_usb_and_rejects_overflow(dut):
+    await initialize(dut)
+    assert await command(dut, b"T\x04", 1) == b"T"
+    async def card_rom():
+        while True:
+            dut.data_host.value = (int(dut.addr_drive_debug.value) ^ 0x5A) & 0xFF
+            await Timer(100, units="ns")
+    model = cocotb.start_soon(card_rom())
+    count = 8191
+    request = b"F\x00\x00\x00" + count.to_bytes(2, "big") + b"\xff\x7d\xff"
+    assert await command(dut, request, 1) == b"!"
+    released(dut)
+    assert await command(dut, b"UREAD", 1) == b"U"
+    oversized = b"F\x00\x00\x00\x20\x00\xff\x7d\xff"
+    assert await command(dut, oversized, 1) == b"!"
+    assert int(dut.addr_oe_debug.value) == int(dut.control_oe_debug.value) == 0
+    assert await command(dut, request, 1) == b"F"
+    for _ in range(500):
+        await Timer(10000, units="ns")
+        if not int(dut.armed_debug.value):
+            break
+    else:
+        raise AssertionError("FT600 chunk did not complete")
+    await Timer(50000, units="ns")
+    released(dut)
+    assert int(dut.ft_wr.value) == 1
+    dut.ft_txe.value = 0
+    observed = []
+    for _ in range(200000):
+        await FallingEdge(dut.ft_clk)
+        await Timer(1, units="ps")
+        write = int(dut.ft_oe.value) and not int(dut.ft_wr.value)
+        word = int(dut.ft_data.value)
+        be = int(dut.ft_be.value)
+        await RisingEdge(dut.ft_clk)
+        await Timer(1, units="ps")
+        if write:
+            assert be == 3
+            observed.append(word)
+            if len(observed) == count:
+                break
+    assert observed == [0xA500 | ((i ^ 0x5A) & 0xFF) for i in range(count)]
+    await tick(dut.clk, 4)
+    released(dut)
+    # A stopped USB consumer cannot keep the completed card read armed.
+    dut.ft_txe.value = 1
+    assert await command(dut, b"UREAD", 1) == b"U"
+    assert await command(dut, request, 1) == b"F"
+    await Timer(5000000, units="ns")
+    released(dut)
+    assert await command(dut, b"Z", 1) == b"Z"
+    model.kill()

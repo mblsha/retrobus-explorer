@@ -183,3 +183,138 @@ expected state, restored `0x9f`, and verified the original 32 KiB SHA-256
 `7696709926e45a3af54e583f03e0bb6f1ea54fc626890529aa548b9948a7dad1`.
 The restore transaction is committed as `d3fa389`. A final bus snapshot
 showed zero address/control drive masks and disarmed state.
+
+## PA-7C18 speed experiments — 2026-10-05
+
+A conservative PA-7C18 capture scanned all 16 single-select CI/E2 views over
+1 MiB on two passes, at 5 Mbaud, 5 µs phases and 8 KiB requests. Including
+backup commits and reversible SRAM probes it took 509.5 seconds. The unique
+memory data was 32 KiB MSKROM and 8 KiB SRAM2; each repeated throughout its
+full 1 MiB scan in all four CI/E2 states. EPROM and SRAM1 tracked bus priming.
+
+The read-only benchmark compared whole ROM/SRAM images at 5000, 1000, 500,
+and 200 ns against that committed capture. Every short qualification matched.
+Each completed throughput case then checked 4 MiB: two full 1 MiB mirror
+passes for both ROM and SRAM, comparing every byte against the backup.
+
+| Baud | Phase | Request bytes | Elapsed for 4 MiB | KiB/s | Recovered short reads |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 5,000,000 | 5000 ns | 65,535 | 44.093 s | 92.9 | 0 |
+| 5,000,000 | 1000 ns | 32,768 | 12.598 s | 325.1 | 0 |
+| 5,000,000 | 1000 ns | 65,535 | 10.636 s | 385.1 | 0 |
+| 5,000,000 | 500 ns | 8,192 | 24.683 s | 165.9 | 0 |
+| 5,000,000 | 500 ns | 32,768 | 15.834 s | 258.7 | 3 |
+| 5,000,000 | 500 ns | 65,535 | 11.781 s | 347.7 | 1 |
+| 4,000,000 | 1000 ns | 65,535 | 12.764 s | 320.9 | 0 |
+| 4,000,000 | 500 ns | 65,535 | 13.877 s | 295.2 | 1 |
+| 4,000,000 | 200 ns | 65,535 | 12.793 s | 320.2 | 0 |
+
+At 5 Mbaud/200 ns the long benchmark stalled after a recovered short read.
+A subsequent complete capture at 5 Mbaud/1000 ns also stalled in view 11,
+after three recovered short reads. Neither failed discovery was published,
+committed as a backup, or used for writes. The link then returned zero bytes
+until a USB reset targeted only the Au1's FTDI serial restored it; a parked
+snapshot was verified afterward. These results reject the 5 Mbaud fast
+profile for this bench despite its successful short benchmark. Delivered
+bytes matched the backup; the experiment does not isolate whether the
+transport failure originates in FPGA UART, USB bridge, driver, or host.
+
+The 4 Mbaud OBP4 variant passed all four Cocotb tests. Nextpnr seeds 2–6
+missed the 100 MHz target; seed 7 passed at 102.29 MHz. The bitstream decoded
+51,391 configuration bits and its SHA-256 is
+`2554ffe371f91a97ed1ed5c5d34906e2d78162d86268516649e248a172e4bab4`.
+All complete ROM/SRAM images matched at each tested phase. Shorter phases
+provided no throughput gain; the 1 µs profile was chosen for the full capture.
+
+The UART path has a one-byte read pipeline. UART transmission overlaps the next card read and gates progress
+when busy. At 4 Mbaud, 8N1 has a 400,000 byte/s payload ceiling; the observed
+320.9 KiB/s is about 82% of it. A block buffer would support retained chunks
+and retransmission but cannot increase sustained UART bandwidth. FPGA
+hashing/comparison could reduce duplicate traffic in a future protocol.
+
+Complete 4 Mbaud/1000 ns captures also failed: the 65,535-byte run stalled
+in view 11 after 82.65 seconds, and the 32 KiB run stalled in view 6 after
+48.66 seconds. Neither produced an archival capture or reached a write probe.
+Thus the short 4 MiB benchmarks do not qualify sustained UART capture.
+
+A first project-local libftdi prototype incorrectly treated status-only USB
+packets as the end of a UART response. Its apparent short reads are invalid
+transport evidence. The implementation now reuses the existing
+`ethernet-diagnostic` backend, which continues reading those packets until
+the requested byte count or deadline.
+
+The mature backend's complete 4 Mbaud/1000 ns UART capture still failed in
+view 13 after 83.42 seconds, with a final 64,430/65,535-byte response after
+two retries. Completed memory scans matched their references. This was a
+real short UART response, unlike the rejected prototype's false EOF result.
+No backup was published and no write probe ran. Direct libftdi alone did not
+qualify sustained high-rate UART capture.
+
+## OBP5 buffered FT600 qualification — 2026-10-05
+
+The connected element was confirmed as Ft/F1 v1 for Au1. It enumerated as an
+FT600 with serial `000000000001` and SuperSpeed flag set. Its existing
+configuration was read, not changed: 100 MHz FIFO clock, FT245 mode, one
+bidirectional channel. The level shifter mapping leaves the Ft pins available.
+The implementation reuses `au_ft_tap_u16`, its shared asynchronous FIFO/vendor
+HDL, the repository's D3XX bindings, and the existing direct-UART backend.
+
+The initial FT prototype lost or malformed words, and a trial with
+falling-edge output registers returned no payload. Buffering entire chunks
+alone still gave 8,262/16,382 bytes in an 8 KiB SRAM request. Those variants
+were rejected. The final connector wrapper drives the fixed `0xa5` upper byte
+and both byte enables as constants; the FIFO carries sampled low bytes.
+With this change, both complete SRAM passes, all timing qualifications and the
+complete capture passed the exact word count, marker and memory checks.
+The experiment does not isolate the cause of the earlier metadata failures.
+
+OBP5 command `F` buffers at most 8,191 sampled card bytes in the shared
+8,192-word FIFO. The card is released before the FT clock consumes the chunk.
+USB backpressure then retains data without leaving card outputs enabled.
+UART remains at 4 Mbaud for commands and acknowledgements. FT reads are not
+automatically replayed; failures abort and a new operation parks and drains
+stale payload before reading. Generic card timing remains 5 µs.
+
+The seed-7 Spade/nextpnr build passed both 100 MHz clocks: core 109.15 MHz,
+FT 161.73 MHz. The bitstream decode checked 60,679 configuration bits;
+SHA-256 `934e925600aef6da99aa0b6a573b23171d58222f774ce6749b9db409a53e4be5`.
+All six Cocotb tests passed, including the full 8,191-word blocked-USB test
+and release before transmission. All 34 host tests passed.
+
+After the earlier USB reconnect, a new two-pass 5 µs SRAM read differed from
+the original snapshot. It was committed before any write probe. No SRAM
+writes had run between the original capture and this read; the cause of the
+change was not isolated. The current 8 KiB SRAM SHA-256 is
+`3599e39805600f5e088832b10d523a6e6eda49f4347b3a4519d959f02c532e91`.
+All subsequent SRAM qualifications compare against this current snapshot.
+The ROM still matches the original 32 KiB image, SHA-256
+`d276e259045216fc6f93b7939ec7fabfc12d000f9b427cd10c863166400fa8d6`.
+
+Each timing first checked two complete canonical ROM/SRAM passes, then two
+full 1 MiB mirrored passes for each memory (4 MiB per row). Every byte matched
+the committed references, including the conservative 5 µs full mirror check.
+
+| FT read phase | Chunk bytes | Elapsed for 4 MiB | KiB/s | Retries |
+| ---: | ---: | ---: | ---: | ---: |
+| 5000 ns | 8191 | 43.138 s | 95.0 | 0 |
+| 1000 ns | 8191 | 10.494 s | 390.3 | 0 |
+| 500 ns | 8191 | 6.446 s | 635.4 | 0 |
+| 200 ns | 8191 | 2.590 s | 1581.7 | 0 |
+
+The successful full capture used 200 ns phases: all 16 views, two full 1 MiB
+passes each (32 MiB total), committed backup, eight SRAM presence outcomes,
+and reversible write/restore trials finished in **33.192 seconds**. No framing
+error, timeout or retry occurred. All four MSKROM views match the conservative
+ROM and all four SRAM2 views match the current committed SRAM snapshot.
+EPROM and SRAM1 still track bus priming; their retained one-byte echo differs
+from the earlier echo value and is not a memory image. Two trials in each
+SRAM2 view confirmed the four-view physical alias group and restored every
+8 KiB image. A separate two-pass 5 µs read again matched current SRAM exactly.
+
+This is about 15.4 times faster than the 509.5-second conservative capture.
+One full 1 MiB pass at 200 ns took 0.59–0.68 seconds in the benchmark.
+The 1.54 MiB/s effective payload exceeds the UART ceiling by a factor of 4.05;
+USB-UART is therefore no longer the payload bottleneck. Card cycles, chunk
+command overhead and host work remain. The run does not measure the maximum
+FT600 USB throughput, qualify other cards, or cover card-specific bank
+registers. The final probe is parked with zero drive masks and 5 µs timing.

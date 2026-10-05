@@ -3,6 +3,14 @@ module main (
     input wire rst_n,
     input wire usb_rx,
     output wire usb_tx,
+    input wire ft_clk,
+    input wire ft_rxf,
+    input wire ft_txe,
+    inout wire [15:0] ft_data,
+    inout wire [1:0] ft_be,
+    output wire ft_rd,
+    output wire ft_wr,
+    output wire ft_oe,
     output wire [7:0] led,
     inout wire [19:0] addr,
     inout wire [7:0] data,
@@ -47,6 +55,12 @@ module main (
     wire [7:0] data_in;
     wire [7:0] control_in;
     wire [6:0] protected_in;
+    wire [15:0] ft_data_drive;
+    wire [1:0] ft_be_drive;
+    // OBP5 transmits only full words with fixed metadata. Format those bits
+    // at the connector instead of retaining constants in the payload FIFO.
+    assign ft_data = ft_oe ? {8'ha5, ft_data_drive[7:0]} : 16'hzzzz;
+    assign ft_be = ft_oe ? 2'b11 : 2'bzz;
 `ifdef COCOTB_SIM
     assign addr_in = addr_host;
     assign data_in = data_host;
@@ -90,6 +104,10 @@ module main (
 
     main_core core (
         .clk(clk), .rst_n(rst_n), .usb_rx(usb_rx), .usb_tx(usb_tx), .led(led),
+        .ft_clk(ft_clk), .ft_rxf(ft_rxf), .ft_txe(ft_txe),
+        .ft_data(ft_data), .ft_be(ft_be),
+        .ft_data_drive(ft_data_drive), .ft_be_drive(ft_be_drive),
+        .ft_rd(ft_rd), .ft_wr(ft_wr), .ft_oe(ft_oe),
         .addr(addr_in), .data(data_in),
         .conn_rw(control_in[0]), .conn_oe(control_in[1]),
         .conn_ci(control_in[2]), .conn_e2(control_in[3]),
