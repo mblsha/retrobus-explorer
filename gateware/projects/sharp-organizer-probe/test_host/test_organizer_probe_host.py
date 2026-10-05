@@ -33,6 +33,16 @@ SNAPSHOT = bytes.fromhex("53 00 01 23 a5 80 00 00 01 23 0f ff ff 80 80 01")
 
 
 class ProbeHostTest(unittest.TestCase):
+    def test_adjustable_read_timing_framing(self):
+        fake = FakePort([b"T"])
+        probe = Probe(fake)
+        probe.protocol = "OBP3"
+        probe.set_read_timing(1000)
+        self.assertEqual(fake.requests, [b"T\x14"])
+        self.assertEqual(probe.burst_phase_ns, 1000)
+        with self.assertRaisesRegex(ValueError, "50 ns steps"):
+            probe.set_read_timing(1025)
+
     def test_cycle_wire_order_and_decode(self):
         fake = FakePort([b"U", b"C", b"A", b"C", SNAPSHOT, b"C", b"Z"])
         probe = Probe(fake)

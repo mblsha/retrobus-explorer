@@ -1,8 +1,7 @@
 use shared_components::{
-    config::{au_usb_uart_rx, au_usb_uart_tx8_req_tap},
     message_stream::{TxReq8, tx_req_none},
     primitives::{reset_conditioner, sync_bundle},
-    serial::UartLineBusy,
+    serial::{UartLineBusy, uart_rx, uart_tx_tap},
 };
 
 type Address = uint<20>;
@@ -37,6 +36,7 @@ struct ProbeState {
     burst_idle: uint<8>,
     burst_active: uint<8>,
     burst_mask: uint<8>,
+    burst_phase_last: uint<9>,
     write_data_byte: uint<8>,
     write_selected: uint<8>,
     write_phase: uint<3>,
@@ -91,6 +91,7 @@ impl Default for ProbeState {
             burst_idle: 0,
             burst_active: 0,
             burst_mask: 0,
+            burst_phase_last: 499,
             write_data_byte: 0,
             write_selected: 0xff,
             write_phase: 0,
@@ -185,8 +186,9 @@ impl ProbeState {
         let control_done = accept && parser == 12;
         let burst_done = accept && parser == 20;
         let write_done = accept && parser == 25;
+        let timing_done = accept && parser == 26;
         let unknown = idle && rx_byte != b'U' && rx_byte != b'A' &&
-            rx_byte != b'C' && rx_byte != b'R' && rx_byte != b'W' && rx_byte != b'Z' &&
+            rx_byte != b'C' && rx_byte != b'R' && rx_byte != b'W' && rx_byte != b'T' && rx_byte != b'Z' &&
             rx_byte != b'?' && rx_byte != b'I';
         let effective_armed = self.armed && !expired;
         let addressed = address_done && effective_armed;
@@ -200,6 +202,7 @@ impl ProbeState {
             else if rx_byte == b'C' { 11 }
             else if rx_byte == b'R' { 13 }
             else if rx_byte == b'W' { 21 }
+            else if rx_byte == b'T' { 26 }
             else { 0 }
         } else if parser == 1 {
             if rx_byte == b'R' { 2 } else { 0 }
@@ -207,7 +210,7 @@ impl ProbeState {
             if rx_byte == b'E' { 3 } else { 0 }
         } else if parser == 3 {
             if rx_byte == b'A' { 4 } else { 0 }
-        } else if parser == 4 || parser == 10 || parser == 12 || parser == 20 || parser == 25 {
+        } else if parser == 4 || parser == 10 || parser == 12 || parser == 20 || parser == 25 || parser == 26 {
             0
         } else {
             trunc(parser + 1)
@@ -243,9 +246,14 @@ impl ProbeState {
         let write_start = write_done && effective_armed && address_value < 0x100000 &&
             (rx_byte == 1 || rx_byte == 2);
         let write_reject = write_done && !write_start;
+        // One timing unit is 50 ns at 100 MHz. Keep the 5 us default and
+        // accept explicit read phases from 200 ns through 5 us while disarmed.
+        let timing_valid = timing_done && !effective_armed && rx_byte >= 4 && rx_byte <= 100;
+        let timing_units: uint<9> = zext(rx_byte);
+        let timing_cycles: uint<9> = trunc((timing_units << 2) + timing_units);
         let selected_control: uint<8> = if rx_byte == 1 { 0xdf } else { 0xbf };
-        let setup_done = self.burst_phase == 1 && self.burst_timer == 499;
-        let sample_done = self.burst_phase == 2 && self.burst_timer == 499;
+        let setup_done = self.burst_phase == 1 && self.burst_timer == self.burst_phase_last;
+        let sample_done = self.burst_phase == 2 && self.burst_timer == self.burst_phase_last;
         let burst_send = self.burst_phase == 3 && !tx_busy && self.reply_kind == 0;
         let burst_last = burst_send && self.burst_remaining == 1;
         let write_setup_done = self.write_phase == 1 && self.write_timer == 499;
@@ -256,7 +264,7 @@ impl ProbeState {
         let new_reply_kind: uint<2> = if snapshot { 2 }
             else if identify { 3 }
             else if release || unlock || unlock_error || address_done || control_done ||
-                burst_done || write_reject || write_finish || unknown { 1 }
+                burst_done || write_reject || write_finish || timing_done || unknown { 1 }
             else { 0 };
         let new_reply_ack: uint<8> = if release { b'Z' }
             else if unlock { b'U' }
@@ -264,6 +272,7 @@ impl ProbeState {
             else if controlled { b'C' }
             else if burst_start { b'R' }
             else if write_finish { b'W' }
+            else if timing_valid { b'T' }
             else { b'!' };
         let sending = self.reply_kind != 0 && !tx_busy;
         let next_reply_pos_wide: uint<6> = zext(self.reply_pos) + 1;
@@ -310,6 +319,7 @@ impl ProbeState {
                 burst_idle: if burst_start { self.control_value_byte } else { self.burst_idle },
                 burst_active: if burst_start { self.burst_active_byte } else { self.burst_active },
                 burst_mask: if burst_start { rx_byte } else { self.burst_mask },
+                burst_phase_last: if timing_valid { trunc(timing_cycles - 1) } else { self.burst_phase_last },
                 write_data_byte: if accept && parser == 24 { rx_byte } else { self.write_data_byte },
                 write_selected: if write_start { selected_control } else { self.write_selected },
                 write_phase: next_write_phase,
@@ -412,7 +422,7 @@ entity main_core(
     armed_debug: inv bool,
 ) {
     let rst = inst reset_conditioner(clk, !rst_n);
-    let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
+    let rx = inst uart_rx(clk, rst, usb_rx, 20, false, 1);
     let addr_sync_bits = inst sync_bundle::<2, 20>(clk, addr.as_bits());
     let data_sync_bits = inst sync_bundle::<2, 8>(clk, data.as_bits());
     let control_sync_bits = inst sync_bundle::<2, 8>(
@@ -442,8 +452,9 @@ entity main_core(
         watchdog_limit,
     );
     reg(clk) state: ProbeState reset(rst: ProbeState::default()) = step.next_state;
-    let _tx = inst au_usb_uart_tx8_req_tap(
-        clk, rst, false, step.tx_req, uart_w.line, uart_w.busy,
+    let _tx = inst uart_tx_tap::<100_000_000, 5_000_000, 8>(
+        clk, rst, false, step.tx_req.byte, step.tx_req.valid && !uart.busy,
+        uart_w.line, uart_w.busy,
     );
     let active = state.armed && state.watchdog < watchdog_limit;
     set usb_tx = uart.line;

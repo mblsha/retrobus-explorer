@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from organizer_probe import (
-    CONTROL_BITS, PROTECTED_BITS, Probe, Snapshot, bounded, cycle, run_dump,
+    BURST_CHUNK, CONTROL_BITS, PROTECTED_BITS, Probe, Snapshot, bounded, cycle, run_dump,
     validate_cycle,
 )
 
@@ -185,7 +185,9 @@ def run_plan(probe: Probe, plan: BankPlan, output_dir: Path, passes: int = 2,
             "captured_utc": datetime.now(timezone.utc).isoformat(),
             "passes": passes,
             "mode": "slow" if slow else "burst",
-            "burst_phase_us": None if slow else 5,
+            "uart_baud": getattr(probe.port, "baudrate", None),
+            "burst_request_bytes": None if slow else BURST_CHUNK,
+            "burst_phase_us": None if slow else probe.burst_phase_ns / 1000,
             "source_plan": "plan.json",
             "banks": [],
         })

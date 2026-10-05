@@ -19,8 +19,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-BAUD = 1_000_000
-BURST_CHUNK = 32768
+BAUD = 5_000_000
+BURST_CHUNK = 65535
 CONTROL_BITS = "RW OE CI E2 MSKROM SRAM1 SRAM2 EPROM".split()
 PROTECTED_BITS = "STNBY VBATT VPP NC02 NC42 NC43 NC44".split()
 
@@ -35,10 +35,10 @@ def bounded(value: int, bits: int, label: str) -> int:
     return value
 
 
-def open_port(path: str):
+def open_port(path: str, baud: int = BAUD):
     import serial
 
-    port = serial.Serial(port=None, baudrate=BAUD, timeout=0.5, write_timeout=0.5)
+    port = serial.Serial(port=None, baudrate=baud, timeout=0.5, write_timeout=0.5)
     port.dtr = False
     port.rts = False
     port.port = path
@@ -90,6 +90,7 @@ class Probe:
     def __init__(self, port):
         self.port = port
         self.protocol: str | None = None
+        self.burst_phase_ns = 5000
 
     def exchange(self, payload: bytes, size: int) -> bytes:
         if self.port.write(payload) != len(payload):
@@ -116,6 +117,14 @@ class Probe:
 
     def release(self) -> None:
         self.ack(b"Z", b"Z")
+
+    def set_read_timing(self, phase_ns: int) -> None:
+        if phase_ns % 50 or not 200 <= phase_ns <= 5000:
+            raise ValueError("read phase must be 200..5000 ns in 50 ns steps")
+        if self.protocol != "OBP3":
+            raise RuntimeError("adjustable read timing requires OBP3 gateware")
+        self.ack(bytes([ord("T"), phase_ns // 50]), b"T")
+        self.burst_phase_ns = phase_ns
 
     def address(self, value: int, mask: int) -> None:
         value = bounded(value, 20, "address")
@@ -248,7 +257,9 @@ def run_dump(probe: Probe, args) -> None:
         "control_mask": args.mask,
         "settle_us": args.settle_us if args.slow else None,
         "mode": "slow" if args.slow else "burst",
-        "burst_phase_us": None if args.slow else 5,
+        "uart_baud": getattr(probe.port, "baudrate", None),
+        "burst_request_bytes": None if args.slow else BURST_CHUNK,
+        "burst_phase_us": None if args.slow else probe.burst_phase_ns / 1000,
         "sha256": hashlib.sha256(baseline).hexdigest(),
     }
     args.output.with_suffix(args.output.suffix + ".json").write_text(
@@ -386,9 +397,10 @@ def default_card_plan(probe: Probe):
     expected_rom = "a8a1afb91bf39f07f528a9690a60d45c6cc61232a126fb0fe1ccff95ec112d9d"
     rom_hash = hashlib.sha256()
     for start in range(0, 0x20000, BURST_CHUNK):
+        count = min(BURST_CHUNK, 0x20000 - start)
         probe.unlock()
         try:
-            rom_hash.update(probe.burst(start, BURST_CHUNK, 0xFF, 0x7D, 0xFF))
+            rom_hash.update(probe.burst(start, count, 0xFF, 0x7D, 0xFF))
         finally:
             probe.release()
     if rom_hash.hexdigest() != expected_rom:
@@ -415,7 +427,7 @@ def shell(probe: Probe) -> None:
                 break
             if op == "i" and not arg:
                 probe.identify()
-                print("OBP2")
+                print(probe.protocol)
             elif op == "s" and not arg:
                 print(format_snapshot(probe.snapshot()))
             elif op == "a" and len(values) == 2:
@@ -448,6 +460,9 @@ def shell(probe: Probe) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", help="Au1 USB-UART device path")
+    parser.add_argument("--baud", type=int, default=BAUD, help="USB-UART baud rate (default: 5000000)")
+    parser.add_argument("--read-phase-ns", type=int, default=5000,
+                        help="each burst read phase in ns, 200..5000 in 50 ns steps")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("identify")
     commands.add_parser("sample")
@@ -491,11 +506,13 @@ def main() -> None:
             return
     if not args.port:
         parser.error("--port is required for hardware commands")
-    with open_port(args.port) as port:
+    with open_port(args.port, args.baud) as port:
         probe = Probe(port)
         probe.identify()
+        if args.read_phase_ns != 5000:
+            probe.set_read_timing(args.read_phase_ns)
         if args.command == "identify":
-            print("OBP2")
+            print(probe.protocol)
         elif args.command == "sample":
             print(format_snapshot(probe.snapshot()))
         elif args.command == "shell":

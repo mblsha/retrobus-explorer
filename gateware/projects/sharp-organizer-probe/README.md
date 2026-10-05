@@ -2,8 +2,8 @@
 
 See [BENCH.md](./BENCH.md) for the live Au1 test and IQ-704B dump results.
 
-This is a removable-card host for the IQ-7000 system bus. It uses Spade and the
-shared Au1 1 Mbaud USB-UART primitives. The physical target is the **Sharp
+This is a removable-card host for the IQ-7000 system bus. It uses Spade and
+the shared UART primitives at 5 Mbaud. The physical target is the **Sharp
 Organizer Host Adapter v1 (2025-05-11)**, the **Level Shifter Element Au1 v2
 (2025-05-11)**, and the **inverted FFC cable**. The generated XDC uses the
 existing `constraints/targets/sharp-organizer-card.acf` mapping; it has the
@@ -46,27 +46,27 @@ From `gateware/`:
 ```sh
 uv run --frozen python tools/run_tb.py --project projects/sharp-organizer-probe
 uv run --frozen python tools/project_inventory.py --check
-DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib ./.venv/bin/python projects/sharp-organizer-probe/scripts/build_nextpnr.py --seed 2
+DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib ./.venv/bin/python projects/sharp-organizer-probe/scripts/build_nextpnr.py --seed 3
 ```
 
 The last command runs Swim/Spade, Yosys, nextpnr-xilinx, Project X-Ray FASM
 packing, and a bitstream decode round trip for `xc7a35tftg256-1`. It writes
-`build/nextpnr-au1-seed2/design.bit` and `result.json`; both are generated files.
-The selected nextpnr seed is 2; its post-route estimate is 100.46 MHz against
+`build/nextpnr-au1/design.bit` and `result.json`; both are generated files.
+The selected nextpnr seed is 3; its post-route estimate is 100.84 MHz against
 the 100 MHz clock. The bitstream is for the Au1 v1 FPGA, not Au1 v2.
 
 To load the checked bitstream into FPGA SRAM through the tested Au1 JTAG path:
 
 ```sh
 openFPGALoader -b alchitry_au --ftdi-serial FT4ZS6I3 -m \
-  projects/sharp-organizer-probe/build/nextpnr-au1-seed2/design.bit
+  projects/sharp-organizer-probe/build/nextpnr-au1/design.bit
 ```
 
 Replace the FTDI serial for another Au1. The SRAM load is volatile.
 
 ## USB-UART commands
 
-`scripts/organizer_probe.py` uses pyserial at 1 Mbaud. The CLI requires the
+`scripts/organizer_probe.py` uses pyserial at 5 Mbaud. The CLI requires the
 UART port explicitly and identifies the bitstream before each operation.
 
 ```sh
@@ -76,11 +76,15 @@ uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py
   cycle --address 0x00000 --idle 0xff --active 0x7d --mask 0xff
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART \
   dump --start 0 --length 0x40000 --idle 0xff --active 0x7d --mask 0xff --output iq704b.bin
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART \
+  --read-phase-ns 500 dump-card --output-dir projects/sharp-organizer-probe/build/oz707-fast
 ```
 
-The control bytes above are the verified IQ-704B read profile. `dump` uses
-FPGA-timed bursts with 5 µs address/idle setup and 5 µs selected read time,
-at or below 100,000 card reads per second. It makes at least two passes,
+The control bytes above are the verified IQ-704B read profile. By default,
+`dump` uses FPGA-timed bursts with 5 µs address/idle setup and 5 µs selected
+read time. `--read-phase-ns` sets both phases to 200–5000 ns in 50 ns steps;
+500 ns has been checked on the OZ-707 ROM and SRAM2, while other cards still
+need their own timing checks. It makes at least two passes,
 compares each byte,
 and writes a binary image plus a JSON manifest with the SHA-256 hash only
 after the passes agree. `dump --slow` uses the original host-timed cycles
@@ -90,12 +94,13 @@ for diagnosis. `shell` accepts `a VALUE MASK` for address bits,
 `0x` notation. Driving commands re-arm the probe; the watchdog releases it
 after one second without a command or burst progress.
 
-The host batches reads in 32 KiB UART requests. On the OZ-707 ROM, a
-verified 128 KiB pass measured about 85 KiB/s with this batch size,
-versus 44 KiB/s with 4 KiB requests. At the same card timing, a 1 MiB scan
-should take about 12 seconds per pass or 24 seconds for the default two passes,
-plus preflight and file overhead. This is a throughput estimate, not a
-qualified timing limit for other cards.
+The host batches reads in 65,535-byte UART requests. On the OZ-707, a full
+1 MiB scan at the old 1 Mbaud/5 µs setting took 26.6 seconds for two passes.
+At 5 Mbaud/500 ns, 48 MiB of complete repeated scans matched the baseline
+without a timeout: about 2.65 seconds per MiB pass, or 5.3 seconds for the
+usual two passes, plus startup and file overhead. Faster 8 Mbaud experiments
+lost UART bytes and are not the selected configuration. The fast timing has
+only been qualified on this OZ-707 card and bench setup.
 
 ## Named bank dumps
 
@@ -167,7 +172,9 @@ releases all driven pins after the cycle. The read commands never drive data.
 
 ## Wire protocol
 
-UART framing is 8N1, 1 Mbaud. The protocol is binary and deliberately small:
+UART framing is 8N1. The host and FPGA use 5 Mbaud with the current bitstream;
+the FPGA's 20-cycle divider at 100 MHz is exact. Use `--baud` for a different
+bitstream's UART rate. The protocol is binary and deliberately small:
 
 | Request | Reply | Meaning |
 | --- | --- | --- |
@@ -177,6 +184,7 @@ UART framing is 8N1, 1 Mbaud. The protocol is binary and deliberately small:
 | `A` + 3-byte address + 3-byte OE mask | `A` or `!` | Set 20 address values and output enables |
 | `C` + control value + OE mask | `C` or `!` | Set control values and output enables |
 | `R` + 3-byte start + 2-byte count + idle + active + control mask | `R` then count bytes, or `!` | Read sequential bytes and release after the last byte |
+| `T` + one byte in 50 ns units (4–100) | `T` or `!` | While disarmed, set each read phase to 200–5000 ns; default is 5000 ns |
 | `W` + 3-byte address + data byte + SRAM selector (1 or 2) | `W` or `!` | Drive one byte with OE high, pulse RW low for 5 µs, restore idle, and release |
 | `Z` | `Z` | Release pins and disarm |
 

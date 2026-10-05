@@ -108,6 +108,46 @@ unlock/release commands but exclude device opening and archival work.
 | 32 KiB | 4 | 1.50 s | 85.3 KiB/s |
 | 65,535 bytes | 3 | 1.45 s | 88.2 KiB/s |
 
-The host now uses 32 KiB requests by default. This keeps the card cycle
-unchanged and makes a 1 MiB scan approximately 12 seconds per pass, or 24
-seconds for two passes, if the larger address range behaves like this ROM.
+With 32 KiB requests, a later full 1 MiB scan at this 1 Mbaud/5 µs setting
+took 26.6 seconds for two passes, including device and file overhead.
+
+## Faster UART and read-cycle experiment — 2026-10-05
+
+A two-pass 1 MiB EPROM baseline at 1 Mbaud, 5 µs phases, and 32 KiB requests
+took 26.6 seconds end to end. Its SHA-256 was
+`af5b0cfe5370f79e16dcb2d6439bc573289d992a56723f13c67b1cbb859dae14`;
+all eight 128 KiB windows matched the separately archived OZ-707 ROM.
+
+The project-local 4 Mbaud variant, built with Spade and nextpnr seed 2, met
+the 100 MHz FPGA target at 105.59 MHz. Two 128 KiB ROM passes matched at every
+read phase tested from 2000 ns down to 200 ns. At 1000 ns, three full 1 MiB
+passes matched the baseline in 12.2 seconds; three full SRAM2 passes matched
+the committed SRAM image at both 1000 ns and 200 ns. The 4 Mbaud bitstream
+SHA-256 was `da547118af92aad49658e831e5fe1d6522153a6bf36e59bc04b619358601fc99`.
+
+The selected 5 Mbaud variant uses an exact 20-cycle UART bit period at
+100 MHz. It passed Cocotb tests and nextpnr timing at 100.84 MHz with seed 3;
+its bitstream SHA-256 is
+`39371387652ecbd5c87536925df3493bcc0e310cb1255395c08038908ed05f61`.
+At 500 ns read phases, the normal card capture matched the archived 128 KiB
+ROM and 32 KiB SRAM2 on three passes each. A 16-pass 1 MiB stress run using
+32 KiB UART requests matched the baseline in 50.5 seconds. With 65,535-byte
+requests, 16 passes matched in 42.3 seconds and a further 32 passes matched
+in 84.8 seconds. That is 48 MiB checked at the selected request size with no
+byte mismatch or timeout, about 2.65 seconds per MiB pass. A normal two-pass
+ROM/SRAM2 card capture completed in 2.0 seconds. These results qualify this
+OZ-707 and connected bench, not every card or USB adapter.
+
+The host requested 8 Mbaud in a separate variant; its 12-cycle FPGA bit
+period at 100 MHz is about 8.33 Mbaud. Seed 2 passed timing at 100.87 MHz.
+Short ROM and SRAM2 reads matched, and one 16-pass 1 MiB run with 32 KiB
+requests completed. A 65,535-byte stress run then lost 3,813 bytes in a
+response during pass 13. An otherwise equivalent rebuilt bitstream lost
+bytes during pass 7 even with 32 KiB requests. The serial adapter then
+returned continuous zero bytes, including with the original 1 Mbaud probe
+bitstream, until a software USB-device reset restored it. The 8 Mbaud link
+was therefore rejected despite its faster short-run results.
+
+A 10 Mbaud variant passed simulation but missed the required 100 MHz FPGA
+clock after routing with nextpnr seeds 2, 3, and 4 (96.01, 89.89, and
+95.17 MHz respectively). It was not loaded onto the Au1.
