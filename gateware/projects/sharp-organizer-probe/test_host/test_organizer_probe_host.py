@@ -30,9 +30,33 @@ class FakePort:
 
 
 SNAPSHOT = bytes.fromhex("53 00 01 23 a5 80 00 00 01 23 0f ff ff 80 80 01")
+RELEASED_SNAPSHOT = b"S" + bytes(15)
 
 
 class ProbeHostTest(unittest.TestCase):
+    def test_context_releases_and_verifies_pins_on_exit(self):
+        fake = FakePort([b"Z", RELEASED_SNAPSHOT])
+        probe = Probe(fake)
+        probe.protocol = "OBP4"
+        with probe:
+            pass
+        self.assertEqual(fake.requests, [b"Z", b"?"])
+
+    def test_context_releases_on_command_error(self):
+        fake = FakePort([b"Z", RELEASED_SNAPSHOT])
+        probe = Probe(fake)
+        probe.protocol = "OBP4"
+        with self.assertRaisesRegex(ValueError, "command failed"):
+            with probe:
+                raise ValueError("command failed")
+        self.assertEqual(fake.requests, [b"Z", b"?"])
+
+    def test_park_rejects_still_driven_pins(self):
+        fake = FakePort([b"Z", SNAPSHOT])
+        probe = Probe(fake)
+        with self.assertRaisesRegex(RuntimeError, "still driving"):
+            probe.park()
+
     def test_adjustable_read_timing_framing(self):
         fake = FakePort([b"T"])
         probe = Probe(fake)
