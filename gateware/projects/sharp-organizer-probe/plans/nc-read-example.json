@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "reported_model": "REPLACE_WITH_PRINTED_LABEL",
+  "profiles": [
+    {
+      "name": "nc-pattern-09-mskrom",
+      "description": "Example NC outputs: NC02=1, NC42=0, NC43=0, NC44=1; RW high",
+      "steps": [{"operation": "nc", "value": "0x9", "mask": "0xf"}],
+      "read": {
+        "start": 0,
+        "length": "0x10000",
+        "idle_control": "0xff",
+        "active_control": "0xed"
+      }
+    }
+  ]
+}

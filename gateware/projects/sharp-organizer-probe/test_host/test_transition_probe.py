@@ -23,14 +23,18 @@ class FakeProbe:
         self.fail, self.drift, self.pins_wrong = fail, drift, pins_wrong
         self.addr = self.ctrl = self.addr_mask = self.ctrl_mask = 0
         self.armed = False
+        self.nc_value = self.nc_mask = 0
         self.commands, self.bursts = [], []
 
     def snapshot(self):
-        return Snapshot(self.addr ^ int(self.pins_wrong), self.addr % 2, self.ctrl, 0x4d,
-                        self.addr, self.addr_mask, self.ctrl, self.ctrl_mask, self.armed)
+        protected = ((0x4d >> 3 & ~self.nc_mask) | (self.nc_value & self.nc_mask)) << 3 | (0x4d & 7)
+        return Snapshot(self.addr ^ int(self.pins_wrong), self.addr % 2, self.ctrl, protected,
+                        self.addr, self.addr_mask, self.ctrl, self.ctrl_mask, self.armed,
+                        self.nc_value, self.nc_mask)
 
     def park(self):
         self.armed, self.addr_mask, self.ctrl_mask = False, 0, 0
+        self.nc_value = self.nc_mask = 0
         self.commands.append(("park",))
         return self.snapshot()
 
@@ -45,6 +49,10 @@ class FakeProbe:
     def address(self, value, mask):
         self.addr, self.addr_mask = value, mask
         self.commands.append(("address", value, mask))
+
+    def nc(self, value, mask):
+        self.nc_value, self.nc_mask = value, mask
+        self.commands.append(("nc", value, mask))
 
     def burst(self, start, count, idle, active, mask):
         self.bursts.append((start, count, idle, active, mask, list(self.commands)))
@@ -170,6 +178,28 @@ class TransitionTests(unittest.TestCase):
         self.document["profiles"][0]["steps"].append({"operation": "control", "value": 0xff})
         with self.assertRaisesRegex(ValueError, "preamble must end"):
             self.plan()
+
+    def test_nc_steps_are_replayed_and_named_pin_masks_are_retained(self):
+        self.document["profiles"][0]["steps"].insert(1, {"operation": "nc", "value": 6, "mask": 15})
+        probe = FakeProbe()
+        probe.protocol = "OBP6"
+        report = capture(probe, self.plan(), self.root / "nc")
+        self.assertEqual(len(probe.bursts), 4)
+        for burst in probe.bursts:
+            self.assertIn(("nc", 6, 15), burst[-1])
+        row = self.observations("nc")[0]
+        event = next(event for event in row["sequence"] if event["operation"] == "nc")
+        self.assertEqual(event["mask"], 15)
+        self.assertEqual(event["observed"]["nc_contacts"]["NC42"], {"drive": 1, "driven": True, "observed": 1})
+        self.assertEqual(report["final_park"]["nc_oe"], 0)
+
+    def test_nc_plan_rejects_legacy_before_outputs_or_files(self):
+        self.document["profiles"][0]["steps"].append({"operation": "nc", "value": 9})
+        probe = FakeProbe()
+        with self.assertRaisesRegex(RuntimeError, "OBP6"):
+            capture(probe, self.plan(), self.root / "legacy")
+        self.assertEqual(probe.commands, [])
+        self.assertFalse((self.root / "legacy").exists())
 
 
 if __name__ == "__main__":

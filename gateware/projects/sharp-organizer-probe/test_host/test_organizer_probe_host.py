@@ -44,6 +44,35 @@ RELEASED_SNAPSHOT = b"S" + bytes(15)
 
 
 class ProbeHostTest(unittest.TestCase):
+    def test_obp6_nc_drive_and_extended_snapshot(self):
+        fake = FakePort([b"OBP6\n", b"N", SNAPSHOT + b"\x09\x0f", b"Z", RELEASED_SNAPSHOT + b"\x00\x00"])
+        probe = Probe(fake)
+        probe.identify()
+        probe.nc(9, 15)
+        sample = probe.snapshot()
+        self.assertEqual((sample.nc_drive, sample.nc_oe), (9, 15))
+        probe.park()
+        self.assertEqual(fake.requests, [b"I", b"N\x09\x0f", b"Q", b"Z", b"Q"])
+
+    def test_nc_drive_rejects_legacy_and_out_of_range_before_uart(self):
+        fake = FakePort([])
+        probe = Probe(fake)
+        probe.protocol = "OBP5"
+        with self.assertRaisesRegex(RuntimeError, "OBP6"):
+            probe.nc(9, 15)
+        probe.protocol = "OBP6"
+        for value, mask in ((16, 15), (0, 16), (-1, 0)):
+            with self.assertRaises(ValueError):
+                probe.nc(value, mask)
+        self.assertEqual(fake.requests, [])
+
+    def test_park_rejects_a_remaining_nc_output_mask(self):
+        fake = FakePort([b"Z", RELEASED_SNAPSHOT + b"\x09\x01"])
+        probe = Probe(fake)
+        probe.protocol = "OBP6"
+        with self.assertRaisesRegex(RuntimeError, "still driving"):
+            probe.park()
+
     def test_ft600_burst_ack_is_uart_and_payload_uses_ft600(self):
         fake = FakePort([b"OBP5\n", b"F"])
         ft600 = Mock()

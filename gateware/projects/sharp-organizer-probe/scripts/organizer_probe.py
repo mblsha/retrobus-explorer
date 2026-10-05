@@ -26,6 +26,7 @@ BAUD = 4_000_000
 BURST_CHUNK = 65535
 CONTROL_BITS = "RW OE CI E2 MSKROM SRAM1 SRAM2 EPROM".split()
 PROTECTED_BITS = "STNBY VBATT VPP NC02 NC42 NC43 NC44".split()
+NC_BITS = "NC02 NC42 NC43 NC44".split()
 
 
 def number(text: str) -> int:
@@ -75,10 +76,12 @@ class Snapshot:
     control_drive: int
     control_oe: int
     armed: bool
+    nc_drive: int = 0
+    nc_oe: int = 0
 
     @classmethod
     def decode(cls, raw: bytes) -> Snapshot:
-        if len(raw) != 16 or raw[0] != ord("S"):
+        if len(raw) not in (16, 18) or raw[0] != ord("S"):
             raise ValueError(f"invalid snapshot: {raw.hex(' ')}")
         return cls(
             address=int.from_bytes(raw[1:4], "big"),
@@ -90,6 +93,8 @@ class Snapshot:
             control_drive=raw[13],
             control_oe=raw[14],
             armed=bool(raw[15]),
+            nc_drive=raw[16] if len(raw) == 18 else 0,
+            nc_oe=raw[17] if len(raw) == 18 else 0,
         )
 
 
@@ -130,12 +135,12 @@ class Probe:
 
     def identify(self) -> None:
         actual = self.exchange(b"I", 5)
-        if actual not in (b"OBP2\n", b"OBP3\n", b"OBP4\n", b"OBP5\n"):
+        if actual not in (b"OBP2\n", b"OBP3\n", b"OBP4\n", b"OBP5\n", b"OBP6\n"):
             raise RuntimeError(f"wrong gateware or UART framing: {actual!r}")
         self.protocol = actual.decode().strip()
 
     def snapshot(self) -> Snapshot:
-        return Snapshot.decode(self.exchange(b"?", 16))
+        return Snapshot.decode(self.exchange(b"Q", 18) if self.protocol == "OBP6" else self.exchange(b"?", 16))
 
     def unlock(self) -> None:
         self.ack(b"UREAD", b"U")
@@ -147,14 +152,14 @@ class Probe:
         """Release FPGA outputs and verify the observable drive enables are zero."""
         self.release()
         snapshot = self.snapshot()
-        if snapshot.armed or snapshot.address_oe or snapshot.control_oe:
+        if snapshot.armed or snapshot.address_oe or snapshot.control_oe or snapshot.nc_oe:
             raise RuntimeError(f"probe is still driving pins: {format_snapshot(snapshot)}")
         return snapshot
 
     def set_read_timing(self, phase_ns: int) -> None:
         if phase_ns % 50 or not 200 <= phase_ns <= 5000:
             raise ValueError("read phase must be 200..5000 ns in 50 ns steps")
-        if self.protocol not in ("OBP3", "OBP4", "OBP5"):
+        if self.protocol not in ("OBP3", "OBP4", "OBP5", "OBP6"):
             raise RuntimeError("adjustable read timing requires OBP3 or newer gateware")
         self.ack(bytes([ord("T"), phase_ns // 50]), b"T")
         self.burst_phase_ns = phase_ns
@@ -169,6 +174,14 @@ class Probe:
         mask = bounded(mask, 8, "control mask")
         self.ack(bytes([ord("C"), value, mask]), b"C")
 
+    def nc(self, value: int, mask: int) -> None:
+        """Opt in to NC contact outputs; firmware requires RW driven high."""
+        if self.protocol != "OBP6":
+            raise RuntimeError("masked NC drive requires OBP6 gateware")
+        bounded(value, 4, "NC value")
+        bounded(mask, 4, "NC output mask")
+        self.ack(bytes([ord("N"), value, mask]), b"N")
+
     def burst(self, start: int, count: int, idle: int, active: int, mask: int) -> bytes:
         bounded(start, 20, "start")
         bounded(count, 16, "count")
@@ -178,8 +191,8 @@ class Probe:
         if not (mask & idle & active & 1):
             raise ValueError("burst reads must drive RW high in both phases")
         command = b"F" if self.ft600 is not None else b"R"
-        if self.ft600 is not None and self.protocol != "OBP5":
-            raise RuntimeError("FT600 bursts require OBP5 gateware")
+        if self.ft600 is not None and self.protocol not in ("OBP5", "OBP6"):
+            raise RuntimeError("FT600 bursts require OBP5 or newer gateware")
         if self.ft600 is not None and count > 8191:
             raise ValueError("FT600 buffered bursts hold at most 8191 card bytes")
         request = (command + start.to_bytes(3, "big") + count.to_bytes(2, "big")
@@ -195,7 +208,7 @@ class Probe:
         return read_exact(self.port, count)
 
     def write_byte(self, address: int, value: int, sram: int) -> None:
-        if self.protocol not in ("OBP3", "OBP4", "OBP5"):
+        if self.protocol not in ("OBP3", "OBP4", "OBP5", "OBP6"):
             raise RuntimeError("SRAM writes require OBP3 or newer gateware")
         bounded(address, 20, "address")
         bounded(value, 8, "data")
@@ -204,7 +217,7 @@ class Probe:
         self.ack(b"W" + address.to_bytes(3, "big") + bytes([value, sram]), b"W")
 
     def write_profiled_byte(self, address: int, value: int, selected: int) -> None:
-        if self.protocol not in ("OBP4", "OBP5"):
+        if self.protocol not in ("OBP4", "OBP5", "OBP6"):
             raise RuntimeError("profiled SRAM writes require OBP4 or newer gateware")
         bounded(address, 20, "address")
         bounded(value, 8, "data")
@@ -223,7 +236,8 @@ def format_snapshot(s: Snapshot) -> str:
         f"addr=0x{s.address:05x} data=0x{s.data:02x} control=0x{s.control:02x} "
         f"[{controls}] protected=0x{s.protected:02x} [{protected}]\n"
         f"drive addr=0x{s.address_drive:05x}/0x{s.address_oe:05x} "
-        f"control=0x{s.control_drive:02x}/0x{s.control_oe:02x} armed={s.armed}"
+        f"control=0x{s.control_drive:02x}/0x{s.control_oe:02x} "
+        f"nc=0x{s.nc_drive:x}/0x{s.nc_oe:x} armed={s.armed}"
     )
 
 
@@ -383,7 +397,7 @@ def verify_committed_backup(image: Path) -> None:
 
 def test_sram_write(probe: Probe, backup_image: Path, result_dir: Path,
                     sram: int, address: int | None) -> dict:
-    if probe.protocol not in ("OBP3", "OBP4", "OBP5"):
+    if probe.protocol not in ("OBP3", "OBP4", "OBP5", "OBP6"):
         raise RuntimeError("SRAM write test requires OBP3 or newer gateware")
     verify_committed_backup(backup_image)
     backup = backup_image.read_bytes()
@@ -459,7 +473,7 @@ def test_sram_write(probe: Probe, backup_image: Path, result_dir: Path,
 
 def shell(probe: Probe) -> None:
     print("Commands: i identify; s sample; a VALUE MASK; c VALUE MASK; "
-          "r ADDRESS IDLE ACTIVE MASK [SETTLE_US]; z release; q quit")
+          "n NC_VALUE NC_MASK; r ADDRESS IDLE ACTIVE MASK [SETTLE_US]; z release; q quit")
     print("Each drive command unlocks; idle for one second releases the pins.")
     while True:
         try:
@@ -485,6 +499,10 @@ def shell(probe: Probe) -> None:
             elif op == "c" and len(values) == 2:
                 probe.unlock()
                 probe.control(*values)
+                print(format_snapshot(probe.snapshot()))
+            elif op == "n" and len(values) == 2:
+                probe.unlock()
+                probe.nc(*values)
                 print(format_snapshot(probe.snapshot()))
             elif op == "r" and len(values) in (4, 5):
                 address, idle, active, mask = values[:4]
@@ -601,7 +619,7 @@ def main() -> None:
         probe.burst_request_bytes = args.burst_bytes
         # Timing persists in gateware between CLI invocations. Always program
         # modern probes, including the conservative default, before any reads.
-        if probe.protocol in ("OBP3", "OBP4", "OBP5") or args.read_phase_ns != 5000:
+        if probe.protocol in ("OBP3", "OBP4", "OBP5", "OBP6") or args.read_phase_ns != 5000:
             probe.set_read_timing(args.read_phase_ns)
         if args.command == "identify":
             print(probe.protocol)

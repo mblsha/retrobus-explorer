@@ -12,12 +12,13 @@ same 43 card-facing signals as the passive `sharp-organizer-card` project.
 The passive project samples an organizer acting as bus master and streams a
 trace over FT600. This probe instead drives selected address and control pins
 as a card host. UART carries commands and pin snapshots. Sequential data can
-use UART, or the Ft Element's FT600 USB interface with OBP5 gateware.
+use UART, or the Ft Element's FT600 USB interface with OBP5 or newer gateware.
 
 ## Electrical behavior
 
-All card-facing FPGA outputs are released at reset. STNBY, VBATT, VPP and the
-four NC contacts are input-only. Address and the eight control pins have
+All card-facing FPGA outputs are released at reset. STNBY, VBATT and VPP are
+input-only. NC02/NC42/NC43/NC44 default to inputs and have a separate four-bit
+value/output-enable mask in OBP6. Address and the eight control pins have
 independent output-enable masks. Data is input-only during reads and is driven
 only during the bounded SRAM write command. A
 malformed unlock, `Z`, reset, or one second without probe activity releases every
@@ -28,7 +29,7 @@ Au1; the card side follows the adapter's 5 V supply.
 
 For a card swap, **release the FPGA outputs rather than drive the pins low**:
 several card selects and `RW` are active low. The host CLI now sends `Z` and
-checks that `armed`, address drive mask, and control drive mask are zero before
+checks that `armed`, address drive mask, control drive mask and NC drive mask are zero before
 closing UART after every identified command, including a failed capture or
 write. Gateware disables the data output with the same disarm state. Use
 `park` to check explicitly, then power off the card adapter before unplugging
@@ -61,9 +62,9 @@ DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib ./.venv/bin/python proje
 The last command runs Swim/Spade, Yosys, nextpnr-xilinx, Project X-Ray FASM
 packing, and a bitstream decode round trip for `xc7a35tftg256-1`. It writes
 `build/nextpnr-au1-seed7/design.bit` and `result.json`; both are generated files.
-The checked OBP5 seed-7 build passes the 100 MHz target at 109.15 MHz for
-the core and 161.73 MHz for FT. It decoded 60,679 configuration bits; SHA-256:
-`934e925600aef6da99aa0b6a573b23171d58222f774ce6749b9db409a53e4be5`.
+The checked OBP6 seed-7 build passes the 100 MHz target at 136.44 MHz for
+the core and 189.00 MHz for FT. It decoded 62,654 configuration bits; SHA-256:
+`bce83320aaf53f4fb60a43bd69f3ba98ac6347511b76e8227a7f5ee58a648566`.
 The bitstream is for the Au1 v1 FPGA, not Au1 v2.
 
 To load the checked bitstream into FPGA SRAM through the tested Au1 JTAG path:
@@ -265,6 +266,8 @@ to internal bank registers.
 Its [example plan](plans/read-transition-example.json) pulses CI while A16 is
 high and MSKROM/OE are asserted, then samples a short window with the controls
 held. It is a hypothesis to test, not a confirmed bank-selection recipe.
+The [NC example](plans/nc-read-example.json) drives the four auxiliary contacts
+with OBP6 while retaining the same read-only control restrictions.
 
 ```sh
 uv run --frozen python projects/sharp-organizer-probe/scripts/transition_probe.py \
@@ -274,9 +277,14 @@ uv run --frozen python projects/sharp-organizer-probe/scripts/transition_probe.p
   --plan /path/to/measured-read-sequences.json --output-dir /path/to/new-experiment
 ```
 
-Steps are full-mask `address` or `control` commands, or a `hold_us` delay up to
-100 ms. All control states must keep RW high and select at most one memory.
-Data, VPP, VBATT, STNBY and unknown contacts remain input-only. A preamble starts
+Steps are full-mask `address` or `control` commands, an optional OBP6 `nc`
+command with a four-bit `value` and `mask` (default `0xf`), or a `hold_us` delay
+up to 100 ms. NC bit order is NC02, NC42, NC43, NC44, from least significant.
+All control states must keep RW high and select at most one memory.
+Data stays input-only during reads; VPP, VBATT and STNBY always stay inputs.
+NC outputs are opt-in and require RW driven high. Firmware rejects a control
+command that would lower or release RW with NC outputs on, and rejects SRAM
+writes while an NC mask is enabled. A preamble starts
 from a verified park, initializes controls to `0xff` and address to zero, then
 replays before **every chunk of every pass**. This initialization is recorded;
 parking does not prove a card latch was reset. Use only with the card adapter
@@ -393,19 +401,21 @@ bitstream's UART rate. The protocol is binary and deliberately small:
 
 | Request | Reply | Meaning |
 | --- | --- | --- |
-| `I` | `OBP5\n` | Identify gateware and protocol version |
+| `I` | `OBP6\n` | Identify gateware and protocol version |
 | `?` | 16 bytes starting `S` | Latched pin and drive snapshot |
+| `Q` | 18 bytes starting `S` | OBP6 snapshot: legacy 16 bytes plus NC value and output mask |
 | `UREAD` | `U` | Unlock address/control outputs |
 | `A` + 3-byte address + 3-byte OE mask | `A` or `!` | Set 20 address values and output enables |
 | `C` + control value + OE mask | `C` or `!` | Set control values and output enables |
+| `N` + NC value + NC OE mask | `N` or `!` | OBP6: set four NC contacts with RW driven high; upper nibble must be zero; invalid command releases all outputs |
 | `R` + 3-byte start + 2-byte count + idle + active + control mask | `R` then count bytes, or `!` | Read sequential bytes and release after the last byte |
 | `F` + the same fields as `R` | UART `F`, then count FT600 words, or UART `!` | OBP5: buffer 1–8191 card bytes as little-endian `0xa5XX`, with both byte enables set; release the card before FT transmission |
 | `T` + one byte in 50 ns units (4–100) | `T` or `!` | While disarmed, set each read phase to 200–5000 ns; default is 5000 ns |
 | `W` + 3-byte address + data byte + config | `W` or `!` | Drive one byte with OE high, pulse RW low for 5 µs, restore idle, and release. Config bits 0–1 select SRAM1 (1) or SRAM2 (2); bits 2–3 lower CI/E2. Other bits must be zero. The original 1/2 codes remain valid. |
 | `Z` | `Z` | Release pins and disarm |
 
-The host also accepts OBP2–OBP4 for their supported UART commands. FT600
-payloads require OBP5. An `F` failure, including a lost UART acknowledgement,
+The host also accepts OBP2–OBP5 for their supported commands. FT600
+payloads require OBP5 or newer. An `F` failure, including a lost UART acknowledgement,
 aborts without replay because the FIFO may already contain that burst.
 
 The 16-byte snapshot is `S`, three address bytes, data, control, protected,
@@ -415,4 +425,8 @@ three-byte field are unused. Control bit order from LSB is RW, OE, CI, E2,
 MSKROM, SRAM1, SRAM2, EPROM. Protected bit order from LSB is STNBY, VBATT,
 VPP, NC02, NC42, NC43, NC44. A snapshot reports synchronized inputs and
 the currently configured output masks; it does not claim to identify the
-card type.
+card type. OBP6 retains `?` unchanged and adds `Q`, appending NC drive and mask
+bytes in NC02/NC42/NC43/NC44 bit order. The host uses `Q` with OBP6 so `park`
+checks auxiliary masks too. `shell` accepts `n VALUE MASK` for NC drive after
+RW has been driven high; scripted transition plans replay these commands
+automatically before each read chunk. Every release path clears NC enables.

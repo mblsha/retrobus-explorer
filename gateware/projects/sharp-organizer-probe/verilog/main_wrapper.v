@@ -25,10 +25,10 @@ module main (
     input wire conn_stnby,
     input wire conn_vbatt,
     input wire conn_vpp,
-    input wire conn_nc02,
-    input wire conn_nc42,
-    input wire conn_nc43,
-    input wire conn_nc44
+    inout wire conn_nc02,
+    inout wire conn_nc42,
+    inout wire conn_nc43,
+    inout wire conn_nc44
 `ifdef COCOTB_SIM
     ,
     input wire [19:0] addr_host,
@@ -41,6 +41,8 @@ module main (
     output wire data_oe_debug,
     output wire [7:0] control_drive_debug,
     output wire [7:0] control_oe_debug,
+    output wire [3:0] nc_drive_debug,
+    output wire [3:0] nc_oe_debug,
     output wire armed_debug
 `endif
 );
@@ -50,6 +52,8 @@ module main (
     wire data_oe;
     wire [7:0] control_drive;
     wire [7:0] control_oe;
+    wire [3:0] nc_drive;
+    wire [3:0] nc_oe;
     wire armed;
     wire [19:0] addr_in;
     wire [7:0] data_in;
@@ -65,13 +69,15 @@ module main (
     assign addr_in = addr_host;
     assign data_in = data_host;
     assign control_in = control_host;
-    assign protected_in = protected_host;
+    assign protected_in = {(protected_host[6:3] & ~nc_oe) | (nc_drive & nc_oe), protected_host[2:0]};
     assign addr_drive_debug = addr_drive;
     assign addr_oe_debug = addr_oe;
     assign data_drive_debug = data_drive;
     assign data_oe_debug = data_oe;
     assign control_drive_debug = control_drive;
     assign control_oe_debug = control_oe;
+    assign nc_drive_debug = nc_drive;
+    assign nc_oe_debug = nc_oe;
     assign armed_debug = armed;
     localparam [26:0] WATCHDOG_LIMIT = 27'd50000;
 `else
@@ -101,6 +107,10 @@ module main (
     assign conn_sram1 = control_oe[5] ? control_drive[5] : 1'bz;
     assign conn_sram2 = control_oe[6] ? control_drive[6] : 1'bz;
     assign conn_eprom = control_oe[7] ? control_drive[7] : 1'bz;
+    assign conn_nc02 = nc_oe[0] ? nc_drive[0] : 1'bz;
+    assign conn_nc42 = nc_oe[1] ? nc_drive[1] : 1'bz;
+    assign conn_nc43 = nc_oe[2] ? nc_drive[2] : 1'bz;
+    assign conn_nc44 = nc_oe[3] ? nc_drive[3] : 1'bz;
 
     main_core core (
         .clk(clk), .rst_n(rst_n), .usb_rx(usb_rx), .usb_tx(usb_tx), .led(led),
@@ -120,6 +130,7 @@ module main (
         .addr_drive(addr_drive), .addr_oe(addr_oe),
         .data_drive(data_drive), .data_oe(data_oe),
         .control_drive(control_drive), .control_oe(control_oe),
+        .nc_drive(nc_drive), .nc_oe(nc_oe),
         .armed_debug(armed)
     );
 endmodule

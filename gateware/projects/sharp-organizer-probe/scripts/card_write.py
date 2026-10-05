@@ -98,7 +98,7 @@ def _write(probe: Probe, view: dict, address: int, value: int) -> None:
         probe.write_profiled_byte(address, value,
                                   _active(view) | 0x02)
         snapshot = probe.snapshot()
-        if snapshot.armed or snapshot.address_oe or snapshot.control_oe:
+        if snapshot.armed or snapshot.address_oe or snapshot.control_oe or snapshot.nc_oe:
             raise RuntimeError("write left pins driven")
     finally:
         probe.release()
@@ -143,7 +143,7 @@ def _physical_alias_groups(probes: list[dict]) -> list[list[str]]:
 
 def probe_ram(probe: Probe, capture_dir: Path, result_dir: Path) -> dict:
     """Try reversible writes only to stable, backed-up SRAM-select views."""
-    if probe.protocol not in ("OBP4", "OBP5"):
+    if probe.protocol not in ("OBP4", "OBP5", "OBP6"):
         raise RuntimeError("automatic SRAM probes require OBP4 or newer gateware")
     manifest = verify_committed_capture(capture_dir)
     verify_live_identity(probe, capture_dir, manifest)
@@ -240,7 +240,7 @@ def probe_ram(probe: Probe, capture_dir: Path, result_dir: Path) -> dict:
 def write_sram(probe: Probe, capture_dir: Path, probe_result: Path, view_name: str,
                address: int, replacement: bytes, result_dir: Path,
                expected_image: Path | None = None) -> dict:
-    if probe.protocol not in ("OBP4", "OBP5"):
+    if probe.protocol not in ("OBP4", "OBP5", "OBP6"):
         raise RuntimeError("profiled SRAM writes require OBP4 or newer gateware")
     manifest = verify_committed_capture(capture_dir)
     view = _view(manifest, view_name)
