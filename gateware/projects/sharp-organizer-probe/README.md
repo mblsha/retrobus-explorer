@@ -26,6 +26,15 @@ TXB0108s on the Au1 level shifter have OE tied high in
 hardware: the FPGA cannot turn off the translators. Their 3.3 V side is on the
 Au1; the card side follows the adapter's 5 V supply.
 
+For a card swap, **release the FPGA outputs rather than drive the pins low**:
+several card selects and `RW` are active low. The host CLI now sends `Z` and
+checks that `armed`, address drive mask, and control drive mask are zero before
+closing UART after every identified command, including a failed capture or
+write. Gateware disables the data output with the same disarm state. Use
+`park` to check explicitly, then power off the card adapter before unplugging
+the card. A failed UART release or snapshot is not a verified park; wait for
+the gateware watchdog and power off before swapping.
+
 The IQ-704B was read with idle control `0xff`, active control
 `0x7d`, and mask `0xff`. Its header includes `thesaurus`; the entire 20-bit
 address scan repeated every 256 KiB and matched on two passes. These values
@@ -71,6 +80,7 @@ UART port explicitly and identifies the bitstream before each operation.
 
 ```sh
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART sample
+uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART park
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART shell
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py --port /dev/cu.YOUR_AU_UART \
   cycle --address 0x00000 --idle 0xff --active 0x7d --mask 0xff
@@ -80,9 +90,12 @@ uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py
   dump-card --output-dir projects/sharp-organizer-probe/build/card-discovery
 ```
 
-The control bytes above are the verified IQ-704B read profile. By default,
-`dump` uses FPGA-timed bursts with 5 µs address/idle setup and 5 µs selected
-read time. `--read-phase-ns` sets both phases to 200–5000 ns in 50 ns steps;
+`park` sends `Z` and reports a snapshot with zero drive masks and
+`armed=False`; it can be run after any probe or write before powering down for
+a card swap. The control bytes above are the verified IQ-704B read profile.
+By default, `dump` uses FPGA-timed bursts with 5 µs address/idle setup and
+5 µs selected read time. `--read-phase-ns` sets both phases to 200–5000 ns in
+50 ns steps;
 500 ns has been checked on the OZ-707 ROM and SRAM2, while other cards still
 need their own timing checks. It makes at least two passes,
 compares each byte,

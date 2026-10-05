@@ -94,6 +94,13 @@ class Probe:
         self.protocol: str | None = None
         self.burst_phase_ns = 5000
 
+    def __enter__(self) -> Probe:
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        if self.protocol is not None:
+            self.park()
+
     def exchange(self, payload: bytes, size: int) -> bytes:
         if self.port.write(payload) != len(payload):
             raise IOError("short UART write")
@@ -119,6 +126,14 @@ class Probe:
 
     def release(self) -> None:
         self.ack(b"Z", b"Z")
+
+    def park(self) -> Snapshot:
+        """Release FPGA outputs and verify the observable drive enables are zero."""
+        self.release()
+        snapshot = self.snapshot()
+        if snapshot.armed or snapshot.address_oe or snapshot.control_oe:
+            raise RuntimeError(f"probe is still driving pins: {format_snapshot(snapshot)}")
+        return snapshot
 
     def set_read_timing(self, phase_ns: int) -> None:
         if phase_ns % 50 or not 200 <= phase_ns <= 5000:
@@ -449,6 +464,7 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("identify")
     commands.add_parser("sample")
+    commands.add_parser("park", help="release outputs and verify zero drive masks")
     commands.add_parser("shell")
     single = commands.add_parser("cycle", help="run one explicit control cycle")
     dump = commands.add_parser("dump", help="read and compare at least two passes")
@@ -515,8 +531,7 @@ def main() -> None:
             return
     if not args.port:
         parser.error("--port is required for hardware commands")
-    with open_port(args.port, args.baud) as port:
-        probe = Probe(port)
+    with open_port(args.port, args.baud) as port, Probe(port) as probe:
         probe.identify()
         if args.read_phase_ns != 5000:
             probe.set_read_timing(args.read_phase_ns)
@@ -524,6 +539,8 @@ def main() -> None:
             print(probe.protocol)
         elif args.command == "sample":
             print(format_snapshot(probe.snapshot()))
+        elif args.command == "park":
+            print(format_snapshot(probe.park()))
         elif args.command == "shell":
             shell(probe)
         elif args.command == "cycle":
