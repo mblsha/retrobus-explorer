@@ -29,8 +29,8 @@ PART = "xc7a35tftg256-1"
 CHIPDB = "xc7a35tftg256.bin"
 INPUT_ONLY = (
     "conn_stnby", "conn_vbatt", "conn_vpp",
-    "conn_nc02", "conn_nc42", "conn_nc43", "conn_nc44",
 )
+NC_PORTS = ("conn_nc02", "conn_nc42", "conn_nc43", "conn_nc44")
 
 
 def run_stage(stage: str, command: list[str], output: Path, *, env=None) -> None:
@@ -72,7 +72,7 @@ def main() -> None:
     for port in INPUT_ONLY:
         if design["ports"][port]["direction"] != "input":
             raise RuntimeError(f"protected port {port} is not input-only")
-    for port in ("addr", "data", "conn_rw", "conn_oe", "conn_ci", "conn_e2", "conn_mskrom", "conn_sram1", "conn_sram2", "conn_eprom", "ft_data", "ft_be"):
+    for port in ("addr", "data", "conn_rw", "conn_oe", "conn_ci", "conn_e2", "conn_mskrom", "conn_sram1", "conn_sram2", "conn_eprom", "ft_data", "ft_be", *NC_PORTS):
         if design["ports"][port]["direction"] != "inout":
             raise RuntimeError(f"drive-capable port {port} unexpectedly changed direction")
     run_stage(
@@ -101,6 +101,7 @@ def main() -> None:
         "post_route_clocks": final_clocks,
         "seed": args.seed,
         "input_only_ports": list(INPUT_ONLY),
+        "masked_auxiliary_ports": list(NC_PORTS),
         "verified_configuration_bits": verified_bits,
         "bitstream_bytes": (output / "design.bit").stat().st_size,
         "bitstream_sha256": hashlib.sha256((output / "design.bit").read_bytes()).hexdigest(),

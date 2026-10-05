@@ -70,13 +70,27 @@ def released(dut):
     assert int(dut.data_oe_debug.value) == 0
     assert int(dut.control_oe_debug.value) == 0
     assert int(dut.armed_debug.value) == 0
+    assert int(dut.nc_oe_debug.value) == 0
+
+
+@cocotb.test()
+async def legacy_snapshot_preserves_auxiliary_contact_bit_positions(dut):
+    await initialize(dut)
+    for bit in range(7):
+        dut.protected_host.value = 1 << bit
+        await tick(dut.clk, 5)
+        snap = await command(dut, b"?", 16)
+        assert len(snap) == 16 and snap[0] == ord("S")
+        assert snap[6] == 1 << bit
+        assert snap[7:] == bytes(9)
+        released(dut)
 
 
 @cocotb.test()
 async def uart_probe_and_watchdog(dut):
     await initialize(dut)
     released(dut)
-    assert await command(dut, b"I", 5) == b"OBP5\n"
+    assert await command(dut, b"I", 5) == b"OBP6\n"
     snap = await command(dut, b"?", 16)
     assert snap == bytes.fromhex("53 01 23 45 a6 82 35 00 00 00 00 00 00 00 00 00")
     assert await command(dut, b"A\x01\x23\x45\x0f\xff\xff", 1) == b"!"
@@ -125,6 +139,98 @@ async def burst_reads_sequential_addresses_and_releases(dut):
     response = await command(dut, b"R\x00\x01\x20\x00\x08\xff\x7d\xff", 9)
     assert response == b"R" + bytes(((0x120 + i) ^ 0x5A) & 0xFF for i in range(8))
     await tick(dut.clk, 4)
+    released(dut)
+    model.kill()
+
+
+@cocotb.test()
+async def masked_nc_contacts_require_read_mode_and_release_on_errors(dut):
+    await initialize(dut)
+    assert await command(dut, b"N\x09\x0f", 1) == b"!"
+    released(dut)
+    assert await command(dut, b"UREAD", 1) == b"U"
+    assert await command(dut, b"N\x09\x0f", 1) == b"!"  # RW not driven.
+    released(dut)
+    for value in range(16):
+        assert await command(dut, b"UREAD", 1) == b"U"
+        assert await command(dut, b"C\xff\xff", 1) == b"C"
+        assert await command(dut, bytes([ord("N"), value, 15]), 1) == b"N"
+        assert int(dut.nc_drive_debug.value) == value
+        assert int(dut.nc_oe_debug.value) == 15
+        snap = await command(dut, b"Q", 18)
+        assert snap[6] == (value << 3) | (0x35 & 7)
+        assert snap[16:] == bytes([value, 15])
+        assert await command(dut, b"Z", 1) == b"Z"
+        released(dut)
+
+    # A partial mask leaves other NC contacts as sensed inputs.
+    assert await command(dut, b"UREAD", 1) == b"U"
+    assert await command(dut, b"C\xff\xff", 1) == b"C"
+    assert await command(dut, b"N\x01\x01", 1) == b"N"
+    snap = await command(dut, b"Q", 18)
+    assert snap[6] == (0x35 | 8) and snap[16:] == b"\x01\x01"
+    assert await command(dut, b"C\x00\xff", 1) == b"!"  # Cannot lower RW with NC drive.
+    released(dut)
+    for invalid in (b"N\x10\x0f", b"N\x00\x10", b"W\x00\x00\x00\xa5\x02"):
+        assert await command(dut, b"UREAD", 1) == b"U"
+        assert await command(dut, b"C\xff\xff", 1) == b"C"
+        assert await command(dut, b"N\x09\x0f", 1) == b"N"
+        assert await command(dut, invalid, 1) == b"!"
+        released(dut)
+
+    assert await command(dut, b"UREAD", 1) == b"U"
+    assert await command(dut, b"C\xff\xff", 1) == b"C"
+    assert await command(dut, b"N\x09\x0f", 1) == b"N"
+    await send_byte(dut, ord("N"))
+    await send_byte(dut, 3)  # Incomplete command; watchdog still releases NC.
+    await Timer(510000, units="ns")
+    released(dut)
+    snap = await command(dut, b"Q", 18)
+    assert snap[16:] == b"\x00\x00"
+
+
+@cocotb.test()
+async def nc_selection_is_held_during_reads_and_released_before_ft_output(dut):
+    await initialize(dut)
+    assert await command(dut, b"T\x04", 1) == b"T"
+
+    async def selected_card():
+        while True:
+            if int(dut.data_oe_debug.value):
+                raise AssertionError("read experiment drove card data")
+            dut.data_host.value = (int(dut.addr_drive_debug.value) ^ int(dut.nc_drive_debug.value) ^ 0x5a) & 255
+            await Timer(100, units="ns")
+
+    model = cocotb.start_soon(selected_card())
+    assert await command(dut, b"UREAD", 1) == b"U"
+    assert await command(dut, b"C\xff\xff", 1) == b"C"
+    assert await command(dut, b"N\x06\x0f", 1) == b"N"
+    response = await command(dut, b"R\x00\x01\x20\x00\x08\xff\xed\xff", 9)
+    assert response == b"R" + bytes(((0x120+i) ^ 6 ^ 0x5a) & 255 for i in range(8))
+    released(dut)
+
+    async def receive_words():
+        observed = []
+        for _ in range(10000):
+            await FallingEdge(dut.ft_clk)
+            await Timer(1, units="ps")
+            write = int(dut.ft_oe.value) and not int(dut.ft_wr.value)
+            word = int(dut.ft_data.value)
+            await RisingEdge(dut.ft_clk)
+            if write:
+                released(dut)
+                observed.append(word)
+                if len(observed) == 8:
+                    return observed
+        raise AssertionError("NC-selected FT600 burst timed out")
+
+    dut.ft_txe.value = 0
+    response = cocotb.start_soon(receive_words())
+    assert await command(dut, b"UREAD", 1) == b"U"
+    assert await command(dut, b"C\xff\xff", 1) == b"C"
+    assert await command(dut, b"N\x0b\x0f", 1) == b"N"
+    assert await command(dut, b"F\x00\x01\x20\x00\x08\xff\xed\xff", 1) == b"F"
+    assert await response == [0xa500 | (((0x120+i) ^ 11 ^ 0x5a) & 255) for i in range(8)]
     released(dut)
     model.kill()
 

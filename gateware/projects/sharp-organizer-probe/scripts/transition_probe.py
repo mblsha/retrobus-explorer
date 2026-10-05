@@ -22,6 +22,7 @@ from organizer_probe import BAUD, Probe, bounded, number, open_port, validate_cy
 class Step:
     operation: str
     value: int
+    mask: int | None = None
 
 
 @dataclass(frozen=True)
@@ -94,18 +95,24 @@ def load_plan(path: Path) -> Plan:
             raise ValueError("steps must be a list of at most 128 commands")
         steps = []
         for item in entry["steps"]:
-            keys(item, {"operation", "value"})
+            keys(item, {"operation", "value"}, {"mask"})
             operation, value = item["operation"], integer(item["value"])
+            mask = integer(item.get("mask", 0xf)) if operation == "nc" else None
+            if operation != "nc" and "mask" in item:
+                raise ValueError("only NC steps have a mask; address/control steps use full masks")
             if operation == "address":
                 bounded(value, 20, "address")
             elif operation == "control":
                 read_control(value)
+            elif operation == "nc":
+                bounded(value, 4, "NC value")
+                bounded(mask, 4, "NC mask")
             elif operation == "hold_us":
                 if not 0 <= value <= 100_000:
                     raise ValueError("hold_us must be 0..100000, within the watchdog interval")
             else:
-                raise ValueError("operations are address, control or hold_us; no data or protected-pin drive")
-            steps.append(Step(operation, value))
+                raise ValueError("operations are address, control, nc or hold_us; no data or power-pin drive")
+            steps.append(Step(operation, value, mask))
         read = keys(entry["read"], {"start", "length", "idle_control", "active_control"}, {"mode"})
         mode = read.get("mode", "burst")
         if mode not in ("burst", "held_select"):
@@ -131,7 +138,7 @@ def replay(probe: Probe, steps: tuple[Step, ...], events: list[dict]) -> None:
     events.append({"operation": "park", "observed": observed_snapshot(probe.park())})
     probe.unlock()
     commands = (Step("control", 0xff), Step("address", 0), *steps)
-    address, control = None, None
+    address, control, nc_value, nc_mask = None, None, 0, 0
     for step in commands:
         before = time.perf_counter_ns()
         event = {"operation": step.operation, "value": step.value, "status": "started"}
@@ -142,6 +149,10 @@ def replay(probe: Probe, steps: tuple[Step, ...], events: list[dict]) -> None:
         elif step.operation == "address":
             address = bounded(step.value, 20, "address")
             probe.address(address, 0xfffff)
+        elif step.operation == "nc":
+            nc_value, nc_mask = step.value, step.mask
+            event["mask"] = nc_mask
+            probe.nc(nc_value, nc_mask)
         else:
             time.sleep(step.value / 1_000_000)
         sample = probe.snapshot()
@@ -149,6 +160,8 @@ def replay(probe: Probe, steps: tuple[Step, ...], events: list[dict]) -> None:
                 (sample.address != address or sample.address_oe != 0xfffff)) or
                 (control is not None and (sample.control != control or sample.control_oe != 0xff))):
             raise RuntimeError("selection preamble lost drive or observed pins differ from commands")
+        if sample.nc_oe != nc_mask or ((sample.protected >> 3 ^ nc_value) & nc_mask):
+            raise RuntimeError("observed NC levels or drive mask differ from the selection preamble")
         event.update(status="observed", host_elapsed_ns_including_snapshot=time.perf_counter_ns() - before,
                      observed=observed_snapshot(sample))
 
@@ -170,6 +183,8 @@ def held_read(probe: Probe, start: int, count: int, active: int, samples: list[d
 def capture(probe: Probe, plan: Plan, output_dir: Path, *, passes: int = 2) -> dict:
     if passes < 2:
         raise ValueError("transition captures require at least two complete comparison passes")
+    if any(step.operation == "nc" for profile in plan.profiles for step in profile.steps) and probe.protocol != "OBP6":
+        raise RuntimeError("NC experiment plans require OBP6 gateware")
     if not 1 <= probe.burst_request_bytes <= 65535:
         raise ValueError("invalid burst request size")
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -195,7 +210,7 @@ def capture(probe: Probe, plan: Plan, output_dir: Path, *, passes: int = 2) -> d
                   "burst_exit": "FT600 releases before payload transmission; host verifies park after each chunk",
                   "timing": "preamble is host-timed with a snapshot after every command; elapsed values are not pin-edge timestamps",
                   "power_on_reset": "not performed; parking is not proof of a card latch reset",
-                  "limitations": "burst mode cannot test continuous drive across burst entry; both modes park between chunks; no writes or unknown-pin drive",
+                  "limitations": "burst mode cannot test continuous drive across burst entry; both modes park between chunks; no writes or power-pin drive",
               }}
     started, image_ids = time.perf_counter(), {}
     try:

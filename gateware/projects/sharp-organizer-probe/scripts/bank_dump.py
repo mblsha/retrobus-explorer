@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from organizer_probe import (
-    BURST_CHUNK, CONTROL_BITS, PROTECTED_BITS, Probe, Snapshot, bounded, cycle, run_dump,
+    BURST_CHUNK, CONTROL_BITS, PROTECTED_BITS, NC_BITS, Probe, Snapshot, bounded, cycle, run_dump,
     validate_cycle,
 )
 
@@ -152,6 +152,12 @@ def observed_snapshot(snapshot: Snapshot) -> dict:
     }
     result["protected_input_pins"] = {
         pin: (snapshot.protected >> bit) & 1 for bit, pin in enumerate(PROTECTED_BITS)
+    }
+    result["nc_contacts"] = {
+        pin: {"observed": (snapshot.protected >> (bit + 3)) & 1,
+              "driven": bool(snapshot.nc_oe & (1 << bit)),
+              "drive": (snapshot.nc_drive >> bit) & 1 if snapshot.nc_oe & (1 << bit) else None}
+        for bit, pin in enumerate(NC_BITS)
     }
     return result
 
