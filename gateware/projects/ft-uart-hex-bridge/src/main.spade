@@ -6,6 +6,7 @@ use shared_components::{
     boot_banner::{boot_banner_then_tx_req, boot_banner_tx_gate},
     clocking::sampled_bool_clock,
     config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
+    ft_rx::{PackedFtWord, pack_ft_word, unpack_ft_be, unpack_ft_word},
     primitives::reset_conditioner,
     serial::{FtBe, FtData, UartLineBusy},
 };
@@ -14,13 +15,9 @@ use self::msg::{BridgeMsg, BridgeMsgStreamState, bridge_msg_stream_step, init_br
 use self::protocol::{
     BridgeCount,
     LineParserState,
-    PackedFtWord,
     ParserEvent,
     ParserStepOut,
     line_parser_step,
-    pack_ft_word,
-    unpack_ft_be,
-    unpack_ft_word,
 };
 
 struct MainState {

@@ -1,0 +1,44 @@
+use super::{
+    ft_stream::{FtWordStreamState, ft_word_stream_step},
+    serial::{FtBe, FtData},
+};
+
+pub struct FtRecordStreamOut {
+    data: FtData,
+    be: FtBe,
+    valid: bool,
+    pop_record: bool,
+}
+
+/// Serialize a held FIFO record into low-first 16-bit FT600 transfers.
+/// Pop the record when the last 32-bit word's low half is accepted: the
+/// existing word serializer retains its high half across backpressure.
+/// For single-word streams use `ft_stream::ft_word_stream_step` directly.
+#[inline]
+pub entity ft_record_stream<#uint WORDS = 4>(
+    clk: clock, rst: bool,
+    record: uint<{WORDS * 32}>, empty: bool, sink_full: bool,
+) -> FtRecordStreamOut
+where
+    WORDS >= 2 else "a multiword FT record needs at least two words",
+{
+    decl word_index;
+    decl step;
+    let shift: uint<{WORDS * 32}> = zext(word_index) << 5;
+    let word: uint<32> = trunc(record >> shift);
+    reg(clk) state: FtWordStreamState reset(rst: FtWordStreamState::GetFifo()) = step.next_state;
+    reg(clk) current: uint<32> reset(rst: 0) = step.next_cur_value;
+    let step = ft_word_stream_step$(
+        state, cur_value: current, ui_din_full: sink_full,
+        ui_dout_empty: true, stream_fifo_empty: empty, stream_fifo_dout: word,
+    );
+    let word_count: uint<{uint::bits_for(WORDS)}> = WORDS;
+    let last_index: uint<{uint::bits_for(WORDS - 1)}> = trunc(word_count -. 1);
+    let last_word = word_index == last_index;
+    reg(clk) word_index: uint<{uint::bits_for(WORDS - 1)}> reset(rst: 0) =
+        if step.stream_fifo_rget {
+            if last_word { 0 } else { word_index +. 1 }
+        } else { word_index };
+    FtRecordStreamOut$(data: step.ui_din, be: step.ui_din_be,
+        valid: step.ui_din_valid, pop_record: step.stream_fifo_rget && last_word)
+}

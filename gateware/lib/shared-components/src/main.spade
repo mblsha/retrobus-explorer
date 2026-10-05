@@ -11,6 +11,8 @@ pub mod message_stream;
 pub mod elastic;
 pub mod monitoring;
 pub mod ft_stream;
+pub mod ft_rx;
+pub mod ft_records;
 pub mod bridges;
 pub(lib) mod guards;
 pub(lib) mod harness;

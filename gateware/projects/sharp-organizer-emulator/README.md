@@ -233,6 +233,10 @@ Place the global `--port "$ORGANIZER_UART"` before hardware subcommands.
 The [bus controller](src/bus.spade), [transport](src/transport.spade),
 [UART protocol](src/protocol.spade), and [top-level integration](src/main.spade)
 reuse the shared UART, synchronizers, memory and FT245 primitives.
+Shared [FT receive helpers](../../lib/shared-components/src/ft_rx.spade)
+preserve byte enables and consume one byte per qualified read; the
+[record serializer](../../lib/shared-components/src/ft_records.spade)
+streams complete records under backpressure.
 The [supervisor](asm/supervisor.asm.in), [returning smoke payload](asm/boot_smoke.asm.in),
 and [continuous receive/echo payload](asm/stream_echo.asm.in) provide the native
 examples. Their CPU-model test is in [test_host/test_emulator.py](test_host/test_emulator.py).

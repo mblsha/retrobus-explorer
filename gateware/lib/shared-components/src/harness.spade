@@ -3,6 +3,8 @@ use super::{
     bridges::{BridgePolicy, uart_fifo_bridge},
     config::{au_usb_uart_tx8_req_tap, au_usb_uart_tx8_tap},
     elastic::{ElasticSlotState, elastic_slot_reset, elastic_slot_step},
+    ft_records::ft_record_stream,
+    ft_rx::{pack_ft_word, unpack_ft_word, unpack_ft_be, ft_rx_byte_step},
     memory::{async_fifo, fifo},
     message_stream::TxReq8,
     monitoring::async_uart_monitor,
@@ -10,6 +12,51 @@ use super::{
     serial::{BitTime, FtBe, FtData, FtOut, StopBits, ft, ft_out_tap, uart_rx, uart_tx, uart_tx_tap},
     sharp::{banked_rom_byte, count_on_event, gate_byte8, wait_hold},
 };
+
+#[no_mangle(all)]
+entity tb_ft_rx_bytes(
+    clk: clock, rst: bool, word: FtData, be: FtBe, empty: bool, consume: bool,
+    packed_word: inv uint<18>, unpacked_word: inv FtData, unpacked_be: inv FtBe,
+    data: inv uint<8>, pop_word: inv bool, high: inv bool,
+) {
+    decl cursor_high;
+    let value = pack_ft_word(word, be);
+    let step = ft_rx_byte_step(cursor_high, value, empty, consume);
+    reg(clk) cursor_high reset(rst: false) = step.next_high;
+    set packed_word = value;
+    set unpacked_word = unpack_ft_word(value);
+    set unpacked_be = unpack_ft_be(value);
+    set data = step.data;
+    set pop_word = step.pop_word;
+    set high = cursor_high;
+}
+
+entity tb_ft_records<#uint WORDS>(
+    clk: clock, rst: bool, record: uint<{WORDS * 32}>, empty: bool, sink_full: bool,
+    data: inv FtData, be: inv FtBe, valid: inv bool, pop_record: inv bool,
+) {
+    let stream = inst ft_record_stream::<WORDS>$(clk, rst, record, empty, sink_full);
+    set data = stream.data;
+    set be = stream.be;
+    set valid = stream.valid;
+    set pop_record = stream.pop_record;
+}
+
+#[no_mangle(all)]
+entity tb_ft_records128(
+    clk: clock, rst: bool, record: uint<128>, empty: bool, sink_full: bool,
+    data: inv FtData, be: inv FtBe, valid: inv bool, pop_record: inv bool,
+) {
+    let _ = inst tb_ft_records::<4>$(clk, rst, record, empty, sink_full, data, be, valid, pop_record);
+}
+
+#[no_mangle(all)]
+entity tb_ft_records96(
+    clk: clock, rst: bool, record: uint<96>, empty: bool, sink_full: bool,
+    data: inv FtData, be: inv FtBe, valid: inv bool, pop_record: inv bool,
+) {
+    let _ = inst tb_ft_records::<3>$(clk, rst, record, empty, sink_full, data, be, valid, pop_record);
+}
 
 #[no_mangle(all)]
 entity tb_card_memory(

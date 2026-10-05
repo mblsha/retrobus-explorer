@@ -1,7 +1,6 @@
 use shared_components::serial::{FtBe, FtData};
 
 pub type BridgeCount = uint<16>;
-pub type PackedFtWord = uint<18>;
 
 pub enum ParserPhase {
     Idle,
@@ -185,18 +184,6 @@ pub fn line_parser_step(
             },
         }
     }
-}
-
-pub fn pack_ft_word(word: FtData, be: FtBe) -> PackedFtWord {
-    (zext(be) << 16) | zext(word)
-}
-
-pub fn unpack_ft_word(packed: PackedFtWord) -> FtData {
-    trunc(packed)
-}
-
-pub fn unpack_ft_be(packed: PackedFtWord) -> FtBe {
-    trunc(packed >> 16)
 }
 
 // The four hex digits of a 16-bit value, most significant first.
