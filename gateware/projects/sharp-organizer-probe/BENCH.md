@@ -93,3 +93,21 @@ the committed backup before any write. At SRAM2 address `0x7fff`, it changed
 `0x9f` to `0xc5` and read back `0xc5`. It then restored `0x9f`; a two-pass
 32 KiB post-restore read had the exact pre-write SHA-256. Raw before/after
 images and the result JSON are under `build/oz707-sram-write-test-20261005/`.
+
+## UART read throughput — 2026-10-05
+
+Read-only EPROM benchmarks on the connected OZ-707 used the same OBP3 bitstream,
+1 Mbaud UART, and 5 µs setup plus 5 µs selected read phases. Every 128 KiB
+pass matched the committed ROM image byte for byte. The timings include host
+unlock/release commands but exclude device opening and archival work.
+
+| UART request size | Requests per 128 KiB | Elapsed | Effective rate |
+| ---: | ---: | ---: | ---: |
+| 4 KiB | 32 | 2.88 s | 44.4 KiB/s |
+| 16 KiB | 8 | 1.70 s | 75.5 KiB/s |
+| 32 KiB | 4 | 1.50 s | 85.3 KiB/s |
+| 65,535 bytes | 3 | 1.45 s | 88.2 KiB/s |
+
+The host now uses 32 KiB requests by default. This keeps the card cycle
+unchanged and makes a 1 MiB scan approximately 12 seconds per pass, or 24
+seconds for two passes, if the larger address range behaves like this ROM.

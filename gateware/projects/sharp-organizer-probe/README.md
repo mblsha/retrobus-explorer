@@ -90,6 +90,13 @@ for diagnosis. `shell` accepts `a VALUE MASK` for address bits,
 `0x` notation. Driving commands re-arm the probe; the watchdog releases it
 after one second without a command or burst progress.
 
+The host batches reads in 32 KiB UART requests. On the OZ-707 ROM, a
+verified 128 KiB pass measured about 85 KiB/s with this batch size,
+versus 44 KiB/s with 4 KiB requests. At the same card timing, a 1 MiB scan
+should take about 12 seconds per pass or 24 seconds for the default two passes,
+plus preflight and file overhead. This is a throughput estimate, not a
+qualified timing limit for other cards.
+
 ## Named bank dumps
 
 `dump-banks` reads a JSON plan of named banks. Each bank specifies an address
