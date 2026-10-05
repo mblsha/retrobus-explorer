@@ -155,21 +155,22 @@ including duplicate and open-bus reads. An observed period is a byte-level
 alias across the scanned address space, not a physical capacity measurement.
 The directory is published only after every two-pass comparison succeeds.
 
-To save a capture in the archive and automatically test backed-up SRAM
+To save a capture in a Git archive and automatically test backed-up SRAM
 candidates, use `capture-card`. It commits the capture in Git before the first
 write probe, then commits the probe result separately. `--read-only` stops
-after the backup commit. The destination repo must be writable and have a
-configured Git identity.
+after the backup commit. Pass the parent directory for capture IDs with
+`--archive-dir`; it must be inside a writable Git repository with a configured
+Git identity.
 
 ```sh
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
   --port /dev/cu.YOUR_AU_UART capture-card \
-  --archive-root /path/to/binja-esr-tests --reported-model OZ-707
+  --archive-dir /path/to/git-repo/card-captures --reported-model OZ-707
 ```
 
 If `dump-card` already produced a verified read-only directory, avoid another
 full scan with `archive-discovery --source-dir build/card-capture
---archive-root /path/to/binja-esr-tests`. It validates every stored image and
+--archive-dir /path/to/git-repo/card-captures`. It validates every stored image and
 full-scan hash, commits the copied backup, then runs the same SRAM probes.
 
 The automatic probe skips selections whose reads track the last data-bus
@@ -190,10 +191,10 @@ live bank before writing.
 ```sh
 uv run --frozen python projects/sharp-organizer-probe/scripts/organizer_probe.py \
   --port /dev/cu.YOUR_AU_UART write-sram \
-  --capture-dir /path/to/binja-esr-tests/roms/cards/sharp-organizer/CAPTURE \
-  --probe-result /path/to/CAPTURE/write-probes/result.json \
+  --capture-dir /path/to/git-repo/card-captures/CAPTURE \
+  --probe-result /path/to/git-repo/card-captures/CAPTURE/write-probes/result.json \
   --view sram2-ci1-e21 --address 0x100 --input payload.bin \
-  --result-dir /path/to/CAPTURE/write-transaction-01
+  --result-dir /path/to/git-repo/card-captures/CAPTURE/write-transaction-01
 ```
 
 ## SRAM write test

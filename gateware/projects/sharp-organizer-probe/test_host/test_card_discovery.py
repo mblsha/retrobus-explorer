@@ -111,7 +111,7 @@ class DiscoveryTest(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), "config", "user.name", "Probe Test"], check=True)
             subprocess.run(["git", "-C", str(root), "config", "user.email", "probe@example.invalid"], check=True)
             probe = MemoryProbe()
-            output = root / "roms/cards/sharp-organizer/fixture"
+            output = root / "captures/fixture"
             capture(probe, output, limit=256)
             with self.assertRaises(ValueError):
                 verify_committed_capture(output)

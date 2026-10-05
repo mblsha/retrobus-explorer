@@ -78,8 +78,7 @@ and ignored by Git.
 Before enabling data-bus output, a fresh read of the inserted OZ-707 captured
 128 KiB EPROM and 32 KiB SRAM2 on two matching passes. The SRAM image SHA-256
 was `7696709926e45a3af54e583f03e0bb6f1ea54fc626890529aa548b9948a7dad1`.
-The capture is committed in `binja-esr-tests` as `cccdbc2` at
-`roms/cards/sharp-organizer/20261004T234306Z/`.
+The fresh backup was committed before the write trial.
 
 The bounded OBP3 write bitstream was built with Spade and nextpnr-xilinx seed 2.
 It passed the 100 MHz timing target at 100.46 MHz and the Project X-Ray
@@ -168,7 +167,7 @@ EPROM (`a8a1afb9…112d9d`), 32 KiB SRAM2
 The EPROM and SRAM2 hashes exactly match the previously archived OZ-707
 images. All four CI/E2 states expose identical EPROM and SRAM2 data; all
 SRAM1 and MSKROM states track bus hold in the priming test. The full capture
-was committed to `binja-esr-tests` as `08def3e` before any OBP4 write probe.
+was committed before any OBP4 write probe.
 
 The automatic probe then skipped SRAM1 and tested two addresses in each of
 the four SRAM2 CI/E2 views. Each trial persisted after priming the data bus

@@ -476,8 +476,8 @@ def main() -> None:
     card.add_argument("--scan-length", type=number, default=1 << 20)
     card.add_argument("--reported-model")
     archive = commands.add_parser("capture-card", help="capture, commit backup, then probe SRAM candidates")
-    archive.add_argument("--archive-root", type=Path, required=True,
-                         help="Git repository containing roms/cards/sharp-organizer")
+    archive.add_argument("--archive-dir", type=Path, required=True,
+                         help="capture parent directory inside a Git repository")
     archive.add_argument("--capture-id", help="UTC capture directory name; defaults to current UTC time")
     archive.add_argument("--scan-length", type=number, default=1 << 20)
     archive.add_argument("--reported-model")
@@ -485,7 +485,7 @@ def main() -> None:
     archive.add_argument("--passes", type=int, default=2)
     import_capture = commands.add_parser("archive-discovery", help="archive a completed read-only discovery scan")
     import_capture.add_argument("--source-dir", type=Path, required=True)
-    import_capture.add_argument("--archive-root", type=Path, required=True)
+    import_capture.add_argument("--archive-dir", type=Path, required=True)
     import_capture.add_argument("--capture-id")
     import_capture.add_argument("--read-only", action="store_true")
     probe_ram_cmd = commands.add_parser("probe-ram", help="probe SRAM from a committed capture")
@@ -558,7 +558,7 @@ def main() -> None:
             capture_id = args.capture_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             if not re.fullmatch(r"[A-Za-z0-9_-]+", capture_id):
                 raise ValueError("capture ID must use letters, digits, underscore or hyphen")
-            dest = args.archive_root / "roms/cards/sharp-organizer" / capture_id
+            dest = args.archive_dir / capture_id
             if args.command == "capture-card":
                 result = capture(probe, dest, limit=args.scan_length, passes=args.passes,
                                  reported_model=args.reported_model)
