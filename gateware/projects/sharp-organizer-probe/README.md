@@ -107,7 +107,18 @@ for diagnosis. `shell` accepts `a VALUE MASK` for address bits,
 `0x` notation. Driving commands re-arm the probe; the watchdog releases it
 after one second without a command or burst progress.
 
-The host batches reads in 65,535-byte UART requests. On the OZ-707, a full
+The host defaults to 65,535-byte UART read requests. The global option
+`--burst-bytes 8192` reduces each request to 8 KiB for transport diagnosis;
+it applies to dumps, discovery, and the reads used for SRAM verification.
+It changes the UART request size while retaining the selected card timing and
+full-pass comparisons. A timed-out burst read is retried up to twice at the same
+address, after clearing pending UART input and verifying a parked state. Short
+payloads are discarded; both complete passes must still agree. Writes are not
+retried. Capture metadata records the request size and recovered read timeouts.
+An unrecovered failure discards the incomplete discovery; run it again before
+archiving.
+
+On the OZ-707, a full
 1 MiB scan at the old 1 Mbaud/5 µs setting took 26.6 seconds for two passes.
 At 5 Mbaud/500 ns, 48 MiB of complete repeated scans matched the baseline
 without a timeout: about 2.65 seconds per MiB pass, or 5.3 seconds for the

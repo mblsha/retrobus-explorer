@@ -13,7 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from bank_dump import Bank, bank_selection, observed_snapshot
-from organizer_probe import Probe, cycle, run_dump
+from organizer_probe import BURST_CHUNK, Probe, cycle, read_burst, run_dump
 
 
 ADDRESS_LIMIT = 1 << 20
@@ -48,11 +48,11 @@ def read(probe: Probe, start: int, count: int, active: int) -> bytes:
     if count < 1 or start < 0 or start + count > ADDRESS_LIMIT:
         raise ValueError("read is outside the 20-bit address range")
     result = bytearray()
+    chunk_bytes = getattr(probe, "burst_request_bytes", BURST_CHUNK)
     try:
-        for offset in range(0, count, 65535):
-            size = min(65535, count - offset)
-            probe.unlock()
-            result.extend(probe.burst(start + offset, size, 0xff, active, 0xff))
+        for offset in range(0, count, chunk_bytes):
+            size = min(chunk_bytes, count - offset)
+            result.extend(read_burst(probe, start + offset, size, 0xff, active, 0xff))
     finally:
         probe.release()
     return bytes(result)
@@ -161,6 +161,7 @@ def capture(probe: Probe, output_dir: Path, *, limit: int = ADDRESS_LIMIT,
         raise ValueError("duplicate select states")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}-", dir=output_dir.parent))
+    retry_start = len(getattr(probe, "read_retry_events", []))
     try:
         primers = find_primers(probe, candidates)
         manifest = {
@@ -170,6 +171,7 @@ def capture(probe: Probe, output_dir: Path, *, limit: int = ADDRESS_LIMIT,
             "captured_utc": datetime.now(timezone.utc).isoformat(),
             "gateware_protocol": probe.protocol,
             "uart_baud": getattr(probe.port, "baudrate", None),
+            "burst_request_bytes": getattr(probe, "burst_request_bytes", BURST_CHUNK),
             "read_phase_ns": probe.burst_phase_ns,
             "address_scan_length": limit,
             "passes": passes,
@@ -228,6 +230,7 @@ def capture(probe: Probe, output_dir: Path, *, limit: int = ADDRESS_LIMIT,
             manifest["views"].append(view)
             scan.unlink()
             scan.with_suffix(".bin.json").unlink()
+        manifest["read_retry_events"] = getattr(probe, "read_retry_events", [])[retry_start:]
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         stage.rename(output_dir)
         return manifest
