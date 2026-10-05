@@ -106,8 +106,8 @@ Start a testbench's clocks once per test: a reset helper that calls
 ## The Spade compiler and where it lives
 
 Every project and `lib/shared-components` pins the compiler as
-`[spade].commit` in its own `swim.lock`. All fourteen must name the same
-commit; the current pin is **v0.20.0**
+`[spade].commit` in its own `swim.lock`. All projects and the shared library
+must name the same commit; the current pin is **v0.20.0**
 (`7e0bf7883d8a23dff89b5e38ce5c5f24761fafe5`). There is no library dependency
 left: the one combinator this repository used from `nstd` now lives in
 `lib/shared-components/src/arrays.spade`.
@@ -134,7 +134,7 @@ To bump the compiler:
 2. For each `build/spade` whose `origin` is still GitLab, either
    `git -C build/spade remote set-url origin https://codeberg.org/spade-lang/spade.git`
    or `swim clean --and-spade` (which also throws away the compiler build).
-3. Edit `[spade].commit` in all fourteen `swim.lock` files to the release
+3. Edit `[spade].commit` in every workspace's `swim.lock` file to the release
    commit you want. Do **not** run `swim update-spade`: it moves the pin to
    whatever the branch head is, and these locks name exact release tags.
 4. Build every project, work the compiler's warnings back to zero, and only
@@ -248,7 +248,7 @@ Synthesis attributes live in two places and both are deliberate.
 `#[verilog_attrs(ASYNC_REG = "TRUE")]` is on `sync_delay_pipe` and
 `sync_bundle_pipe` in `primitives.spade` -- on the pipelines that hold the
 flops, because the attribute is rejected on a `reg` and accepted on a unit.
-`#[verilog_attrs(keep_hierarchy = "yes")]` is on all nine extern
+`#[verilog_attrs(keep_hierarchy = "yes")]` is on extern
 SystemVerilog instantiations, so a vendor block's boundary survives synthesis
 and is still there to be named by a constraint or a report.
 
@@ -275,7 +275,7 @@ To check a refactor that is meant to preserve behaviour: build before and after,
 and compare with both `tools/sv_module_surface.py --diff` (what the testbenches
 and constraints bind to) and `tools/sv_module_bodies.py --diff` (the logic
 itself, with `--loose` to tell a renamed net from a changed one and `--rename`
-when a unit was renamed on purpose). Build the fourteen projects **one at a
+when a unit was renamed on purpose). Build the registered projects **one at a
 time** when saving a reference: `ethernet-diagnostic` consumes
 `microsd-emulator` as a library, and a concurrent build reads that library's
 `build/` while swim is rewriting it.

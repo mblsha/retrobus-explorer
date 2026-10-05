@@ -1,0 +1,43 @@
+use super::serial::{FtBe, FtData};
+
+/// A FIFO word retains both FT600 data bytes and their physical byte enables.
+pub type PackedFtWord = uint<18>;
+
+#[inline]
+pub fn pack_ft_word(word: FtData, be: FtBe) -> PackedFtWord {
+    (zext(be) << 16) | zext(word)
+}
+
+#[inline]
+pub fn unpack_ft_word(packed: PackedFtWord) -> FtData {
+    trunc(packed)
+}
+
+#[inline]
+pub fn unpack_ft_be(packed: PackedFtWord) -> FtBe {
+    trunc(packed >> 16)
+}
+
+pub struct FtByteRead {
+    data: uint<8>,
+    pop_word: bool,
+    next_high: bool,
+}
+
+/// Present enabled bytes low-first. `consume` is a one-cycle read event,
+/// not the held bus-read level. The caller owns the cursor register and FIFO.
+/// BE=00 is discarded even without a read; an empty FIFO presents zero.
+#[inline]
+pub fn ft_rx_byte_step(
+    high: bool, packed: PackedFtWord, empty: bool, consume: bool,
+) -> FtByteRead {
+    let be = unpack_ft_be(packed);
+    let word = unpack_ft_word(packed);
+    let high_byte = high || (be & 1) == 0;
+    let pop_word = !empty && (be == 0 || (consume && (high_byte || (be & 2) == 0)));
+    FtByteRead$(
+        data: if empty { 0 } else if high_byte { trunc(word >> 8) } else { trunc(word) },
+        pop_word,
+        next_high: if pop_word { false } else if consume && !empty { true } else { high },
+    )
+}

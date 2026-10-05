@@ -42,6 +42,12 @@ bitstream. Generated bitstreams, logs and test results stay outside source
 control. This document records verification; it does not designate a hardware
 qualified release.
 
+The initial implementation was saved in commit `4f896e7`. The subsequent
+[Spade/FT600 source cleanup](../../docs/spade-modernization-2026-10-05.md)
+records its own compilation, simulation and interface checks. The initial
+bitstream identity above does not qualify a newly routed image from those
+updated sources.
+
 ## Reproduce the checks
 
 Use [Build and verification](README.md#build-and-verification) for gateware,

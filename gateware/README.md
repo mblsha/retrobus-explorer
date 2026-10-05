@@ -136,6 +136,12 @@ in `swim.toml`. Put generally useful protocol, clocking, FIFO, memory, monitor,
 and bus helpers in `lib/shared-components/` instead of copying them between
 projects.
 
+Shared FT600 composition includes
+[byte-enable packing and byte consumption](lib/shared-components/src/ft_rx.spade)
+and a [multiword record serializer](lib/shared-components/src/ft_records.spade).
+The latter defaults to four 32-bit words and reuses the existing 32-bit word
+serializer; applications own the record layout and FIFO/capture policy.
+
 Constraint-aware hardware builds regenerate `constraints/pins.xdc` from the
 project's `[constraints]` configuration. These XDC files are checked-in,
 reviewable snapshots whose semantics are locked by the constraint golden
@@ -152,6 +158,8 @@ not imply a wire-protocol or package rename.
 The [2026-10-01 modernization review](docs/spade-modernization-2026-10-01.md)
 maps the previous year's Spade posts to the code, records the syntax changes
 and their verification, and identifies features that were already applied.
+The [2026-10-05 follow-up](docs/spade-modernization-2026-10-05.md) audits newer
+organizer sources and documents the extracted FT600 interfaces and tests.
 Use [the compiler issue record](docs/spade-compiler-issues.md) when deciding
 whether a language feature can replace an existing workaround.
 

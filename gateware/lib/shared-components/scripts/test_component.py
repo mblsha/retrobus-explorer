@@ -13,6 +13,9 @@ from pathlib import Path
 
 
 CASES: dict[str, tuple[str, str]] = {
+    "ft_rx_bytes": ("tb_ft_rx_bytes", "test_ft_rx_bytes"),
+    "ft_records128": ("tb_ft_records128", "test_ft_records"),
+    "ft_records96": ("tb_ft_records96", "test_ft_records"),
     "card_memory": ("tb_card_memory", "test_card_memory"),
     "sync_delay": ("tb_sync_delay", "test_sync_delay"),
     "reset_conditioner": ("tb_reset_conditioner", "test_reset_conditioner"),
