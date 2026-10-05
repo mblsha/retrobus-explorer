@@ -6,7 +6,7 @@ from cocotb.triggers import FallingEdge, Timer
 from cocotb_helpers import start_clock, tick
 
 
-BIT_NS = 1000
+BIT_NS = 200
 
 
 async def send_byte(dut, byte):
@@ -83,6 +83,8 @@ async def uart_probe_and_watchdog(dut):
 
     assert await command(dut, b"UREAD", 1) == b"U"
     assert int(dut.armed_debug.value) == 1
+    assert await command(dut, b"T\x14", 1) == b"!"
+    assert int(dut.armed_debug.value) == 1
     assert await command(dut, b"A\x01\x23\x45\x0f\xff\xff", 1) == b"A"
     assert int(dut.addr_drive_debug.value) == 0x12345
     assert int(dut.addr_oe_debug.value) == 0xFFFFF
@@ -105,6 +107,8 @@ async def uart_probe_and_watchdog(dut):
 @cocotb.test()
 async def burst_reads_sequential_addresses_and_releases(dut):
     await initialize(dut)
+    assert await command(dut, b"T\x03", 1) == b"!"
+    assert await command(dut, b"T\x14", 1) == b"T"
 
     async def card_rom():
         while True:
