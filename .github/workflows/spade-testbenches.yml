@@ -114,6 +114,8 @@ jobs:
       - name: Run host-side gateware unit tests
         run: |
           "${GATEWARE_PYTHON}" -m unittest discover \
+            -s projects/sharp-organizer-emulator/test_host -v
+          "${GATEWARE_PYTHON}" -m unittest discover \
             -s projects/ft-uart-hex-bridge/test \
             -p 'test_ft_uart_hex_bridge_host.py'
           "${GATEWARE_PYTHON}" -m pytest projects/sharp-pc-e500-card/tests

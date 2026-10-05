@@ -6,6 +6,17 @@ level-shifting interface board for bus compatibility, streams the captured data
 through an FT600 FTDI chip, and presents live waveforms, decoded protocols, and
 analytics via a Marimo Notebook interface in the browser.
 
+## Start here: Sharp organizer cards
+
+- **Dump a card or program its SRAM:** [card dumper and SRAM programmer](gateware/projects/sharp-organizer-probe/README.md#quick-start).
+- **Emulate a card and run native IQ-7000/OZ experiments:** [ROM/SRAM2 emulator and eval-loop quick start](gateware/projects/sharp-organizer-emulator/README.md#quick-start), with UART control and bidirectional FT600 streaming.
+- **Observe an organizer's bus:** [passive organizer monitor](gateware/projects/sharp-organizer-card/README.md).
+
+See [Choose an organizer tool](gateware/README.md#choose-an-organizer-tool) for
+the fixture and bus role of each project. The emulator's
+[qualification record](gateware/projects/sharp-organizer-emulator/QUALIFICATION.md)
+separates verified simulation/build results from pending organizer tests.
+
 # Current Status
 
 ![SHARP PC-G850 with both its UART and System Bus connected to a computer](_images/pc-g850.jpg)
@@ -30,6 +41,29 @@ analytics via a Marimo Notebook interface in the browser.
     **ROM Decoding**: In Progress ([Binary Ninja
     Plugin](https://github.com/mblsha/binja-esr))
 
+    **Card Emulation / Native Eval Loop**: [Spade implementation with UART and FT600](gateware/projects/sharp-organizer-emulator/README.md#quick-start); organizer launch and electrical timing await qualification. Intended for the IQ-7000-style bus and OZ family, including OZ-9600 experiments.
+
+# Sharp organizer card dumping and SRAM programming
+
+With the Alchitry Au1, Level Shifter Element, and Sharp Organizer Host Adapter,
+RetroBus Explorer can dump card ROM and SRAM, deduplicate identical data while
+preserving each tested pin selection, and write confirmed SRAM banks.
+`capture-card` commits the current backup to a Git archive before reversible
+SRAM presence probes; `write-sram` checks that backup and verifies the write.
+The CLI automatically releases the bus when an operation ends.
+
+Start with the [card dumper and SRAM programmer quick start](gateware/projects/sharp-organizer-probe/README.md#quick-start)
+for hardware requirements, capture commands, archive storage, and SRAM writes.
+The archive location is supplied by the caller with `--archive-dir`.
+
+# Sharp organizer native execution card
+
+The [native execution card quick start](gateware/projects/sharp-organizer-emulator/README.md#quick-start)
+provides a resident eval loop, UART-loaded code and SRAM2 scratch memory,
+live bus timing controls, and bidirectional FT600 bus traces and host-fed data.
+Simulation and nextpnr builds are verified; organizer boot entry still needs
+hardware qualification. See the [CLI command reference](gateware/projects/sharp-organizer-emulator/README.md#cli-command-reference)
+for image loading, native jobs, SRAM2 access, timing, capture, and explicit disarm.
 
 # Hardware
 

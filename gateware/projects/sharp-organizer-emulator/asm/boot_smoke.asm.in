@@ -1,0 +1,6 @@
+; Assemble at CPU base+0400, then upload as a job. Absolute tokens need the
+; same CPU base as supervisor. Emit '!' and return to the resident loop.
+.ORG @0400@
+    MV A, 0x21
+    MV [@3FF1@], A
+    RETF

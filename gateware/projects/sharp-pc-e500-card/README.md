@@ -3,6 +3,11 @@
 This project emulates a SHARP PC-E500 card with FPGA-backed CE1 RAM, CE6 ROM,
 and a CE6 control page exposed through the onboard USB-UART.
 
+For IQ-7000/OZ-family native experiments, see the
+[Sharp organizer ROM/SRAM2 emulator and eval loop](../sharp-organizer-emulator/README.md#quick-start).
+It reuses the shared transport primitives and provides bidirectional FT600
+capture/input; its organizer launch path still needs hardware qualification.
+
 Unless stated otherwise, run the commands below from the repository root.
 
 ## Expected Host Interface

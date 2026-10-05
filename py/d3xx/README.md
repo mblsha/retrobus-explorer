@@ -3,6 +3,13 @@ This version has minor changes to find the dynamic d3xx library.
 Requires https://ftdichip.com/drivers/d3xx-drivers/ to be located in this
 directory.
 
+## Organizer emulator streaming
+
+The [Sharp organizer ROM/SRAM2 emulator](../../gateware/projects/sharp-organizer-emulator/README.md#ft600-capture-and-host-fed-streams)
+uses these bindings for buffered bus capture and concurrent host-to-FPGA data.
+Its guide covers exact device selection, binary capture, offline decoding,
+receive backpressure, and throughput limits. UART carries emulator control.
+
 # License
 
 This software is provided by Future Technology Devices International Limited “as

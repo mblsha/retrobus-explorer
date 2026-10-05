@@ -4,6 +4,7 @@ pub mod clocking;
 pub mod sharp;
 pub mod serial;
 pub mod memory;
+pub mod card_memory;
 pub mod ascii;
 pub mod boot_banner;
 pub mod message_stream;

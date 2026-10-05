@@ -1,0 +1,65 @@
+use shared_components::serial::{UartLineBusy, uart_tx_tap};
+
+pub struct Command {
+    opcode: uint<8>,
+    address: uint<16>,
+    arg0: uint<8>,
+    arg1: uint<8>,
+    arg2: uint<8>,
+    fire: bool,
+    bad: bool,
+}
+
+/// Request: A5 opcode addrLE16 arg0 arg1 arg2 XOR(first seven bytes).
+/// Reply: D5 opcode status payload[12] XOR(first fifteen bytes).
+/// One outstanding command. A partial request expires after 10 ms; this
+/// resets only the parser, never a running native program.
+pub entity command_link(
+    clk: clock, rst: bool, rx_valid: bool, rx_byte: uint<8>,
+    response: uint<104>, tx: inv bool,
+) -> Command {
+    decl phase;
+    decl reply;
+    decl tx_index;
+    let (uart, uart_w): UartLineBusy = port();
+    let send = phase == 12 && !uart.busy;
+    let shift: uint<128> = zext(tx_index) << 3;
+    let tx_byte: uint<8> = trunc(reply >> shift);
+    let _ = inst uart_tx_tap::<100_000_000, 4_000_000, 8>(
+        clk, rst, false, tx_byte, send, uart_w.line, uart_w.busy,
+    );
+    set tx = uart.line;
+    reg(clk) age: uint<20> reset(rst: 0) =
+        if rx_valid || phase == 0 || phase >= 8 { 0 } else { age +. 1 };
+    let expired = age == 999_999;
+    reg(clk) phase: uint<4> reset(rst: 0) =
+        if expired { 0 }
+        else if phase == 0 { if rx_valid && rx_byte == 0xa5 { 1 } else { 0 } }
+        else if phase < 8 { if rx_valid { phase +. 1 } else { phase } }
+        else if phase < 12 { phase +. 1 }
+        else if send && tx_index == 15 { 0 } else { phase };
+    reg(clk) request: uint<48> reset(rst: 0) =
+        if rx_valid && phase >= 1 && phase <= 6 {
+            (request >> 8) | (zext(rx_byte) << 40)
+        } else { request };
+    reg(clk) checksum: uint<8> reset(rst: 0) =
+        if phase == 0 { 0xa5 }
+        else if rx_valid && phase <= 6 { checksum ^ rx_byte }
+        else { checksum };
+    reg(clk) bad reset(rst: false) =
+        if rx_valid && phase == 7 { checksum != rx_byte } else { bad };
+    let header: uint<120> = 0xd5 | (zext(trunc(request) as uint<8>) << 8)
+        | (zext(if bad { 1 as uint<104> } else { response }) << 16);
+    let reply_xor: uint<8> = trunc(header) ^ trunc(header >> 8) ^ trunc(header >> 16)
+        ^ trunc(header >> 24) ^ trunc(header >> 32) ^ trunc(header >> 40)
+        ^ trunc(header >> 48) ^ trunc(header >> 56) ^ trunc(header >> 64)
+        ^ trunc(header >> 72) ^ trunc(header >> 80) ^ trunc(header >> 88)
+        ^ trunc(header >> 96) ^ trunc(header >> 104) ^ trunc(header >> 112);
+    reg(clk) reply: uint<128> reset(rst: 0) =
+        if phase == 11 { zext(header) | (zext(reply_xor) << 120) } else { reply };
+    reg(clk) tx_index: uint<4> reset(rst: 0) =
+        if phase != 12 { 0 } else if send { tx_index +. 1 } else { tx_index };
+    Command$(opcode: trunc(request), address: trunc(request >> 8),
+        arg0: trunc(request >> 24), arg1: trunc(request >> 32),
+        arg2: trunc(request >> 40), fire: phase == 8 && !bad, bad: bad)
+}

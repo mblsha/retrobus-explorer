@@ -1,0 +1,59 @@
+use shared_components::{
+    ft_stream::{FtWordStreamState, ft_word_stream_step},
+    memory::{sync_fifo},
+    serial::{FtWire, FtData, FtBe, ft_tap},
+};
+
+pub struct Transport {
+    rx_word: uint<18>,
+    rx_empty: bool,
+    rx_full: bool,
+    trace_full: bool,
+}
+
+/// Buffered complete 16-byte records. The shared FT block handles clock
+/// crossing and FT245 turnaround; its read side is consumed here, not dropped.
+pub entity transport(
+    clk: clock, rst: bool, ft_clk: clock, ft_rxf: bool, ft_txe: bool,
+    ft_data: FtData, ft_be: FtBe,
+    record: uint<128>, record_valid: bool, rx_pop: bool,
+    ft_data_drive: inv FtData, ft_be_drive: inv FtBe,
+    ft_rd: inv bool, ft_wr: inv bool, ft_oe: inv bool,
+) -> Transport {
+    let (ft, ft_w): FtWire<FtData, FtBe> = port();
+    decl word_index;
+    decl step;
+    let trace = inst sync_fifo::<128, 256>(
+        clk, rst, record, record_valid,
+        step.stream_fifo_rget && word_index == 3,
+    );
+    let shift: uint<128> = zext(word_index) << 5;
+    let word: uint<32> = trunc(trace.dout >> shift);
+    reg(clk) state: FtWordStreamState reset(rst: FtWordStreamState::GetFifo()) = step.next_state;
+    reg(clk) current: uint<32> reset(rst: 0) = step.next_cur_value;
+    let step = ft_word_stream_step(state, current, ft.ui_din_full,
+        ft.ui_dout_empty, trace.empty, word);
+    reg(clk) word_index: uint<2> reset(rst: 0) =
+        if step.stream_fifo_rget { word_index +. 1 } else { word_index };
+    decl incoming;
+    let rx_accept = !ft.ui_dout_empty && !incoming.full;
+    let incoming = inst sync_fifo::<18, 512>(
+        // Invalid BE=00 words never become visible as CPU receive data.
+        clk, rst, zext(ft.ui_dout) | (zext(ft.ui_dout_be) << 16),
+        rx_accept && ft.ui_dout_be != 0, rx_pop,
+    );
+    // Enable preemption so an ongoing outbound burst can admit host input.
+    let _ = inst ft_tap::<16, 2, 8192, 64, 1, 1>(
+        clk, rst, ft_clk, ft_rxf, ft_txe, ft_data, ft_be,
+        step.ui_din, step.ui_din_be, step.ui_din_valid, rx_accept,
+        ft_w.ft_data_out, ft_w.ft_be_out, ft_w.ft_rd, ft_w.ft_wr, ft_w.ft_oe,
+        ft_w.ui_din_full, ft_w.ui_dout, ft_w.ui_dout_be, ft_w.ui_dout_empty,
+    );
+    set ft_data_drive = ft.ft_data_out;
+    set ft_be_drive = ft.ft_be_out;
+    set ft_rd = ft.ft_rd;
+    set ft_wr = ft.ft_wr;
+    set ft_oe = ft.ft_oe;
+    Transport$(rx_word: incoming.dout, rx_empty: incoming.empty,
+        rx_full: incoming.full, trace_full: trace.full)
+}

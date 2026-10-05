@@ -1,4 +1,5 @@
 use super::{
+    card_memory::card_memory,
     bridges::{BridgePolicy, uart_fifo_bridge},
     config::{au_usb_uart_tx8_req_tap, au_usb_uart_tx8_tap},
     elastic::{ElasticSlotState, elastic_slot_reset, elastic_slot_step},
@@ -9,6 +10,18 @@ use super::{
     serial::{BitTime, FtBe, FtData, FtOut, StopBits, ft, ft_out_tap, uart_rx, uart_tx, uart_tx_tap},
     sharp::{banked_rom_byte, count_on_event, gate_byte8, wait_hold},
 };
+
+#[no_mangle(all)]
+entity tb_card_memory(
+    clk: clock, host_addr: uint<4>, host_data: uint<8>, host_write: bool,
+    bus_addr: uint<4>, bus_data: uint<8>, bus_write: bool,
+    host_read: inv uint<8>, bus_read: inv uint<8>,
+) {
+    let memory = inst card_memory::<4>(clk, host_addr, host_data, host_write,
+        bus_addr, bus_data, bus_write);
+    set host_read = memory.host;
+    set bus_read = memory.bus;
+}
 
 entity tb_counter_bits<#uint WIDTH>(
     clk: clock,

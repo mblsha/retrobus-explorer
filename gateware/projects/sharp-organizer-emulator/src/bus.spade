@@ -1,0 +1,40 @@
+pub struct Cycle {
+    fire: bool,
+    active: bool,
+    ready: bool,
+    address: uint<20>,
+    control: uint<8>,
+    data: uint<8>,
+    reading: bool,
+}
+
+/// One event per qualified address/control window. Address changes under a
+/// held chip select start another window. Raw inputs cancel short/ended
+/// windows before a synchronized write can have a side effect.
+pub entity bus_cycle(
+    clk: clock, rst: bool,
+    address: uint<20>, control: uint<8>, data: uint<8>,
+    raw_address: uint<20>, raw_control: uint<8>,
+    read_delay: uint<8>, write_delay: uint<8>,
+) -> Cycle {
+    let selected = (control & 0xf0) != 0xf0;
+    let reading = (control & 1) != 0;
+    let window = selected && (!reading || (control & 2) == 0);
+    reg(clk) active reset(rst: false) = window;
+    reg(clk) previous_address: uint<20> reset(rst: 0) = address;
+    reg(clk) previous_control: uint<8> reset(rst: 0xff) = control;
+    let starting = window && (!active || previous_address != address
+        || previous_control != control);
+    reg(clk) delay: uint<8> reset(rst: 0) =
+        if starting { if reading { read_delay } else { write_delay } } else { delay };
+    reg(clk) age: uint<8> reset(rst: 0) =
+        if !window || starting { 0 }
+        else if age != 255 { age +. 1 } else { age };
+    decl fired;
+    let raw_matches = raw_address == address && raw_control == control;
+    let fire = window && active && !starting && !fired && age >= delay && raw_matches;
+    reg(clk) fired reset(rst: false) =
+        if !window || starting { false } else { fired || fire };
+    Cycle$(fire: fire, active: window, ready: fired && !starting && raw_matches,
+        address: address, control: control, data: data, reading: reading)
+}
