@@ -1,7 +1,9 @@
 use shared_components::{
+    clocking::sampled_bool_clock,
+    config::au_ft_tap_u16,
     message_stream::{TxReq8, tx_req_none},
     primitives::{reset_conditioner, sync_bundle},
-    serial::{UartLineBusy, uart_rx, uart_tx_tap},
+    serial::{FtBe, FtData, FtWire, UartLineBusy, uart_rx, uart_tx_tap},
 };
 
 type Address = uint<20>;
@@ -33,6 +35,7 @@ struct ProbeState {
     burst_timer: uint<9>,
     burst_remaining: uint<16>,
     burst_data: uint<8>,
+    burst_ft: bool,
     burst_idle: uint<8>,
     burst_active: uint<8>,
     burst_mask: uint<8>,
@@ -49,6 +52,7 @@ struct ProbeState {
     control_oe: Control,
     armed: bool,
     watchdog: Watchdog,
+    watchdog_expired: bool,
     reply_kind: uint<2>,
     reply_pos: uint<5>,
     reply_ack: uint<8>,
@@ -58,6 +62,8 @@ struct ProbeState {
 struct ProbeStep {
     next_state: ProbeState,
     tx_req: TxReq8,
+    ft_valid: bool,
+    ft_word: FtData,
 }
 
 impl Default for ProbeSnapshot {
@@ -88,6 +94,7 @@ impl Default for ProbeState {
             burst_timer: 0,
             burst_remaining: 0,
             burst_data: 0,
+            burst_ft: false,
             burst_idle: 0,
             burst_active: 0,
             burst_mask: 0,
@@ -104,6 +111,7 @@ impl Default for ProbeState {
             control_oe: 0,
             armed: false,
             watchdog: 0,
+            watchdog_expired: false,
             reply_kind: 0,
             reply_pos: 0,
             reply_ack: 0,
@@ -131,7 +139,7 @@ impl ProbeState {
             if self.reply_pos == 0 { b'O' }
             else if self.reply_pos == 1 { b'B' }
             else if self.reply_pos == 2 { b'P' }
-            else if self.reply_pos == 3 { b'4' }
+            else if self.reply_pos == 3 { b'5' }
             else { b'\n' }
         } else if self.reply_kind == 2 {
             let snap = self.snapshot;
@@ -161,13 +169,19 @@ impl ProbeState {
         rx_valid: bool,
         rx_byte: uint<8>,
         tx_busy: bool,
+        ft_full: bool,
         addr_sample: Address,
         data_sample: uint<8>,
         control_sample: Control,
         protected_sample: Protected,
         watchdog_limit: Watchdog,
     ) -> ProbeStep {
-        let expired = self.watchdog >= watchdog_limit;
+        // Predict expiry alongside the counter update so the wide terminal
+        // count comparison is not on every command/output-enable path.
+        // Both wrapper limits are nonzero constants; expiry still occurs
+        // on the exact cycle that the saturating counter reaches its limit.
+        let expired = self.watchdog_expired;
+        let watchdog_last: Watchdog = trunc(watchdog_limit - 1);
         let parser = if expired { 0 } else { self.parser };
         let accept = rx_valid && self.reply_kind == 0 && self.burst_phase == 0 && self.write_phase == 0;
         let burst_abort = rx_valid && rx_byte == b'Z' && self.burst_phase != 0;
@@ -188,7 +202,7 @@ impl ProbeState {
         let write_done = accept && parser == 25;
         let timing_done = accept && parser == 26;
         let unknown = idle && rx_byte != b'U' && rx_byte != b'A' &&
-            rx_byte != b'C' && rx_byte != b'R' && rx_byte != b'W' && rx_byte != b'T' && rx_byte != b'Z' &&
+            rx_byte != b'C' && rx_byte != b'R' && rx_byte != b'F' && rx_byte != b'W' && rx_byte != b'T' && rx_byte != b'Z' &&
             rx_byte != b'?' && rx_byte != b'I';
         let effective_armed = self.armed && !expired;
         let addressed = address_done && effective_armed;
@@ -200,7 +214,7 @@ impl ProbeState {
             if rx_byte == b'U' { 1 }
             else if rx_byte == b'A' { 5 }
             else if rx_byte == b'C' { 11 }
-            else if rx_byte == b'R' { 13 }
+            else if rx_byte == b'R' || rx_byte == b'F' { 13 }
             else if rx_byte == b'W' { 21 }
             else if rx_byte == b'T' { 26 }
             else { 0 }
@@ -238,6 +252,7 @@ impl ProbeState {
             (zext(mask_bytes[1]) << 8) | zext(rx_byte);
         let count: uint<16> = (zext(mask_bytes[0]) << 8) | zext(mask_bytes[1]);
         let burst_start = burst_done && effective_armed && count != 0 &&
+            (!self.burst_ft || count <= 8191) &&
             address_value < 0x100000 && rx_byte != 0 &&
             (rx_byte & 1) != 0 && (self.control_value_byte & 1) != 0 &&
             (self.burst_active_byte & 1) != 0 &&
@@ -258,7 +273,8 @@ impl ProbeState {
             (if (rx_byte & 3) == 1 { 0xdf } else { 0xbf }) & (0xff ^ (rx_byte & 0x0c));
         let setup_done = self.burst_phase == 1 && self.burst_timer == self.burst_phase_last;
         let sample_done = self.burst_phase == 2 && self.burst_timer == self.burst_phase_last;
-        let burst_send = self.burst_phase == 3 && !tx_busy && self.reply_kind == 0;
+        let burst_send = self.burst_phase == 3 &&
+            (if self.burst_ft { !ft_full } else { !tx_busy }) && self.reply_kind == 0;
         let burst_last = burst_send && self.burst_remaining == 1;
         let write_setup_done = self.write_phase == 1 && self.write_timer == 499;
         let write_select_done = self.write_phase == 2 && self.write_timer == 499;
@@ -274,7 +290,7 @@ impl ProbeState {
             else if unlock { b'U' }
             else if addressed { b'A' }
             else if controlled { b'C' }
-            else if burst_start { b'R' }
+            else if burst_start { if self.burst_ft { b'F' } else { b'R' } }
             else if write_finish { b'W' }
             else if timing_valid { b'T' }
             else { b'!' };
@@ -304,6 +320,9 @@ impl ProbeState {
             else if write_pulse_done { 4 }
             else if write_hold_done { 5 }
             else { self.write_phase };
+        let watchdog_progress = rx_valid || setup_done || sample_done || burst_send ||
+            write_setup_done || write_select_done || write_pulse_done ||
+            write_hold_done || write_finish;
 
         ProbeStep$(
             next_state: ProbeState$(
@@ -320,6 +339,8 @@ impl ProbeState {
                     else if burst_send { trunc(self.burst_remaining - 1) }
                     else { self.burst_remaining },
                 burst_data: if sample_done { data_sample } else { self.burst_data },
+                burst_ft: if idle && (rx_byte == b'R' || rx_byte == b'F') { rx_byte == b'F' }
+                    else { self.burst_ft },
                 burst_idle: if burst_start { self.control_value_byte } else { self.burst_idle },
                 burst_active: if burst_start { self.burst_active_byte } else { self.burst_active },
                 burst_mask: if burst_start { rx_byte } else { self.burst_mask },
@@ -361,11 +382,11 @@ impl ProbeState {
                     else if controlled { rx_byte }
                     else { self.control_oe },
                 armed: next_armed,
-                watchdog: if rx_valid || setup_done || sample_done || burst_send ||
-                    write_setup_done || write_select_done || write_pulse_done ||
-                    write_hold_done || write_finish { 0 }
+                watchdog: if watchdog_progress { 0 }
                     else if expired { self.watchdog }
                     else { trunc(self.watchdog + 1) },
+                watchdog_expired: if watchdog_progress { false }
+                    else { expired || self.watchdog == watchdog_last },
                 reply_kind: next_reply_kind,
                 reply_pos: next_reply_pos,
                 reply_ack: if new_reply_kind != 0 { new_reply_ack } else { self.reply_ack },
@@ -386,8 +407,10 @@ impl ProbeState {
                 },
             ),
             tx_req: if sending { TxReq8$(valid: true, byte: self.reply_byte()) }
-                else if burst_send { TxReq8$(valid: true, byte: self.burst_data) }
+                else if burst_send && !self.burst_ft { TxReq8$(valid: true, byte: self.burst_data) }
                 else { tx_req_none() },
+            ft_valid: burst_send && self.burst_ft && !expired && !release,
+            ft_word: 0xa500 | zext(self.burst_data),
         )
     }
 }
@@ -398,6 +421,16 @@ entity main_core(
     rst_n: bool,
     usb_rx: bool,
     usb_tx: inv bool,
+    ft_clk: bool,
+    ft_rxf: bool,
+    ft_txe: bool,
+    ft_data: FtData,
+    ft_be: FtBe,
+    ft_data_drive: inv FtData,
+    ft_be_drive: inv FtBe,
+    ft_rd: inv bool,
+    ft_wr: inv bool,
+    ft_oe: inv bool,
     led: inv [bool; 8],
     addr: Address,
     data: uint<8>,
@@ -426,7 +459,11 @@ entity main_core(
     armed_debug: inv bool,
 ) {
     let rst = inst reset_conditioner(clk, !rst_n);
-    let rx = inst uart_rx(clk, rst, usb_rx, 20, false, 1);
+    let rx = inst uart_rx(clk, rst, usb_rx, 25, false, 1);
+    // Isolate UART decoding from the command FSM's release/enable fanout.
+    // This adds one core clock to command reception, not to card read phases.
+    reg(clk) command_valid reset(rst: false) = rx.valid && !rx.parity_error;
+    reg(clk) command_byte: uint<8> reset(rst: 0) = rx.byte;
     let addr_sync_bits = inst sync_bundle::<2, 20>(clk, addr.as_bits());
     let data_sync_bits = inst sync_bundle::<2, 8>(clk, data.as_bits());
     let control_sync_bits = inst sync_bundle::<2, 8>(
@@ -444,11 +481,14 @@ entity main_core(
     let control_sample: Control = control_sync_bits.as_uint();
     let protected_sample: Protected = protected_sync_bits.as_uint();
     let (uart, uart_w): UartLineBusy = port();
+    let (ft, ft_w): FtWire<FtData, FtBe> = port();
+    let ft_clk_clock = unsafe { inst sampled_bool_clock(ft_clk) };
     decl state;
     let step = state.step(
-        rx.valid && !rx.parity_error,
-        rx.byte,
+        command_valid,
+        command_byte,
         uart.busy,
+        ft.ui_din_full,
         addr_sample,
         data_sample,
         control_sample,
@@ -456,11 +496,25 @@ entity main_core(
         watchdog_limit,
     );
     reg(clk) state: ProbeState reset(rst: ProbeState::default()) = step.next_state;
-    let _tx = inst uart_tx_tap::<100_000_000, 5_000_000, 8>(
+    let ft_blocked = inst sync_bundle::<2, 1>(ft_clk_clock, [state.armed]);
+    let _tx = inst uart_tx_tap::<100_000_000, 4_000_000, 8>(
         clk, rst, false, step.tx_req.byte, step.tx_req.valid && !uart.busy,
         uart_w.line, uart_w.busy,
     );
-    let active = state.armed && state.watchdog < watchdog_limit;
+    let _ft = inst au_ft_tap_u16(
+        // Buffer the complete FT chunk before sending it. The shared FIFO
+        // reserves one slot, so F is limited to 8191 words. UART R can stream.
+        clk, rst, ft_clk_clock, ft_rxf, ft_txe || ft_blocked[0], ft_data, ft_be,
+        step.ft_word, 3, step.ft_valid, false,
+        ft_w.ft_data_out, ft_w.ft_be_out, ft_w.ft_rd, ft_w.ft_wr, ft_w.ft_oe,
+        ft_w.ui_din_full, ft_w.ui_dout, ft_w.ui_dout_be, ft_w.ui_dout_empty,
+    );
+    set ft_data_drive = ft.ft_data_out;
+    set ft_be_drive = ft.ft_be_out;
+    set ft_rd = ft.ft_rd;
+    set ft_wr = ft.ft_wr;
+    set ft_oe = ft.ft_oe;
+    let active = state.armed && !state.watchdog_expired;
     set usb_tx = uart.line;
     set led = data_sample.as_bits();
     set addr_drive = state.addr_drive;

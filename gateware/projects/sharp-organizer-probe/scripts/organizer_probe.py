@@ -16,12 +16,13 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
 
-BAUD = 5_000_000
+BAUD = 4_000_000
 BURST_CHUNK = 65535
 CONTROL_BITS = "RW OE CI E2 MSKROM SRAM1 SRAM2 EPROM".split()
 PROTECTED_BITS = "STNBY VBATT VPP NC02 NC42 NC43 NC44".split()
@@ -38,6 +39,10 @@ def bounded(value: int, bits: int, label: str) -> int:
 
 
 def open_port(path: str, baud: int = BAUD):
+    if path.startswith("ftdi://"):
+        from ftdi_uart import open_ftdi_uart
+
+        return open_ftdi_uart(path, baud)
     import serial
 
     port = serial.Serial(port=None, baudrate=baud, timeout=0.5, write_timeout=0.5)
@@ -89,8 +94,9 @@ class Snapshot:
 
 
 class Probe:
-    def __init__(self, port):
+    def __init__(self, port, ft600=None):
         self.port = port
+        self.ft600 = ft600
         self.protocol: str | None = None
         self.burst_phase_ns = 5000
         self.burst_request_bytes = BURST_CHUNK
@@ -98,6 +104,14 @@ class Probe:
 
     def __enter__(self) -> Probe:
         return self
+
+    @property
+    def burst_request_bytes(self) -> int:
+        return self._burst_request_bytes
+
+    @burst_request_bytes.setter
+    def burst_request_bytes(self, count: int) -> None:
+        self._burst_request_bytes = min(count, 8191) if self.ft600 is not None else count
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         if self.protocol is not None:
@@ -116,7 +130,7 @@ class Probe:
 
     def identify(self) -> None:
         actual = self.exchange(b"I", 5)
-        if actual not in (b"OBP2\n", b"OBP3\n", b"OBP4\n"):
+        if actual not in (b"OBP2\n", b"OBP3\n", b"OBP4\n", b"OBP5\n"):
             raise RuntimeError(f"wrong gateware or UART framing: {actual!r}")
         self.protocol = actual.decode().strip()
 
@@ -140,8 +154,8 @@ class Probe:
     def set_read_timing(self, phase_ns: int) -> None:
         if phase_ns % 50 or not 200 <= phase_ns <= 5000:
             raise ValueError("read phase must be 200..5000 ns in 50 ns steps")
-        if self.protocol not in ("OBP3", "OBP4"):
-            raise RuntimeError("adjustable read timing requires OBP3 or OBP4 gateware")
+        if self.protocol not in ("OBP3", "OBP4", "OBP5"):
+            raise RuntimeError("adjustable read timing requires OBP3 or newer gateware")
         self.ack(bytes([ord("T"), phase_ns // 50]), b"T")
         self.burst_phase_ns = phase_ns
 
@@ -163,19 +177,26 @@ class Probe:
         validate_cycle(idle, active, mask, 0)
         if not (mask & idle & active & 1):
             raise ValueError("burst reads must drive RW high in both phases")
-        request = (b"R" + start.to_bytes(3, "big") + count.to_bytes(2, "big")
+        command = b"F" if self.ft600 is not None else b"R"
+        if self.ft600 is not None and self.protocol != "OBP5":
+            raise RuntimeError("FT600 bursts require OBP5 gateware")
+        if self.ft600 is not None and count > 8191:
+            raise ValueError("FT600 buffered bursts hold at most 8191 card bytes")
+        request = (command + start.to_bytes(3, "big") + count.to_bytes(2, "big")
                    + bytes([idle, active, mask]))
         if self.port.write(request) != len(request):
             raise IOError("short UART write")
         self.port.flush()
         ack = read_exact(self.port, 1)
-        if ack != b"R":
+        if ack != command:
             raise RuntimeError(f"probe rejected burst: {ack!r}")
+        if self.ft600 is not None:
+            return self.ft600.read_payload(count, self.burst_phase_ns)
         return read_exact(self.port, count)
 
     def write_byte(self, address: int, value: int, sram: int) -> None:
-        if self.protocol not in ("OBP3", "OBP4"):
-            raise RuntimeError("SRAM writes require OBP3 or OBP4 gateware")
+        if self.protocol not in ("OBP3", "OBP4", "OBP5"):
+            raise RuntimeError("SRAM writes require OBP3 or newer gateware")
         bounded(address, 20, "address")
         bounded(value, 8, "data")
         if sram not in (1, 2):
@@ -183,8 +204,8 @@ class Probe:
         self.ack(b"W" + address.to_bytes(3, "big") + bytes([value, sram]), b"W")
 
     def write_profiled_byte(self, address: int, value: int, selected: int) -> None:
-        if self.protocol != "OBP4":
-            raise RuntimeError("profiled SRAM writes require OBP4 gateware")
+        if self.protocol not in ("OBP4", "OBP5"):
+            raise RuntimeError("profiled SRAM writes require OBP4 or newer gateware")
         bounded(address, 20, "address")
         bounded(value, 8, "data")
         bounded(selected, 8, "selected control")
@@ -223,7 +244,9 @@ def read_burst(probe: Probe, start: int, count: int, idle: int, active: int, mas
         try:
             return probe.burst(start, count, idle, active, mask)
         except TimeoutError as exc:
-            if attempt == 2:
+            # A lost FT acknowledgement may already have queued payload words.
+            # UART resynchronization alone cannot attribute those words safely.
+            if probe.ft600 is not None or attempt == 2:
                 raise
             probe.port.reset_input_buffer()
             probe.park()
@@ -310,6 +333,9 @@ def run_dump(probe: Probe, args) -> None:
         "settle_us": args.settle_us if args.slow else None,
         "mode": "slow" if args.slow else "burst",
         "uart_baud": getattr(probe.port, "baudrate", None),
+        "uart_transport": getattr(probe.port, "transport", "pyserial"),
+        "data_transport": "ft600" if getattr(probe, "ft600", None) is not None else "uart",
+        "ft600_serial": getattr(getattr(probe, "ft600", None), "serial", None),
         "burst_request_bytes": None if args.slow else chunk_bytes,
         "read_retry_events": getattr(probe, "read_retry_events", [])[retry_start:],
         "burst_phase_us": None if args.slow else probe.burst_phase_ns / 1000,
@@ -357,8 +383,8 @@ def verify_committed_backup(image: Path) -> None:
 
 def test_sram_write(probe: Probe, backup_image: Path, result_dir: Path,
                     sram: int, address: int | None) -> dict:
-    if probe.protocol not in ("OBP3", "OBP4"):
-        raise RuntimeError("SRAM write test requires OBP3 or OBP4 gateware")
+    if probe.protocol not in ("OBP3", "OBP4", "OBP5"):
+        raise RuntimeError("SRAM write test requires OBP3 or newer gateware")
     verify_committed_backup(backup_image)
     backup = backup_image.read_bytes()
     if not backup or len(backup) > 1 << 20:
@@ -482,9 +508,10 @@ def shell(probe: Probe) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", help="Au1 USB-UART device path")
-    parser.add_argument("--baud", type=int, default=BAUD, help="USB-UART baud rate (default: 5000000)")
+    parser.add_argument("--baud", type=int, default=BAUD, help="USB-UART baud rate (default: 4000000)")
+    parser.add_argument("--ft600-serial", help="Send burst payloads over this exact FT600 serial (OBP5)")
     parser.add_argument("--burst-bytes", type=number, default=BURST_CHUNK,
-                        help="maximum bytes per sequential UART read request, 1..65535")
+                        help="maximum card bytes per burst, 1..65535; FT600 capped at 8191")
     parser.add_argument("--read-phase-ns", type=int, default=5000,
                         help="each burst read phase in ns, 200..5000 in 50 ns steps")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -559,10 +586,22 @@ def main() -> None:
             return
     if not args.port:
         parser.error("--port is required for hardware commands")
-    with open_port(args.port, args.baud) as port, Probe(port) as probe:
+    with ExitStack() as stack:
+        port = stack.enter_context(open_port(args.port, args.baud))
+        ft600 = None
+        if args.ft600_serial:
+            from ft600_transport import Ft600
+
+            ft600 = stack.enter_context(Ft600(args.ft600_serial))
+        probe = stack.enter_context(Probe(port, ft600))
         probe.identify()
+        if ft600 is not None:
+            probe.park()
+            ft600.drain()
         probe.burst_request_bytes = args.burst_bytes
-        if args.read_phase_ns != 5000:
+        # Timing persists in gateware between CLI invocations. Always program
+        # modern probes, including the conservative default, before any reads.
+        if probe.protocol in ("OBP3", "OBP4", "OBP5") or args.read_phase_ns != 5000:
             probe.set_read_timing(args.read_phase_ns)
         if args.command == "identify":
             print(probe.protocol)

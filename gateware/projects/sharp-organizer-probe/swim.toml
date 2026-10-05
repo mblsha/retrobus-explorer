@@ -8,7 +8,7 @@ auto = true
 top_entity = "main_core"
 
 [verilog]
-sources = ["verilog/main_wrapper.v"]
+sources = ["verilog/main_wrapper.v", "../../lib/shared-components/verilog/**/*.v"]
 
 [tooling]
 top = "main"
