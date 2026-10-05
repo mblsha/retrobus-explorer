@@ -73,7 +73,7 @@ def released(dut):
 async def uart_probe_and_watchdog(dut):
     await initialize(dut)
     released(dut)
-    assert await command(dut, b"I", 5) == b"OBP3\n"
+    assert await command(dut, b"I", 5) == b"OBP4\n"
     snap = await command(dut, b"?", 16)
     assert snap == bytes.fromhex("53 01 23 45 a6 82 35 00 00 00 00 00 00 00 00 00")
     assert await command(dut, b"A\x01\x23\x45\x0f\xff\xff", 1) == b"!"
@@ -161,3 +161,36 @@ async def bounded_sram_write_never_selects_rom_or_enables_oe(dut):
     assert all(control & 0x9e == 0x9e for _, _, _, control, _ in driven)
     assert any(control == 0xbe for _, _, _, control, _ in driven)
     assert all(control in (0xff, 0xbf, 0xbe) for _, _, _, control, _ in driven)
+
+
+@cocotb.test()
+async def profiled_sram_write_checks_select_and_meta_pins(dut):
+    await initialize(dut)
+    for selected in (0x00, 0x03, 0x11, 0xff):
+        assert await command(dut, b"UREAD", 1) == b"U"
+        assert await command(dut, b"W\x00\x12\x34\xa7" + bytes([selected]), 1) == b"!"
+        released(dut)
+
+    samples = []
+
+    async def watch_write():
+        while True:
+            samples.append((int(dut.addr_drive_debug.value),
+                            int(dut.data_drive_debug.value),
+                            int(dut.data_oe_debug.value),
+                            int(dut.control_drive_debug.value),
+                            int(dut.control_oe_debug.value)))
+            await Timer(100, units="ns")
+
+    assert await command(dut, b"UREAD", 1) == b"U"
+    monitor = cocotb.start_soon(watch_write())
+    assert await command(dut, b"W\x00\x12\x34\xa7\x0d", 1) == b"W"
+    monitor.kill()
+    released(dut)
+    driven = [sample for sample in samples if sample[2]]
+    assert driven
+    assert all(addr == 0x1234 and data == 0xa7 and mask == 0xff
+               for addr, data, _, _, mask in driven)
+    assert all(control & 0x92 == 0x92 for _, _, _, control, _ in driven)
+    assert any(control == 0xd2 for _, _, _, control, _ in driven)
+    assert all(control in (0xff, 0xd3, 0xd2) for _, _, _, control, _ in driven)

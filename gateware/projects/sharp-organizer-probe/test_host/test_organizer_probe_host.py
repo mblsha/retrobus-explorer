@@ -89,6 +89,16 @@ class ProbeHostTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "selector"):
             probe.write_byte(0x7FFF, 0x5A, 3)
 
+    def test_profiled_write_rejects_rom_and_frames_ci_e2(self):
+        fake = FakePort([b"W"])
+        probe = Probe(fake)
+        probe.protocol = "OBP4"
+        for invalid in (0x7d, 0x9d, 0x1d, 0x13, 0xf3):
+            with self.assertRaises(ValueError):
+                probe.write_profiled_byte(0x1234, 0xa7, invalid)
+        probe.write_profiled_byte(0x1234, 0xa7, 0xd3)
+        self.assertEqual(fake.requests, [b"W\x00\x12\x34\xa7\x0d"])
+
     def test_write_backup_must_match_git_head(self):
         from tempfile import TemporaryDirectory
 
