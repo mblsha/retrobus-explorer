@@ -30,27 +30,28 @@ Run Python as `uv run --frozen`, and never run `uv sync`. The user's global
 `~/.config/uv/uv.toml` sets `exclude-newer`, so `uv sync --locked` fails and a
 plain `uv run` resolves and rewrites `uv.lock`; if `uv.lock` shows as modified,
 `git checkout gateware/uv.lock` before committing. Do not delete or recreate
-`gateware/.venv`: the one that exists has a working `cocotb` 1.9.2, and
-building that version from source on this Mac fails at link time. A fresh
-clone needs `--no-config` to sync at all, and should expect the cocotb install
-to need attention.
+`gateware/.venv`. A fresh clone needs `--no-config` to sync at all.
 
-The move to cocotb 2.1, which Spade 0.21 itself made and which ships macOS
-arm64 wheels, so it installs without that link failure, is ready on branch
-`claude/spade-0.21-cocotb2` but parked. cocotb 2.1 wants Verilator 5.036 or
-later, and this Mac has Homebrew's 5.028 (CI's Ubuntu apt has 5.020). On 5.028
-the simulator segfaults at test boundaries. macOS crash reports put it in
-cocotb's `handle_vpi_callback` called from `VerilatedVpiImp::callCbs`, which is
-the callback-removal bug Verilator 5.036 fixed (#5851). The one non-crashing
-failure, ethernet's `mailbox_frames_offset_clock`, sits at the same boundary:
-it passes when run alone. That branch's commits list what changed in the
-testbenches and `run_tb.py` (`cocotb_tools.runner`, an explicit `COCOTB_SIM`
-define, `unit=`, `int(x.value)`, a Verilator floor check, the simulator Python
-first on PATH) and move CI to `swim install-tools` for its Verilator. What is
-left is to run it on Verilator 5.036 or later: `brew upgrade verilator` here,
-then the full suite. Try it without touching `.venv` by pointing
-`GATEWARE_PYTHON` at a separate venv. Only that branch's `run_tb.py` honours
-`GATEWARE_PYTHON`.
+Testbenches run on cocotb 2.1 (pinned `>=2.1,<3`), which ships macOS arm64
+wheels, so it installs without a source build. It needs Verilator 5.036 or
+later. Older ones mishandle a VPI callback removed mid-dispatch (#5851), and the
+simulator segfaults between tests in `handle_vpi_callback`; `run_tb.py` refuses
+them up front. Homebrew's Verilator is fine (5.054 when this moved); CI gets
+its Verilator from `swim install-tools`, because Ubuntu's apt has 5.020.
+`run_tb.py` honours `GATEWARE_PYTHON` for the simulator's interpreter, and it
+puts that interpreter's `bin` first on PATH. cocotb 2's runner exports the
+interpreter's `sys.path`, and Verilator's build runs `python3` from PATH, so
+any other `python3` there fails with "SRE module mismatch".
+
+The first `uv run --frozen` after this change replaces cocotb 1.9.2 in `.venv`
+with 2.1. An older branch still pins 1.9.2, and 1.9.2 does not build from source
+on this Mac; current uv's cache holds only its source. Its last built wheel is
+kept at `gateware/build/wheels/cocotb-1.9.2-cp312-cp312-macosx_11_0_arm64.whl`.
+On such a branch, `uv run --frozen` tries to build 1.9.2 and fails. It
+treats a hand-installed wheel as not satisfying the lock, which was checked in a
+scratch environment. So install that file with
+`uv pip install --no-config --python .venv/bin/python <wheel>` and run with
+`uv run --frozen --no-sync` there.
 
 Bitstream builds are the one exception to `uv run`: `nextpnr-xilinx` is linked
 against Homebrew's Boost by absolute path, so they need
