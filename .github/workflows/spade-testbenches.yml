@@ -190,14 +190,19 @@ jobs:
         run: |
           # Spade moved from GitLab to Codeberg on 2026-09-18. Codeberg is run
           # by volunteers and is down more often than GitLab was, so retry.
-          if ! command -v swim >/dev/null 2>&1; then
+          # Spade v0.21.0 needs swim e47c713 or later: an older swim passes the
+          # compiler a file list it rejects. ~/.cargo/bin is cached, so check
+          # the cached binary's revision, not only that a swim exists.
+          SWIM_REV=e47c7138c38b1f36055f337452564bbf91fa5349
+          if ! swim --version 2>/dev/null | grep -q -- "-${SWIM_REV:0:7}"; then
             for attempt in 1 2 3; do
-              cargo install --git https://codeberg.org/spade-lang/swim swim && break
+              cargo install --force --git https://codeberg.org/spade-lang/swim --rev "${SWIM_REV}" swim && break
               echo "swim install attempt ${attempt} failed"
               sleep 20
             done
           fi
           swim --version
+          swim --version | grep -q -- "-${SWIM_REV:0:7}"
 
       - name: Install verilator
         run: |
