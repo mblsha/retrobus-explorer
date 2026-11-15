@@ -128,5 +128,24 @@ class DiscoveryTests(unittest.TestCase):
             ci.TEST_SECONDS.update(original)
 
 
+class TestFilterTests(unittest.TestCase):
+    def test_filter_selects_exactly_the_named_tests(self):
+        import re
+
+        pattern = re.compile(ci.test_filter(["reads", "write_back"]))
+        # Cocotb 2 searches the filter in "module.test".
+        for selected in ("test_mod.reads", "test_mod.write_back"):
+            self.assertTrue(pattern.search(selected), selected)
+        for other in ("test_mod.reads_twice", "test_mod.pre_reads", "test_mod.write_backs"):
+            self.assertFalse(pattern.search(other), other)
+
+    def test_filter_escapes_regex_characters(self):
+        import re
+
+        pattern = re.compile(ci.test_filter(["a.b"]))
+        self.assertTrue(pattern.search("m.a.b"))
+        self.assertFalse(pattern.search("m.axb"))
+
+
 if __name__ == "__main__":
     unittest.main()

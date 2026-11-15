@@ -5,7 +5,7 @@
 entry names. A unit is a registered project, one microSD suite case, the
 application characterization benches, or the shared-component benches. Long
 projects whose tests are independent split into shards, each run with
-Cocotb's TESTCASE list; every shard checks that exactly its tests ran.
+Cocotb's COCOTB_TEST_FILTER; every shard checks that exactly its tests ran.
 
 Short units are packed together so the matrix stays small. The weights below
 only balance the jobs: a stale one makes CI slower, never less complete,
@@ -18,6 +18,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -112,8 +113,8 @@ def discover_tests(path: Path) -> list[str]:
     """Names Cocotb would run from a module of decorated tests, in file order.
 
     Refuses anything a static reading could get wrong: generated tests, and a
-    `skip` that is not a literal. TESTCASE runs a named test even if skipped,
-    so a literally skipped test is left out rather than named.
+    `skip` that is not a literal. A test the filter selects runs even if it is
+    skipped, so a literally skipped test is left out rather than named.
     """
     source = path.read_text()
     if "TestFactory" in source:
@@ -225,6 +226,15 @@ def _ran_tests(results: Path) -> list[str]:
     return [case.get("name") for case in ET.parse(results).getroot().iter("testcase")]
 
 
+def test_filter(tests: list[str]) -> str:
+    """A COCOTB_TEST_FILTER that selects exactly these tests.
+
+    Cocotb 2 searches the regex in each test's full name, `module.test`, and
+    ignores the TESTCASE variable Cocotb 1 took a comma-separated list from.
+    """
+    return r"\.(?:" + "|".join(re.escape(name) for name in tests) + r")$"
+
+
 def run_unit(unit: str) -> None:
     python = sys.executable
     if unit == "characterization":
@@ -252,9 +262,10 @@ def run_unit(unit: str) -> None:
     elif unit.startswith("project:"):
         path, tests = _project_shard(unit)
         env = dict(os.environ)
-        env.pop("TESTCASE", None)
+        for name in ("TESTCASE", "COCOTB_TESTCASE", "COCOTB_TEST_FILTER"):
+            env.pop(name, None)
         if tests:
-            env["TESTCASE"] = ",".join(tests)
+            env["COCOTB_TEST_FILTER"] = test_filter(tests)
         subprocess.run([python, f"{path}/scripts/test_with_vcd.py"], cwd=GATEWARE, env=env, check=True)
         if tests:
             ran = _ran_tests(GATEWARE / path / "test/results.xml")
