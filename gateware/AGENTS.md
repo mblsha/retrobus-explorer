@@ -38,13 +38,19 @@ to need attention.
 The move to cocotb 2.1, which Spade 0.21 itself made and which ships macOS
 arm64 wheels, so it installs without that link failure, is ready on branch
 `claude/spade-0.21-cocotb2` but parked. cocotb 2.1 wants Verilator 5.036 or
-later, and this Mac has Homebrew's 5.028: three benches segfault on it. CI's apt
-Verilator is older still. That branch's commit message lists what changed in
-the testbenches and `run_tb.py` (`cocotb_tools.runner`, an explicit
-`COCOTB_SIM` define, `unit=`, `int(x.value)`) and what still fails. Try it
-without touching `.venv` by pointing `GATEWARE_PYTHON` at a separate venv and
-putting that venv's `bin` first on `PATH`. Only that branch's `run_tb.py`
-honours `GATEWARE_PYTHON`.
+later, and this Mac has Homebrew's 5.028 (CI's Ubuntu apt has 5.020). On 5.028
+the simulator segfaults at test boundaries. macOS crash reports put it in
+cocotb's `handle_vpi_callback` called from `VerilatedVpiImp::callCbs`, which is
+the callback-removal bug Verilator 5.036 fixed (#5851). The one non-crashing
+failure, ethernet's `mailbox_frames_offset_clock`, sits at the same boundary:
+it passes when run alone. That branch's commits list what changed in the
+testbenches and `run_tb.py` (`cocotb_tools.runner`, an explicit `COCOTB_SIM`
+define, `unit=`, `int(x.value)`, a Verilator floor check, the simulator Python
+first on PATH) and move CI to `swim install-tools` for its Verilator. What is
+left is to run it on Verilator 5.036 or later: `brew upgrade verilator` here,
+then the full suite. Try it without touching `.venv` by pointing
+`GATEWARE_PYTHON` at a separate venv. Only that branch's `run_tb.py` honours
+`GATEWARE_PYTHON`.
 
 Bitstream builds are the one exception to `uv run`: `nextpnr-xilinx` is linked
 against Homebrew's Boost by absolute path, so they need
