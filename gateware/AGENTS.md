@@ -37,7 +37,9 @@ wheels, so it installs without a source build. It needs Verilator 5.036 or
 later. Older ones mishandle a VPI callback removed mid-dispatch (#5851), and the
 simulator segfaults between tests in `handle_vpi_callback`; `run_tb.py` refuses
 them up front. Homebrew's Verilator is fine (5.054 when this moved); CI gets
-its Verilator from `swim install-tools`, because Ubuntu's apt has 5.020.
+its Verilator from a pinned OSS CAD Suite nightly (`OSS_CAD_SUITE_TAG` in
+`.github/workflows/spade-testbenches.yml`, Verilator 5.055 at 2026-11-14),
+because Ubuntu's apt has 5.020.
 `run_tb.py` honours `GATEWARE_PYTHON` for the simulator's interpreter, and it
 puts that interpreter's `bin` first on PATH. cocotb 2's runner exports the
 interpreter's `sys.path`, and Verilator's build runs `python3` from PATH, so
