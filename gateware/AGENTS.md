@@ -107,8 +107,8 @@ Start a testbench's clocks once per test: a reset helper that calls
 
 Every project and `lib/shared-components` pins the compiler as
 `[spade].commit` in its own `swim.lock`. All projects and the shared library
-must name the same commit; the current pin is **v0.20.0**
-(`7e0bf7883d8a23dff89b5e38ce5c5f24761fafe5`). There is no library dependency
+must name the same commit; the current pin is **v0.21.0**
+(`423b451b3ed90cd004b6ebd9aae045109c62087b`). There is no library dependency
 left: the one combinator this repository used from `nstd` now lives in
 `lib/shared-components/src/arrays.spade`.
 
@@ -127,16 +127,30 @@ checkout has had its `origin` re-pointed at Codeberg. Swim fetches from a
 checkout's own `origin`, so a checkout made before the move keeps talking to
 GitLab until it is re-pointed or discarded.
 
+Swim and the compiler have to move together, although swim has no release
+tags to match. Spade 0.21 needs swim `v0.21.0-r377-e47c713` or later: an
+older swim hands the compiler its file list in a form 0.21 rejects
+(`invalid value '...' for '[EXTRA_FILES]...'`). The 0.20 binary is kept as
+`~/.cargo/bin/swim-0.20.0-r351`.
+
 To bump the compiler:
 
-1. On a machine that still has a pre-move swim, install it from Codeberg:
-   `cargo install --git https://codeberg.org/spade-lang/swim swim`.
+1. Install the matching swim from Codeberg, pinned to a commit:
+   `cargo install --git https://codeberg.org/spade-lang/swim --rev <commit> swim`.
+   On this Mac cargo's built-in git client fails Codeberg's TLS handshake
+   (`ssl handshake -9806`); prefix the command with
+   `CARGO_NET_GIT_FETCH_WITH_CLI=true` to fetch through the `git` command.
 2. For each `build/spade` whose `origin` is still GitLab, either
    `git -C build/spade remote set-url origin https://codeberg.org/spade-lang/spade.git`
    or `swim clean --and-spade` (which also throws away the compiler build).
 3. Edit `[spade].commit` in every workspace's `swim.lock` file to the release
    commit you want. Do **not** run `swim update-spade`: it moves the pin to
    whatever the branch head is, and these locks name exact release tags.
+   Swim does not fetch a commit its cached checkout lacks -- the build stops
+   with `fatal: unable to read tree (<commit>)` -- so fetch the tag into every
+   workspace's checkout first:
+   `git -C build/spade fetch origin tag v0.21.0`. Each workspace then compiles
+   its own copy of the compiler on its first build.
 4. Build every project, work the compiler's warnings back to zero, and only
    then run the testbenches. Go through the intermediate releases rather than
    jumping: a release that deprecates something prints a fix-it for every
@@ -174,9 +188,9 @@ To bump the compiler:
 - Type expressions do **not** work in a struct member that refers to the
   struct's own generic ("Struct members cannot have const generics in their
   type"), and routing one through a type alias panics the compiler. They do work
-  in a `let` annotation, which is where `memory.spade`'s `FifoAddr<ENTRIES>` and
+  in a `let` annotation, which is where `fifos.spade`'s `FifoAddr<ENTRIES>` and
   `FifoCount<ENTRIES>` are used, and in a `reg` annotation through an alias
-  whose arguments are type expressions (`memory.spade`'s `FifoState`). Name a
+  whose arguments are type expressions (`fifos.spade`'s `FifoState`). Name a
   type spelling that repeats more than a few times. An alias can name a port
   pair -- `serial::UartLineBusy` is `(UartLineBusyPort, inv UartLineBusyPort)`
   and `let (a, b): UartLineBusy = port();` works -- which an earlier note here
@@ -258,18 +272,16 @@ machine with no Vivado on it, openXC7 ignores the attribute, and Verilator only
 tells us it parses. Read a synthesis report before relying on it, and do not
 treat it as an MTBF improvement until you have.
 
-Known compiler issues on v0.20.0, the workaround each one forces on us, and
+Known compiler issues on v0.21.0, the workaround each one forces on us, and
 the simplification that becomes possible once it is fixed, live in
 [docs/spade-compiler-issues.md](docs/spade-compiler-issues.md) with a
 reproducer apiece. Re-run the reproducers after every compiler bump and retire
-what no longer fails. The short list: a struct member cannot compute a width
-from its own generic (`FifoImplState`, `BootBannerState`); destructuring a
-power-of-two-length array emits an index one bit too wide; `bits[N - 1]`
-inside a `gen if` recursion is typed for half the array (use `last()`); an
-array repeat count cannot be a type expression; a `where` clause cannot say
-"power of two" (`guards.spade` stays); deprecated methods do not warn; and
-`swim build` rewrites `src/build_info.spade`, so never build in a checkout
-while its suites run.
+what no longer fails. The short list: destructuring a power-of-two-length
+array emits an index one bit too wide; `bits[N - 1]` inside a `gen if`
+recursion is typed for half the array (use `last()`); an array repeat count
+cannot be a type expression; deprecated methods do not warn; a local named
+`core` breaks the compiler's own `core::ops` paths; and `swim build` rewrites
+`src/build_info.spade`, so never build in a checkout while its suites run.
 
 To check a refactor that is meant to preserve behaviour: build before and after,
 and compare with both `tools/sv_module_surface.py --diff` (what the testbenches
@@ -316,7 +328,7 @@ bench or the client:
 - Never change the qualified bitstream (`build/microsd-ddr-ethernet-h700`) or
   the gateware to make a target experiment work. A result measured against a
   rebuilt card is a result about a different card. That bitstream was compiled
-  by Spade v0.17.0 and the sources are now on v0.20.0, so a rebuild is a new
+  by Spade v0.17.0 and the sources are now on v0.21.0, so a rebuild is a new
   netlist: it needs its own placement-seed search and its own hardware
   qualification before it could replace the qualified one. See
   [QUALIFICATION.md](projects/ethernet-diagnostic/QUALIFICATION.md).

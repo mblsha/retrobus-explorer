@@ -1,7 +1,7 @@
 // Native DDR streams cross independently, as required by LiteDRAM's interface.
 // Both domains and the DDR controller must share a reset event. Hold resets for
 // at least eight cycles in each domain; do not reset just one side of a live FIFO.
-use shared_components::memory::async_fifo;
+use shared_components::fifos::async_fifo;
 
 #[no_mangle(all)]
 pub entity native_cdc(

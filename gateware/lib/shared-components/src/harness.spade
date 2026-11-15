@@ -5,7 +5,7 @@ use super::{
     elastic::{ElasticSlotState, elastic_slot_reset, elastic_slot_step},
     ft_records::ft_record_stream,
     ft_rx::{pack_ft_word, unpack_ft_word, unpack_ft_be, ft_rx_byte_step},
-    memory::{async_fifo, fifo},
+    fifos::{async_fifo, fifo},
     message_stream::TxReq8,
     monitoring::async_uart_monitor,
     primitives::{counter, falling_edge, reset_conditioner, rising_edge, sync_delay},
@@ -64,10 +64,10 @@ entity tb_card_memory(
     bus_addr: uint<4>, bus_data: uint<8>, bus_write: bool,
     host_read: inv uint<8>, bus_read: inv uint<8>,
 ) {
-    let memory = inst card_memory::<4>(clk, host_addr, host_data, host_write,
+    let card = inst card_memory::<4>(clk, host_addr, host_data, host_write,
         bus_addr, bus_data, bus_write);
-    set host_read = memory.host;
-    set bus_read = memory.bus;
+    set host_read = card.host;
+    set bus_read = card.bus;
 }
 
 entity tb_counter_bits<#uint WIDTH>(
@@ -501,7 +501,7 @@ entity tb_uart_tx_tap_equiv(
     tap_line: inv bool,
     tap_busy: inv bool,
 ) {
-    let core = inst uart_tx::<40, 10, 8>(clk, rst, block, tx_byte, tx_valid);
+    let core_tx = inst uart_tx::<40, 10, 8>(clk, rst, block, tx_byte, tx_valid);
     inst uart_tx_tap::<40, 10, 8>(
         clk,
         rst,
@@ -512,8 +512,8 @@ entity tb_uart_tx_tap_equiv(
         tap_busy,
     );
 
-    set core_line = core.tx;
-    set core_busy = core.busy;
+    set core_line = core_tx.tx;
+    set core_busy = core_tx.busy;
 }
 
 #[no_mangle(all)]

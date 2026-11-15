@@ -1,7 +1,7 @@
 use shared_components::{
     ft_records::ft_record_stream,
     ft_rx::{PackedFtWord, pack_ft_word},
-    memory::sync_fifo,
+    fifos::sync_fifo,
     serial::{FtWire, FtData, FtBe, ft_tap},
 };
 
