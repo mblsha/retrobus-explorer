@@ -206,11 +206,11 @@ jobs:
 
       - name: Install verilator
         run: |
-          if ! command -v verilator >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y verilator
-          fi
-          verilator --version
+          # Cocotb 2 needs Verilator 5.036 or later, and Ubuntu 24.04's apt has
+          # 5.020. swim's OSS CAD Suite carries a current one, and run_tb.py
+          # already puts its bin first on PATH (and refuses an older Verilator).
+          swim install-tools
+          "$HOME/.local/share/swim/bin/oss-cad-suite/bin/verilator" --version
 
       - name: Sync Python dependencies
         run: |
