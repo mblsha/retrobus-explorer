@@ -8,7 +8,7 @@ use shared_components::{
     config::{au_ft_tap_u16, au_usb_uart_rx, au_usb_uart_tx8_tap},
     elastic::{ElasticSlotState, elastic_slot_reset, elastic_slot_step},
     ft_stream::{FtWordStreamState, ft_word_stream_step},
-    memory::sync_fifo,
+    fifos::sync_fifo,
     message_stream::{TxReq8, tx_req_arbiter, tx_req_none},
     primitives::{reset_conditioner, sync_bundle, sync_delay},
     serial::{FtBe, FtData, FtWire, UartLineBusy, uart_tx_tap},

@@ -1,6 +1,6 @@
 use super::{
     bridges::{BridgePolicy, UartBridgeOut, UartFifoBridgeOut, uart_fifo_bridge},
-    memory::{FifoOut, sync_fifo},
+    fifos::{FifoOut, sync_fifo},
     message_stream::TxReq8,
     serial::{BitTime, FtBe, FtData, StopBits, UartRxOut, ft_tap, uart_rx, uart_tx_tap},
 };
@@ -51,7 +51,7 @@ pub entity au_usb_uart_tx8_req_tap(
 ) {
     // `busy` is this entity's own output and also the thing that gates the
     // send, so it is read back through `inspect` rather than duplicated.
-    let (busy_value, busy_w) = busy.inspect();
+    let busy_value = *busy.inspect();
     let tx_fire = tx_req.valid && !block && !busy_value;
 
     inst au_usb_uart_tx8_tap(
@@ -61,7 +61,7 @@ pub entity au_usb_uart_tx8_req_tap(
         tx_req.byte,
         tx_fire,
         tx_line,
-        busy_w,
+        busy,
     );
 }
 

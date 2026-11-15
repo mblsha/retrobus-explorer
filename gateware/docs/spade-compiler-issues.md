@@ -10,6 +10,15 @@ decision. After every compiler bump, re-run the reproducers (drop each one into
 `verilator --lint-only build/spade.sv`) and retire the entries that no longer
 fail.
 
+Re-checked against v0.21.0 (`423b451b3ed90cd004b6ebd9aae045109c62087b`) on
+2026-11-15. Entries 1, 2, 3, 6 and 7 still reproduce (6 with
+`[bool; 8].to_uint()`, deprecated in favour of `as_uint` and silent). Entry 4 (struct members
+computing a width) and entry 5 (a `where` clause saying "power of two") are
+fixed, and their workarounds come out in the change after the bump. Entry 10
+is new in 0.21. Lint a reproducer with `--top-module main`: the
+shared-components library brings in SystemVerilog externs that a whole-file
+lint cannot find.
+
 ## 1. Array-pattern destructuring emits an index one bit too wide
 
 **Symptom.** `let [a, b, c, d] = arr;` on a `[T; 4]` generates
@@ -81,6 +90,12 @@ count.
 `ChannelName` construction: `text.concat([0; 8])[..8]` pads a name to eight
 bytes by over-concatenating and slicing.
 
+v0.21.0 still rejects it, and the new `const type { 8 - N }` expression is
+rejected in the same place. What does work is a second generic that a `where`
+clause ties to `N` (`fn pad<#uint N, #uint M>(…) where M == 8 - N` with
+`[0; M]`), but every caller then has to spell `pad::<_, _>` or name both, which
+is worse than the over-concatenation.
+
 **When fixed.** `text.concat([0; {8 - N}])`, and the comment above it goes.
 
 ## 4. A struct member cannot compute a width from the struct's own generic
@@ -93,7 +108,7 @@ type`. Routing the same expression through a type alias
 type_expr_to_concrete` at `spade-typeinference/src/mir_type_lowering.rs:201`.
 The same alias works in a `let` or `reg` annotation.
 
-**Where we work around it.** `lib/shared-components/src/memory.spade`:
+**Where we work around it.** `lib/shared-components/src/fifos.spade`:
 `FifoImplState<ADDR_W, COUNT_W, WIDTH, ENTRIES>` carries two size-only generics
 that are functions of `ENTRIES`, and the `FifoState<WIDTH, ENTRIES>` alias ties
 them back together at the one `reg` that holds the state.
@@ -114,7 +129,7 @@ and the type-expression language has no shift or exponentiation
 
 **Where we work around it.** `lib/shared-components/src/guards.spade`:
 `require_power_of_two::<N>()`, an `#[inline]` unit whose body fails to
-monomorphise for a non-power-of-two, called from `memory.spade` and
+monomorphise for a non-power-of-two, called from `fifos.spade` and
 `serial.spade` as `let _ = require_power_of_two::<ENTRIES>();`.
 
 **When fixed.** `where N == {1 << uint::bits_for(N - 1)} else "… must be a
@@ -193,3 +208,30 @@ the elegance pass gave each agent its own worktree for that reason.
 **When fixed.** If swim ever gains a way to run preprocessing only when a source
 changed, or the banner test learns to read the timestamp it was built with,
 concurrent build-and-test in one checkout becomes safe again.
+
+## 10. A local named `core` breaks the compiler's own `core::ops` paths
+
+**Symptom.** New in v0.21.0. Any unit that binds a local called `core` fails to
+compile, because the paths the compiler generates for operators and `inst`
+(`core::ops::…`) resolve against the local instead of the `core` crate. The
+error has no useful location:
+`Use of undeclared name <module>::core::ops`, pointing at `<str>:1:1`.
+
+```spade
+#[no_mangle(all)]
+entity main(a: uint<8>, y: inv uint<8>) {
+    let core = a;
+    set y = trunc(core + 1);
+}
+```
+
+**Where we work around it.** `lib/shared-components/src/harness.spade`'s
+`tb_uart_tx_tap_equiv` named its reference transmitter `core_tx`, not `core`.
+
+**When fixed.** Nothing has to change back; the entry is here so that the
+next person who sees that error knows to look for a `core` binding.
+
+A related collision is a language change, not a bug: `memory` is a keyword in
+v0.21.0 (the memory declaration), so it can name neither a module nor a local.
+The shared FIFO module became `fifos`, `ethernet-diagnostic`'s frame buffers
+became `frames`, and `tb_card_memory`'s instance became `card`.

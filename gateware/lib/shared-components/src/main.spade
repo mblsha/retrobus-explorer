@@ -3,7 +3,7 @@ pub mod primitives;
 pub mod clocking;
 pub mod sharp;
 pub mod serial;
-pub mod memory;
+pub mod fifos;
 pub mod card_memory;
 pub mod ascii;
 pub mod boot_banner;

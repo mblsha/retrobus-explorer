@@ -79,7 +79,7 @@ uv run python tools/project_inventory.py --check
 
 The single `gateware/.venv` supplies Cocotb to every project. Each project's
 `swim.lock` pins the Spade compiler as `[spade].commit`; all projects name the
-same release, currently **v0.20.0**. There are no library dependencies.
+same release, currently **v0.21.0**. There are no library dependencies.
 [AGENTS.md](./AGENTS.md) has the compiler-bump procedure.
 
 ## Run tests
