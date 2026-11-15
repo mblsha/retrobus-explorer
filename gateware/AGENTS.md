@@ -151,6 +151,9 @@ To bump the compiler:
    On this Mac cargo's built-in git client fails Codeberg's TLS handshake
    (`ssl handshake -9806`); prefix the command with
    `CARGO_NET_GIT_FETCH_WITH_CLI=true` to fetch through the `git` command.
+   Set the same commit as `SWIM_REV` in
+   `.github/workflows/spade-testbenches.yml`. CI caches `~/.cargo/bin`, and
+   without the pin it would keep running whatever swim it cached last.
 2. For each `build/spade` whose `origin` is still GitLab, either
    `git -C build/spade remote set-url origin https://codeberg.org/spade-lang/spade.git`
    or `swim clean --and-spade` (which also throws away the compiler build).
