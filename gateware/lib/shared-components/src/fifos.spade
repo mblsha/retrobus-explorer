@@ -109,15 +109,15 @@ where
     let next_raddr = if do_read { ptr_inc(raddr) } else { raddr };
 
     reg(clk) state: FifoImplState<WIDTH, ENTRIES>
-        reset(rst: FifoImplState$(
+        reset(rst: FifoImplState {
             waddr: 0,
             waddr_delay: 0,
             raddr: 0,
             used: 0,
             read_data: 0,
             storage: [0; ENTRIES],
-        ))
-        = FifoImplState$(
+        })
+        = FifoImplState {
             waddr: if do_write { next_write } else { waddr },
             waddr_delay: waddr,
             raddr: next_raddr,
@@ -134,14 +134,14 @@ where
             } else {
                 storage
             },
-        );
+        };
 
-    FifoUsed$(
+    FifoUsed {
         full: !wrdy,
         empty: !rrdy,
         dout: state.read_data,
         used: used,
-    )
+    }
 }
 
 pub entity fifo<#uint WIDTH, #uint ENTRIES>(

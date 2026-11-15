@@ -23,22 +23,22 @@ pub entity transport(
 ) -> Transport {
     let (ft, ft_w): FtWire<FtData, FtBe> = port();
     decl step;
-    let trace = inst sync_fifo::<128, 256>$(
-        clk, rst, din: record, wput: record_valid, rget: step.pop_record,
+    let trace = inst sync_fifo::<128, 256>(
+        clk:, rst:, din: record, wput: record_valid, rget: step.pop_record,
     );
-    let step = inst ft_record_stream$(
-        clk, rst, record: trace.dout, empty: trace.empty, sink_full: ft.ui_din_full,
+    let step = inst ft_record_stream(
+        clk:, rst:, record: trace.dout, empty: trace.empty, sink_full: ft.ui_din_full,
     );
     decl incoming;
     let rx_accept = !ft.ui_dout_empty && !incoming.full;
-    let incoming = inst sync_fifo::<18, 512>$(
+    let incoming = inst sync_fifo::<18, 512>(
         // Invalid BE=00 words never become visible as CPU receive data.
-        clk, rst, din: pack_ft_word(ft.ui_dout, ft.ui_dout_be),
+        clk:, rst:, din: pack_ft_word(ft.ui_dout, ft.ui_dout_be),
         wput: rx_accept && ft.ui_dout_be != 0, rget: rx_pop,
     );
     // Enable preemption so an ongoing outbound burst can admit host input.
-    let _ = inst ft_tap::<16, 2, 8192, 64, 1, 1>$(
-        clk, rst, ft_clk, ft_rxf, ft_txe, ft_data_in: ft_data, ft_be_in: ft_be,
+    let _ = inst ft_tap::<16, 2, 8192, 64, 1, 1>(
+        clk:, rst:, ft_clk:, ft_rxf:, ft_txe:, ft_data_in: ft_data, ft_be_in: ft_be,
         ui_din: step.data, ui_din_be: step.be, ui_din_valid: step.valid, ui_dout_get: rx_accept,
         ft_data_out: ft_w.ft_data_out, ft_be_out: ft_w.ft_be_out,
         ft_rd: ft_w.ft_rd, ft_wr: ft_w.ft_wr, ft_oe: ft_w.ft_oe,
@@ -50,6 +50,6 @@ pub entity transport(
     set ft_rd = ft.ft_rd;
     set ft_wr = ft.ft_wr;
     set ft_oe = ft.ft_oe;
-    Transport$(rx_word: incoming.dout, rx_empty: incoming.empty,
-        rx_full: incoming.full, trace_full: trace.full)
+    Transport {rx_word: incoming.dout, rx_empty: incoming.empty,
+        rx_full: incoming.full, trace_full: trace.full}
 }

@@ -85,7 +85,7 @@ pub struct StreamingRomOut {
 
 impl Default for StreamingRomState {
     fn default() -> Self {
-        StreamingRomState$(
+        StreamingRomState {
             read_state: ReadState::Init(),
             streaming_state: StreamingState::Ready(),
             num_data_request: 0,
@@ -95,7 +95,7 @@ impl Default for StreamingRomState {
             write_byte2: 0,
             last_bank: 0,
             last_addr: 0,
-        )
+        }
     }
 }
 
@@ -145,7 +145,7 @@ impl StreamingState {
 // free functions so that a chain of them reads as a sequence of transitions.
 impl StreamingRomState {
     fn with_read_state(self, read_state: ReadState) -> Self {
-        Self$(
+        Self {
             read_state: read_state,
             streaming_state: self.streaming_state,
             num_data_request: self.num_data_request,
@@ -155,11 +155,11 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn with_streaming_state(self, streaming_state: StreamingState) -> Self {
-        Self$(
+        Self {
             read_state: self.read_state,
             streaming_state: streaming_state,
             num_data_request: self.num_data_request,
@@ -169,11 +169,11 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn begin_bank_fill(self, bank: RomBank) -> Self {
-        Self$(
+        Self {
             read_state: self.read_state,
             streaming_state: StreamingState::RequestData(),
             num_data_request: self.num_data_request,
@@ -183,11 +183,11 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn finish_initial_bank(self, next_read_state: ReadState) -> Self {
-        Self$(
+        Self {
             read_state: next_read_state,
             streaming_state: StreamingState::Ready(),
             num_data_request: self.num_data_request,
@@ -197,12 +197,12 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn capture_read(self, inputs: StreamingRomInputs) -> Self {
         let selected_streaming_bank = inputs.addr_bnk_sync == self.num_streaming_bank;
-        Self$(
+        Self {
             read_state: ReadState::HoldData(),
             streaming_state: if selected_streaming_bank {
                 StreamingState::RequestData()
@@ -220,11 +220,11 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: inputs.addr_bnk_sync,
             last_addr: inputs.addr_sync -. 0x8000,
-        )
+        }
     }
 
     fn accept_request(self) -> Self {
-        Self$(
+        Self {
             read_state: self.read_state,
             streaming_state: StreamingState::GetSize(),
             num_data_request: self.num_data_request +. 1,
@@ -234,11 +234,11 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn accept_size(self, size: FtWord) -> Self {
-        Self$(
+        Self {
             read_state: self.read_state,
             streaming_state: StreamingState::FillBank(),
             num_data_request: self.num_data_request,
@@ -248,11 +248,11 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn accept_low_byte(self, word: FtWord) -> Self {
-        Self$(
+        Self {
             read_state: self.read_state,
             streaming_state: StreamingState::FillBank2(),
             num_data_request: self.num_data_request,
@@ -262,11 +262,11 @@ impl StreamingRomState {
             write_byte2: trunc(word >> 8),
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn write_high_byte(self) -> Self {
-        Self$(
+        Self {
             read_state: self.read_state,
             streaming_state: StreamingState::FillBank(),
             num_data_request: self.num_data_request,
@@ -276,7 +276,7 @@ impl StreamingRomState {
             write_byte2: self.write_byte2,
             last_bank: self.last_bank,
             last_addr: self.last_addr,
-        )
+        }
     }
 
     fn step_read(self, inputs: StreamingRomInputs) -> Self {
@@ -334,7 +334,7 @@ impl StreamingRomState {
         };
         let ram_waddr = bank_ram_addr(self.num_streaming_bank, self.streaming_index);
 
-        StreamingRomStep$(
+        StreamingRomStep {
             next_state: stream_next,
             ft_ui_din: self.num_data_request,
             ft_ui_din_be: if request_fire { 0b11 } else { 0 },
@@ -345,7 +345,7 @@ impl StreamingRomState {
             ram_write_enable: low_byte_fire || high_byte_fire,
             ram_raddr: ram_raddr,
             data_oe: if let ReadState::HoldData = self.read_state { true } else { false },
-        )
+        }
     }
 }
 
@@ -370,7 +370,7 @@ pub entity streaming_rom_core(
         ram_read_data_w,
     );
 
-    StreamingRomOut$(
+    StreamingRomOut {
         ft_ui_din: step.ft_ui_din,
         ft_ui_din_be: step.ft_ui_din_be,
         ft_ui_din_valid: step.ft_ui_din_valid,
@@ -383,5 +383,5 @@ pub entity streaming_rom_core(
         num_data_request: state.num_data_request,
         streaming_data_size: state.streaming_data_size,
         streaming_index: state.streaming_index,
-    )
+    }
 }

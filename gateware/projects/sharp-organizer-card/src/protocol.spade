@@ -44,19 +44,19 @@ pub struct OrganizerSampleReq {
 pub type OrganizerTraceEventReq = TraceEventReq;
 
 pub fn organizer_zero_sample() -> OrganizerSample {
-    OrganizerSample$(
+    OrganizerSample {
         kind: OrganizerTraceKind::Addr(),
         addr: 0,
         data: 0,
         misc: 0,
-    )
+    }
 }
 
 pub fn organizer_sample_none() -> OrganizerSampleReq {
-    OrganizerSampleReq$(
+    OrganizerSampleReq {
         valid: false,
         sample: organizer_zero_sample(),
-    )
+    }
 }
 
 pub fn organizer_trace_event_none() -> OrganizerTraceEventReq {
@@ -64,39 +64,39 @@ pub fn organizer_trace_event_none() -> OrganizerTraceEventReq {
 }
 
 pub fn organizer_addr_sample(addr: OrganizerAddr) -> OrganizerSampleReq {
-    OrganizerSampleReq$(
+    OrganizerSampleReq {
         valid: true,
-        sample: OrganizerSample$(
+        sample: OrganizerSample {
             kind: OrganizerTraceKind::Addr(),
             addr: addr,
             data: 0,
             misc: 0,
-        ),
-    )
+        },
+    }
 }
 
 pub fn organizer_data_sample(data: OrganizerData) -> OrganizerSampleReq {
-    OrganizerSampleReq$(
+    OrganizerSampleReq {
         valid: true,
-        sample: OrganizerSample$(
+        sample: OrganizerSample {
             kind: OrganizerTraceKind::Data(),
             addr: 0,
             data: data,
             misc: 0,
-        ),
-    )
+        },
+    }
 }
 
 pub fn organizer_misc_sample(misc: MiscWord) -> OrganizerSampleReq {
-    OrganizerSampleReq$(
+    OrganizerSampleReq {
         valid: true,
-        sample: OrganizerSample$(
+        sample: OrganizerSample {
             kind: OrganizerTraceKind::Misc(),
             addr: 0,
             data: 0,
             misc: misc,
-        ),
-    )
+        },
+    }
 }
 
 fn sample_payload(sample: OrganizerSample) -> TaggedTracePayload {

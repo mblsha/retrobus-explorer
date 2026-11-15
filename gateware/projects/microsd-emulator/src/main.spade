@@ -514,14 +514,14 @@ pub entity sd_frontend(
     } else {
         write_lba
     };
-    let _ = inst write_transaction::sd_write_transaction$(
-        clk,
-        rst,
+    let _ = inst write_transaction::sd_write_transaction(
+        clk:,
+        rst:,
         prepared_mode: prepared_data_mode,
         start: write_request || write_next,
         cancel: write_cancel,
         stop: write_stop,
-        wide,
+        wide:,
         lba: if write_request {
             command_lba
         } else {
@@ -582,12 +582,12 @@ pub entity sd_frontend(
     };
 
     // Command legality, status, and response payload selection.
-    let base_status: uint<32> = card_status_word$(
+    let base_status: uint<32> = card_status_word(
         card_state: state,
         committing: committing,
-        write_active,
+        write_active:,
         reading: data_state != READ_IDLE || pending,
-        write_crc_error,
+        write_crc_error:,
     );
     let status = base_status | (if switch_error { STATUS_SWITCH_ERROR } else { 0 });
     let addressed = trunc::<uint<32>, uint<16>>(command_argument >> 16) == rca;
@@ -1487,15 +1487,15 @@ entity bram_emulator(
     let (read_byte_index, read_byte_index_w): (uint<9>, inv uint<9>) = port();
     let (read_byte, read_byte_w): (uint<8>, inv uint<8>) = port();
     let (read_release, read_release_w): (bool, inv bool) = port();
-    let _ = inst loader::image_loader$(
-        clk,
-        rst,
+    let _ = inst loader::image_loader(
+        clk:,
+        rst:,
         status_word: 0,
-        rx_valid,
-        rx_byte,
-        tx_ready,
-        tx_valid,
-        tx_byte,
+        rx_valid:,
+        rx_byte:,
+        tx_ready:,
+        tx_valid:,
+        tx_byte:,
         load_ready: loader_ready,
         load_valid: loader_valid_w,
         load_address: loader_address_w,
@@ -1504,9 +1504,9 @@ entity bram_emulator(
         // The BRAM card has one image bank, so no sector selects a status word.
         status_selector: unused(),
     );
-    let _ = inst storage::bram_backend$(
-        clk,
-        rst,
+    let _ = inst storage::bram_backend(
+        clk:,
+        rst:,
         armed: card_armed,
         load_valid: loader_valid,
         load_address: loader_address,
@@ -1523,20 +1523,20 @@ entity bram_emulator(
     );
     // This card is read-only and has no trace service: the DDR write channel
     // and every observation tap terminate in their own `unused()` sink.
-    let _ = inst sd_frontend$(
+    let _ = inst sd_frontend(
 
         // Clock and card control
-        clk,
-        rst,
+        clk:,
+        rst:,
         armed: card_armed,
 
         // SD pins
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
 
         // Read-buffer exchange
         request_valid: read_request_w,
@@ -1602,9 +1602,9 @@ entity emulator_uart(
     armed_status: inv bool,
 ) {
     let rst = !rst_n;
-    let rx = inst shared_components::serial::uart_rx$(
-        clk,
-        rst,
+    let rx = inst shared_components::serial::uart_rx(
+        clk:,
+        rst:,
         rx: usb_rx,
         bit_time: 100,
         parity: false,
@@ -1615,25 +1615,25 @@ entity emulator_uart(
     let (busy, busy_w): (bool, inv bool) = port();
     reg(clk) issued reset(rst: false) = valid && !busy && !issued;
     let send = valid && !busy && !issued;
-    let _ = inst bram_emulator$(
-        clk,
-        rst,
+    let _ = inst bram_emulator(
+        clk:,
+        rst:,
         rx_valid: rx.valid && !rx.parity_error,
         rx_byte: rx.byte,
         tx_ready: send,
         tx_valid: valid_w,
         tx_byte: byte_w,
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
-        armed_status,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
+        armed_status:,
     );
-    let tx = inst shared_components::serial::uart_tx::<100_000_000, 1_000_000, 8>$(
-        clk,
-        rst,
+    let tx = inst shared_components::serial::uart_tx::<100_000_000, 1_000_000, 8>(
+        clk:,
+        rst:,
         block: false,
         data: byte,
         new_data: send,
@@ -1694,21 +1694,21 @@ entity ddr_emulator(
         | zext([
             initialized, ddr_cmd_ready, ddr_wdata_ready, card_armed, ddr_rdata_valid,
         ].as_uint());
-    let _ = inst loader::image_loader$(
-        clk,
-        rst,
+    let _ = inst loader::image_loader(
+        clk:,
+        rst:,
         status_word: loader_status_word,
-        rx_valid,
-        rx_byte,
-        tx_ready,
-        tx_valid,
-        tx_byte,
+        rx_valid:,
+        rx_byte:,
+        tx_ready:,
+        tx_valid:,
+        tx_byte:,
         load_ready: loader_ready,
         load_valid: loader_valid_w,
         load_address: loader_address_w,
         load_byte: loader_byte_w,
         armed: card_armed_w,
-        status_selector,
+        status_selector:,
     );
     let (read_cmd_valid, read_cmd_valid_w): (bool, inv bool) = port();
     let (read_cmd_address, read_cmd_address_w): (uint<24>, inv uint<24>) = port();
@@ -1757,9 +1757,9 @@ entity ddr_emulator(
     } else {
         live_backend_inputs
     };
-    let _ = inst storage::ddr_backend$(
-        clk,
-        rst,
+    let _ = inst storage::ddr_backend(
+        clk:,
+        rst:,
         armed: backend_arm,
         initialized: backend_initialized,
         resident_bytes: 268_435_456,
@@ -1778,9 +1778,9 @@ entity ddr_emulator(
         rdata_ready: ddr_rdata_ready,
         rdata: ddr_rdata,
     );
-    let _ = inst storage::ddr_byte_writer$(
-        clk,
-        rst,
+    let _ = inst storage::ddr_byte_writer(
+        clk:,
+        rst:,
         enabled: !card_armed && initialized && !sd_commit_busy && !sd_owner,
         load_valid: loader_valid,
         load_address: loader_address,
@@ -1814,20 +1814,20 @@ entity ddr_emulator(
     set ddr_wdata_mask = (if sd_owner { sd_write_mask } else { loader_mask });
     // Only the Ethernet build subscribes to the observation taps; here each
     // one terminates in its own `unused()` sink.
-    let _ = inst sd_frontend$(
+    let _ = inst sd_frontend(
 
         // Clock and card control
-        clk,
-        rst,
+        clk:,
+        rst:,
         armed: card_armed && initialized,
 
         // SD pins
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
 
         // Read-buffer exchange
         request_valid: read_request_w,
@@ -1840,14 +1840,14 @@ entity ddr_emulator(
         sector_release: read_release_w,
 
         // Mode and write-side inputs
-        fast_mode,
+        fast_mode:,
         h700_mode: false,
         h700_falling_phase: false,
         h700_early_command: false,
         sd_csd: 0x0026001a115903ffc002800002400023,
         mmc_only: false,
-        writable,
-        dat_in,
+        writable:,
+        dat_in:,
 
         // DDR write command
         write_cmd_valid: sd_write_cmd_valid_w,
@@ -1912,9 +1912,9 @@ entity ddr_uart_core<#uint CLK_FREQ>(
     CLK_FREQ >= 1_000_000 else "the 1 Mbaud console needs at least one system clock cycle per bit"
 {
     let rx_cycles: uint<32> = CLK_FREQ `std::ops::comb_div` 1_000_000;
-    let rx = inst shared_components::serial::uart_rx$(
-        clk,
-        rst,
+    let rx = inst shared_components::serial::uart_rx(
+        clk:,
+        rst:,
         rx: usb_rx,
         bit_time: trunc(rx_cycles),
         parity: false,
@@ -1925,34 +1925,34 @@ entity ddr_uart_core<#uint CLK_FREQ>(
     let (busy, busy_w): (bool, inv bool) = port();
     reg(clk) issued reset(rst: false) = valid && !busy && !issued;
     let send = valid && !busy && !issued;
-    let _ = inst ddr_emulator$(
+    let _ = inst ddr_emulator(
 
         // Clock and card control
-        clk,
-        rst,
-        initialized,
-        diagnostic_status,
-        status_selector,
-        fast_mode,
-        writable,
-        dat_in,
+        clk:,
+        rst:,
+        initialized:,
+        diagnostic_status:,
+        status_selector:,
+        fast_mode:,
+        writable:,
+        dat_in:,
 
         // DDR command channel
-        ddr_cmd_valid,
-        ddr_cmd_ready,
-        ddr_cmd_address,
-        ddr_cmd_write,
+        ddr_cmd_valid:,
+        ddr_cmd_ready:,
+        ddr_cmd_address:,
+        ddr_cmd_write:,
 
         // DDR read channel
-        ddr_rdata_valid,
-        ddr_rdata_ready,
-        ddr_rdata,
+        ddr_rdata_valid:,
+        ddr_rdata_ready:,
+        ddr_rdata:,
 
         // DDR write channel
-        ddr_wdata_valid,
-        ddr_wdata_ready,
-        ddr_wdata,
-        ddr_wdata_mask,
+        ddr_wdata_valid:,
+        ddr_wdata_ready:,
+        ddr_wdata:,
+        ddr_wdata_mask:,
 
         // UART loader
         rx_valid: rx.valid && !rx.parity_error,
@@ -1962,17 +1962,17 @@ entity ddr_uart_core<#uint CLK_FREQ>(
         tx_byte: byte_w,
 
         // SD pins
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
-        armed_status,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
+        armed_status:,
     );
-    let tx = inst shared_components::serial::uart_tx::<CLK_FREQ, 1_000_000, 8>$(
-        clk,
-        rst,
+    let tx = inst shared_components::serial::uart_tx::<CLK_FREQ, 1_000_000, 8>(
+        clk:,
+        rst:,
         block: false,
         data: byte,
         new_data: send,
@@ -2011,35 +2011,35 @@ entity ddr_uart(
     dat_oe: inv uint<4>,
     armed_status: inv bool,
 ) {
-    let _ = inst ddr_uart_core::<83_333_333>$(
-        clk,
-        rst,
-        initialized,
-        diagnostic_status,
-        status_selector,
+    let _ = inst ddr_uart_core::<83_333_333>(
+        clk:,
+        rst:,
+        initialized:,
+        diagnostic_status:,
+        status_selector:,
         fast_mode: false,
-        writable,
-        dat_in,
-        usb_rx,
-        usb_tx,
-        ddr_cmd_valid,
-        ddr_cmd_ready,
-        ddr_cmd_address,
-        ddr_cmd_write,
-        ddr_rdata_valid,
-        ddr_rdata_ready,
-        ddr_rdata,
-        ddr_wdata_valid,
-        ddr_wdata_ready,
-        ddr_wdata,
-        ddr_wdata_mask,
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
-        armed_status,
+        writable:,
+        dat_in:,
+        usb_rx:,
+        usb_tx:,
+        ddr_cmd_valid:,
+        ddr_cmd_ready:,
+        ddr_cmd_address:,
+        ddr_cmd_write:,
+        ddr_rdata_valid:,
+        ddr_rdata_ready:,
+        ddr_rdata:,
+        ddr_wdata_valid:,
+        ddr_wdata_ready:,
+        ddr_wdata:,
+        ddr_wdata_mask:,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
+        armed_status:,
     );
 }
 
@@ -2073,35 +2073,35 @@ entity ddr_uart_80(
     dat_oe: inv uint<4>,
     armed_status: inv bool,
 ) {
-    let _ = inst ddr_uart_core::<80_000_000>$(
-        clk,
-        rst,
-        initialized,
-        diagnostic_status,
-        status_selector,
+    let _ = inst ddr_uart_core::<80_000_000>(
+        clk:,
+        rst:,
+        initialized:,
+        diagnostic_status:,
+        status_selector:,
         fast_mode: false,
-        writable,
-        dat_in,
-        usb_rx,
-        usb_tx,
-        ddr_cmd_valid,
-        ddr_cmd_ready,
-        ddr_cmd_address,
-        ddr_cmd_write,
-        ddr_rdata_valid,
-        ddr_rdata_ready,
-        ddr_rdata,
-        ddr_wdata_valid,
-        ddr_wdata_ready,
-        ddr_wdata,
-        ddr_wdata_mask,
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
-        armed_status,
+        writable:,
+        dat_in:,
+        usb_rx:,
+        usb_tx:,
+        ddr_cmd_valid:,
+        ddr_cmd_ready:,
+        ddr_cmd_address:,
+        ddr_cmd_write:,
+        ddr_rdata_valid:,
+        ddr_rdata_ready:,
+        ddr_rdata:,
+        ddr_wdata_valid:,
+        ddr_wdata_ready:,
+        ddr_wdata:,
+        ddr_wdata_mask:,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
+        armed_status:,
     );
 }
 
@@ -2135,35 +2135,35 @@ entity ddr_uart_200(
     dat_oe: inv uint<4>,
     armed_status: inv bool,
 ) {
-    let _ = inst ddr_uart_core::<200_000_000>$(
-        clk,
-        rst,
-        initialized,
-        diagnostic_status,
-        status_selector,
+    let _ = inst ddr_uart_core::<200_000_000>(
+        clk:,
+        rst:,
+        initialized:,
+        diagnostic_status:,
+        status_selector:,
         fast_mode: true,
-        writable,
-        dat_in,
-        usb_rx,
-        usb_tx,
-        ddr_cmd_valid,
-        ddr_cmd_ready,
-        ddr_cmd_address,
-        ddr_cmd_write,
-        ddr_rdata_valid,
-        ddr_rdata_ready,
-        ddr_rdata,
-        ddr_wdata_valid,
-        ddr_wdata_ready,
-        ddr_wdata,
-        ddr_wdata_mask,
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
-        armed_status,
+        writable:,
+        dat_in:,
+        usb_rx:,
+        usb_tx:,
+        ddr_cmd_valid:,
+        ddr_cmd_ready:,
+        ddr_cmd_address:,
+        ddr_cmd_write:,
+        ddr_rdata_valid:,
+        ddr_rdata_ready:,
+        ddr_rdata:,
+        ddr_wdata_valid:,
+        ddr_wdata_ready:,
+        ddr_wdata:,
+        ddr_wdata_mask:,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
+        armed_status:,
     );
 }
 
@@ -2197,35 +2197,35 @@ entity ddr_uart_100(
     dat_oe: inv uint<4>,
     armed_status: inv bool,
 ) {
-    let _ = inst ddr_uart_core::<100_000_000>$(
-        clk,
-        rst,
-        initialized,
-        diagnostic_status,
-        status_selector,
+    let _ = inst ddr_uart_core::<100_000_000>(
+        clk:,
+        rst:,
+        initialized:,
+        diagnostic_status:,
+        status_selector:,
         fast_mode: true,
-        writable,
-        dat_in,
-        usb_rx,
-        usb_tx,
-        ddr_cmd_valid,
-        ddr_cmd_ready,
-        ddr_cmd_address,
-        ddr_cmd_write,
-        ddr_rdata_valid,
-        ddr_rdata_ready,
-        ddr_rdata,
-        ddr_wdata_valid,
-        ddr_wdata_ready,
-        ddr_wdata,
-        ddr_wdata_mask,
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
-        armed_status,
+        writable:,
+        dat_in:,
+        usb_rx:,
+        usb_tx:,
+        ddr_cmd_valid:,
+        ddr_cmd_ready:,
+        ddr_cmd_address:,
+        ddr_cmd_write:,
+        ddr_rdata_valid:,
+        ddr_rdata_ready:,
+        ddr_rdata:,
+        ddr_wdata_valid:,
+        ddr_wdata_ready:,
+        ddr_wdata:,
+        ddr_wdata_mask:,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
+        armed_status:,
     );
 }
 
@@ -2288,17 +2288,17 @@ entity ddr_emulator_cdc(
     let (memory_read_valid, memory_read_valid_w): (bool, inv bool) = port();
     let (memory_read_ready, memory_read_ready_w): (bool, inv bool) = port();
     let (memory_read_data, memory_read_data_w): (uint<128>, inv uint<128>) = port();
-    let _ = inst ddr_emulator$(
+    let _ = inst ddr_emulator(
 
         // Clock and card control
-        clk,
-        rst,
-        initialized,
-        diagnostic_status,
-        status_selector,
-        fast_mode,
-        writable,
-        dat_in,
+        clk:,
+        rst:,
+        initialized:,
+        diagnostic_status:,
+        status_selector:,
+        fast_mode:,
+        writable:,
+        dat_in:,
 
         // DDR command channel
         ddr_cmd_valid: frontend_cmd_valid_w,
@@ -2318,22 +2318,22 @@ entity ddr_emulator_cdc(
         ddr_wdata_mask: frontend_write_mask_w,
 
         // UART loader
-        rx_valid,
-        rx_byte,
-        tx_ready,
-        tx_valid,
-        tx_byte,
+        rx_valid:,
+        rx_byte:,
+        tx_ready:,
+        tx_valid:,
+        tx_byte:,
 
         // SD pins
-        sd_clk,
-        cmd_in,
-        cmd_out,
-        cmd_oe,
-        dat_out,
-        dat_oe,
-        armed_status,
+        sd_clk:,
+        cmd_in:,
+        cmd_out:,
+        cmd_oe:,
+        dat_out:,
+        dat_oe:,
+        armed_status:,
     );
-    let _ = inst cdc::native_cdc$(
+    let _ = inst cdc::native_cdc(
 
         // Clock domains and shared reset
         s_clk: clk,
@@ -2369,7 +2369,7 @@ entity ddr_emulator_cdc(
         s_rdata_ready: frontend_read_ready,
         s_rdata: frontend_read_data_w,
     );
-    let _ = inst cdc::native_stage$(
+    let _ = inst cdc::native_stage(
         clk: memory_clk,
         rst: memory_rst,
         s_cmd_valid: memory_cmd_valid,

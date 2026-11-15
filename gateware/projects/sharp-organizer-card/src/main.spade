@@ -111,14 +111,14 @@ struct MainEval {
 
 impl Default for MainState {
     fn default() -> Self {
-        MainState$(
-            ft: FtRegs$(
+        MainState {
+            ft: FtRegs {
                 enabled: false,
                 stream_fifo_full: false,
                 cur_value: 0,
                 stream_state: FtWordStreamState::GetFifo(),
-            ),
-            saleae: SaleaeRegs$(
+            },
+            saleae: SaleaeRegs {
                 state: SaleaeState::SyncSignals(),
                 counter: 0,
                 sync_sub_mode: SyncSubMode::StandardSignals(),
@@ -127,19 +127,19 @@ impl Default for MainState {
                 pin1: pin_source_oe(),
                 pin2: pin_source_mskrom(),
                 pin3: pin_source_sram1(),
-            ),
+            },
             cmd_state: init_organizer_cmd_state(),
             cmd_hex_high: 0,
             addr_stable_delay: default_stable_threshold(),
             data_stable_delay: default_stable_threshold(),
             monitor: OrganizerMonitorState::default(),
             msg_stream: OrganizerMsgStreamState::default(),
-        )
+        }
     }
 }
 
 fn current_board_state(state: MainState) -> BoardRenderState {
-    BoardRenderState$(
+    BoardRenderState {
         ft_enabled: state.ft.enabled,
         saleae_state: state.saleae.state,
         saleae_counter: state.saleae.counter,
@@ -149,13 +149,13 @@ fn current_board_state(state: MainState) -> BoardRenderState {
         pin1: state.saleae.pin1,
         pin2: state.saleae.pin2,
         pin3: state.saleae.pin3,
-    )
+    }
 }
 
 impl MainState {
     fn eval(self, inputs: MainInputs) -> MainEval {
         let ui: OrganizerUiEffect = eval_organizer_ui(
-            OrganizerUiInputs$(
+            OrganizerUiInputs {
                 rx_valid: inputs.rx_valid,
                 rx_byte: inputs.rx_byte,
                 ft_ui_dout_empty: inputs.ft_ui_dout_empty,
@@ -173,7 +173,7 @@ impl MainState {
                 pin2: self.saleae.pin2,
                 pin3: self.saleae.pin3,
                 ft_enabled: self.ft.enabled,
-            ),
+            },
         );
         let monitor_transport: OrganizerMonitorTransportOut = self.monitor.drain_stream(
             self.ft.enabled && !self.ft.stream_fifo_full,
@@ -207,15 +207,15 @@ impl MainState {
             0
         };
 
-        MainEval$(
-            next_state: MainState$(
-                ft: FtRegs$(
+        MainEval {
+            next_state: MainState {
+                ft: FtRegs {
                     enabled: ui.next_ft_enabled,
                     stream_fifo_full: inputs.stream_fifo_full,
                     cur_value: ft_stream.next_cur_value,
                     stream_state: ft_stream.next_state,
-                ),
-                saleae: SaleaeRegs$(
+                },
+                saleae: SaleaeRegs {
                     state: ui.next_saleae_state,
                     counter: if let SaleaeState::Counter = self.saleae.state {
                         self.saleae.counter +. 1
@@ -228,21 +228,21 @@ impl MainState {
                     pin1: ui.next_pin1,
                     pin2: ui.next_pin2,
                     pin3: ui.next_pin3,
-                ),
+                },
                 cmd_state: ui.next_cmd_state,
                 cmd_hex_high: ui.next_cmd_hex_high,
                 addr_stable_delay: ui.next_addr_stable_delay,
                 data_stable_delay: ui.next_data_stable_delay,
                 monitor: monitor.next_state,
                 msg_stream: msg_stream.state,
-            ),
+            },
             tx_req: msg_stream.tx_req,
             monitor_samples: monitor.samples,
             stream_word_valid: stream_event.valid,
             stream_word: stream_word,
             ft_stream: ft_stream,
             board_state: current_board_state(self),
-        )
+        }
     }
 }
 
@@ -339,7 +339,7 @@ entity main_core(
         usb_uart.busy,
     );
 
-    let inputs = MainInputs$(
+    let inputs = MainInputs {
         addr_sync: addr_sync,
         data_sync: data_sync,
         misc_sync: misc_sync,
@@ -353,7 +353,7 @@ entity main_core(
         stream_fifo_full: stream_fifo_full,
         stream_fifo_empty: stream_fifo_empty,
         stream_fifo_dout: stream_fifo_dout,
-    );
+    };
 
     decl state;
     let eval = state.eval(inputs);

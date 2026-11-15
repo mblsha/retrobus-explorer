@@ -42,7 +42,7 @@ struct MainState {
 
 impl Default for MainState {
     fn default() -> Self {
-        MainState$(
+        MainState {
             parser: LineParserState::default(),
             msg_stream: init_bridge_msg_stream(),
             pending_ctrl_msg: BridgeMsg::None(),
@@ -60,7 +60,7 @@ impl Default for MainState {
             parse_err_seen: false,
             stall_seen: false,
             stall_active: false,
-        )
+        }
     }
 }
 
@@ -137,7 +137,7 @@ fn decide_next_msg(
     let offer_ctrl = can_offer_msg && !ctrl_msg.is_none();
     let offer_ft_rx = can_offer_msg && ctrl_msg.is_none() && !rx_empty;
 
-    NextMsgDecision$(
+    NextMsgDecision {
         offer_ctrl: offer_ctrl,
         offer_ft_rx: offer_ft_rx,
         next_msg_valid: offer_ctrl || offer_ft_rx,
@@ -148,7 +148,7 @@ fn decide_next_msg(
         } else {
             BridgeMsg::None()
         },
-    )
+    }
 }
 
 #[no_mangle(all)]
@@ -233,7 +233,7 @@ entity main_core(
         let next_pending_tx_word = if take_send_word { send_word } else { state.pending_tx_word };
         let next_pending_tx_be = if take_send_word { send_be } else { state.pending_tx_be };
 
-        MainState$(
+        MainState {
             parser: parse.state,
             msg_stream: msg_stream.state,
             pending_ctrl_msg: next_pending_ctrl(state.pending_ctrl_msg, parser_msg, msg_decision.offer_ctrl),
@@ -261,7 +261,7 @@ entity main_core(
             parse_err_seen: state.parse_err_seen || parse_err_event,
             stall_seen: state.stall_seen || rx_stall_event,
             stall_active: rx_stall_now,
-        )
+        }
     };
 
     let rx_empty = state.rx_used == 0;

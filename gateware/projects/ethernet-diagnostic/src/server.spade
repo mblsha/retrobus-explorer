@@ -61,27 +61,27 @@ pub entity network_frontend(
     let (app_reply_data, app_reply_data_w): Connection<uint<8>> = port();
     let (app_reply_done, app_reply_done_w): Connection<bool> = port();
     let (app_reply_length, app_reply_length_w): Connection<uint<11>> = port();
-    let _ = inst mac::frame_receiver$(
-        rx_clk, clk,
-        rst: local_rst, rxd,
+    let _ = inst mac::frame_receiver(
+        rx_clk:, clk:,
+        rst: local_rst, rxd:,
         dv: rx_dv, er: rx_er,
         consume: rx_consume, address: rx_read_address,
         data: rx_read_data_w, available: rx_available_w,
         frame_length: rx_length_w,
     );
-    let _ = inst mac::frame_transmitter$(
-        clk, tx_clk,
+    let _ = inst mac::frame_transmitter(
+        clk:, tx_clk:,
         rst: local_rst, write: tx_write,
         address: tx_write_address, data: tx_write_data,
         length: tx_length, submit: tx_submit,
-        ready: tx_ready_w, txd,
-        tx_en,
+        ready: tx_ready_w, txd:,
+        tx_en:,
     );
-    let _ = inst network::network_engine$(
-        clk, rst: local_rst,
-        rx_available, rx_length,
+    let _ = inst network::network_engine(
+        clk:, rst: local_rst,
+        rx_available:, rx_length:,
         rx_address: rx_read_address_w, rx_data: rx_read_data,
-        rx_consume: rx_consume_w, tx_ready,
+        rx_consume: rx_consume_w, tx_ready:,
         tx_write: tx_write_w, tx_address: tx_write_address_w,
         tx_data: tx_write_data_w, tx_submit: tx_submit_w,
         tx_length: tx_length_w, app_request: app_request_w,
@@ -102,43 +102,43 @@ pub entity network_frontend(
     let (service_data, service_data_w): Connection<uint<8>> = port();
     let (service_reply_write, service_reply_write_w): Connection<bool> = port();
     let (service_reply_done, service_reply_done_w): Connection<bool> = port();
-    let _ = inst serial::serial_frontend$(
-        clk, rst,
-        bit_time: uart_bit_time, usb_rx,
-        usb_tx, active: usb_active,
+    let _ = inst serial::serial_frontend(
+        clk:, rst:,
+        bit_time: uart_bit_time, usb_rx:,
+        usb_tx:, active: usb_active,
         request: serial_request_w, request_length: serial_length_w,
         request_address: serial_address, request_data: serial_data_w,
         reply_write: serial_reply_write, reply_address: app_reply_address,
         reply_data: app_reply_data, reply_done: serial_reply_done,
         reply_length: app_reply_length,
     );
-    let _ = inst arbiter::request_arbiter$(
-        clk, rst,
+    let _ = inst arbiter::request_arbiter(
+        clk:, rst:,
         ethernet_request: app_request, ethernet_length: app_request_length,
         ethernet_data: app_read_data, ethernet_address: app_read_address_w,
         ethernet_reply_write: app_reply_write_w, ethernet_reply_done: app_reply_done_w,
-        serial_request, serial_length,
-        serial_data, serial_address: serial_address_w,
+        serial_request:, serial_length:,
+        serial_data:, serial_address: serial_address_w,
         serial_reply_write: serial_reply_write_w, serial_reply_done: serial_reply_done_w,
         request: service_request_w, request_length: service_length_w,
         request_data: service_data_w, request_address: service_address,
         reply_write: service_reply_write, reply_done: service_reply_done,
     );
     // USB service starts on fabric reset release, independently of PHY startup.
-    let _ = inst blocks::block_service$(
-        clk, rst,
-        initialized, sd_quiescent,
+    let _ = inst blocks::block_service(
+        clk:, rst:,
+        initialized:, sd_quiescent:,
         request: service_request, request_length: service_length,
         request_address: service_address_w, request_data: service_data,
         reply_write: service_reply_write_w, reply_address: app_reply_address_w,
         reply_data: app_reply_data_w, reply_done: service_reply_done_w,
-        reply_length: app_reply_length_w, memory_request,
-        memory_write, memory_lba,
-        memory_count, memory_write_index,
-        memory_write_data, memory_read_valid,
-        memory_read_index, memory_read_data,
-        memory_done, memory_error,
-        sd_trace, trace_word_index,
-        armed,
+        reply_length: app_reply_length_w, memory_request:,
+        memory_write:, memory_lba:,
+        memory_count:, memory_write_index:,
+        memory_write_data:, memory_read_valid:,
+        memory_read_index:, memory_read_data:,
+        memory_done:, memory_error:,
+        sd_trace:, trace_word_index:,
+        armed:,
     );
 }

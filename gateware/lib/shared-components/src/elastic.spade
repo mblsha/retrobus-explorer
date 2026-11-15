@@ -14,7 +14,7 @@ pub struct ElasticSlotOut<T> {
 }
 
 pub fn elastic_slot_reset<T>(data: T) -> ElasticSlotState<T> {
-    ElasticSlotState$(valid: false, data: data)
+    ElasticSlotState { valid: false, data: data }
 }
 
 pub fn elastic_slot_step<T>(
@@ -26,8 +26,8 @@ pub fn elastic_slot_step<T>(
     let dequeue = state.valid && !sink_full;
     let accept_new = capture_valid && (!state.valid || dequeue);
     let drop_new = capture_valid && state.valid && sink_full;
-    ElasticSlotOut$(
-        next_state: ElasticSlotState$(
+    ElasticSlotOut {
+        next_state: ElasticSlotState {
             valid: if accept_new {
                 true
             } else if dequeue {
@@ -36,12 +36,12 @@ pub fn elastic_slot_step<T>(
                 state.valid
             },
             data: if accept_new { capture_data } else { state.data },
-        ),
+        },
         pending_valid: state.valid,
         pending_data: state.data,
         sink_wput: dequeue,
         sink_data: state.data,
         accepted: accept_new,
         dropped: drop_new,
-    )
+    }
 }

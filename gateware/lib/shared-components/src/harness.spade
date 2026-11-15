@@ -35,7 +35,7 @@ entity tb_ft_records<#uint WORDS>(
     clk: clock, rst: bool, record: uint<{WORDS * 32}>, empty: bool, sink_full: bool,
     data: inv FtData, be: inv FtBe, valid: inv bool, pop_record: inv bool,
 ) {
-    let stream = inst ft_record_stream::<WORDS>$(clk, rst, record, empty, sink_full);
+    let stream = inst ft_record_stream::<WORDS>(clk:, rst:, record:, empty:, sink_full:);
     set data = stream.data;
     set be = stream.be;
     set valid = stream.valid;
@@ -47,7 +47,7 @@ entity tb_ft_records128(
     clk: clock, rst: bool, record: uint<128>, empty: bool, sink_full: bool,
     data: inv FtData, be: inv FtBe, valid: inv bool, pop_record: inv bool,
 ) {
-    let _ = inst tb_ft_records::<4>$(clk, rst, record, empty, sink_full, data, be, valid, pop_record);
+    let _ = inst tb_ft_records::<4>(clk:, rst:, record:, empty:, sink_full:, data:, be:, valid:, pop_record:);
 }
 
 #[no_mangle(all)]
@@ -55,7 +55,7 @@ entity tb_ft_records96(
     clk: clock, rst: bool, record: uint<96>, empty: bool, sink_full: bool,
     data: inv FtData, be: inv FtBe, valid: inv bool, pop_record: inv bool,
 ) {
-    let _ = inst tb_ft_records::<3>$(clk, rst, record, empty, sink_full, data, be, valid, pop_record);
+    let _ = inst tb_ft_records::<3>(clk:, rst:, record:, empty:, sink_full:, data:, be:, valid:, pop_record:);
 }
 
 #[no_mangle(all)]
@@ -483,7 +483,7 @@ entity tb_uart_tx_adapter_equiv(
         clk,
         rst,
         block,
-        TxReq8$(valid: tx_valid, byte: tx_byte),
+        TxReq8 { valid: tx_valid, byte: tx_byte },
         adapter_line,
         adapter_busy,
     );
@@ -537,7 +537,7 @@ entity tb_ft_out_tap(
     ui_dout_be: inv FtBe,
     ui_dout_empty: inv bool,
 ) {
-    let out = FtOut$(
+    let out = FtOut {
         ft_data_out: in_ft_data_out,
         ft_be_out: in_ft_be_out,
         ft_rd: in_ft_rd,
@@ -547,7 +547,7 @@ entity tb_ft_out_tap(
         ui_dout: in_ui_dout,
         ui_dout_be: in_ui_dout_be,
         ui_dout_empty: in_ui_dout_empty,
-    );
+    };
     inst ft_out_tap(
         out,
         ft_data_out,

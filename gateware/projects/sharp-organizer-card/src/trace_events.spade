@@ -13,17 +13,17 @@ pub struct TraceEventReq {
 }
 
 pub fn trace_event_none() -> TraceEventReq {
-    TraceEventReq$(
+    TraceEventReq {
         valid: false,
-        event: TraceEvent$(kind: TaggedTraceKind::Addr(), payload: 0),
-    )
+        event: TraceEvent { kind: TaggedTraceKind::Addr(), payload: 0 },
+    }
 }
 
 pub fn trace_event(kind: TaggedTraceKind, payload: TaggedTracePayload) -> TraceEventReq {
-    TraceEventReq$(
+    TraceEventReq {
         valid: true,
-        event: TraceEvent$(kind: kind, payload: payload),
-    )
+        event: TraceEvent { kind: kind, payload: payload },
+    }
 }
 
 pub fn overflow_trace_event(payload: TaggedTracePayload) -> TraceEventReq {

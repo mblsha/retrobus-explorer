@@ -60,8 +60,8 @@ struct SampleFlags {
 impl SampleState {
     fn flags(self) -> SampleFlags {
         match self {
-            Self::SampleBus => SampleFlags$(is_bus: true, is_wait: false),
-            Self::InsertWait => SampleFlags$(is_bus: false, is_wait: true),
+            Self::SampleBus => SampleFlags { is_bus: true, is_wait: false },
+            Self::InsertWait => SampleFlags { is_bus: false, is_wait: true },
         }
     }
 }
@@ -111,13 +111,13 @@ fn decode_bus_events(
     let wr_event_valid = wr_rise && !invalid_bus_state;
     let bus_event_valid = rd_event_valid || wr_event_valid;
     let bus_event_char = bus_event_char_from_flags(rd_event_valid, wr_event_valid, z80_m1_sync, z80_mreq_sync);
-    BusEventDecode$(
+    BusEventDecode {
         invalid_bus_state: invalid_bus_state,
         rd_event_valid: rd_event_valid,
         wr_event_valid: wr_event_valid,
         bus_event_valid: bus_event_valid,
         bus_event_char: bus_event_char,
-    )
+    }
 }
 
 pub struct BusError {
@@ -127,11 +127,11 @@ pub struct BusError {
 
 fn bus_error_status(rd_rise: bool, wr_rise: bool, invalid_bus_state: bool) -> BusError {
     if rd_rise {
-        BusError$(valid: invalid_bus_state, ch: b'E')
+        BusError { valid: invalid_bus_state, ch: b'E' }
     } else if wr_rise {
-        BusError$(valid: invalid_bus_state, ch: b'e')
+        BusError { valid: invalid_bus_state, ch: b'e' }
     } else {
-        BusError$(valid: false, ch: b'e')
+        BusError { valid: false, ch: b'e' }
     }
 }
 
@@ -145,10 +145,10 @@ impl uint<16> {
         let cmd_b0: uint<8> = trunc(self);
         let cmd_b1: uint<8> = trunc(self >> 8);
         let has_prefix = !ft_ui_dout_empty && cmd_b0.to_upper() == b'S';
-        FtStreamCmdDecode$(
+        FtStreamCmdDecode {
             enable: has_prefix && cmd_b1 == b'+',
             disable: has_prefix && cmd_b1 == b'-',
-        )
+        }
     }
 }
 
@@ -160,12 +160,12 @@ pub struct SaleaeCmdDecode {
 impl uint<8> {
     fn decode_saleae_state(self) -> SaleaeCmdDecode {
         match self.to_upper() {
-            b'S' => SaleaeCmdDecode$(valid: true, state: SaleaeState::SyncSignals()),
-            b'E' => SaleaeCmdDecode$(valid: true, state: SaleaeState::EdgeSignals()),
-            b'D' => SaleaeCmdDecode$(valid: true, state: SaleaeState::DataSignals()),
-            b'R' => SaleaeCmdDecode$(valid: true, state: SaleaeState::RawSignals()),
-            b'C' => SaleaeCmdDecode$(valid: true, state: SaleaeState::Counter()),
-            _ => SaleaeCmdDecode$(valid: false, state: SaleaeState::DataSignals()),
+            b'S' => SaleaeCmdDecode { valid: true, state: SaleaeState::SyncSignals() },
+            b'E' => SaleaeCmdDecode { valid: true, state: SaleaeState::EdgeSignals() },
+            b'D' => SaleaeCmdDecode { valid: true, state: SaleaeState::DataSignals() },
+            b'R' => SaleaeCmdDecode { valid: true, state: SaleaeState::RawSignals() },
+            b'C' => SaleaeCmdDecode { valid: true, state: SaleaeState::Counter() },
+            _ => SaleaeCmdDecode { valid: false, state: SaleaeState::DataSignals() },
         }
     }
 }
@@ -189,13 +189,13 @@ pub fn decode_cycle(
     ft_cmd_word: uint<16>,
 ) -> CycleDecode {
     let bus = decode_bus_events(z80_m1_sync, z80_mreq_sync, z80_iorq_sync, rd_rise, wr_rise);
-    CycleDecode$(
+    CycleDecode {
         bus: bus,
         bus_error: bus_error_status(rd_rise, wr_rise, bus.invalid_bus_state),
         rx_digit: rx_byte.decode_digit(),
         saleae_cmd: rx_byte.decode_saleae_state(),
         ft_cmd: ft_cmd_word.decode_ft_stream(ft_ui_dout_empty),
-    )
+    }
 }
 
 pub struct BusSamplerOut {
@@ -227,7 +227,7 @@ fn sample_bus_cycle(
     let wait_window_bits: uint<8> = wait_counter.wait_window(wait_enabled);
     let wait_done = wait_window_bits > 1;
     let bus_start = mreq_fall || iorq_fall;
-    BusSamplerOut$(
+    BusSamplerOut {
         sample_is_bus: sample_is_bus,
         sample_is_wait: sample_is_wait,
         wait_done: wait_done,
@@ -238,11 +238,11 @@ fn sample_bus_cycle(
         addr_fifo_wput: bus_start && sample_is_bus,
         event_fifo_wput: bus_decode.bus_event_valid,
         sample_tx_req: if sample_is_wait && wait_done && !tx_busy {
-            TxReq8$(valid: true, byte: b'.')
+            TxReq8 { valid: true, byte: b'.' }
         } else {
             tx_req_none()
         },
-    )
+    }
 }
 
 pub struct UsbCmdOut {
@@ -280,18 +280,18 @@ impl UsbCmdInputs {
         let rx_is_digit = self.rx_valid && self.cycle_decode.rx_digit.valid;
         let rx_is_saleae_cmd = self.rx_valid && self.cycle_decode.saleae_cmd.valid;
         let rx_tx_req = if (rx_is_digit || rx_is_saleae_cmd) && !self.tx_busy {
-            TxReq8$(valid: true, byte: self.rx_byte)
+            TxReq8 { valid: true, byte: self.rx_byte }
         } else {
             self.upstream_req
         };
 
-        UsbCmdOut$(
+        UsbCmdOut {
             next_wait_enabled: next_wait_enabled,
             next_saleae_state: next_saleae_state,
             rx_is_digit: rx_is_digit,
             rx_is_saleae_cmd: rx_is_saleae_cmd,
             tx_req: rx_tx_req,
-        )
+        }
     }
 }
 
@@ -356,14 +356,14 @@ fn run_ft_stream_mux(
         false
     };
     let ft_tx_req = if ft_cmd.enable && !tx_busy {
-        TxReq8$(valid: true, byte: b'+')
+        TxReq8 { valid: true, byte: b'+' }
     } else if ft_cmd.disable && !tx_busy {
-        TxReq8$(valid: true, byte: b'-')
+        TxReq8 { valid: true, byte: b'-' }
     } else {
         tx_req_none()
     };
 
-    FtStreamMuxOut$(
+    FtStreamMuxOut {
         next_ft_enabled: next_ft_enabled,
         next_ft_state: next_ft_state,
         next_ft_cur_value: next_ft_cur_value,
@@ -373,7 +373,7 @@ fn run_ft_stream_mux(
         ft_ui_dout_get: !ft_ui_dout_empty,
         stream_fifo_rget: stream_fifo_rget,
         ft_tx_req: ft_tx_req,
-    )
+    }
 }
 
 pub struct CoreStepOut {
@@ -432,11 +432,11 @@ impl CoreStepInputs {
             self.ft_enabled &&
             !self.stream_fifo_full &&
             self.fifo_full_counter > 0;
-        CoreStepOut$(
+        CoreStepOut {
             sample: sample,
             ft_mux: ft_mux,
             should_emit_overflow: should_emit_overflow,
-        )
+        }
     }
 }
 

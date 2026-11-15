@@ -35,11 +35,11 @@ pub struct ParserStepOut {
 
 impl Default for LineParserState {
     fn default() -> Self {
-        LineParserState$(
+        LineParserState {
             phase: ParserPhase::Idle(),
             word: 0,
             be: 0x3,
-        )
+        }
     }
 }
 
@@ -69,22 +69,22 @@ impl ParserStepOut {
     // The byte moved the parser on, possibly emitting something.
     #[inline]
     fn advance(phase: ParserPhase, word: FtData, be: FtBe, event: ParserEvent) -> Self {
-        Self$(
-            state: LineParserState$(phase: phase, word: word, be: be),
+        Self {
+            state: LineParserState { phase: phase, word: word, be: be },
             event: event,
-        )
+        }
     }
 
     // The byte changed nothing.
     #[inline]
     fn stay(state: LineParserState) -> Self {
-        Self$(state: state, event: ParserEvent::None())
+        Self { state: state, event: ParserEvent::None() }
     }
 
     // The line is unusable: report it and start the next one from scratch.
     #[inline]
     fn error() -> Self {
-        Self$(state: LineParserState::default(), event: ParserEvent::ParseErr())
+        Self { state: LineParserState::default(), event: ParserEvent::ParseErr() }
     }
 }
 

@@ -134,7 +134,7 @@ impl Ce6CtrlAddr {
 
 fn decode_ce6_addr(addr: BusAddr) -> Ce6AddrDecode {
     let low16: Ce6Low16 = trunc(addr);
-    Ce6AddrDecode$(
+    Ce6AddrDecode {
         offset: trunc(addr),
         rom_in_range: low16 < ce6_rom_window_last(),
         ctrl: if low16 == ce6_measure_start_port() {
@@ -154,7 +154,7 @@ fn decode_ce6_addr(addr: BusAddr) -> Ce6AddrDecode {
         } else {
             Ce6CtrlAddr::None()
         },
-    )
+    }
 }
 
 fn debug_event_word(prefix: uint<8>, data: CardData) -> EventWord {
@@ -214,14 +214,14 @@ fn pack_measure_report(report: MeasureReport) -> MeasurePacked {
 }
 
 fn unpack_measure_report(value: MeasurePacked) -> MeasureReport {
-    MeasureReport$(
+    MeasureReport {
         start_tag: trunc(value >> 136),
         stop_tag: trunc(value >> 128),
         delta_ticks: trunc(value >> 96),
         delta_events: trunc(value >> 64),
         delta_addr_uart: trunc(value >> 32),
         delta_ft_overflow: trunc(value),
-    )
+    }
 }
 
 fn saturating_inc_u8(value: uint<8>) -> uint<8> {
@@ -371,19 +371,19 @@ struct ParserFrontStage {
 }
 
 fn init_pending_uart_state<#uint WIDTH>() -> PendingUartState<WIDTH> {
-    PendingUartState$(
+    PendingUartState {
         last_raw: 0,
         pending: 0,
         pending_valid: false,
         settle: 0,
         sent: 0,
         missed: false,
-    )
+    }
 }
 
 impl Default for AccessCycleState {
     fn default() -> Self {
-        AccessCycleState$(
+        AccessCycleState {
             prev_ce: false,
             classified: false,
             is_read: false,
@@ -391,23 +391,23 @@ impl Default for AccessCycleState {
             start_tick: 0,
             latched_addr: 0,
             latched_write_data: 0,
-        )
+        }
     }
 }
 
 impl Default for CtrlWriteState {
     fn default() -> Self {
-        CtrlWriteState$(
+        CtrlWriteState {
             active: false,
             fired: false,
             wait_ctr: 0,
-        )
+        }
     }
 }
 
 impl Default for SampledBusState {
     fn default() -> Self {
-        SampledBusState$(
+        SampledBusState {
             active: false,
             from_cycle_start: false,
             wait_ctr: 0,
@@ -415,60 +415,60 @@ impl Default for SampledBusState {
             cycle_phase: 0,
             cycles_since_cycle_start: 0,
             synthetic_armed: false,
-        )
+        }
     }
 }
 
 impl Default for PortOverrunState {
     fn default() -> Self {
-        PortOverrunState$(
+        PortOverrunState {
             pending_count: 0,
             idx: 0,
-        )
+        }
     }
 }
 
 impl Default for MemClearState {
     fn default() -> Self {
-        MemClearState$(
+        MemClearState {
             active: true,
             addr: 0,
-        )
+        }
     }
 }
 
 impl Default for MeasureCaptureState {
     fn default() -> Self {
-        MeasureCaptureState$(
+        MeasureCaptureState {
             armed: false,
             start_tag: 0,
             start_tick: 0,
             start_event_count: 0,
             start_addr_uart_count: 0,
             start_ft_overflow_count: 0,
-        )
+        }
     }
 }
 
 fn init_measure_pending_state() -> ElasticSlotState<MeasureReport> {
     elastic_slot_reset(
-        MeasureReport$(
+        MeasureReport {
             start_tag: 0,
             stop_tag: 0,
             delta_ticks: 0,
             delta_events: 0,
             delta_addr_uart: 0,
             delta_ft_overflow: 0,
-        ),
+        },
     )
 }
 
 impl Default for MeasureEngineState {
     fn default() -> Self {
-        MeasureEngineState$(
+        MeasureEngineState {
             dump_active: false,
             stream: init_measure_stream(),
-        )
+        }
     }
 }
 
@@ -478,29 +478,29 @@ fn init_ft_ingress_state() -> ElasticSlotState<SampledBusWord> {
 
 impl Default for FtStreamRegs {
     fn default() -> Self {
-        FtStreamRegs$(
+        FtStreamRegs {
             state: FtWordStreamState::GetFifo(),
             cur_value: 0,
-        )
+        }
     }
 }
 
 impl Default for FtUartSessionState {
     fn default() -> Self {
-        FtUartSessionState$(
+        FtUartSessionState {
             active: false,
             base_overflow_count: 0,
             last_overflow_delta: 0,
-        )
+        }
     }
 }
 
 impl Default for ParserFrontStage {
     fn default() -> Self {
-        ParserFrontStage$(
+        ParserFrontStage {
             event: ParserEvent::None(),
             echo: EchoMsg::None(),
-        )
+        }
     }
 }
 
@@ -519,18 +519,18 @@ fn pending_uart_step<#uint WIDTH>(
         state.missed || (raw_changed && busy)
     };
 
-    PendingUartOut$(
+    PendingUartOut {
         next_state: if raw_changed {
-            PendingUartState$(
+            PendingUartState {
                 last_raw: now,
                 pending: now,
                 pending_valid: true,
                 settle: 0,
                 sent: state.sent,
                 missed: state.missed || busy,
-            )
+            }
         } else {
-            PendingUartState$(
+            PendingUartState {
                 last_raw: state.last_raw,
                 pending: state.pending,
                 pending_valid: if send || clear_same { false } else { state.pending_valid },
@@ -541,11 +541,11 @@ fn pending_uart_step<#uint WIDTH>(
                 },
                 sent: if send { state.pending } else { state.sent },
                 missed: stale,
-            )
+            }
         },
         send: send,
         dropped: stale,
-    )
+    }
 }
 
 fn access_cycle_step(
@@ -559,8 +559,8 @@ fn access_cycle_step(
 ) -> AccessCycleStep {
     let classify_now = ce && !state.classified && state.wait_ctr == classify_delay;
     let event_start_tick = if ce && !state.prev_ce { tick } else { state.start_tick };
-    AccessCycleStep$(
-        next_state: AccessCycleState$(
+    AccessCycleStep {
+        next_state: AccessCycleState {
             prev_ce: ce,
             classified: if !ce {
                 false
@@ -582,13 +582,13 @@ fn access_cycle_step(
             start_tick: if ce && !state.prev_ce { tick } else { state.start_tick },
             latched_addr: if classify_now { addr } else { state.latched_addr },
             latched_write_data: if classify_now { data } else { state.latched_write_data },
-        ),
+        },
         classify_now: classify_now,
         kind_read: if classify_now { rw } else { state.is_read },
         start_tick: event_start_tick,
         addr: addr,
         data: data,
-    )
+    }
 }
 
 fn ctrl_write_step(
@@ -609,16 +609,16 @@ fn ctrl_write_step(
         state.wait_ctr
     };
     let fire = ctrl_window && !state.fired && wait_ctr >= ctrl_write_delay;
-    CtrlWriteStep$(
-        next_state: CtrlWriteState$(
+    CtrlWriteStep {
+        next_state: CtrlWriteState {
             active: ctrl_window,
             fired: if !ctrl_window { false } else { state.fired || fire },
             wait_ctr: wait_ctr,
-        ),
+        },
         fire: fire,
         addr: addr,
         data: data,
-    )
+    }
 }
 
 fn sampled_bus_step(
@@ -676,8 +676,8 @@ fn sampled_bus_step(
     } else {
         state.synthetic_armed
     };
-    SampledBusStep$(
-        next_state: SampledBusState$(
+    SampledBusStep {
+        next_state: SampledBusState {
             active: if real_fire {
                 false
             } else if start_wait {
@@ -697,12 +697,12 @@ fn sampled_bus_step(
             cycle_phase: cycle_phase,
             cycles_since_cycle_start: cycles_since_cycle_start,
             synthetic_armed: synthetic_armed,
-        ),
+        },
         fire: real_fire || synthetic_fire,
         from_cycle_start: if real_fire { state.from_cycle_start } else { false },
         synthetic_followup: synthetic_fire,
         cycle_start_pulse: cycle_start_now,
-    )
+    }
 }
 
 fn port_overrun_step(
@@ -719,14 +719,14 @@ fn port_overrun_step(
     let sending_existing = state.pending_count != 0;
     let cur_idx: uint<4> = if sending_existing { state.idx } else { 0 };
     let tx_req = if queued != 0 && !block_tx {
-        TxReq8$(valid: true, byte: overrun[trunc(cur_idx)])
+        TxReq8 { valid: true, byte: overrun[trunc(cur_idx)] }
     } else {
         tx_req_none()
     };
     let sent = tx_req.valid;
     let last = cur_idx == (overrun.len() -. 1);
-    PortOverrunOut$(
-        next_state: PortOverrunState$(
+    PortOverrunOut {
+        next_state: PortOverrunState {
             pending_count: if sent && last {
                 queued -. 1
             } else {
@@ -739,9 +739,9 @@ fn port_overrun_step(
             } else {
                 0
             },
-        ),
+        },
         tx_req: tx_req,
-    )
+    }
 }
 
 fn measure_engine_step(
@@ -771,11 +771,11 @@ fn measure_engine_step(
         next_msg,
     );
     let dump_complete = want_msg && fifo_empty;
-    MeasureEngineOut$(
+    MeasureEngineOut {
         next_state: if clear_request {
             MeasureEngineState::default()
         } else {
-            MeasureEngineState$(
+            MeasureEngineState {
                 dump_active: if dump_complete {
                     false
                 } else if dump_request {
@@ -784,11 +784,11 @@ fn measure_engine_step(
                     state.dump_active
                 },
                 stream: stream_out.state,
-            )
+            }
         },
         fifo_rget: want_msg && !fifo_empty,
         tx_req: stream_out.tx_req,
-    )
+    }
 }
 
 entity parser_core(
@@ -842,7 +842,7 @@ entity pending_uart_core<#uint WIDTH>(
     let step = pending_uart_step(state, now, busy, settle_last);
     reg(clk) state: PendingUartState<WIDTH> reset(rst: init_pending_uart_state()) = step.next_state;
 
-    PendingUartEval$(state: state, step: step)
+    PendingUartEval { state: state, step: step }
 }
 
 entity access_cycle_core(
@@ -859,7 +859,7 @@ entity access_cycle_core(
     let step = access_cycle_step(state, ce, rw, addr, data, tick, classify_delay);
     reg(clk) state: AccessCycleState reset(rst: AccessCycleState::default()) = step.next_state;
 
-    AccessCycleEval$(state: state, step: step)
+    AccessCycleEval { state: state, step: step }
 }
 
 entity ctrl_write_core(
@@ -1001,10 +1001,10 @@ entity main_core(
         usb_rx_out.byte,
     );
     reg(clk) parser_front: ParserFrontStage reset(rst: ParserFrontStage::default()) =
-        ParserFrontStage$(
+        ParserFrontStage {
             event: usb_parse.event,
             echo: usb_parse.echo,
-        );
+        };
     let parser_event = parser_front.event;
     let usb_ram_read = parser_event.ram_read();
     let usb_ram_read_valid = usb_ram_read.is_some();
@@ -1075,10 +1075,10 @@ entity main_core(
     reg(clk) mem_clear: MemClearState reset(rst: MemClearState::default()) =
         // Scrub card RAM after runtime reset so reset behavior is deterministic.
         if mem_clear.active {
-            MemClearState$(
+            MemClearState {
                 active: mem_clear.addr != 0x7FF,
                 addr: if mem_clear.addr == 0x7FF { 0 } else { mem_clear.addr +. 1 },
-            )
+            }
         } else {
             mem_clear
         };
@@ -1316,17 +1316,17 @@ entity main_core(
         ft_stream_fifo_dout,
     );
     reg(clk) ft_stream_regs: FtStreamRegs reset(rst: FtStreamRegs::default()) =
-        FtStreamRegs$(
+        FtStreamRegs {
             state: ft_stream.next_state,
             cur_value: ft_stream.next_cur_value,
-        );
+        };
     let ft_stream_fifo_wput = ft_ingress_step.sink_wput;
     let ft_stream_fifo_drop = ft_ingress_step.dropped;
     reg(clk) ft_overflow_total: MeasureCount reset(rst: 0) =
         if ft_stream_fifo_drop { ft_overflow_total +. 1 } else { ft_overflow_total };
     reg(clk) ft_uart_session: FtUartSessionState reset(rst: FtUartSessionState::default()) =
         if ft_uart_source_disable || ft_uart_disable_request {
-            FtUartSessionState$(
+            FtUartSessionState {
                 active: false,
                 base_overflow_count: ft_uart_session.base_overflow_count,
                 last_overflow_delta: if ft_uart_session.active {
@@ -1334,13 +1334,13 @@ entity main_core(
                 } else {
                     ft_uart_session.last_overflow_delta
                 },
-            )
+            }
         } else if ft_uart_enable_request {
-            FtUartSessionState$(
+            FtUartSessionState {
                 active: true,
                 base_overflow_count: ft_overflow_total,
                 last_overflow_delta: 0,
-            )
+            }
         } else {
             ft_uart_session
         };
@@ -1367,34 +1367,34 @@ entity main_core(
 
     reg(clk) measure_capture: MeasureCaptureState reset(rst: MeasureCaptureState::default()) =
         if ce6_measure_start {
-            MeasureCaptureState$(
+            MeasureCaptureState {
                 armed: true,
                 start_tag: ce6_ctrl_step.data,
                 start_tick: tick,
                 start_event_count: if event_valid { event_total +. 1 } else { event_total },
                 start_addr_uart_count: if addr_uart.step.send { addr_uart_total +. 1 } else { addr_uart_total },
                 start_ft_overflow_count: ft_overflow_total,
-            )
+            }
         } else if ce6_measure_abort || (ce6_measure_stop && measure_capture.armed) {
-            MeasureCaptureState$(
+            MeasureCaptureState {
                 armed: false,
                 start_tag: measure_capture.start_tag,
                 start_tick: measure_capture.start_tick,
                 start_event_count: measure_capture.start_event_count,
                 start_addr_uart_count: measure_capture.start_addr_uart_count,
                 start_ft_overflow_count: measure_capture.start_ft_overflow_count,
-            )
+            }
         } else {
             measure_capture
         };
-    let measure_report = MeasureReport$(
+    let measure_report = MeasureReport {
         start_tag: measure_capture.start_tag,
         stop_tag: ce6_ctrl_step.data,
         delta_ticks: tick -. measure_capture.start_tick,
         delta_events: event_total -. measure_capture.start_event_count,
         delta_addr_uart: addr_uart_total -. measure_capture.start_addr_uart_count,
         delta_ft_overflow: ft_overflow_total -. measure_capture.start_ft_overflow_count,
-    );
+    };
 
     let measure_report_capture = ce6_measure_stop && measure_capture.armed;
     decl measure_pending;
@@ -1452,12 +1452,12 @@ entity main_core(
         } else {
             measure_overflow_count
         };
-    let measure_status_now = MeasureStatus$(
+    let measure_status_now = MeasureStatus {
         count: zext(measure_queue_level),
         overflow: measure_overflow_count,
         armed: measure_capture.armed,
-    );
-    let ft_status_now = FtStatus$(
+    };
+    let ft_status_now = FtStatus {
         config: ft_stream_cfg,
         mode: ft_stream_mode,
         uart_active: ft_uart_active,
@@ -1465,7 +1465,7 @@ entity main_core(
         capture_active: ft_capture_active,
         session_overflow: ft_uart_session_overflow,
         overflow: ft_overflow_total,
-    );
+    };
 
     let next_resp_msg = if usb_ram_read_valid {
         if mem_clear.active || uart_ram_read_collision {
@@ -1506,7 +1506,7 @@ entity main_core(
 
     let port_char_blocked = resp_block_tx || resp_out.tx_req.valid;
     let port_char_tx_req = if ce6_port_write_valid && !port_char_blocked {
-        TxReq8$(valid: true, byte: ce6_port_write_byte)
+        TxReq8 { valid: true, byte: ce6_port_write_byte }
     } else {
         tx_req_none()
     };

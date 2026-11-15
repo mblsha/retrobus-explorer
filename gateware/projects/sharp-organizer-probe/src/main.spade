@@ -75,7 +75,7 @@ struct ProbeStep {
 
 impl Default for ProbeSnapshot {
     fn default() -> Self {
-        ProbeSnapshot$(
+        ProbeSnapshot {
             addr: 0,
             data: 0,
             control: 0,
@@ -87,13 +87,13 @@ impl Default for ProbeSnapshot {
             armed: false,
             nc_drive: 0,
             nc_oe: 0,
-        )
+        }
     }
 }
 
 impl Default for ProbeState {
     fn default() -> Self {
-        ProbeState$(
+        ProbeState {
             parser: 0,
             addr_bytes: [0, 0, 0],
             mask_bytes: [0, 0],
@@ -128,7 +128,7 @@ impl Default for ProbeState {
             reply_pos: 0,
             reply_ack: 0,
             snapshot: ProbeSnapshot::default(),
-        )
+        }
     }
 }
 
@@ -351,8 +351,8 @@ impl ProbeState {
             write_setup_done || write_select_done || write_pulse_done ||
             write_hold_done || write_finish;
 
-        ProbeStep$(
-            next_state: ProbeState$(
+        ProbeStep {
+            next_state: ProbeState {
                 parser: next_parser,
                 addr_bytes: addr_bytes,
                 mask_bytes: mask_bytes,
@@ -428,7 +428,7 @@ impl ProbeState {
                 reply_pos: next_reply_pos,
                 reply_ack: if new_reply_kind != 0 { new_reply_ack } else { self.reply_ack },
                 snapshot: if snapshot {
-                    ProbeSnapshot$(
+                    ProbeSnapshot {
                         addr: addr_sample,
                         data: data_sample,
                         control: control_sample,
@@ -440,17 +440,17 @@ impl ProbeState {
                         armed: effective_armed,
                         nc_drive: self.nc_drive,
                         nc_oe: if effective_armed { self.nc_oe } else { 0 },
-                    )
+                    }
                 } else {
                     self.snapshot
                 },
-            ),
-            tx_req: if sending { TxReq8$(valid: true, byte: self.reply_byte()) }
-                else if burst_send && !self.burst_ft { TxReq8$(valid: true, byte: self.burst_data) }
+            },
+            tx_req: if sending { TxReq8 { valid: true, byte: self.reply_byte() } }
+                else if burst_send && !self.burst_ft { TxReq8 { valid: true, byte: self.burst_data } }
                 else { tx_req_none() },
             ft_valid: burst_send && self.burst_ft && !expired && !release,
             ft_word: 0xa500 | zext(self.burst_data),
-        )
+        }
     }
 }
 

@@ -28,8 +28,8 @@ where
     let word: uint<32> = trunc(record >> shift);
     reg(clk) state: FtWordStreamState reset(rst: FtWordStreamState::GetFifo()) = step.next_state;
     reg(clk) current: uint<32> reset(rst: 0) = step.next_cur_value;
-    let step = ft_word_stream_step$(
-        state, cur_value: current, ui_din_full: sink_full,
+    let step = ft_word_stream_step(
+        state:, cur_value: current, ui_din_full: sink_full,
         ui_dout_empty: true, stream_fifo_empty: empty, stream_fifo_dout: word,
     );
     let word_count: uint<{uint::bits_for(WORDS)}> = WORDS;
@@ -39,6 +39,6 @@ where
         if step.stream_fifo_rget {
             if last_word { 0 } else { word_index +. 1 }
         } else { word_index };
-    FtRecordStreamOut$(data: step.ui_din, be: step.ui_din_be,
-        valid: step.ui_din_valid, pop_record: step.stream_fifo_rget && last_word)
+    FtRecordStreamOut {data: step.ui_din, be: step.ui_din_be,
+        valid: step.ui_din_valid, pop_record: step.stream_fifo_rget && last_word}
 }

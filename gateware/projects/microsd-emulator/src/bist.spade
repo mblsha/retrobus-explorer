@@ -72,12 +72,12 @@ pub entity qualified_ddr(
     let (bist_write_data, bist_write_data_w): (uint<128>, inv uint<128>) = port();
     let (bist_write_mask, bist_write_mask_w): (uint<16>, inv uint<16>) = port();
     let (bist_read_ready, bist_read_ready_w): (bool, inv bool) = port();
-    let _ = inst native_bist$(
-        clk,
-        rst,
-        start,
-        word_count,
-        timeout_cycles,
+    let _ = inst native_bist(
+        clk:,
+        rst:,
+        start:,
+        word_count:,
+        timeout_cycles:,
         cmd_valid: bist_cmd_valid_w,
         cmd_ready: cmd_ready && !bist_passed,
         cmd_address: bist_cmd_address_w,
@@ -88,14 +88,14 @@ pub entity qualified_ddr(
         wdata_mask: bist_write_mask_w,
         rdata_valid: rdata_valid && !bist_passed,
         rdata_ready: bist_read_ready_w,
-        rdata,
-        busy,
+        rdata:,
+        busy:,
         passed: bist_passed_w,
-        failed,
-        progress,
-        diagnostic,
-        expected_word,
-        actual_word,
+        failed:,
+        progress:,
+        diagnostic:,
+        expected_word:,
+        actual_word:,
     );
     // Register ownership separately from reset and the BIST state decoder.
     // This also inserts an idle cycle between the final response and handover.

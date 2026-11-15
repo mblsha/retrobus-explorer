@@ -25,7 +25,7 @@ struct UartRxCapture<#uint DATA_WIDTH> {
 impl<#uint DATA_WIDTH> Default for UartRxCapture<DATA_WIDTH> {
     #[inline]
     fn default() -> Self {
-        Self$(valid: false, byte: 0, parity_error: false)
+        Self { valid: false, byte: 0, parity_error: false }
     }
 }
 
@@ -147,8 +147,8 @@ struct UartTxRegs<#uint DATA_WIDTH> {
 impl<#uint DATA_WIDTH> Default for UartTxRegs<DATA_WIDTH> {
     #[inline]
     fn default() -> Self {
-        Self$(state: UartTxState::Idle(), ctr: 0, bit_ctr: 0,
-            saved_data: 0, tx_reg: true, block_flag: false)
+        Self {state: UartTxState::Idle(), ctr: 0, bit_ctr: 0,
+            saved_data: 0, tx_reg: true, block_flag: false}
     }
 }
 
@@ -187,7 +187,7 @@ where
             match state {
                 UartTxState::Idle => {
                     let start_send = !block_flag && new_data;
-                    UartTxRegs$(
+                    UartTxRegs {
                         state: if start_send { UartTxState::StartBit() } else { UartTxState::Idle() },
                         // Keep blocked idle state as-is; otherwise clear counters while idle.
                         ctr: if block_flag { ctr } else { 0 },
@@ -195,38 +195,38 @@ where
                         saved_data: if start_send { data } else { saved_data },
                         tx_reg: true,
                         block_flag: block_flag_next,
-                    )
+                    }
                 },
-                UartTxState::StartBit => UartTxRegs$(
+                UartTxState::StartBit => UartTxRegs {
                     state: if elapsed { UartTxState::Data() } else { UartTxState::StartBit() },
                     ctr: if elapsed { 0 } else { ctr_inc },
                     bit_ctr: bit_ctr,
                     saved_data: saved_data,
                     tx_reg: false,
                     block_flag: block_flag_next,
-                ),
+                },
                 UartTxState::Data => {
                     let last_bit = bit_ctr == DATA_WIDTH - 1;
                     let bit_ctr_inc: uint<32> = bit_ctr +. 1;
-                    UartTxRegs$(
+                    UartTxRegs {
                         state: if elapsed && last_bit { UartTxState::StopBit() } else { UartTxState::Data() },
                         ctr: if elapsed { 0 } else { ctr_inc },
                         bit_ctr: if elapsed { bit_ctr_inc } else { bit_ctr },
                         saved_data: saved_data,
                         tx_reg: saved_data.as_bits()[trunc(bit_ctr)],
                         block_flag: block_flag_next,
-                    )
+                    }
                 },
                 // The stop bit is the one state that keeps counting past its
                 // own end: `ctr` advances on the cycle it hands back to Idle.
-                UartTxState::StopBit => UartTxRegs$(
+                UartTxState::StopBit => UartTxRegs {
                     state: if elapsed { UartTxState::Idle() } else { UartTxState::StopBit() },
                     ctr: ctr_inc,
                     bit_ctr: bit_ctr,
                     saved_data: saved_data,
                     tx_reg: true,
                     block_flag: block_flag_next,
-                ),
+                },
             }
         };
 
@@ -235,10 +235,10 @@ where
     let block_flag = regs.block_flag;
     let busy = if let UartTxState::Idle = state { block_flag } else { true };
 
-    UartTxOut$(
+    UartTxOut {
         tx: tx_reg,
         busy: busy,
-    )
+    }
 }
 
 pub entity uart_tx_tap<#uint CLK_FREQ, #uint BAUD, #uint DATA_WIDTH>(
@@ -326,7 +326,7 @@ where DATA_WIDTH > 0 else "uart_rx needs at least one data bit"
                     RxState::WaitHalf(time +. 1)
                 }
             },
-            RxState::WaitData$(time, bit_idx, data, odd_parity) => {
+            RxState::WaitData { time, bit_idx, data, odd_parity } => {
                 let next_data = uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync);
                 let next_odd = odd_parity ^^ rx_sync;
                 if time == last {
@@ -339,14 +339,14 @@ where DATA_WIDTH > 0 else "uart_rx needs at least one data bit"
                     RxState::WaitData(time +. 1, bit_idx, data, odd_parity)
                 }
             },
-            RxState::WaitParity$(time, data, odd_parity) => {
+            RxState::WaitParity { time, data, odd_parity } => {
                 if time == last {
                     uart_rx_after_stop_bits::<DATA_WIDTH>(stops_after_first)
                 } else {
                     RxState::WaitParity(time +. 1, data, odd_parity)
                 }
             },
-            RxState::WaitExtraStop$(time, count) => {
+            RxState::WaitExtraStop { time, count } => {
                 if time == last {
                     if count == 1 {
                         RxState::WaitHigh()
@@ -371,25 +371,25 @@ where DATA_WIDTH > 0 else "uart_rx needs at least one data bit"
         reset(rst: default())
         = {
         match state {
-            RxState::WaitData$(time, bit_idx, data, odd_parity: _) if !parity && time == last && bit_idx == last_bit_idx => {
-                UartRxCapture$(
+            RxState::WaitData { time, bit_idx, data, odd_parity: _ } if !parity && time == last && bit_idx == last_bit_idx => {
+                UartRxCapture {
                     valid: true,
                     byte: uart_rx_shift_in::<DATA_WIDTH>(data, rx_sync),
                     parity_error: false,
-                )
+                }
             },
-            RxState::WaitParity$(time, data, odd_parity) if time == last => {
-                UartRxCapture$(
+            RxState::WaitParity { time, data, odd_parity } if time == last => {
+                UartRxCapture {
                     valid: true,
                     byte: data,
                     parity_error: odd_parity ^^ rx_sync,
-                )
+                }
             },
-            _ => UartRxCapture$(
+            _ => UartRxCapture {
                 valid: false,
                 byte: capture.byte,
                 parity_error: capture.parity_error,
-            ),
+            },
         }
     };
 
@@ -397,11 +397,11 @@ where DATA_WIDTH > 0 else "uart_rx needs at least one data bit"
     let out_byte = capture.byte;
     let out_parity_error = capture.parity_error;
 
-    UartRxOut$(
+    UartRxOut {
         valid: out_valid,
         parity_error: if out_valid { out_parity_error } else { false },
         byte: if out_valid { out_byte } else { 0 },
-    )
+    }
 }
 
 pub entity ft<#uint DATA_WIDTH, #uint BE_WIDTH, #uint TX_BUFFER, #uint RX_BUFFER, #uint PRIORITY_RX, #uint PREEMPT>(

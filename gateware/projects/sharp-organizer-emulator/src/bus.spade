@@ -35,6 +35,6 @@ pub entity bus_cycle(
     let fire = window && active && !starting && !fired && age >= delay && raw_matches;
     reg(clk) fired reset(rst: false) =
         if !window || starting { false } else { fired || fire };
-    Cycle$(fire: fire, active: window, ready: fired && !starting && raw_matches,
-        address: address, control: control, data: data, reading: reading)
+    Cycle {fire: fire, active: window, ready: fired && !starting && raw_matches,
+        address: address, control: control, data: data, reading: reading}
 }

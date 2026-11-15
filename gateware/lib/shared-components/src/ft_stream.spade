@@ -33,7 +33,7 @@ pub fn ft_word_stream_step(
     };
     let ui_din_valid = take_low || send_high;
 
-    FtWordStreamOut$(
+    FtWordStreamOut {
         next_state: if take_low {
             FtWordStreamState::Stream()
         } else if send_high {
@@ -53,5 +53,5 @@ pub fn ft_word_stream_step(
         ui_din_be: if ui_din_valid { 0x3 } else { 0x0 },
         ui_dout_get: !ui_dout_empty,
         stream_fifo_rget: take_low,
-    )
+    }
 }

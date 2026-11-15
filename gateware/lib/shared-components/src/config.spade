@@ -135,10 +135,10 @@ entity au_dual_bridge<#uint WIDTH, #uint ENTRIES, #uint BAUD_A, #uint BAUD_B, #u
         send_enable,
         policy,
     );
-    AuDualBridgeOut$(
+    AuDualBridgeOut {
         tx_a: tx_a,
         tx_b: tx_b,
-    )
+    }
 }
 
 #[inline]

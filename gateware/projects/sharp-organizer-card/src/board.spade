@@ -39,7 +39,7 @@ pub(lib) entity organizer_board_outputs(
         monitor_samples,
     );
     let board = render_board_outputs(
-        BoardRenderInputs$(
+        BoardRenderInputs {
             state: state,
             stream_fifo_empty: stream_fifo_empty,
             stream_fifo_full: stream_fifo_full,
@@ -65,7 +65,7 @@ pub(lib) entity organizer_board_outputs(
             misc_line: monitor_lines.misc,
             data_line: monitor_lines.data,
             addr_line: monitor_lines.addr,
-        ),
+        },
     );
 
     set led = board.led;
