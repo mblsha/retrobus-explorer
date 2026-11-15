@@ -253,7 +253,24 @@ projects build with the 59 deprecation warnings that implies: the one
 exception to zero warnings. Waiving the Verilator rule instead would also hide
 entry 1, which is found by exactly that warning.
 
+**The fix**, checked on 2026-11-15, is to write both literals as
+`{elem_width}'bx` in that codegen branch, the way `ConstantValue::Undef` is
+already spelled. With it, the reproducer lints clean in both read forms. Branch
+`claude/spade-0.21-memory` was then run in full against that patched compiler,
+brought in through a scratch `[compiler] path`:
+- both projects build with zero warnings;
+- ethernet-diagnostic's 18 tests pass, each ending at exactly the simulated
+  time it ends at with `clocked_memory`;
+- the microSD suite passes in both profiles.
+
+Upstream's own swim tests exercise `memory` only under swim's default
+simulator, which is why it went unnoticed. Nothing has been reported upstream
+yet.
+
 **When fixed.** Rebase and merge branch `claude/spade-0.21-memory`. It already
 moves every RAM to a `memory` declaration and was checked with yosys to infer
-the same block RAMs, flip-flops and carry chains. Then run both projects'
-testbenches and the microSD suite in both profiles.
+the same block RAMs, flip-flops and carry chains. Then rerun both projects'
+testbenches and the microSD suite in both profiles. If waiting is not wanted:
+rewriting `'sbx` to the unsized `'x` in the copy `run_tb.py` hands Verilator
+lints clean too (checked) and means the same thing. That patches generated
+SystemVerilog, though, so it is a choice to make deliberately, not a default.
