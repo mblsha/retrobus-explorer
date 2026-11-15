@@ -1,5 +1,3 @@
-use super::guards::require_power_of_two;
-
 #[no_mangle(all)]
 extern entity async_fifo_v<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES>(
     wclk: clock,
@@ -49,15 +47,12 @@ pub struct FifoOut<T> {
     dout: T,
 }
 
-pub struct FifoUsedOut<TData, TUsed> {
+pub struct FifoUsed<#uint WIDTH, #uint ENTRIES> {
     full: bool,
     empty: bool,
-    dout: TData,
-    used: TUsed,
+    dout: uint<WIDTH>,
+    used: FifoCount<ENTRIES>,
 }
-
-pub type FifoUsed<#uint WIDTH, #uint ENTRIES> =
-    FifoUsedOut<uint<WIDTH>, FifoCount<ENTRIES>>;
 
 /// The type of an index into a FIFO's `ENTRIES` storage slots.
 pub type FifoAddr<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES - 1)}>;
@@ -66,31 +61,11 @@ pub type FifoAddr<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES - 1)}>;
 /// bit more than an address does.
 pub type FifoCount<#uint ENTRIES> = uint<{uint::bits_for(ENTRIES)}>;
 
-/// `FifoImplState` with the two widths `ENTRIES` already implies. The struct
-/// cannot compute them itself (see below), but a `reg` annotation can name an
-/// alias whose arguments are type expressions, so the restatement happens once
-/// here instead of at every mention of the register's type.
-type FifoState<#uint WIDTH, #uint ENTRIES> =
-    FifoImplState<{uint::bits_for(ENTRIES - 1)}, {uint::bits_for(ENTRIES)}, WIDTH, ENTRIES>;
-
-// `ADDR_W` and `COUNT_W` are not independent: they are `FifoAddr<ENTRIES>` and
-// `FifoCount<ENTRIES>`. They stay parameters anyway, because v0.20.0 will not
-// evaluate a type expression in a struct member:
-//
-//     waddr: uint<{uint::bits_for(ENTRIES - 1)}>,
-//     error: Struct members cannot have const generics in their type
-//
-// and routing it through the `FifoAddr<ENTRIES>` alias instead crashes the
-// compiler outright ("internal error: entered unreachable code: Const generic in
-// type_expr_to_concrete", spade-typeinference/src/mir_type_lowering.rs:201).
-// Both were retried on v0.20.0 and both still do this. Same answer for
-// `BootBannerState`'s `IDX_W`. Until a compiler bump fixes it, `FifoState`
-// above is what ties the two widths back to `ENTRIES`, in one place.
-struct FifoImplState<#uint ADDR_W, #uint COUNT_W, #uint WIDTH, #uint ENTRIES> {
-    waddr: uint<ADDR_W>,
-    waddr_delay: uint<ADDR_W>,
-    raddr: uint<ADDR_W>,
-    used: uint<COUNT_W>,
+struct FifoImplState<#uint WIDTH, #uint ENTRIES> {
+    waddr: FifoAddr<ENTRIES>,
+    waddr_delay: FifoAddr<ENTRIES>,
+    raddr: FifoAddr<ENTRIES>,
+    used: FifoCount<ENTRIES>,
     read_data: uint<WIDTH>,
     storage: [uint<WIDTH>; ENTRIES],
 }
@@ -109,9 +84,8 @@ entity fifo_impl<#uint WIDTH, #uint ENTRIES>(
 where
     WIDTH > 0 else "a fifo needs at least one data bit",
     ENTRIES >= 2 else "a fifo needs at least two entries",
+    ENTRIES >= 1 << uint::bits_for(ENTRIES - 1) else "a fifo's entry count must be a power of two",
 {
-    let _ = require_power_of_two::<ENTRIES>();
-
     // One packed register rather than six interlocked ones, so that the write
     // pointer, its delayed copy and the occupancy count are updated from the
     // same snapshot. `decl` lets that snapshot be read above the register that
@@ -134,7 +108,7 @@ where
     // works: the storage read is launched a cycle before its data is asked for.
     let next_raddr = if do_read { ptr_inc(raddr) } else { raddr };
 
-    reg(clk) state: FifoState<WIDTH, ENTRIES>
+    reg(clk) state: FifoImplState<WIDTH, ENTRIES>
         reset(rst: FifoImplState$(
             waddr: 0,
             waddr_delay: 0,
@@ -162,7 +136,7 @@ where
             },
         );
 
-    FifoUsedOut$(
+    FifoUsed$(
         full: !wrdy,
         empty: !rrdy,
         dout: state.read_data,
@@ -193,9 +167,8 @@ where
     WIDTH > 0 else "an async fifo needs at least one data bit",
     ENTRIES >= 2 else "an async fifo needs at least two entries",
     SYNC_STAGES > 0 else "an async fifo needs at least one synchronizer stage",
+    ENTRIES >= 1 << uint::bits_for(ENTRIES - 1) else "an async fifo's entry count must be a power of two",
 {
-    let _ = require_power_of_two::<ENTRIES>();
-
     let (fifo, fifo_w): (FifoOut<uint<WIDTH>>, inv FifoOut<uint<WIDTH>>) = port();
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst async_fifo_v::<WIDTH, ENTRIES, SYNC_STAGES>(
@@ -223,9 +196,8 @@ pub entity sync_fifo<#uint WIDTH, #uint ENTRIES>(
 where
     WIDTH > 0 else "a sync fifo needs at least one data bit",
     ENTRIES >= 2 else "a sync fifo needs at least two entries",
+    ENTRIES >= 1 << uint::bits_for(ENTRIES - 1) else "a sync fifo's entry count must be a power of two",
 {
-    let _ = require_power_of_two::<ENTRIES>();
-
     let (fifo, fifo_w): (FifoOut<uint<WIDTH>>, inv FifoOut<uint<WIDTH>>) = port();
     #[verilog_attrs(keep_hierarchy = "yes")]
     let _ = inst sync_fifo_v::<WIDTH, ENTRIES>(

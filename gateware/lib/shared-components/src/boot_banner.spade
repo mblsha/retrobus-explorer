@@ -3,17 +3,16 @@ use super::{
     message_stream::{TxReq8, tx_req_none, tx_req_or_else},
 };
 
-// `IDX_W` is `uint::bits_for(N - 1)` for the banner length `N` every caller
-// pairs it with, and cannot be removed: see the note on `FifoImplState` in
-// `fifos.spade`. v0.20.0 rejects a type expression in a struct member, and the
-// type-alias spelling makes the compiler panic.
-pub struct BootBannerState<#uint IDX_W> {
+/// The position in a banner of `N` bytes.
+type BannerIdx<#uint N> = uint<{uint::bits_for(N - 1)}>;
+
+pub struct BootBannerState<#uint N> {
     active: bool,
-    idx: uint<IDX_W>,
+    idx: BannerIdx<N>,
 }
 
-pub struct BootBannerOut<#uint IDX_W> {
-    state: BootBannerState<IDX_W>,
+pub struct BootBannerOut<#uint N> {
+    state: BootBannerState<N>,
     tx_req: TxReq8,
 }
 
@@ -26,7 +25,7 @@ pub struct BootBannerTxGateOut {
 // first character. `X::<A>::default()` cannot be spelled on a generic type, so
 // the one reader of this reaches the trait through the standard library's free
 // `default()`, which takes its type from the `reg` annotation beside it.
-impl<#uint IDX_W> Default for BootBannerState<IDX_W> {
+impl<#uint N> Default for BootBannerState<N> {
     #[inline]
     fn default() -> Self {
         BootBannerState$(
@@ -36,51 +35,55 @@ impl<#uint IDX_W> Default for BootBannerState<IDX_W> {
     }
 }
 
-pub fn boot_banner_step<#uint IDX_W, #uint N>(
-    state: BootBannerState<IDX_W>,
+pub fn boot_banner_step<#uint N>(
+    state: BootBannerState<N>,
     banner: [uint<8>; N],
     block_tx: bool,
-) -> BootBannerOut<IDX_W> {
+) -> BootBannerOut<N> {
     if !state.active || block_tx {
         BootBannerOut$(
             state: state,
             tx_req: tx_req_none(),
         )
     } else {
-        let last_idx: uint<IDX_W> = N - 1;
+        // `N - 1` would widen by a bit and so type `N` one bit narrower than
+        // the index; and when `N` is a power of two, `N` itself needs one bit
+        // more than any index does.
+        let banner_len: uint<{uint::bits_for(N)}> = N;
+        let last_idx: BannerIdx<N> = trunc(banner_len -. 1);
         let done = state.idx == last_idx;
         BootBannerOut$(
             state: BootBannerState$(
                 active: !done,
                 idx: if done { 0 } else { state.idx +. 1 },
             ),
-            tx_req: TxReq8$(valid: true, byte: banner[trunc(state.idx)]),
+            tx_req: TxReq8$(valid: true, byte: banner[state.idx]),
         )
     }
 }
 
 #[inline]
-pub entity boot_banner_core<#uint IDX_W, #uint N>(
+pub entity boot_banner_core<#uint N>(
     clk: clock,
     rst: bool,
     banner: [uint<8>; N],
     block_tx: bool,
-) -> BootBannerOut<IDX_W> {
+) -> BootBannerOut<N> {
     decl stepped;
-    reg(clk) state: BootBannerState<IDX_W> reset(rst: default()) = stepped.state;
+    reg(clk) state: BootBannerState<N> reset(rst: default()) = stepped.state;
     let stepped = boot_banner_step(state, banner, block_tx);
 
     stepped
 }
 
 #[inline]
-pub entity boot_banner_tx_gate<#uint IDX_W, #uint N>(
+pub entity boot_banner_tx_gate<#uint N>(
     clk: clock,
     rst: bool,
     banner: [uint<8>; N],
     tx_busy: bool,
 ) -> BootBannerTxGateOut {
-    let banner_out = inst boot_banner_core::<IDX_W, N>(
+    let banner_out = inst boot_banner_core::<N>(
         clk,
         rst,
         banner,
@@ -98,7 +101,7 @@ pub fn boot_banner_then_tx_req(banner_tx_req: TxReq8, app_tx_req: TxReq8) -> TxR
 }
 
 #[inline]
-pub entity au_usb_uart_banner_then_loopback<#uint IDX_W, #uint N>(
+pub entity au_usb_uart_banner_then_loopback<#uint N>(
     clk: clock,
     rst: bool,
     usb_rx: bool,
@@ -107,7 +110,7 @@ pub entity au_usb_uart_banner_then_loopback<#uint IDX_W, #uint N>(
 ) {
     let (busy, busy_w): (bool, inv bool) = port();
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
-    let banner_out = inst boot_banner_core::<IDX_W, N>(
+    let banner_out = inst boot_banner_core::<N>(
         clk,
         rst,
         banner,

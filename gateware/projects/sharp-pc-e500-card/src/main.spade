@@ -986,7 +986,7 @@ entity main_core(
 
     let usb_rx_out = inst au_usb_uart_rx(clk, rst, usb_rx);
 
-    let boot_tx = inst boot_banner_tx_gate::<8, 94>(
+    let boot_tx = inst boot_banner_tx_gate(
         clk,
         rst,
         build_info::boot_banner_text(),

@@ -1502,7 +1502,7 @@ entity bram_emulator(
         load_byte: loader_byte_w,
         armed: card_armed_w,
         // The BRAM card has one image bank, so no sector selects a status word.
-        status_selector: port().1,
+        status_selector: unused(),
     );
     let _ = inst storage::bram_backend$(
         clk,
@@ -1522,7 +1522,7 @@ entity bram_emulator(
         sector_byte: read_byte_w,
     );
     // This card is read-only and has no trace service: the DDR write channel
-    // and every observation tap terminate in their own `port().1` sink.
+    // and every observation tap terminate in their own `unused()` sink.
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1559,30 +1559,30 @@ entity bram_emulator(
         dat_in: 15,
 
         // DDR write command
-        write_cmd_valid: port().1,
+        write_cmd_valid: unused(),
         write_cmd_ready: false,
-        write_cmd_address: port().1,
+        write_cmd_address: unused(),
 
         // DDR write data
-        write_data_valid: port().1,
+        write_data_valid: unused(),
         write_data_ready: false,
-        write_data: port().1,
-        write_mask: port().1,
-        write_busy: port().1,
-        trace_clock_tick: port().1,
-        trace_frame: port().1,
-        trace_valid: port().1,
-        trace_command: port().1,
-        trace_argument: port().1,
-        trace_response: port().1,
-        trace_response_complete: port().1,
-        trace_response_payload: port().1,
-        trace_data_release: port().1,
-        trace_protocol_status: port().1,
-        trace_pin_response: port().1,
-        trace_pin_response_mismatch: port().1,
-        trace_pin_data: port().1,
-        trace_pin_data_mismatch: port().1,
+        write_data: unused(),
+        write_mask: unused(),
+        write_busy: unused(),
+        trace_clock_tick: unused(),
+        trace_frame: unused(),
+        trace_valid: unused(),
+        trace_command: unused(),
+        trace_argument: unused(),
+        trace_response: unused(),
+        trace_response_complete: unused(),
+        trace_response_payload: unused(),
+        trace_data_release: unused(),
+        trace_protocol_status: unused(),
+        trace_pin_response: unused(),
+        trace_pin_response_mismatch: unused(),
+        trace_pin_data: unused(),
+        trace_pin_data_mismatch: unused(),
     );
     set armed_status = card_armed;
 }
@@ -1813,7 +1813,7 @@ entity ddr_emulator(
     set ddr_wdata = (if sd_owner { sd_write_data } else { loader_data });
     set ddr_wdata_mask = (if sd_owner { sd_write_mask } else { loader_mask });
     // Only the Ethernet build subscribes to the observation taps; here each
-    // one terminates in its own `port().1` sink.
+    // one terminates in its own `unused()` sink.
     let _ = inst sd_frontend$(
 
         // Clock and card control
@@ -1860,20 +1860,20 @@ entity ddr_emulator(
         write_data: sd_write_data_w,
         write_mask: sd_write_mask_w,
         write_busy: sd_commit_busy_w,
-        trace_clock_tick: port().1,
-        trace_frame: port().1,
-        trace_valid: port().1,
-        trace_command: port().1,
-        trace_argument: port().1,
-        trace_response: port().1,
-        trace_response_complete: port().1,
-        trace_response_payload: port().1,
-        trace_data_release: port().1,
-        trace_protocol_status: port().1,
-        trace_pin_response: port().1,
-        trace_pin_response_mismatch: port().1,
-        trace_pin_data: port().1,
-        trace_pin_data_mismatch: port().1,
+        trace_clock_tick: unused(),
+        trace_frame: unused(),
+        trace_valid: unused(),
+        trace_command: unused(),
+        trace_argument: unused(),
+        trace_response: unused(),
+        trace_response_complete: unused(),
+        trace_response_payload: unused(),
+        trace_data_release: unused(),
+        trace_protocol_status: unused(),
+        trace_pin_response: unused(),
+        trace_pin_response_mismatch: unused(),
+        trace_pin_data: unused(),
+        trace_pin_data_mismatch: unused(),
     );
     set armed_status = (card_armed && initialized);
 }

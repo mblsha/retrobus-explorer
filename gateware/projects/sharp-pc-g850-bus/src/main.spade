@@ -594,7 +594,7 @@ entity main_core(
         ft_io.ui_dout,
     );
 
-    let boot_tx = inst boot_banner_tx_gate::<8, 93>(
+    let boot_tx = inst boot_banner_tx_gate(
         clk,
         rst,
         build_info::boot_banner_text(),

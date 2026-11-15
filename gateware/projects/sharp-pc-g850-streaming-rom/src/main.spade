@@ -121,7 +121,7 @@ entity main_core(
         ft_io_w.ui_dout_empty,
     );
 
-    inst au_usb_uart_banner_then_loopback::<8, 103>(
+    inst au_usb_uart_banner_then_loopback(
         clk,
         rst,
         usb_rx,

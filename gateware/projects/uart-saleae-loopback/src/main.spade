@@ -29,7 +29,7 @@ entity main(
 
     let (enqueue, enqueue_w): (bool, inv bool) = port();
     let (usb_uart, usb_uart_w): UartLineBusy = port();
-    let boot_tx = inst boot_banner_tx_gate::<8, 96>(
+    let boot_tx = inst boot_banner_tx_gate(
         clk,
         rst,
         build_info::boot_banner_text(),

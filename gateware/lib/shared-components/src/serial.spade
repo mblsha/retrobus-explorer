@@ -1,7 +1,4 @@
-use super::{
-    guards::require_power_of_two,
-    primitives::sync_delay,
-};
+use super::primitives::sync_delay;
 
 pub type BitTime = uint<15>;
 pub type StopBits = uint<3>;
@@ -425,10 +422,9 @@ where
     BE_WIDTH > 0 else "ft needs at least one byte-enable bit",
     TX_BUFFER >= 2 else "ft needs a TX buffer of at least two entries",
     RX_BUFFER >= 2 else "ft needs an RX buffer of at least two entries",
+    TX_BUFFER >= 1 << uint::bits_for(TX_BUFFER - 1) else "ft's TX buffer size must be a power of two",
+    RX_BUFFER >= 1 << uint::bits_for(RX_BUFFER - 1) else "ft's RX buffer size must be a power of two",
 {
-    let _ = require_power_of_two::<TX_BUFFER>();
-    let _ = require_power_of_two::<RX_BUFFER>();
-
     let (ft, ft_w): FtWire<uint<DATA_WIDTH>, uint<BE_WIDTH>> = port();
 
     #[verilog_attrs(keep_hierarchy = "yes")]
