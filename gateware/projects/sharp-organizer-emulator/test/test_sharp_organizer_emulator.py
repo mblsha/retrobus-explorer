@@ -12,21 +12,21 @@ BIT_NS = 250
 
 async def send_byte(dut, value):
     dut.usb_rx.value = 0
-    await Timer(BIT_NS, units="ns")
+    await Timer(BIT_NS, unit="ns")
     for bit in range(8):
         dut.usb_rx.value = (value >> bit) & 1
-        await Timer(BIT_NS, units="ns")
+        await Timer(BIT_NS, unit="ns")
     dut.usb_rx.value = 1
-    await Timer(BIT_NS, units="ns")
+    await Timer(BIT_NS, unit="ns")
 
 
 async def receive_byte(dut):
     await FallingEdge(dut.usb_tx)
-    await Timer(BIT_NS * 1.5, units="ns")
+    await Timer(BIT_NS * 1.5, unit="ns")
     result = 0
     for bit in range(8):
         result |= int(dut.usb_tx.value) << bit
-        await Timer(BIT_NS, units="ns")
+        await Timer(BIT_NS, unit="ns")
     assert int(dut.usb_tx.value) == 1
     return result
 
@@ -39,7 +39,7 @@ async def command(dut, op, address=0, arg0=0, arg1=0, arg2=0, status=0, corrupt=
         return bytes([await receive_byte(dut) for _ in range(16)])
 
     task = cocotb.start_soon(collect())
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     for value in request:
         await send_byte(dut, value)
     result = await with_timeout(task, 100, "us")
@@ -138,7 +138,7 @@ async def ft_send(dut, words):
         await FallingEdge(dut.ft_clk)
         taking = int(dut.ft_rd.value) == 0 and int(dut.ft_oe.value) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         if taking:
             index += 1
             if index == len(words):
@@ -203,19 +203,19 @@ async def asynchronous_turnaround_and_held_select_address(dut):
     await arm(dut)
     for phase in range(10):
         await FallingEdge(dut.clk)
-        await Timer(phase + 1, units="ns")
+        await Timer(phase + 1, unit="ns")
         dut.addr.value = 0x40100
         dut.conn_eprom.value = 0
         dut.conn_oe.value = 0
         await tick(dut.clk, 15)
         assert int(dut.data.value) == 0x81
         dut.addr.value = 0x40101
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         assert int(dut.data_oe_debug.value) == 0
         await tick(dut.clk, 15)
         assert int(dut.data.value) == 0x42
         dut.conn_rw.value = 0
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         assert int(dut.data_oe_debug.value) == 0
         await release(dut)
     dut.conn_mskrom.value = 0
@@ -228,7 +228,7 @@ async def asynchronous_turnaround_and_held_select_address(dut):
     dut.conn_oe.value = 0
     await tick(dut.clk, 20)
     dut.rst_n.value = 0
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(dut.data_oe_debug.value) == 0
 
 
@@ -261,13 +261,13 @@ async def sram_writes_idle_guard_and_live_timing(dut):
     change = cocotb.start_soon(command(dut, "T", arg0=0, arg1=0))
     # Start the bus during the last UART byte. The new timing arrives while
     # the long old write window is active, then we end it before 255 clocks.
-    await Timer(19000, units="ns")
+    await Timer(19000, unit="ns")
     dut.addr.value = 0x80006
     dut.conn_sram2.value = 0
     dut.conn_rw.value = 0
     dut.data_host_drive.value = 1
     dut.data_host.value = 0xA6
-    await Timer(1800, units="ns")
+    await Timer(1800, unit="ns")
     await release(dut)
     await change
     assert (await command(dut, "R", 0x8006))[0] == 0
@@ -356,7 +356,7 @@ async def partial_uart_timeout_keeps_emulation_active(dut):
     await arm(dut)
     for byte in (0xA5, ord("W"), 0x00):
         await send_byte(dut, byte)
-    await Timer(10_100_000, units="ns")
+    await Timer(10_100_000, unit="ns")
     assert int(dut.armed_debug.value) == 1
     assert (await command(dut, "R", 0))[0] == 0x5A
     assert await read_bus(dut, 0x40000) == 0x5A

@@ -17,14 +17,14 @@ def _bit(signal) -> int:
 
 async def _tick_and_compare(dut) -> None:
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     assert _bit(dut.tap_line) == _bit(dut.core_line)
     assert _bit(dut.tap_busy) == _bit(dut.core_busy)
 
 
 @cocotb.test()
 async def typed_uart_tap_preserves_core_line_and_busy(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     dut.rst.value = 1
     dut.block.value = 0
     dut.tx_valid.value = 0

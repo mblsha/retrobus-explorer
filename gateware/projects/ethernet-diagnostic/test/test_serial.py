@@ -12,12 +12,12 @@ def framed(data):
 
 @cocotb.test()
 async def framing_recovery_and_buffered_reply(d):
-    cocotb.start_soon(Clock(d.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(d.clk, 10, unit="ns").start())
     for name in ("rx_valid", "rx_byte", "tx_ready", "request_address",
                  "reply_write", "reply_address", "reply_data", "reply_done", "reply_length"):
         getattr(d, name).value = 0
     d.rst.value = 1
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     d.rst.value = 0
 
     async def send(wire):
@@ -26,7 +26,7 @@ async def framing_recovery_and_buffered_reply(d):
             d.rx_valid.value, d.rx_byte.value = 1, byte
             await FallingEdge(d.clk)
             d.rx_valid.value = 0
-        await Timer(30, units="ns")
+        await Timer(30, unit="ns")
 
     # Noise, an unfinished escape, a malformed escape, and overflow all
     # recover at the next delimiter without exposing a partial request.
@@ -48,7 +48,7 @@ async def framing_recovery_and_buffered_reply(d):
     actual = bytearray()
     for index in range(len(body)):
         d.request_address.value = index
-        await Timer(30, units="ns")
+        await Timer(30, unit="ns")
         actual.append(int(d.request_data.value))
     assert bytes(actual) == body
 
@@ -73,24 +73,24 @@ async def framing_recovery_and_buffered_reply(d):
             break
     else:
         assert False, "serial reply timeout"
-    await Timer(50, units="ns")
+    await Timer(50, unit="ns")
     assert int(d.active.value), "recognized reply must retain binary ownership"
     assert not int(d.request.value)
     await send(framed(b"new packet"))
     assert int(d.request.value)
     d.rst.value = 1
-    await Timer(30, units="ns")
+    await Timer(30, unit="ns")
     assert not int(d.request.value) and not int(d.active.value)
 
 
 @cocotb.test()
 async def rejected_frame_releases_console_after_error_reply(d):
-    cocotb.start_soon(Clock(d.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(d.clk, 10, unit="ns").start())
     for name in ("rx_valid", "rx_byte", "tx_ready", "request_address",
                  "reply_write", "reply_address", "reply_data", "reply_done", "reply_length"):
         getattr(d, name).value = 0
     d.rst.value = 1
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     d.rst.value = 0
     assert not int(d.active.value)
     for byte in framed(b"stray terminal frame"):
@@ -98,7 +98,7 @@ async def rejected_frame_releases_console_after_error_reply(d):
         d.rx_valid.value, d.rx_byte.value = 1, byte
         await FallingEdge(d.clk)
         d.rx_valid.value = 0
-    await Timer(30, units="ns")
+    await Timer(30, unit="ns")
     assert int(d.request.value) and int(d.active.value)
     reply = b"RBA1\x09\x01" + bytes(534)
     for index, byte in enumerate(reply):
@@ -121,5 +121,5 @@ async def rejected_frame_releases_console_after_error_reply(d):
             break
     else:
         assert False, "error reply did not drain"
-    await Timer(50, units="ns")
+    await Timer(50, unit="ns")
     assert not int(d.request.value) and not int(d.active.value)

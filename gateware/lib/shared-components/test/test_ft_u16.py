@@ -29,8 +29,8 @@ def _u16(signal) -> int:
 
 
 async def _init(dut) -> None:
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
-    cocotb.start_soon(Clock(dut.ft_clk, 8, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    cocotb.start_soon(Clock(dut.ft_clk, 8, unit="ns").start())
 
     dut.rst.value = 1
     dut.ft_rxf.value = 1
@@ -50,7 +50,7 @@ async def _init(dut) -> None:
 
     dut.rst.value = 0
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
 
 
 async def _push_ui_word(dut, *, data: int, be: int, timeout_cycles: int = 400) -> None:
@@ -61,7 +61,7 @@ async def _push_ui_word(dut, *, data: int, be: int, timeout_cycles: int = 400) -
             dut.ui_din_be.value = be & 0x3
             dut.ui_din_valid.value = 1
             await RisingEdge(dut.clk)
-            await Timer(1, units="ps")
+            await Timer(1, unit="ps")
             await FallingEdge(dut.clk)
             dut.ui_din_valid.value = 0
             return
@@ -75,7 +75,7 @@ async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 2000) -> lis
         will_write = _bit(dut.ft_oe) == 1 and _bit(dut.ft_wr) == 0 and _bit(dut.ft_txe) == 0
         sampled_word = (_u16(dut.ft_data_out), _u2(dut.ft_be_out))
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_write:
             observed.append(sampled_word)
             if len(observed) == count:
@@ -98,7 +98,7 @@ async def _feed_ft_words(dut, words: list[tuple[int, int]], timeout_cycles: int 
         await FallingEdge(dut.ft_clk)
         will_read = _bit(dut.ft_oe) == 0 and _bit(dut.ft_rd) == 0 and _bit(dut.ft_rxf) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_read:
             accepted.append(words[idx])
             idx += 1
@@ -114,13 +114,13 @@ async def _feed_ft_words(dut, words: list[tuple[int, int]], timeout_cycles: int 
 async def _pop_ui_word(dut, timeout_cycles: int = 2000) -> tuple[int, int]:
     for _ in range(timeout_cycles):
         await RisingEdge(dut.clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if _bit(dut.ui_dout_empty) == 0:
             word = (_u16(dut.ui_dout), _u2(dut.ui_dout_be))
             await FallingEdge(dut.clk)
             dut.ui_dout_get.value = 1
             await RisingEdge(dut.clk)
-            await Timer(1, units="ps")
+            await Timer(1, unit="ps")
             await FallingEdge(dut.clk)
             dut.ui_dout_get.value = 0
             return word
@@ -175,7 +175,7 @@ async def ft_u16_prefers_read_over_write_when_both_ready(dut):
         read_event = _bit(dut.ft_oe) == 0 and _bit(dut.ft_rd) == 0 and _bit(dut.ft_rxf) == 0
         write_event = _bit(dut.ft_oe) == 1 and _bit(dut.ft_wr) == 0 and _bit(dut.ft_txe) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
         if read_event:
             first_event = "read"
@@ -192,7 +192,7 @@ async def ft_u16_prefers_read_over_write_when_both_ready(dut):
         await FallingEdge(dut.ft_clk)
         write_event = _bit(dut.ft_oe) == 1 and _bit(dut.ft_wr) == 0 and _bit(dut.ft_txe) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if write_event:
             saw_write_after = True
             break
@@ -215,7 +215,7 @@ async def ft_u16_write_is_not_preempted_by_new_read_request(dut):
     # Allow all writes to cross into the ft_clk domain before starting tx.
     for _ in range(24):
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
     dut.ft_txe.value = 0
     dut.ft_rxf.value = 1
@@ -232,7 +232,7 @@ async def ft_u16_write_is_not_preempted_by_new_read_request(dut):
         write_word = (_u16(dut.ft_data_out), _u2(dut.ft_be_out))
         read_event = _bit(dut.ft_oe) == 0 and _bit(dut.ft_rd) == 0 and _bit(dut.ft_rxf) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
         if write_event:
             events.append("write")
@@ -273,7 +273,7 @@ async def ft_u16_multi_burst_integrity(dut):
 
         for _ in range(24):
             await RisingEdge(dut.ft_clk)
-            await Timer(1, units="ps")
+            await Timer(1, unit="ps")
 
         dut.ft_txe.value = 0
         observed_tx = await _collect_ft_writes(dut, len(tx_words))

@@ -78,7 +78,7 @@ async def _ft_host_send_word(dut, word: int, timeout_cycles: int = 2000):
         await FallingEdge(dut.ft_clk)
         will_read = int(dut.ft_oe.value) == 0 and int(dut.ft_rd.value) == 0 and int(dut.ft_rxf.value) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_read:
             dut.ft_rxf.value = 1
             _set_ft_bus_z(dut)

@@ -106,7 +106,7 @@ async def malformed_bounds_timeout_resync_and_reset(d):
         assert not writes and ack == (1, 2, 44)
     # A truncated header expires; an overlapping magic prefix resynchronizes.
     await send(d, packet(1, 0, 45)[:30])
-    await Timer(10_000_100, units="ns")
+    await Timer(10_000_100, unit="ns")
     assert not int(d.tx_valid.value) and not int(d.load_valid.value)
     await send(d, b"MMS")
     await send(d, packet(1, 0, 46))

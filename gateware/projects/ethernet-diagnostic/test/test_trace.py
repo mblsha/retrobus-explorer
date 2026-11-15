@@ -6,23 +6,23 @@ from cocotb.triggers import Timer
 
 async def pulse(dut, name):
     getattr(dut, name).value = 1
-    await Timer(10, units="ns")
+    await Timer(10, unit="ns")
     getattr(dut, name).value = 0
-    await Timer(10, units="ns")
+    await Timer(10, unit="ns")
 
 
 async def snapshot(dut):
     words = []
     for index in range(64):
         dut.word_index.value = index
-        await Timer(20, units="ns")
+        await Timer(20, unit="ns")
         words.append(int(dut.word.value))
     return words
 
 
 @cocotb.test()
 async def records_clock_commands_and_backend_activity(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     dut.rst.value = 1
     dut.armed.value = 0
     dut.initialized.value = 1
@@ -49,7 +49,7 @@ async def records_clock_commands_and_backend_activity(dut):
     dut.read_lba.value = 0
     dut.write_busy.value = 0
     dut.word_index.value = 0
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     dut.rst.value = 0
     dut.armed.value = 1
 
@@ -69,10 +69,10 @@ async def records_clock_commands_and_backend_activity(dut):
         dut.command_argument.value = 0x100 + index
         dut.command_valid.value = 1
         dut.command_frame.value = 1 if index == 1 else 0
-        await Timer(10, units="ns")
+        await Timer(10, unit="ns")
         dut.command_valid.value = 0
         dut.command_frame.value = 0
-        await Timer(10, units="ns")
+        await Timer(10, unit="ns")
     await pulse(dut, "response")
     await pulse(dut, "response_complete")
     dut.protocol_status.value = 0xE2879425
@@ -83,12 +83,12 @@ async def records_clock_commands_and_backend_activity(dut):
     await pulse(dut, "command_frame")
     dut.read_lba.value = 33
     dut.read_request.value = 1
-    await Timer(20, units="ns")
+    await Timer(20, unit="ns")
     dut.read_request.value = 0
     dut.write_busy.value = 1
-    await Timer(20, units="ns")
+    await Timer(20, unit="ns")
     dut.write_busy.value = 0
-    await Timer(30, units="ns")
+    await Timer(30, unit="ns")
 
     words = await snapshot(dut)
     assert words[0] == 0x31544453
@@ -110,7 +110,7 @@ async def records_clock_commands_and_backend_activity(dut):
 
 @cocotb.test()
 async def independently_captures_mmc_negotiation_r2_and_first_block(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     for name, value in {
         "rst": 1,
         "armed": 0,
@@ -140,10 +140,10 @@ async def independently_captures_mmc_negotiation_r2_and_first_block(dut):
         "word_index": 0,
     }.items():
         getattr(dut, name).value = value
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     dut.rst.value = 0
     dut.armed.value = 1
-    await Timer(20, units="ns")
+    await Timer(20, unit="ns")
 
     # Unsupported four-bit switch followed by the status U-Boot actually
     # inspects. The observer records both response payloads.
@@ -228,7 +228,7 @@ async def independently_decodes_a_four_bit_block(dut):
     """The RG35XX boot runs SD at four bits, so a one-lane decoder measured
     nothing there. Each lane carries its own CRC16 over its own bits, and lane
     zero is the one followed through both the payload and the CRC window."""
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     for name, value in {
         "rst": 1,
         "armed": 0,
@@ -260,7 +260,7 @@ async def independently_decodes_a_four_bit_block(dut):
         "word_index": 0,
     }.items():
         getattr(dut, name).value = value
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     dut.rst.value = 0
     dut.armed.value = 1
 

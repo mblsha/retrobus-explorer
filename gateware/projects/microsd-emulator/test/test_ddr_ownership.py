@@ -35,4 +35,4 @@ async def stalled_sd_commit_precedes_disarmed_loader(d):
     actual = b''.join(memory[word].to_bytes(16, 'little') for word in range(32))
     assert actual == replacement
     assert not int(d.armed_status.value)
-    task.kill()
+    task.cancel()

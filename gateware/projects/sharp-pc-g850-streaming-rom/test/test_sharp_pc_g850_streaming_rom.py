@@ -30,12 +30,12 @@ def _set_ft_bus_z(dut) -> None:
 async def _tick(signal, cycles: int = 1) -> None:
     for _ in range(cycles):
         await RisingEdge(signal)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
 
 async def _init(dut) -> None:
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
-    cocotb.start_soon(Clock(dut.ft_clk, 8, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
+    cocotb.start_soon(Clock(dut.ft_clk, 8, unit="ns").start())
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1
@@ -73,7 +73,7 @@ async def _expect_ft_request(dut, expected: int, timeout_cycles: int = 40000) ->
         word = _u(dut.ft_data_drive, 0xFFFF)
         be = _u(dut.ft_be_drive, 0x3)
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_write:
             dut.ft_txe.value = 1
             assert (word, be) == (expected, 0b11)
@@ -99,7 +99,7 @@ async def _feed_ft_words(dut, words: list[int]) -> None:
             and _u(dut.ft_rxf, 1) == 0
         )
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_read:
             index += 1
             if index == len(words):

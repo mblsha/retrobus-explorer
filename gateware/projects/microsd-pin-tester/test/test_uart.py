@@ -8,7 +8,7 @@ async def transmit(dut, packet):
     for byte in packet:
         for bit in [0] + [(byte >> i) & 1 for i in range(8)] + [1]:
             dut.usb_rx.value = bit
-            await Timer(1000, units="ns")
+            await Timer(1000, unit="ns")
     dut.usb_rx.value = 1
 
 
@@ -16,11 +16,11 @@ async def receive(dut):
     result = bytearray()
     for _ in range(64):
         await with_timeout(FallingEdge(dut.usb_tx), 100, "us")
-        await Timer(1500, units="ns")
+        await Timer(1500, unit="ns")
         byte = 0
         for i in range(8):
             byte |= int(dut.usb_tx.value) << i
-            await Timer(1000, units="ns")
+            await Timer(1000, unit="ns")
         assert int(dut.usb_tx.value) == 1, "UART stop bit"
         result.append(byte)
     return decode(bytes(result))
@@ -47,4 +47,4 @@ async def serial_end_to_end_both_profiles(dut):
             result["profile"]
             == ("bottom-header", "top-header-r180", "bottom-header-row-swap")[profile]
         )
-        await Timer(2000, units="ns")
+        await Timer(2000, unit="ns")

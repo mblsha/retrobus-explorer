@@ -35,6 +35,6 @@ async def typed_ft_out_tap_maps_every_field_without_transformation(dut):
             expected[name] = value
             getattr(dut, f"in_{name}").value = value
 
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         for name, mask in mappings:
             assert _value(getattr(dut, name), mask) == expected[name]

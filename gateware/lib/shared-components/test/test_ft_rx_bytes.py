@@ -27,7 +27,7 @@ async def enabled_byte_order_stalls_empty_and_invalid_words(dut):
         dut.be.value = be
         dut.empty.value = 0
         dut.consume.value = 0
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         assert int(dut.packed_word.value) == word | (be << 16)
         assert int(dut.unpacked_word.value) == word
         assert int(dut.unpacked_be.value) == be
@@ -40,13 +40,13 @@ async def enabled_byte_order_stalls_empty_and_invalid_words(dut):
         for index, byte in enumerate(expected):
             # Merely presenting or holding a read must not advance the FIFO.
             for _ in range(3):
-                await Timer(1, units="ns")
+                await Timer(1, unit="ns")
                 assert int(dut.data.value) == byte
                 assert int(dut.pop_word.value) == 0
                 await RisingEdge(dut.clk)
                 await FallingEdge(dut.clk)
             dut.consume.value = 1
-            await Timer(1, units="ns")
+            await Timer(1, unit="ns")
             assert int(dut.data.value) == byte
             assert int(dut.pop_word.value) == (index == len(expected) - 1)
             await RisingEdge(dut.clk)
@@ -56,7 +56,7 @@ async def enabled_byte_order_stalls_empty_and_invalid_words(dut):
 
     dut.empty.value = 1
     dut.consume.value = 1
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(dut.data.value) == int(dut.pop_word.value) == 0
     await RisingEdge(dut.clk)
     await FallingEdge(dut.clk)
@@ -74,5 +74,5 @@ async def enabled_byte_order_stalls_empty_and_invalid_words(dut):
     await RisingEdge(dut.clk)
     await FallingEdge(dut.clk)
     dut.rst.value = 0
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(dut.data.value) == 0xCD

@@ -35,7 +35,7 @@ async def client_blocked_until_qualification_then_all_channels_forward(d):
     d.wdata_ready.value = 1
     d.rdata_valid.value = 1
     d.rdata.value = 0xABCD
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(d.cmd_valid.value) and int(d.cmd_address.value) == 1234
     assert int(d.cmd_write.value) and int(d.client_cmd_ready.value)
     assert int(d.wdata_valid.value) and int(d.wdata.value) == 0x123456789ABCDEF
@@ -43,7 +43,7 @@ async def client_blocked_until_qualification_then_all_channels_forward(d):
     assert int(d.client_rdata_valid.value) and int(d.client_rdata.value) == 0xABCD
     assert int(d.rdata_ready.value)
     d.rst.value = 1
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert not int(d.cmd_valid.value) and not int(d.wdata_valid.value)
     assert not int(d.client_cmd_ready.value) and not int(d.client_rdata_valid.value)
 
@@ -59,4 +59,4 @@ async def failed_qualification_never_grants_client(d):
     await tick(d.clk, 20)
     assert not int(d.passed.value) and not int(d.cmd_valid.value)
     assert not int(d.wdata_valid.value) and not int(d.client_cmd_ready.value)
-    monitor.kill()
+    monitor.cancel()

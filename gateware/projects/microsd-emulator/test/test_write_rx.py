@@ -8,14 +8,14 @@ from sd_support import crc_bit
 
 @cocotb.test()
 async def sector_crc_width_errors_and_cancel(d):
-    cocotb.start_soon(Clock(d.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(d.clk, 10, unit="ns").start())
 
     async def tick(**values):
         await FallingEdge(d.clk)
         for name, value in values.items():
             getattr(d, name).value = value
         await RisingEdge(d.clk)
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
 
     await tick(rst=1, start=0, cancel=0, wide=0, sample=0, dat=15, byte_index=0)
     await tick(rst=0)

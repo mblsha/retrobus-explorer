@@ -27,7 +27,7 @@ async def single_multi_crc_range_and_stop(d):
             wr = allow[0] and rng.randrange(3) != 0
             d.write_cmd_ready.value = cr
             d.write_data_ready.value = wr
-            await Timer(1, units="ps")
+            await Timer(1, unit="ps")
             if cr and int(d.write_cmd_valid.value):
                 assert address is None
                 address = int(d.write_cmd_address.value)
@@ -94,4 +94,4 @@ async def single_multi_crc_range_and_stop(d):
     await send_packet(h, True, 124, expect_response=False)
     assert memory == before, "multiblock write wrapped beyond the last sector"
     assert not int(d.write_busy.value)
-    task.kill()
+    task.cancel()

@@ -8,7 +8,7 @@ from cocotb.triggers import Timer
 
 
 async def _settle():
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
 
 
 def _bit(value: int, index: int) -> int:

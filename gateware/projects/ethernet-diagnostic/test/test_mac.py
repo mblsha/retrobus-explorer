@@ -10,13 +10,13 @@ def frame(body):
 
 
 async def exercise_mailbox(dut, phase_ns=0):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     receive = hasattr(dut, "rx_clk")
     phy_clock = dut.rx_clk if receive else dut.tx_clk
     async def start_phy():
         if phase_ns:
-            await Timer(phase_ns, units="ns")
-        await Clock(phy_clock, 40, units="ns").start()
+            await Timer(phase_ns, unit="ns")
+        await Clock(phy_clock, 40, unit="ns").start()
 
     cocotb.start_soon(start_phy())
     dut.rst.value = 1
@@ -31,7 +31,7 @@ async def exercise_mailbox(dut, phase_ns=0):
         dut.data.value = 0
         dut.submit.value = 0
         dut.length.value = 0
-    await Timer(160, units="ns")
+    await Timer(160, unit="ns")
     dut.rst.value = 0
     if receive:
 
@@ -46,7 +46,7 @@ async def exercise_mailbox(dut, phase_ns=0):
                     dut.rxd.value = nibble
             await FallingEdge(phy_clock)
             dut.dv.value = 0
-            await Timer(300, units="ns")
+            await Timer(300, unit="ns")
 
         first = bytes(range(64))
         await send(first, True)
@@ -63,12 +63,12 @@ async def exercise_mailbox(dut, phase_ns=0):
             for i, value in enumerate(expected):
                 await FallingEdge(dut.clk)
                 dut.address.value = i
-                await Timer(20, units="ns")
+                await Timer(20, unit="ns")
                 assert int(dut.data.value) == value
             dut.consume.value = 1
-            await Timer(10, units="ns")
+            await Timer(10, unit="ns")
             dut.consume.value = 0
-            await Timer(200, units="ns")
+            await Timer(200, unit="ns")
         assert not int(dut.available.value)
         for n in range(8):
             await send(bytes([n + 17]) * 60)
@@ -77,12 +77,12 @@ async def exercise_mailbox(dut, phase_ns=0):
             for i in range(60):
                 await FallingEdge(dut.clk)
                 dut.address.value = i
-                await Timer(20, units="ns")
+                await Timer(20, unit="ns")
                 assert int(dut.data.value) == n + 17
             dut.consume.value = 1
-            await Timer(10, units="ns")
+            await Timer(10, unit="ns")
             dut.consume.value = 0
-            await Timer(200, units="ns")
+            await Timer(200, unit="ns")
         assert not int(dut.available.value)
         await send(b"next frame")
         assert int(dut.available.value)
@@ -152,7 +152,7 @@ async def mailbox_frames_offset_clock(dut):
 
 @cocotb.test()
 async def reset_release_follows_each_phy_clock_phase(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     receive = hasattr(dut, "rx_clk")
     phy_clock = dut.rx_clk if receive else dut.tx_clk
     local_reset = dut.rx_reset if receive else dut.tx_reset
@@ -166,24 +166,24 @@ async def reset_release_follows_each_phy_clock_phase(dut):
 
     # Deliberately stop the PHY clock during assertion, then run it while reset
     # is held. This is the startup contract, including a late-starting PHY clock.
-    await Timer(113, units="ns")
+    await Timer(113, unit="ns")
     assert int(local_reset.value)
-    clock_task = cocotb.start_soon(Clock(phy_clock, 40, units="ns").start())
+    clock_task = cocotb.start_soon(Clock(phy_clock, 40, unit="ns").start())
     edge = RisingEdge if receive else FallingEdge
     for phase in (1, 7, 19, 39):
         dut.rst.value = 1
-        await Timer(160, units="ns")
+        await Timer(160, unit="ns")
         await edge(phy_clock)
-        await Timer(phase, units="ns")
+        await Timer(phase, unit="ns")
         dut.rst.value = 0
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         assert int(local_reset.value)
         await edge(phy_clock)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         assert int(local_reset.value)
         await edge(phy_clock)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         assert not int(local_reset.value)
-        await Timer(160, units="ns")
+        await Timer(160, unit="ns")
         assert not int(dut.available.value if receive else dut.tx_en.value)
-    clock_task.kill()
+    clock_task.cancel()

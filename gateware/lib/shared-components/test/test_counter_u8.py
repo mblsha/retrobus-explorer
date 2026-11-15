@@ -11,13 +11,13 @@ async def counter_u8_counts_and_resets(dut):
 
     dut.rst.value = 1
     await tick(dut.clk, 2)
-    assert dut.value_bits.value.integer == 0
+    assert int(dut.value_bits.value) == 0
 
     dut.rst.value = 0
     for expected in range(1, 17):
         await tick(dut.clk, 1)
-        assert dut.value_bits.value.integer == expected
+        assert int(dut.value_bits.value) == expected
 
     dut.rst.value = 1
     await tick(dut.clk, 1)
-    assert dut.value_bits.value.integer == 0
+    assert int(dut.value_bits.value) == 0

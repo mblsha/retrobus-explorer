@@ -14,7 +14,7 @@ TRACE_TAGS = {
 async def trace_events_pack_exact_tagged_words(dut):
     for payload in (0x000000, 0x000001, 0xA5C3E7, 0xFFFFFF):
         dut.payload.value = payload
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
 
         for signal_name, tag in TRACE_TAGS.items():
             actual = int(getattr(dut, signal_name).value)
@@ -27,7 +27,7 @@ async def trace_events_pack_exact_tagged_words(dut):
 @cocotb.test()
 async def trace_event_requests_preserve_valid_semantics(dut):
     dut.payload.value = 0x5A3C81
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
 
     assert int(dut.none_valid.value) == 0
     assert int(dut.none_word.value) == ord("A") << 24

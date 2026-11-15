@@ -65,7 +65,7 @@ class AlchitryUartRxModel:
 async def tick(clk, cycles=1):
     for _ in range(cycles):
         await RisingEdge(clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
 
 async def send_uart_byte(dut, value):
@@ -177,7 +177,7 @@ async def measure_led_change_intervals(dut, count, max_cycles, skip_first=True):
 
 @cocotb.test()
 async def uart_digit_controls_led_saleae_slow_factor(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1
@@ -213,7 +213,7 @@ async def uart_digit_controls_led_saleae_slow_factor(dut):
 
 @cocotb.test()
 async def non_digit_is_ignored_and_not_echoed(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
     dut.rst_n.value = 0
     dut.usb_rx.value = 1

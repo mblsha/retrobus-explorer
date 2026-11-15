@@ -177,9 +177,9 @@ async def _fast_uart_recv_words(signal, clk, width: int, count: int, timeout_cyc
 async def _pulse_cycle_start(dut, width_ns: int = 8):
     dut.nc.value = 0
     await RisingEdge(dut.clk)
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     dut.nc.value = 1
-    await Timer(width_ns, units="ns")
+    await Timer(width_ns, unit="ns")
     dut.nc.value = 0
 
 def _set_data_bus_z(dut):
@@ -200,7 +200,7 @@ async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 4000) -> lis
         will_write = int(dut.ft_oe.value) == 1 and int(dut.ft_wr.value) == 0 and int(dut.ft_txe.value) == 0
         sampled = (int(dut.ft_data_drive.value) & 0xFFFF, int(dut.ft_be_drive.value) & 0x3)
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_write:
             observed.append(sampled)
             if len(observed) == count:
@@ -213,7 +213,7 @@ async def _assert_no_ft_write(dut, timeout_cycles: int = 400) -> None:
         await FallingEdge(dut.ft_clk)
         will_write = int(dut.ft_oe.value) == 1 and int(dut.ft_wr.value) == 0 and int(dut.ft_txe.value) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         assert not will_write, "unexpected FT write"
 
 
@@ -520,17 +520,17 @@ async def _ce6_ctrl_async_write_phase(
     dut.data_host_drive.value = 1
 
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
 
     current_ns = 0
     if ce6_phase_ns > 0:
-        await Timer(ce6_phase_ns, units="ns")
+        await Timer(ce6_phase_ns, unit="ns")
     dut.ce6.value = 0
     current_ns = ce6_phase_ns
     if rw_phase_ns > current_ns:
-        await Timer(rw_phase_ns - current_ns, units="ns")
+        await Timer(rw_phase_ns - current_ns, unit="ns")
     dut.rw.value = 0
-    await Timer(hold_low_ns, units="ns")
+    await Timer(hold_low_ns, unit="ns")
     drive = int(dut.data_oe.value)
     dut.rw.value = 1
     dut.ce6.value = 1
@@ -1452,14 +1452,14 @@ async def ce6_control_page_write_can_start_after_addr_enters_range(dut):
     dut.data_host_drive.value = 1
 
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
-    await Timer(1, units="ns")
+    await Timer(1, unit="ps")
+    await Timer(1, unit="ns")
     dut.ce6.value = 0
-    await Timer(2, units="ns")
+    await Timer(2, unit="ns")
     dut.rw.value = 0
-    await Timer(25, units="ns")
+    await Timer(25, unit="ns")
     dut.addr.value = 0x1FFF1
-    await Timer(120, units="ns")
+    await Timer(120, unit="ns")
     drive = int(dut.data_oe.value)
     dut.rw.value = 1
     dut.ce6.value = 1
@@ -1488,12 +1488,12 @@ async def ce6_control_page_aborted_write_does_not_fire_late(dut):
     dut.data_host_drive.value = 1
 
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
-    await Timer(1, units="ns")
+    await Timer(1, unit="ps")
+    await Timer(1, unit="ns")
     dut.ce6.value = 0
-    await Timer(2, units="ns")
+    await Timer(2, unit="ns")
     dut.rw.value = 0
-    await Timer(50, units="ns")
+    await Timer(50, unit="ns")
     dut.rw.value = 1
     dut.ce6.value = 1
     _set_data_bus_z(dut)

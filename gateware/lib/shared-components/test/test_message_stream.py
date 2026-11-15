@@ -48,7 +48,7 @@ async def _assert_schedule(
     dut.schedule_incoming_valid.value = incoming_valid
     dut.schedule_incoming.value = incoming
     dut.schedule_incoming_is_none.value = incoming_is_none
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
 
     assert int(dut.scheduled_current.value) == expected_current
     assert int(dut.scheduled_current_is_none.value) == expected_current_is_none

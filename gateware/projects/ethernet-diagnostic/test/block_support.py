@@ -7,7 +7,7 @@ from cocotb.triggers import FallingEdge, Timer
 
 
 async def block_fixture(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     for name in (
         "request",
         "request_length",
@@ -24,7 +24,7 @@ async def block_fixture(dut):
     dut.initialized.value = 1
     dut.sd_quiescent.value = 1
     dut.sd_trace.value = 0
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     dut.rst.value = 0
     memory = {}
     writes = []
@@ -89,7 +89,7 @@ async def block_fixture(dut):
             if int(dut.reply_done.value):
                 assert int(dut.reply_length.value) == len(reply)
                 dut.request.value = 0
-                await Timer(30, units="ns")
+                await Timer(30, unit="ns")
                 break
         else:
             assert False, "Block service timeout"

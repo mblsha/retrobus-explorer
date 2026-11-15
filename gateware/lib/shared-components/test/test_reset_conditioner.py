@@ -24,17 +24,17 @@ async def reset_conditioner_async_assert_and_sync_release(dut):
     # Assert reset between edges; output should rise immediately.
     await FallingEdge(dut.clk)
     dut.in_reset.value = 1
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
 
     # Hold reset through one clock edge so the delayed-release chain is loaded.
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
 
     # Deassert between edges; release remains synchronized.
     dut.in_reset.value = 0
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
 
     await tick(dut.clk, 1)
@@ -64,11 +64,11 @@ async def reset_conditioner_reassertion_reloads_all_stages(dut):
     # Reassert during release; both outputs should immediately return high.
     await FallingEdge(dut.clk)
     dut.in_reset.value = 1
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
 
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
 
     dut.in_reset.value = 0
@@ -82,7 +82,7 @@ async def reset_conditioner_reassertion_reloads_all_stages(dut):
     # Pattern coverage: high for 1 cycle, low for 2 cycles, high for 1 cycle.
     await FallingEdge(dut.clk)
     dut.in_reset.value = 1
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
     await tick(dut.clk, 1)
     _assert_outputs(dut, 1, 1)
@@ -94,7 +94,7 @@ async def reset_conditioner_reassertion_reloads_all_stages(dut):
 
     await FallingEdge(dut.clk)
     dut.in_reset.value = 1
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
     await tick(dut.clk, 1)
     _assert_outputs(dut, 1, 1)
@@ -107,7 +107,7 @@ async def reset_conditioner_reassertion_reloads_all_stages(dut):
 
     await FallingEdge(dut.clk)
     dut.in_reset.value = 1
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(dut, 1, 1)
     await tick(dut.clk, 1)
     _assert_outputs(dut, 1, 1)

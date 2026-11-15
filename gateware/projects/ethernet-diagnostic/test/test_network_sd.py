@@ -19,7 +19,7 @@ async def uart_send(d, data, bit_ns=80):
     for byte in data:
         for bit in [0] + [(byte >> n) & 1 for n in range(8)] + [1]:
             d.usb_rx.value = bit
-            await Timer(bit_ns, units="ns")
+            await Timer(bit_ns, unit="ns")
     d.usb_rx.value = 1
 
 
@@ -28,20 +28,20 @@ async def uart_receive(d, bit_ns=80):
     collecting, escaped = False, False
     while True:
         await FallingEdge(d.usb_tx)
-        await Timer(bit_ns * 1.5, units="ns")
+        await Timer(bit_ns * 1.5, unit="ns")
         byte = 0
         for bit in range(8):
             byte |= int(d.usb_tx.value) << bit
-            await Timer(bit_ns, units="ns")
+            await Timer(bit_ns, unit="ns")
         assert int(d.usb_tx.value), "UART stop bit"
         assert int(d.usb_active.value), "binary ownership must cover the final stop bit"
         # Sample again just before the stop bit ends, including the closing
         # delimiter of a rejected frame. Releasing at its midpoint truncates
         # the physical reply when board.v switches back to the BIOS UART.
-        await Timer(bit_ns * 0.5 - 1, units="ns")
+        await Timer(bit_ns * 0.5 - 1, unit="ns")
         assert int(d.usb_tx.value), "UART stop bit must remain high in full"
         assert int(d.usb_active.value), "TX ownership must last through the whole stop bit"
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         if byte == 0x7e:
             if collecting and frame:
                 assert not escaped
@@ -65,7 +65,7 @@ async def usb_exchange(d, request, status=0, *, bit_ns=80):
     assert response[:4] == b"RBA1"
     assert response[4] == request[4] and response[5] == status
     assert zlib.crc32(response[:-4]) == int.from_bytes(response[-4:], "little")
-    await Timer(1000, units="ns")
+    await Timer(1000, unit="ns")
     return response
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "microsd-emulator/test"))
@@ -77,7 +77,7 @@ from sd_support import send_packet
 @cocotb.test()
 async def ethernet_sd_ethernet_roundtrip(d):
     for name, period in [("clk", 10), ("rx_clk", 40), ("tx_clk", 40)]:
-        cocotb.start_soon(Clock(getattr(d, name), period, units="ns").start())
+        cocotb.start_soon(Clock(getattr(d, name), period, unit="ns").start())
     d.rst.value = 1
     d.initialized.value = 1
     d.writable.value = 1
@@ -100,11 +100,11 @@ async def ethernet_sd_ethernet_roundtrip(d):
     d.ddr_wdata_ready.value = 0
     d.ddr_rdata_valid.value = 0
     d.ddr_rdata.value = 0
-    await Timer(200, units="ns")
+    await Timer(200, unit="ns")
     d.rst.value = 0
     await FallingEdge(d.clk)
     d.network_frontend_0.startup.value = 19_999_990
-    await Timer(1000, units="ns")
+    await Timer(1000, unit="ns")
 
     async def check_ownership():
         previous_owner = False
@@ -180,7 +180,7 @@ async def ethernet_sd_ethernet_roundtrip(d):
         await send(request)
         reply = await with_timeout(receiver, 1000, "us")
         assert reply[5] == status, (reply[5], status)
-        await Timer(1000, units="ns")
+        await Timer(1000, unit="ns")
         return reply
 
     first = bytes((i * 31 + 7) & 255 for i in range(512))
@@ -228,7 +228,7 @@ async def ethernet_sd_ethernet_roundtrip(d):
     await exchange(packet(3, 10, lba=1, count=1), 4)
     assert memory == snapshot
     allow[0] = True
-    await Timer(100000, units="ns")
+    await Timer(100000, unit="ns")
     reply = await exchange(packet(3, 11, lba=1, count=1))
     assert reply[24:536] == pending
     assert all(memory.get(i) == snapshot.get(i) for i in range(32))
@@ -251,7 +251,7 @@ async def ethernet_sd_ethernet_roundtrip(d):
             request = request[:24]
             request += zlib.crc32(request).to_bytes(4, "little")
         await send(request)
-        await Timer(1000, units="ns")
+        await Timer(1000, unit="ns")
     burst = await with_timeout(collector, 4000, "us")
     assert [int.from_bytes(x[12:16], "little") for x in burst] == list(range(501, 509))
     for n, response in enumerate(burst):
@@ -262,17 +262,17 @@ async def ethernet_sd_ethernet_roundtrip(d):
     allow[0] = False
     before_read = dict(memory)
     await host.command(17, 0)
-    await Timer(1000, units="ns")
+    await Timer(1000, unit="ns")
     assert int(d.read_pending.value)
     await exchange(packet(5, 13))
     await exchange(packet(3, 14, count=1), 4)
     assert not int(d.network_owner.value)
     allow[0] = True
-    await Timer(100000, units="ns")
+    await Timer(100000, unit="ns")
     reply = await exchange(packet(3, 15, count=1))
     assert reply[24:536] == changed
     assert memory == before_read
-    model.kill()
+    model.cancel()
 
 
 @cocotb.test()
@@ -282,9 +282,9 @@ async def usb_info_with_absent_phy_clocks_and_uninitialized_ddr(d):
     async def fabric_clock():
         while True:
             d.clk.value = 0
-            await Timer(7812, units="ps")
+            await Timer(7812, unit="ps")
             d.clk.value = 1
-            await Timer(7813, units="ps")
+            await Timer(7813, unit="ps")
     cocotb.start_soon(fabric_clock())
     for name in ("rx_clk", "tx_clk", "initialized", "diagnostic_status",
                  "fast_mode", "h700_mode", "h700_falling_phase", "h700_early_command",
@@ -295,7 +295,7 @@ async def usb_info_with_absent_phy_clocks_and_uninitialized_ddr(d):
     d.uart_bit_time.value = 64
     d.usb_rx.value, d.cmd_in.value, d.dat_in.value = 1, 1, 15
     d.rst.value = 1
-    await Timer(100, units="ns")
+    await Timer(100, unit="ns")
     d.rst.value = 0
     head = packet(9, 0, session=0)[:24]
     query = head + zlib.crc32(head).to_bytes(4, "little")

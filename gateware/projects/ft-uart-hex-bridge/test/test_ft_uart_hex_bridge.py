@@ -106,7 +106,7 @@ async def _ft_host_send_word_be(dut, word: int, be: int, timeout_cycles: int = 2
         await FallingEdge(dut.ft_clk)
         will_read = int(dut.ft_oe.value) == 0 and int(dut.ft_rd.value) == 0 and int(dut.ft_rxf.value) == 0
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_read:
             dut.ft_rxf.value = 1
             _set_ft_bus_z(dut)
@@ -122,7 +122,7 @@ async def _collect_ft_writes(dut, count: int, timeout_cycles: int = 30000) -> li
         will_write = int(dut.ft_oe.value) == 1 and int(dut.ft_wr.value) == 0 and int(dut.ft_txe.value) == 0
         sampled = (int(dut.ft_data_drive.value) & 0xFFFF, int(dut.ft_be_drive.value) & 0x3)
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if will_write:
             observed.append(sampled)
             if len(observed) == count:
