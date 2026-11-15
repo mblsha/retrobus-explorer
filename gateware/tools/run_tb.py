@@ -58,6 +58,25 @@ def run(
         raise subprocess.CalledProcessError(process.returncode, cmd)
 
 
+# Verilator 5.036 fixed removing a VPI callback that is no longer in the
+# current list (verilator#5851). Cocotb 2 relies on that, and on an older
+# Verilator a test that ends with tasks still awaiting edges crashes the
+# simulator with SIGSEGV in handle_vpi_callback.
+MIN_VERILATOR = (5, 36)
+
+
+def verilator_version(verilator: str, env: dict[str, str]) -> tuple[int, int] | None:
+    """(major, minor) from `verilator --version`, or None if it cannot be read."""
+    try:
+        out = subprocess.run(
+            [verilator, "--version"], env=env, capture_output=True, text=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    match = re.search(r"Verilator (\d+)\.(\d+)", out)
+    return (int(match[1]), int(match[2])) if match else None
+
+
 def require_command(name: str, help_text: str) -> None:
     if shutil.which(name) is None:
         print(f"error: missing `{name}` ({help_text})", file=sys.stderr)
@@ -247,8 +266,18 @@ def main() -> int:
     env["PATH"] = f"{Path.home()}/.local/share/swim/bin/oss-cad-suite/bin:{env['PATH']}"
     env["PYTHONPATH"] = str(tools_dir) + os.pathsep + env.get("PYTHONPATH", "")
     env.pop("VIRTUAL_ENV", None)
-    if shutil.which("verilator", path=env["PATH"]) is None:
+    verilator = shutil.which("verilator", path=env["PATH"])
+    if verilator is None:
         print("error: verilator not found in PATH", file=sys.stderr)
+        return 1
+    version = verilator_version(verilator, env)
+    if version is not None and version < MIN_VERILATOR:
+        print(
+            f"error: {verilator} is Verilator {version[0]}.{version[1]:03d}; Cocotb 2 needs "
+            f"{MIN_VERILATOR[0]}.{MIN_VERILATOR[1]:03d} or later (older ones mishandle a "
+            "VPI callback removed mid-dispatch, and the simulation segfaults between tests)",
+            file=sys.stderr,
+        )
         return 1
 
     with project_lock(project):
@@ -363,6 +392,12 @@ def build_and_simulate(
     venv_python = Path(os.environ.get("GATEWARE_PYTHON") or umbrella_project / ".venv" / "bin" / "python")
     if venv_python.is_file():
         command = [str(venv_python), "-c", driver]
+        # Cocotb 2's runner exports this Python's sys.path as PYTHONPATH, and
+        # Verilator's build runs its helper scripts through whatever
+        # `python3` comes first on PATH. Any other interpreter there -- the
+        # OSS CAD Suite ships its own -- then loads this one's standard
+        # library and fails with "SRE module mismatch".
+        env = {**env, "PATH": f"{venv_python.parent}{os.pathsep}{env['PATH']}"}
     else:
         require_command("uv", "https://docs.astral.sh/uv/")
         command = ["uv", "run", "python", "-c", driver]
