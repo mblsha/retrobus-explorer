@@ -35,6 +35,17 @@ building that version from source on this Mac fails at link time. A fresh
 clone needs `--no-config` to sync at all, and should expect the cocotb install
 to need attention.
 
+The move to cocotb 2.1, which Spade 0.21 itself made and which ships macOS
+arm64 wheels, so it installs without that link failure, is ready on branch
+`claude/spade-0.21-cocotb2` but parked. cocotb 2.1 wants Verilator 5.036 or
+later, and this Mac has Homebrew's 5.028: three benches segfault on it. CI's apt
+Verilator is older still. That branch's commit message lists what changed in
+the testbenches and `run_tb.py` (`cocotb_tools.runner`, an explicit
+`COCOTB_SIM` define, `unit=`, `int(x.value)`) and what still fails. Try it
+without touching `.venv` by pointing `GATEWARE_PYTHON` at a separate venv and
+putting that venv's `bin` first on `PATH`. Only that branch's `run_tb.py`
+honours `GATEWARE_PYTHON`.
+
 Bitstream builds are the one exception to `uv run`: `nextpnr-xilinx` is linked
 against Homebrew's Boost by absolute path, so they need
 `DYLD_LIBRARY_PATH=/opt/homebrew/Cellar/boost/1.92.0/lib` and must be launched
@@ -255,6 +266,12 @@ To bump the compiler:
   nothing, though -- only deprecated free units do -- which is how 49
   `to_bits()` calls survived a zero-warning bump; after the next one, grep for
   the methods the changelog retires as well as reading the warnings.
+  The one standing exception on v0.21.0: `ethernet-diagnostic` and
+  `microsd-emulator` keep the deprecated `clocked_memory`/`read_memory` (59
+  warnings), because the `memory` declaration that replaces them emits a
+  32-bit `'sbx` that the Verilator builds reject. The migration is ready on
+  branch `claude/spade-0.21-memory`; see compiler issue 11 for what unblocks it.
+  Use `clocked_memory` for new RAMs in the meantime.
 - A `pub fn` nothing calls is still a module in every consumer's SystemVerilog.
   Delete dead code; do not keep it "for later".
 - Centralize repeated widths, protocol constants, UART helpers, synchronizers,
@@ -287,7 +304,9 @@ what no longer fails. The short list: destructuring a power-of-two-length
 array emits an index one bit too wide; `bits[N - 1]` inside a `gen if`
 recursion is typed for half the array (use `last()`); an array repeat count
 cannot be a type expression; deprecated methods do not warn; a local named
-`core` breaks the compiler's own `core::ops` paths; and `swim build` rewrites
+`core` breaks the compiler's own `core::ops` paths; a `memory` declaration's
+read port emits a 32-bit `'sbx` Verilator rejects (so RAMs stay on
+`clocked_memory`); and `swim build` rewrites
 `src/build_info.spade`, so never build in a checkout while its suites run.
 
 To check a refactor that is meant to preserve behaviour: build before and after,

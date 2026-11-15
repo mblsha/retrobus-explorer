@@ -13,7 +13,7 @@ fail.
 Re-checked against v0.21.0 (`423b451b3ed90cd004b6ebd9aae045109c62087b`) on
 2026-11-15. Entries 1, 2, 3, 6 and 7 still reproduce (6 with
 `[bool; 8].to_uint()`, deprecated in favour of `as_uint` and silent). Entries
-4 and 5 are fixed, and their workarounds are gone. Entry 10 is new in 0.21.
+4 and 5 are fixed, and their workarounds are gone. Entries 10 and 11 are new in 0.21.
 Lint a reproducer with `--top-module main`: the
 shared-components library brings in SystemVerilog externs that a whole-file
 lint cannot find.
@@ -216,3 +216,44 @@ A related collision is a language change, not a bug: `memory` is a keyword in
 v0.21.0 (the memory declaration), so it can name neither a module nor a local.
 The shared FIFO module became `fifos`, `ethernet-diagnostic`'s frame buffers
 became `frames`, and `tb_card_memory`'s instance became `card`.
+
+## 11. Memory read ports emit a 32-bit `'sbx`, which Verilator rejects
+
+**Symptom.** New in v0.21.0, and the reason the RAMs still use the deprecated
+`clocked_memory`. A `memory` declaration's read port lowers its "no read"
+value to `'sbx`, a 32-bit literal: `\m_read [7:0] <= 'sbx;` for `Ro<_, _, 1>`
+and `assign … = re ? mem[addr] : 'sbx;` for `Ro<_, _, 0>`
+(`spade-mir/src/codegen/mod.rs`, the `read_info` branch). Verilator reports
+`WIDTHTRUNC` (and `WIDTHEXPAND` on the combinational form) for every memory
+narrower than 32 bits, and the Cocotb builds treat that as fatal. Everywhere
+else the compiler spells an undefined value with its width, `{w}'bx`, which
+is the fix.
+
+```spade
+use std::mem::{Ro, Wo};
+#[no_mangle(all)]
+entity main(clk: clock, we: bool, waddr: uint<9>, wdata: uint<8>, raddr: uint<9>, q: inv uint<8>) {
+    memory: [uint<8>; 512] {
+        m_read: Ro<_, _, 1>,
+        m_write: Wo<_, _, 1>,
+    };
+    m_write.write(clk, we.then_some((waddr, wdata)));
+    set q = m_read.inst(1) read(clk, Some(raddr)).unwrap_or_undef();
+}
+```
+
+`verilator --lint-only --top-module main build/spade.sv` reports
+`Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's CONST
+'?32?sbxxxx…' generates 32 bits`. Yosys accepts it, and synthesis is
+unaffected.
+
+**Where we work around it.** The 36 `clocked_memory`/`read_memory` uses in
+`ethernet-diagnostic` and `microsd-emulator` stay as they are, and those two
+projects build with the 59 deprecation warnings that implies: the one
+exception to zero warnings. Waiving the Verilator rule instead would also hide
+entry 1, which is found by exactly that warning.
+
+**When fixed.** Rebase and merge branch `claude/spade-0.21-memory`. It already
+moves every RAM to a `memory` declaration and was checked with yosys to infer
+the same block RAMs, flip-flops and carry chains. Then run both projects'
+testbenches and the microSD suite in both profiles.
