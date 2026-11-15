@@ -47,7 +47,7 @@ async def elastic_slot_preserves_dequeue_refill_and_drop_semantics(dut):
     # An empty slot accepts a sample even while its downstream sink is full.
     dut.capture_valid.value = 1
     dut.capture_data.value = 0x11
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(
         dut,
         pending_valid=0,
@@ -61,7 +61,7 @@ async def elastic_slot_preserves_dequeue_refill_and_drop_semantics(dut):
 
     # Once occupied and blocked, a new sample is dropped and the old one is retained.
     dut.capture_data.value = 0x22
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(
         dut,
         pending_valid=1,
@@ -78,7 +78,7 @@ async def elastic_slot_preserves_dequeue_refill_and_drop_semantics(dut):
     # replaces it on the same edge, preserving one word per cycle throughput.
     dut.sink_full.value = 0
     dut.capture_data.value = 0x33
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     _assert_outputs(
         dut,
         pending_valid=1,

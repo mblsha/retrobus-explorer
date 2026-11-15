@@ -45,8 +45,8 @@ def _assert_equivalent(dut) -> None:
 
 
 async def _start_rclk_with_offset(signal) -> None:
-    await Timer(1, units="ns")
-    await Clock(signal, 14, units="ns").start()
+    await Timer(1, unit="ns")
+    await Clock(signal, 14, unit="ns").start()
 
 
 async def _monitor_equivalence(dut, stop: Event, observations: dict[str, bool]) -> None:
@@ -58,7 +58,7 @@ async def _monitor_equivalence(dut, stop: Event, observations: dict[str, bool]) 
         if fired is stop_wait:
             return
 
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         _assert_equivalent(dut)
         observations["busy"] |= bool(_bit(dut.bridge_busy))
         observations["start_bit"] |= _bit(dut.bridge_line) == 0
@@ -68,12 +68,12 @@ async def _monitor_equivalence(dut, stop: Event, observations: dict[str, bool]) 
 async def _wait_rising(signal, count: int) -> None:
     for _ in range(count):
         await RisingEdge(signal)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
 
 @cocotb.test()
 async def queue_only_bridge_matches_async_uart_monitor_cycle_for_cycle(dut):
-    cocotb.start_soon(Clock(dut.wclk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.wclk, 10, unit="ns").start())
     cocotb.start_soon(_start_rclk_with_offset(dut.rclk))
 
     dut.wrst.value = 1

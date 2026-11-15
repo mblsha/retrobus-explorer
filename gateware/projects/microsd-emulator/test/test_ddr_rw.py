@@ -21,8 +21,8 @@ async def native_ddr_read_write_roundtrips(d):
         from cocotb.triggers import Timer
 
         async def start_memory():
-            await Timer(3, units="ns")
-            await Clock(d.memory_clk, 12.5, units="ns").start()
+            await Timer(3, unit="ns")
+            await Clock(d.memory_clk, 12.5, unit="ns").start()
 
         cocotb.start_soon(start_memory())
         memory_clock = d.memory_clk
@@ -74,4 +74,4 @@ async def native_ddr_read_write_roundtrips(d):
             "the read after the stop was rejected"
         )
         assert await h.data(wide=True) == image[127 * 512 : 128 * 512]
-    task.kill()
+    task.cancel()

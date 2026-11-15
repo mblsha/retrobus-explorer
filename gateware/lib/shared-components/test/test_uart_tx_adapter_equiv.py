@@ -21,13 +21,13 @@ def _bit(signal) -> int:
 
 async def _tick_and_compare(dut) -> None:
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
     assert _bit(dut.adapter_line) == _bit(dut.direct_line)
     assert _bit(dut.adapter_busy) == _bit(dut.direct_busy)
 
 
 async def _init(dut) -> None:
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     dut.rst.value = 1
     dut.block.value = 0
     dut.tx_valid.value = 0
@@ -84,13 +84,13 @@ async def adapter_filters_same_cycle_valid_when_block_is_asserted(dut):
     dut.tx_valid.value = 1
     dut.tx_byte.value = 0x3C
     await RisingEdge(dut.clk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
 
     dut.tx_valid.value = 0
     dut.block.value = 0
     for _ in range(4):
         await RisingEdge(dut.clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
     assert _bit(dut.adapter_line) == 1, "blocked adapter request must not start a frame"
     assert _bit(dut.adapter_busy) == 0

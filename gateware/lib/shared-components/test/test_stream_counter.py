@@ -12,7 +12,7 @@ async def stream_counter_advances_only_on_advance_flag(dut):
     dut.rst.value = 1
     dut.advance.value = 0
     await tick(dut.clk, 2)
-    assert dut.value_bits.value.integer == 0
+    assert int(dut.value_bits.value) == 0
 
     dut.rst.value = 0
     expected = 0
@@ -22,4 +22,4 @@ async def stream_counter_advances_only_on_advance_flag(dut):
         await tick(dut.clk, 1)
         if value:
             expected = (expected + 1) & 0xFF
-        assert dut.value_bits.value.integer == expected
+        assert int(dut.value_bits.value) == expected

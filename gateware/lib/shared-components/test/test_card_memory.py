@@ -13,7 +13,7 @@ async def dual_port_upload_bus_write_and_read_latency(dut):
     dut.bus_data.value = 0
     dut.bus_write.value = 0
     await RisingEdge(dut.clk)
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(dut.host_read.value) == int(dut.bus_read.value) == 0
     await FallingEdge(dut.clk)
     dut.host_write.value = 1
@@ -26,6 +26,6 @@ async def dual_port_upload_bus_write_and_read_latency(dut):
     dut.host_addr.value = 15
     dut.bus_addr.value = 0
     await RisingEdge(dut.clk)
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(dut.host_read.value) == 0x5A
     assert int(dut.bus_read.value) == 0xA5

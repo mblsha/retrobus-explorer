@@ -8,11 +8,11 @@ async def receive(d):
     data = bytearray()
     for _ in range(16):
         await with_timeout(FallingEdge(d.usb_tx), 6000, "us")
-        await Timer(1500, units="ns")
+        await Timer(1500, unit="ns")
         value = 0
         for bit in range(8):
             value |= int(d.usb_tx.value) << bit
-            await Timer(1000, units="ns")
+            await Timer(1000, unit="ns")
         assert int(d.usb_tx.value)
         data.append(value)
     return decode_ack(bytes(data))
@@ -33,7 +33,7 @@ async def uart_image_packet_reaches_validated_loader(d):
     for byte in raw:
         for bit in [0] + [(byte >> i) & 1 for i in range(8)] + [1]:
             d.usb_rx.value = bit
-            await Timer(1000, units="ns")
+            await Timer(1000, unit="ns")
     assert await task == (1, 0, 312)
     assert (
         not int(d.armed_status.value)

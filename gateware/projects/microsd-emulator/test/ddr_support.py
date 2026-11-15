@@ -24,7 +24,7 @@ async def memory_model(d, memory=None, read_addresses=None, clock=None, allow=No
             else:
                 d.ddr_rdata.value = data
                 d.ddr_rdata_valid.value = 1
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         cmd = int(d.ddr_cmd_valid.value) and int(d.ddr_cmd_ready.value)
         write = int(d.ddr_wdata_valid.value) and int(d.ddr_wdata_ready.value)
         if cmd:
@@ -33,7 +33,7 @@ async def memory_model(d, memory=None, read_addresses=None, clock=None, allow=No
             writes.append((int(d.ddr_wdata.value), int(d.ddr_wdata_mask.value)))
         read = int(d.ddr_rdata_valid.value) and int(d.ddr_rdata_ready.value)
         await RisingEdge(clock)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if read:
             d.ddr_rdata_valid.value = 0
             pending = None

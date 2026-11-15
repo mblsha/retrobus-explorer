@@ -1,6 +1,7 @@
 # top = tb_rom_gate
 
 import cocotb
+from cocotb.triggers import Timer
 
 
 def expected_byte(addr: int, bnk: int, stream_counter: int) -> int:
@@ -27,20 +28,20 @@ async def rom_and_gated_outputs_match_expected_pattern(dut):
     dut.addr_bnk.value = 0x1
     dut.stream_counter.value = 0x12
     dut.enable.value = 0
-    await cocotb.triggers.Timer(1, units="ns")
+    await Timer(1, unit="ns")
 
     exp0 = expected_byte(0x005A, 0x1, 0x12)
-    assert dut.rom_byte.value.integer == exp0
-    assert dut.gated_byte.value.integer == 0
+    assert int(dut.rom_byte.value) == exp0
+    assert int(dut.gated_byte.value) == 0
 
     dut.enable.value = 1
-    await cocotb.triggers.Timer(1, units="ns")
-    assert dut.gated_byte.value.integer == exp0
+    await Timer(1, unit="ns")
+    assert int(dut.gated_byte.value) == exp0
 
     dut.addr.value = 0x00A5
     dut.addr_bnk.value = 0x2
     dut.stream_counter.value = 0x21
-    await cocotb.triggers.Timer(1, units="ns")
+    await Timer(1, unit="ns")
     exp1 = expected_byte(0x00A5, 0x2, 0x21)
-    assert dut.rom_byte.value.integer == exp1
-    assert dut.gated_byte.value.integer == exp1
+    assert int(dut.rom_byte.value) == exp1
+    assert int(dut.gated_byte.value) == exp1

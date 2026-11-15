@@ -38,7 +38,7 @@ async def uart_upload_waits_for_ddr_and_preserves_all_byte_masks(d):
         for byte in packet(4, selector, 999):
             for bit in [0] + [(byte >> i) & 1 for i in range(8)] + [1]:
                 d.usb_rx.value = bit
-                await Timer(1000, units="ns")
+                await Timer(1000, unit="ns")
         assert await status_task == (4, 0, 0x6543217 << 5)
         assert int(d.status_selector.value) == selector
     memory = {}
@@ -48,7 +48,7 @@ async def uart_upload_waits_for_ddr_and_preserves_all_byte_masks(d):
     for byte in packet(1, 0, 713, expected):
         for bit in [0] + [(byte >> i) & 1 for i in range(8)] + [1]:
             d.usb_rx.value = bit
-            await Timer(1000, units="ns")
+            await Timer(1000, unit="ns")
     await tick(d.clk, 100)
     assert not memory
     assert not int(d.ddr_cmd_valid.value)
@@ -58,4 +58,4 @@ async def uart_upload_waits_for_ddr_and_preserves_all_byte_masks(d):
     assert actual == expected
     assert not int(d.armed_status.value)
     assert not int(d.cmd_oe.value) and not int(d.dat_oe.value)
-    model.kill()
+    model.cancel()

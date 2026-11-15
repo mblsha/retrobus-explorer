@@ -68,7 +68,7 @@ class Host:
             + pause
             + self.clock_jitter * (self.cycles % 7)
             - self.sample_advance_ns,
-            units="ns",
+            unit="ns",
             round_mode="round",
         )
         sample = tuple(int(s.value) for s in (d.cmd_oe, d.cmd_out, d.dat_oe, d.dat_out))
@@ -89,11 +89,11 @@ class Host:
             d.dat_in.value = level
             self.dat_written = level
         if self.sample_advance_ns:
-            await Timer(self.sample_advance_ns, units="ns", round_mode="round")
+            await Timer(self.sample_advance_ns, unit="ns", round_mode="round")
         d.sd_clk.value = 1
         await Timer(
             self.half_ns + self.clock_jitter * ((self.cycles * 13) % 9),
-            units="ns",
+            unit="ns",
             round_mode="round",
         )
         return sample

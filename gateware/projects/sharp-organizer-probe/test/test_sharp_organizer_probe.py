@@ -11,21 +11,21 @@ BIT_NS = 250
 
 async def send_byte(dut, byte):
     dut.usb_rx.value = 0
-    await Timer(BIT_NS, units="ns")
+    await Timer(BIT_NS, unit="ns")
     for bit in range(8):
         dut.usb_rx.value = (byte >> bit) & 1
-        await Timer(BIT_NS, units="ns")
+        await Timer(BIT_NS, unit="ns")
     dut.usb_rx.value = 1
-    await Timer(BIT_NS, units="ns")
+    await Timer(BIT_NS, unit="ns")
 
 
 async def receive_byte(dut):
     await FallingEdge(dut.usb_tx)
-    await Timer(BIT_NS + BIT_NS // 2, units="ns")
+    await Timer(BIT_NS + BIT_NS // 2, unit="ns")
     value = 0
     for bit in range(8):
         value |= int(dut.usb_tx.value) << bit
-        await Timer(BIT_NS, units="ns")
+        await Timer(BIT_NS, unit="ns")
     assert int(dut.usb_tx.value) == 1
     return value
 
@@ -35,7 +35,7 @@ async def command(dut, payload, response_len):
         return bytes([await receive_byte(dut) for _ in range(response_len)])
 
     response = cocotb.start_soon(collect())
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     for byte in payload:
         await send_byte(dut, byte)
     return await response
@@ -117,7 +117,7 @@ async def uart_probe_and_watchdog(dut):
     assert await command(dut, b"UREAD", 1) == b"U"
     assert await command(dut, b"A\x00\x01\x23\x0f\xff\xff", 1) == b"A"
     assert int(dut.addr_oe_debug.value) == 0xFFFFF
-    await Timer(510000, units="ns")
+    await Timer(510000, unit="ns")
     released(dut)
 
 
@@ -130,7 +130,7 @@ async def burst_reads_sequential_addresses_and_releases(dut):
     async def card_rom():
         while True:
             dut.data_host.value = (int(dut.addr_drive_debug.value) ^ 0x5A) & 0xFF
-            await Timer(100, units="ns")
+            await Timer(100, unit="ns")
 
     model = cocotb.start_soon(card_rom())
     assert await command(dut, b"R\x00\x01\x20\x00\x08\xff\x7d\xff", 1) == b"!"
@@ -140,7 +140,7 @@ async def burst_reads_sequential_addresses_and_releases(dut):
     assert response == b"R" + bytes(((0x120 + i) ^ 0x5A) & 0xFF for i in range(8))
     await tick(dut.clk, 4)
     released(dut)
-    model.kill()
+    model.cancel()
 
 
 @cocotb.test()
@@ -183,7 +183,7 @@ async def masked_nc_contacts_require_read_mode_and_release_on_errors(dut):
     assert await command(dut, b"N\x09\x0f", 1) == b"N"
     await send_byte(dut, ord("N"))
     await send_byte(dut, 3)  # Incomplete command; watchdog still releases NC.
-    await Timer(510000, units="ns")
+    await Timer(510000, unit="ns")
     released(dut)
     snap = await command(dut, b"Q", 18)
     assert snap[16:] == b"\x00\x00"
@@ -199,7 +199,7 @@ async def nc_selection_is_held_during_reads_and_released_before_ft_output(dut):
             if int(dut.data_oe_debug.value):
                 raise AssertionError("read experiment drove card data")
             dut.data_host.value = (int(dut.addr_drive_debug.value) ^ int(dut.nc_drive_debug.value) ^ 0x5a) & 255
-            await Timer(100, units="ns")
+            await Timer(100, unit="ns")
 
     model = cocotb.start_soon(selected_card())
     assert await command(dut, b"UREAD", 1) == b"U"
@@ -213,7 +213,7 @@ async def nc_selection_is_held_during_reads_and_released_before_ft_output(dut):
         observed = []
         for _ in range(10000):
             await FallingEdge(dut.ft_clk)
-            await Timer(1, units="ps")
+            await Timer(1, unit="ps")
             write = int(dut.ft_oe.value) and not int(dut.ft_wr.value)
             word = int(dut.ft_data.value)
             await RisingEdge(dut.ft_clk)
@@ -232,7 +232,7 @@ async def nc_selection_is_held_during_reads_and_released_before_ft_output(dut):
     assert await command(dut, b"F\x00\x01\x20\x00\x08\xff\xed\xff", 1) == b"F"
     assert await response == [0xa500 | (((0x120+i) ^ 11 ^ 0x5a) & 255) for i in range(8)]
     released(dut)
-    model.kill()
+    model.cancel()
 
 
 @cocotb.test()
@@ -256,11 +256,11 @@ async def bounded_sram_write_never_selects_rom_or_enables_oe(dut):
                 int(dut.control_drive_debug.value),
                 int(dut.control_oe_debug.value),
             ))
-            await Timer(100, units="ns")
+            await Timer(100, unit="ns")
 
     monitor = cocotb.start_soon(watch_write())
     assert await command(dut, b"W\x00\x7f\xff\x5a\x02", 1) == b"W"
-    monitor.kill()
+    monitor.cancel()
     await tick(dut.clk, 4)
     released(dut)
     driven = [sample for sample in samples if sample[2]]
@@ -289,12 +289,12 @@ async def profiled_sram_write_checks_select_and_meta_pins(dut):
                             int(dut.data_oe_debug.value),
                             int(dut.control_drive_debug.value),
                             int(dut.control_oe_debug.value)))
-            await Timer(100, units="ns")
+            await Timer(100, unit="ns")
 
     assert await command(dut, b"UREAD", 1) == b"U"
     monitor = cocotb.start_soon(watch_write())
     assert await command(dut, b"W\x00\x12\x34\xa7\x0d", 1) == b"W"
-    monitor.kill()
+    monitor.cancel()
     released(dut)
     driven = [sample for sample in samples if sample[2]]
     assert driven
@@ -312,12 +312,12 @@ async def ft600_buffers_slow_reads_before_transmitting(dut):
     async def card_rom():
         while True:
             dut.data_host.value = (int(dut.addr_drive_debug.value) ^ 0x5A) & 0xFF
-            await Timer(100, units="ns")
+            await Timer(100, unit="ns")
     async def receive_words():
         observed = []
         for _ in range(100000):
             await FallingEdge(dut.ft_clk)
-            await Timer(1, units="ps")
+            await Timer(1, unit="ps")
             write = int(dut.ft_oe.value) and not int(dut.ft_wr.value)
             word, be = int(dut.ft_data.value), int(dut.ft_be.value)
             await RisingEdge(dut.ft_clk)
@@ -334,7 +334,7 @@ async def ft600_buffers_slow_reads_before_transmitting(dut):
     assert await command(dut, b"F\x00\x01\x23\x00\x20\xff\x7d\xff", 1) == b"F"
     assert await response == [0xA500 | (((0x123+i) ^ 0x5A) & 0xFF) for i in range(32)]
     released(dut)
-    model.kill()
+    model.cancel()
 
 
 @cocotb.test()
@@ -344,7 +344,7 @@ async def ft600_full_chunk_releases_before_usb_and_rejects_overflow(dut):
     async def card_rom():
         while True:
             dut.data_host.value = (int(dut.addr_drive_debug.value) ^ 0x5A) & 0xFF
-            await Timer(100, units="ns")
+            await Timer(100, unit="ns")
     model = cocotb.start_soon(card_rom())
     count = 8191
     request = b"F\x00\x00\x00" + count.to_bytes(2, "big") + b"\xff\x7d\xff"
@@ -356,24 +356,24 @@ async def ft600_full_chunk_releases_before_usb_and_rejects_overflow(dut):
     assert int(dut.addr_oe_debug.value) == int(dut.control_oe_debug.value) == 0
     assert await command(dut, request, 1) == b"F"
     for _ in range(500):
-        await Timer(10000, units="ns")
+        await Timer(10000, unit="ns")
         if not int(dut.armed_debug.value):
             break
     else:
         raise AssertionError("FT600 chunk did not complete")
-    await Timer(50000, units="ns")
+    await Timer(50000, unit="ns")
     released(dut)
     assert int(dut.ft_wr.value) == 1
     dut.ft_txe.value = 0
     observed = []
     for _ in range(200000):
         await FallingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         write = int(dut.ft_oe.value) and not int(dut.ft_wr.value)
         word = int(dut.ft_data.value)
         be = int(dut.ft_be.value)
         await RisingEdge(dut.ft_clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if write:
             assert be == 3
             observed.append(word)
@@ -386,7 +386,7 @@ async def ft600_full_chunk_releases_before_usb_and_rejects_overflow(dut):
     dut.ft_txe.value = 1
     assert await command(dut, b"UREAD", 1) == b"U"
     assert await command(dut, request, 1) == b"F"
-    await Timer(5000000, units="ns")
+    await Timer(5000000, unit="ns")
     released(dut)
     assert await command(dut, b"Z", 1) == b"Z"
-    model.kill()
+    model.cancel()

@@ -7,14 +7,14 @@ from cocotb_helpers import tick
 
 @cocotb.test()
 async def write_commands_wait_for_their_data(d):
-    cocotb.start_soon(Clock(d.clk, 12, units="ns").start())
+    cocotb.start_soon(Clock(d.clk, 12, unit="ns").start())
     d.rst.value = 1
     d.s_cmd_valid.value = d.s_wdata_valid.value = d.m_rdata_valid.value = 0
     d.m_cmd_ready.value = 1
     d.m_wdata_ready.value = d.s_rdata_ready.value = 0
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     d.rst.value = 0
-    await Timer(24, units="ns")
+    await Timer(24, unit="ns")
     d.s_cmd_address.value = 127
     d.s_cmd_write.value = 1
     d.s_cmd_valid.value = 1
@@ -22,16 +22,16 @@ async def write_commands_wait_for_their_data(d):
     d.s_wmask.value = 0xFFFF
     d.s_wdata_valid.value = 1
     await RisingEdge(d.clk)
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     d.s_cmd_address.value = 128
     d.s_wdata.value = 0x2222
     await RisingEdge(d.clk)
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     # First command is accepted but its data has not yet been consumed.
     # A second command must not reach LiteDRAM with only the first data buffered.
     for _ in range(3):
         await RisingEdge(d.clk)
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         assert not int(d.m_cmd_valid.value), "write command outran buffered data"
     d.s_cmd_valid.value = d.s_wdata_valid.value = 0
     d.rst.value = 1
@@ -44,7 +44,7 @@ async def write_commands_wait_for_their_data(d):
 
 @cocotb.test()
 async def scheduled_native_data_with_stalls_masks_and_read_backpressure(d):
-    cocotb.start_soon(Clock(d.clk, 12, units="ns").start())
+    cocotb.start_soon(Clock(d.clk, 12, unit="ns").start())
     d.rst.value = 1
     for name in (
         "s_cmd_valid",

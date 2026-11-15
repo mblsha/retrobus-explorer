@@ -8,14 +8,14 @@ from sd_support import crc_bit
 
 @cocotb.test()
 async def crc_gated_commit_response_busy_and_cancel(d):
-    cocotb.start_soon(Clock(d.clk, 12, units="ns").start())
+    cocotb.start_soon(Clock(d.clk, 12, unit="ns").start())
 
     async def step(**values):
         await FallingEdge(d.clk)
         for name, value in values.items():
             getattr(d, name).value = value
         await RisingEdge(d.clk)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
     await step(
         rst=1,
@@ -45,7 +45,7 @@ async def crc_gated_commit_response_busy_and_cancel(d):
             wr = allow[0] and rng.randrange(3) != 0
             d.cmd_ready.value = cr
             d.wdata_ready.value = wr
-            await Timer(1, units="ns")
+            await Timer(1, unit="ns")
             if cr and int(d.cmd_valid.value):
                 assert address is None
                 address = int(d.cmd_address.value)
@@ -164,4 +164,4 @@ async def crc_gated_commit_response_busy_and_cancel(d):
     else:
         assert False, "canceled accepted commit did not drain"
     assert b"".join(memory[128 * 32 + i] for i in range(32)) == expected
-    task.kill()
+    task.cancel()

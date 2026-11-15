@@ -67,7 +67,7 @@ async def ordered_transfer_and_retries(dut):
     assert not int(dut.armed.value)
     await exchange(b"truncated")
     dut.rst.value = 1
-    await Timer(30, units="ns")
+    await Timer(30, unit="ns")
     dut.rst.value = 0
     await exchange(packet(2, 11, count=1), 2)
     assert writes == [0, 1]

@@ -86,9 +86,9 @@ async def _assert_uart_stays_idle(dut, cycles: int) -> None:
 
 def _assert_receive_outputs(dut, expected_byte: int) -> None:
     assert int(dut.send_mode_debug.value) == 0
-    assert dut.ffc_oe_debug.value.integer == 0
-    assert dut.led.value.integer == expected_byte
-    assert dut.saleae.value.integer == expected_byte
+    assert int(dut.ffc_oe_debug.value) == 0
+    assert int(dut.led.value) == expected_byte
+    assert int(dut.saleae.value) == expected_byte
 
 
 @cocotb.test()
@@ -96,9 +96,9 @@ async def reset_defaults_to_receive_bank_zero_and_releases_all_ffc_pins(dut):
     ffc_word = _pack_banks(0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC)
     await _init(dut, ffc_word=ffc_word)
 
-    assert dut.bank_debug.value.integer == 0
-    assert dut.counter_debug.value.integer == 0
-    assert dut.ffc_data.value.integer == ffc_word
+    assert int(dut.bank_debug.value) == 0
+    assert int(dut.counter_debug.value) == 0
+    assert int(dut.ffc_data.value) == ffc_word
     _assert_receive_outputs(dut, 0x12)
 
 
@@ -109,12 +109,12 @@ async def receive_mode_selects_banks_zero_through_five_and_echoes_digits(dut):
 
     for bank, expected in enumerate(banks):
         await _send_and_expect_echo(dut, ord("0") + bank)
-        assert dut.bank_debug.value.integer == bank
+        assert int(dut.bank_debug.value) == bank
         _assert_receive_outputs(dut, expected)
 
     await _uart_send_byte(dut, ord("6"))
     await _assert_uart_stays_idle(dut, USB_UART_BIT_CYCLES * 3)
-    assert dut.bank_debug.value.integer == 5
+    assert int(dut.bank_debug.value) == 5
     _assert_receive_outputs(dut, banks[5])
 
 
@@ -125,26 +125,26 @@ async def send_mode_drives_only_low_ffc_byte_and_uses_two_bit_counter_windows(du
 
     await _send_and_expect_echo(dut, ord("S"))
     assert int(dut.send_mode_debug.value) == 1
-    assert dut.bank_debug.value.integer == 0
-    assert dut.ffc_oe_debug.value.integer == FFC_LOW_BYTE_OE
+    assert int(dut.bank_debug.value) == 0
+    assert int(dut.ffc_oe_debug.value) == FFC_LOW_BYTE_OE
 
-    counter = dut.counter_debug.value.integer
+    counter = int(dut.counter_debug.value)
     expected = counter & 0xFF
-    assert dut.led.value.integer == expected
-    assert dut.saleae.value.integer == expected
-    assert dut.ffc_drive_debug.value.integer == expected
-    assert dut.ffc_data.value.integer == (ffc_word & ~0xFF) | expected
+    assert int(dut.led.value) == expected
+    assert int(dut.saleae.value) == expected
+    assert int(dut.ffc_drive_debug.value) == expected
+    assert int(dut.ffc_data.value) == (ffc_word & ~0xFF) | expected
 
     await _send_and_expect_echo(dut, ord("3"))
-    assert dut.bank_debug.value.integer == 3
-    assert dut.ffc_oe_debug.value.integer == FFC_LOW_BYTE_OE
+    assert int(dut.bank_debug.value) == 3
+    assert int(dut.ffc_oe_debug.value) == FFC_LOW_BYTE_OE
 
-    counter = dut.counter_debug.value.integer
+    counter = int(dut.counter_debug.value)
     expected = (counter >> (3 * 2)) & 0xFF
-    assert dut.led.value.integer == expected
-    assert dut.saleae.value.integer == expected
-    assert dut.ffc_drive_debug.value.integer == expected
-    assert dut.ffc_data.value.integer == (ffc_word & ~0xFF) | expected
+    assert int(dut.led.value) == expected
+    assert int(dut.saleae.value) == expected
+    assert int(dut.ffc_drive_debug.value) == expected
+    assert int(dut.ffc_data.value) == (ffc_word & ~0xFF) | expected
 
 
 @cocotb.test()
@@ -155,16 +155,16 @@ async def command_letters_are_case_insensitive_and_mode_switches_reset_bank(dut)
     await _send_and_expect_echo(dut, ord("s"))
     await _send_and_expect_echo(dut, ord("4"))
     assert int(dut.send_mode_debug.value) == 1
-    assert dut.bank_debug.value.integer == 4
+    assert int(dut.bank_debug.value) == 4
 
     await _send_and_expect_echo(dut, ord("R"))
-    assert dut.bank_debug.value.integer == 0
+    assert int(dut.bank_debug.value) == 0
     _assert_receive_outputs(dut, 0x5A)
 
     await _send_and_expect_echo(dut, ord("S"))
     await _send_and_expect_echo(dut, ord("2"))
     await _send_and_expect_echo(dut, ord("r"))
-    assert dut.bank_debug.value.integer == 0
+    assert int(dut.bank_debug.value) == 0
     _assert_receive_outputs(dut, 0x5A)
 
 
@@ -175,11 +175,11 @@ async def reset_while_sending_clears_mode_bank_counter_and_output_enables(dut):
     await _send_and_expect_echo(dut, ord("s"))
     await _send_and_expect_echo(dut, ord("5"))
     assert int(dut.send_mode_debug.value) == 1
-    assert dut.counter_debug.value.integer != 0
+    assert int(dut.counter_debug.value) != 0
 
     dut.rst_n.value = 0
     await tick(dut.clk, 6)
 
-    assert dut.bank_debug.value.integer == 0
-    assert dut.counter_debug.value.integer == 0
+    assert int(dut.bank_debug.value) == 0
+    assert int(dut.counter_debug.value) == 0
     _assert_receive_outputs(dut, 0xC7)

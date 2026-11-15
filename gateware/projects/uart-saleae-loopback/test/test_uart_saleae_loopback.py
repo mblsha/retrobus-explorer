@@ -3,7 +3,7 @@
 import cocotb
 from cocotb.triggers import Edge
 from cocotb.triggers import with_timeout
-from cocotb.utils import get_sim_time
+from cocotb.simtime import get_sim_time
 from boot_banner_test import assert_boot_banner
 from cocotb_helpers import start_clock
 from cocotb_helpers import tick
@@ -172,10 +172,10 @@ async def assert_saleae0_toggles(dut, cycles: int = 64):
 
 
 async def wait_for_saleae_bit_toggle(dut, idx: int, timeout_ps: int):
-    start = get_sim_time(units="ps")
+    start = get_sim_time(unit="ps")
     prev = saleae_bit(dut, idx)
     while True:
-        now = get_sim_time(units="ps")
+        now = get_sim_time(unit="ps")
         if now - start >= timeout_ps:
             assert False, f"saleae[{idx}] did not toggle within {timeout_ps} ps"
         remaining = max(1, timeout_ps - (now - start))
@@ -192,9 +192,9 @@ async def measure_saleae0_half_period_ps(dut, settle_edges: int = 4, samples: in
 
     needed = settle_edges + samples
     timeout_ps = 20_000_000
-    start_ps = get_sim_time(units="ps")
+    start_ps = get_sim_time(unit="ps")
     while len(intervals_ps) < needed:
-        now_ps = get_sim_time(units="ps")
+        now_ps = get_sim_time(unit="ps")
         if now_ps - start_ps >= timeout_ps:
             assert False, "timed out while measuring saleae[0] period"
         remaining = max(1, timeout_ps - (now_ps - start_ps))
@@ -202,7 +202,7 @@ async def measure_saleae0_half_period_ps(dut, settle_edges: int = 4, samples: in
         cur = saleae_bit(dut, 0)
         if cur == prev:
             continue
-        t_ps = get_sim_time(units="ps")
+        t_ps = get_sim_time(unit="ps")
         if last_transition_ps is not None:
             intervals_ps.append(t_ps - last_transition_ps)
         last_transition_ps = t_ps

@@ -8,7 +8,7 @@ from packet_support import MAC, HOST, IP, HOST_IP, checksum, ipv4, udp
 
 @cocotb.test()
 async def arp_ping_udp_and_rejections(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     dut.rst.value = 1
     for name in (
         "rx_available",
@@ -23,7 +23,7 @@ async def arp_ping_udp_and_rejections(dut):
     ):
         getattr(dut, name).value = 0
     dut.tx_ready.value = 1
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     dut.rst.value = 0
     response = b"validated UDP response"
 
@@ -62,13 +62,13 @@ async def arp_ping_udp_and_rejections(dut):
                 submitted = True
             if int(dut.rx_consume.value):
                 dut.rx_available.value = 0
-                await Timer(20, units="ns")
+                await Timer(20, unit="ns")
                 break
         else:
             assert False, "Engine timeout"
         dut.app_done.value = 0
         dut.app_write.value = 0
-        await Timer(30, units="ns")
+        await Timer(30, unit="ns")
         if app_expected is not None:
             assert app_started
         assert submitted == bool(output)

@@ -27,7 +27,7 @@ async def status_and_stop_preserve_accepted_programming(d):
     async def collect():
         while True:
             await FallingEdge(d.clk)
-            await Timer(1, units="ps")
+            await Timer(1, unit="ps")
             if int(d.write_cmd_valid.value):
                 assert int(d.write_data_valid.value)
                 assert int(d.write_mask.value) == 65535
@@ -52,4 +52,4 @@ async def status_and_stop_preserve_accepted_programming(d):
     assert b"".join(memory[33 * 32 + n] for n in range(32)) == expected
     status = int.from_bytes((await h.command(13, 0x10000))[1:5], "big")
     assert status & 0x1F00 == 0x900
-    task.kill()
+    task.cancel()

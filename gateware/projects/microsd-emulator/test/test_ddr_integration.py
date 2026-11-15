@@ -20,4 +20,4 @@ async def complete_image_loader_native_ddr_sd_path(d):
     await exercise_image(d)
     for lba in (128, 16383):
         assert set(range(lba * 32, (lba + 1) * 32)) <= set(read_addresses)
-    task.kill()
+    task.cancel()

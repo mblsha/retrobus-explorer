@@ -19,7 +19,7 @@ async def transfer(
                 signal.value = word
             valid.value = 1
             while True:
-                await Timer(1, units="ns")
+                await Timer(1, unit="ns")
                 accepted = int(ready.value)
                 await RisingEdge(src_clk)
                 if accepted:
@@ -36,7 +36,7 @@ async def transfer(
             while True:
                 await FallingEdge(dst_clk)
                 out_ready.value = int(rng.randrange(3) != 0)
-                await Timer(1, units="ns")
+                await Timer(1, unit="ns")
                 accepted = int(out_valid.value) and int(out_ready.value)
                 actual = tuple(int(s.value) for s in outputs)
                 await RisingEdge(dst_clk)
@@ -53,16 +53,16 @@ async def transfer(
 async def independent_native_channels_backpressure_and_common_reset(d):
     cocotb.start_soon(
         Clock(
-            d.s_clk, float(os.environ.get("MICROSD_CDC_SRC_NS", "10")), units="ns"
+            d.s_clk, float(os.environ.get("MICROSD_CDC_SRC_NS", "10")), unit="ns"
         ).start()
     )
 
     async def other_clock():
         phase = float(os.environ.get("MICROSD_CDC_PHASE_NS", "3"))
         if phase:
-            await Timer(phase, units="ns")
+            await Timer(phase, unit="ns")
         await Clock(
-            d.m_clk, float(os.environ.get("MICROSD_CDC_DST_NS", "12")), units="ns"
+            d.m_clk, float(os.environ.get("MICROSD_CDC_DST_NS", "12")), unit="ns"
         ).start()
 
     cocotb.start_soon(other_clock())
@@ -84,16 +84,16 @@ async def independent_native_channels_backpressure_and_common_reset(d):
     async def reset():
         d.s_rst.value = 1
         d.m_rst.value = 1
-        await Timer(180, units="ns")
+        await Timer(180, unit="ns")
         d.s_rst.value = 0
         d.m_rst.value = 0
-        await Timer(180, units="ns")
+        await Timer(180, unit="ns")
 
     await reset()
     # Fill all channels while their consumers are stopped, then reset both
     # domains: none of this abandoned epoch may leak into fresh transactions.
     d.s_cmd_valid.value = d.s_wdata_valid.value = d.m_rdata_valid.value = 1
-    await Timer(500, units="ns")
+    await Timer(500, unit="ns")
     assert not int(d.s_cmd_ready.value)
     assert not int(d.s_wdata_ready.value)
     assert not int(d.m_rdata_ready.value)

@@ -349,14 +349,18 @@ def build_and_simulate(
     verilog_sources = [project / "build" / "spade.sv"] + resolve_verilog_sources(project)
     verilog_list_repr = ", ".join(f"Path(r'{p}')" for p in verilog_sources)
     waves_literal = "True" if args.waves else "False"
+    # Cocotb 2 no longer defines COCOTB_SIM itself; the HDL wrappers that add
+    # testbench-only ports (pin-tester's `main_wrapper.v`) still key on it.
     driver = (
         "from pathlib import Path\n"
-        "from cocotb.runner import get_runner\n"
+        "from cocotb_tools.runner import get_runner\n"
         "runner = get_runner('verilator')\n"
-        f"runner.build(verilog_sources=[{verilog_list_repr}], hdl_toplevel='{top}', always=True, waves={waves_literal}, build_dir='{args.build_dir}')\n"
-        f"runner.test(hdl_toplevel='{top}', test_module='{test_module}', test_dir=Path('test'), waves={waves_literal})\n"
+        f"runner.build(sources=[{verilog_list_repr}], hdl_toplevel='{top}', always=True, waves={waves_literal}, build_dir='{args.build_dir}', defines={{'COCOTB_SIM': 1}})\n"
+        f"runner.test(hdl_toplevel='{top}', test_module='{test_module}', test_dir=Path('test'), waves={waves_literal}, results_xml=r'{results_xml.resolve()}')\n"
     )
-    venv_python = umbrella_project / ".venv" / "bin" / "python"
+    # CI points GATEWARE_PYTHON at the environment it synced; elsewhere the
+    # workspace's own .venv supplies Cocotb.
+    venv_python = Path(os.environ.get("GATEWARE_PYTHON") or umbrella_project / ".venv" / "bin" / "python")
     if venv_python.is_file():
         command = [str(venv_python), "-c", driver]
     else:

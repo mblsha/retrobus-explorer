@@ -27,7 +27,7 @@ async def record_order_pop_boundary_backpressure_and_reset(dut):
         dut.empty.value = head == len(records)
         # Stop at varied points, including between the final two halfwords.
         dut.sink_full.value = cycle % 7 in (0, 2, 3)
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         valid = int(dut.valid.value)
         pop = int(dut.pop_record.value)
         if valid:
@@ -50,7 +50,7 @@ async def record_order_pop_boundary_backpressure_and_reset(dut):
     assert received == [0xA000 + record * 0x100 + half for record in range(3) for half in range(halves)]
     dut.empty.value = 1
     dut.sink_full.value = 0
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(dut.valid.value) == int(dut.pop_record.value) == 0
 
     # A reset during a partly transmitted record restarts at its low half.
@@ -62,6 +62,6 @@ async def record_order_pop_boundary_backpressure_and_reset(dut):
     await RisingEdge(dut.clk)
     await FallingEdge(dut.clk)
     dut.rst.value = 0
-    await Timer(1, units="ns")
+    await Timer(1, unit="ns")
     assert int(dut.valid.value) == 1
     assert int(dut.data.value) == 0xA000

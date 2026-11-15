@@ -155,8 +155,8 @@ def _assert_matches(dut, model: AlchitryAsyncFifoModel) -> None:
 
 
 async def _start_rclk_with_offset(signal, *, period_ns: int, delay_ns: int) -> None:
-    await Timer(delay_ns, units="ns")
-    await Clock(signal, period_ns, units="ns").start()
+    await Timer(delay_ns, unit="ns")
+    await Clock(signal, period_ns, unit="ns").start()
 
 
 async def _monitor_edges(dut, model: AlchitryAsyncFifoModel, stop: Event) -> None:
@@ -169,7 +169,7 @@ async def _monitor_edges(dut, model: AlchitryAsyncFifoModel, stop: Event) -> Non
         if fired is stop_wait:
             return
 
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if fired is w_edge:
             model.step_wclk(
                 wrst=_dut_bit(dut.wrst),
@@ -190,7 +190,7 @@ async def _monitor_edges(dut, model: AlchitryAsyncFifoModel, stop: Event) -> Non
 async def _wait_rise(signal, cycles: int) -> None:
     for _ in range(cycles):
         await RisingEdge(signal)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
 
 
 async def _pulse_write(dut, value: int) -> None:
@@ -199,7 +199,7 @@ async def _pulse_write(dut, value: int) -> None:
     dut.wput.value = 1
 
     await RisingEdge(dut.wclk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
 
     await FallingEdge(dut.wclk)
     dut.wput.value = 0
@@ -211,7 +211,7 @@ async def _pulse_read(dut) -> int:
     dut.rget.value = 1
 
     await RisingEdge(dut.rclk)
-    await Timer(1, units="ps")
+    await Timer(1, unit="ps")
 
     await FallingEdge(dut.rclk)
     dut.rget.value = 0
@@ -221,7 +221,7 @@ async def _pulse_read(dut) -> int:
 async def _wait_flag(signal, expected: int, *, clock, timeout_cycles: int = 120) -> None:
     for _ in range(timeout_cycles):
         await RisingEdge(clock)
-        await Timer(1, units="ps")
+        await Timer(1, unit="ps")
         if _dut_bit(signal) == expected:
             return
     raise AssertionError(f"timed out waiting for {signal._name}={expected}")
@@ -229,7 +229,7 @@ async def _wait_flag(signal, expected: int, *, clock, timeout_cycles: int = 120)
 
 @cocotb.test()
 async def async_fifo_u8_directed(dut):
-    cocotb.start_soon(Clock(dut.wclk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.wclk, 10, unit="ns").start())
     cocotb.start_soon(_start_rclk_with_offset(dut.rclk, period_ns=14, delay_ns=1))
 
     dut.wrst.value = 1
@@ -279,7 +279,7 @@ async def async_fifo_u8_directed(dut):
 
 @cocotb.test()
 async def async_fifo_u8_randomized_model_compat(dut):
-    cocotb.start_soon(Clock(dut.wclk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.wclk, 10, unit="ns").start())
     cocotb.start_soon(_start_rclk_with_offset(dut.rclk, period_ns=14, delay_ns=1))
 
     dut.wrst.value = 1

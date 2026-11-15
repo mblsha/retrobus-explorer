@@ -5,7 +5,7 @@ from cocotb.triggers import FallingEdge, Timer
 
 @cocotb.test()
 async def native_backpressure_and_bounds(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     dut.rst.value = 1
     for name in (
         "request",
@@ -20,7 +20,7 @@ async def native_backpressure_and_bounds(dut):
     ):
         getattr(dut, name).value = 0
     dut.enabled.value = 1
-    await Timer(40, units="ns")
+    await Timer(40, unit="ns")
     dut.rst.value = 0
     memory = {}
     commands = []
@@ -49,7 +49,7 @@ async def native_backpressure_and_bounds(dut):
                 returned = memory.get(addr, 0)
             dut.rdata_valid.value = returned is not None
             dut.rdata.value = returned or 0
-            await Timer(1, units="ns")
+            await Timer(1, unit="ns")
             if int(dut.cmd_valid.value) and int(dut.cmd_ready.value):
                 addr = int(dut.cmd_address.value)
                 if int(dut.cmd_write.value):
@@ -69,7 +69,7 @@ async def native_backpressure_and_bounds(dut):
             if int(dut.done.value):
                 assert bool(dut.error.value) == error
                 dut.request.value = 0
-                await Timer(30, units="ns")
+                await Timer(30, unit="ns")
                 break
         else:
             assert False, "Native timeout"

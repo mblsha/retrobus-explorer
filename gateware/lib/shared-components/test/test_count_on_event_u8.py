@@ -12,7 +12,7 @@ async def count_on_event_only_increments_when_event_is_high(dut):
     dut.rst.value = 1
     dut.event_in.value = 0
     await tick(dut.clk, 2)
-    assert dut.value_bits.value.integer == 0
+    assert int(dut.value_bits.value) == 0
 
     dut.rst.value = 0
     expected = 0
@@ -22,4 +22,4 @@ async def count_on_event_only_increments_when_event_is_high(dut):
         await tick(dut.clk, 1)
         if value:
             expected = (expected + 1) & 0xFF
-        assert dut.value_bits.value.integer == expected
+        assert int(dut.value_bits.value) == expected
