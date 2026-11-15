@@ -204,13 +204,39 @@ jobs:
           swim --version
           swim --version | grep -q -- "-${SWIM_REV:0:7}"
 
+      - name: Cache OSS CAD Suite
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/swim/bin/oss-cad-suite
+          key: oss-cad-suite-${{ runner.os }}-2026-11-14
+
       - name: Install verilator
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A pinned nightly. Bump it here and in the cache key above together.
+          OSS_CAD_SUITE_TAG: "2026-11-14"
         run: |
           # Cocotb 2 needs Verilator 5.036 or later, and Ubuntu 24.04's apt has
-          # 5.020. swim's OSS CAD Suite carries a current one, and run_tb.py
-          # already puts its bin first on PATH (and refuses an older Verilator).
-          swim install-tools
-          "$HOME/.local/share/swim/bin/oss-cad-suite/bin/verilator" --version
+          # 5.020. The OSS CAD Suite carries a current one, unpacked where
+          # `swim install-tools` would put it: run_tb.py already puts that bin
+          # first on PATH (and refuses an older Verilator). Not
+          # `swim install-tools` itself: it asks the GitHub API for the latest
+          # release without a token, which every parallel job does at once,
+          # and the API's error reply then fails the step.
+          dest="$HOME/.local/share/swim/bin"
+          if [ ! -x "$dest/oss-cad-suite/bin/verilator" ]; then
+            asset="oss-cad-suite-linux-x64-${OSS_CAD_SUITE_TAG//-/}.tgz"
+            for attempt in 1 2 3; do
+              gh release download "${OSS_CAD_SUITE_TAG}" --repo YosysHQ/oss-cad-suite-build \
+                --pattern "${asset}" --dir "${RUNNER_TEMP}" --clobber && break
+              echo "OSS CAD Suite download attempt ${attempt} failed"
+              sleep 20
+            done
+            mkdir -p "$dest"
+            tar -xzf "${RUNNER_TEMP}/${asset}" -C "$dest"
+            rm -f "${RUNNER_TEMP}/${asset}"
+          fi
+          "$dest/oss-cad-suite/bin/verilator" --version
 
       - name: Sync Python dependencies
         run: |
