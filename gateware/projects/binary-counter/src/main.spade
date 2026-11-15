@@ -12,7 +12,7 @@ fn decode_rx_digit(
     rx_parity_error: bool,
     rx_byte: uint<8>,
 ) -> Option<DigitDecode> {
-    let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
+    let maybe_rx_byte = (rx_valid && !rx_parity_error).then_some(rx_byte);
 
     maybe_rx_byte.map(fn |byte| byte.decode_digit())
 }
@@ -49,7 +49,7 @@ entity main(
         .unwrap_or(DigitDecode::default());
     let (tx_line, tx_line_w): (bool, inv bool) = port();
     let (tx_busy, tx_busy_w): (bool, inv bool) = port();
-    let boot_banner_out = inst boot_banner_core::<8, 84>(
+    let boot_banner_out = inst boot_banner_core(
         clk,
         rst,
         build_info::boot_banner_text(),

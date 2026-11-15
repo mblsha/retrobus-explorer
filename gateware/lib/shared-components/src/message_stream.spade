@@ -22,11 +22,7 @@ pub fn tx_req_from_option(byte: Option<uint<8>>) -> TxReq8 {
 }
 
 pub fn tx_req_indexed<#uint N, #uint IDX_W>(bytes: [uint<8>; N], idx: uint<IDX_W>) -> TxReq8 {
-    tx_req_from_option(if idx < N {
-        Some(bytes[trunc(idx)])
-    } else {
-        None
-    })
+    tx_req_from_option((idx < N).then_some(bytes[trunc(idx)]))
 }
 
 pub fn tx_req_or_else(primary: TxReq8, fallback: TxReq8) -> TxReq8 {
@@ -176,11 +172,7 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             is_none,
             render_byte,
             block_tx,
-            if next_msg_valid {
-                Some(next_msg)
-            } else {
-                None
-            },
+            next_msg_valid.then_some(next_msg),
         )
     }
 

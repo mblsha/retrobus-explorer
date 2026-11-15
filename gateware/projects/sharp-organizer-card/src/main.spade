@@ -332,7 +332,7 @@ entity main_core(
     let (stream_fifo_dout, stream_fifo_dout_w): (OrganizerTraceWord, inv OrganizerTraceWord) = port();
 
     let rx = inst au_usb_uart_rx(clk, rst, usb_rx);
-    let boot_tx = inst boot_banner_tx_gate::<8, 96>(
+    let boot_tx = inst boot_banner_tx_gate(
         clk,
         rst,
         build_info::boot_banner_text(),

@@ -12,10 +12,9 @@ fail.
 
 Re-checked against v0.21.0 (`423b451b3ed90cd004b6ebd9aae045109c62087b`) on
 2026-11-15. Entries 1, 2, 3, 6 and 7 still reproduce (6 with
-`[bool; 8].to_uint()`, deprecated in favour of `as_uint` and silent). Entry 4 (struct members
-computing a width) and entry 5 (a `where` clause saying "power of two") are
-fixed, and their workarounds come out in the change after the bump. Entry 10
-is new in 0.21. Lint a reproducer with `--top-module main`: the
+`[bool; 8].to_uint()`, deprecated in favour of `as_uint` and silent). Entries
+4 and 5 are fixed, and their workarounds are gone. Entry 10 is new in 0.21.
+Lint a reproducer with `--top-module main`: the
 shared-components library brings in SystemVerilog externs that a whole-file
 lint cannot find.
 
@@ -98,45 +97,27 @@ is worse than the over-concatenation.
 
 **When fixed.** `text.concat([0; {8 - N}])`, and the comment above it goes.
 
-## 4. A struct member cannot compute a width from the struct's own generic
+## 4. Retired in v0.21.0: a struct member could not compute a width from the struct's own generic
 
-**Symptom.** `waddr: uint<{uint::bits_for(ENTRIES - 1)}>` in a struct
-declaration fails with `Struct members cannot have const generics in their
-type`. Routing the same expression through a type alias
-(`FifoAddr<ENTRIES>`) instead panics the compiler:
-`internal error: entered unreachable code: Const generic in
-type_expr_to_concrete` at `spade-typeinference/src/mir_type_lowering.rs:201`.
-The same alias works in a `let` or `reg` annotation.
+v0.20.0 rejected `waddr: uint<{uint::bits_for(ENTRIES - 1)}>` in a struct
+("Struct members cannot have const generics in their type") and panicked on the
+alias spelling. v0.21.0 accepts both. `FifoImplState<WIDTH, ENTRIES>` and
+`FifoUsed<WIDTH, ENTRIES>` now compute their own widths, the `FifoState` alias
+and the `FifoUsedOut<TData, TUsed>` indirection are gone, and
+`BootBannerState<N>` takes the banner length instead of an `IDX_W` every caller
+had to pass. That last one is not netlist-neutral: every banner caller passed
+`IDX_W = 8` for an 84- to 103-byte banner, so the index register is now the
+seven bits `uint::bits_for(N - 1)` asks for. Its top bit was always zero.
 
-**Where we work around it.** `lib/shared-components/src/fifos.spade`:
-`FifoImplState<ADDR_W, COUNT_W, WIDTH, ENTRIES>` carries two size-only generics
-that are functions of `ENTRIES`, and the `FifoState<WIDTH, ENTRIES>` alias ties
-them back together at the one `reg` that holds the state.
-`lib/shared-components/src/boot_banner.spade`: `BootBannerState<IDX_W>` likewise.
+## 5. Retired in v0.21.0: a `where` clause could not say "power of two"
 
-**When fixed.** `FifoImplState<WIDTH, ENTRIES>` with `uint<FifoAddr<ENTRIES>>`
-members, `BootBannerState<N>` computing its own index width, the `FifoState`
-alias deleted, and every `impl` and call site that spells out `ADDR_W`/`COUNT_W`
-loses two arguments.
-
-## 5. A `where` clause cannot say "power of two"
-
-**Symptom.** Not a bug, a limit: a constraint takes a bare generic on the left
-and the type-expression language has no shift or exponentiation
-(`Operator '<<' is not supported in a type expression`; braced
-`{1 << …}` → `This expression is not supported in a type expression`;
-`uint::bits_for(N - 1) < …` on the left → `Unexpected '('`).
-
-**Where we work around it.** `lib/shared-components/src/guards.spade`:
-`require_power_of_two::<N>()`, an `#[inline]` unit whose body fails to
-monomorphise for a non-power-of-two, called from `fifos.spade` and
-`serial.spade` as `let _ = require_power_of_two::<ENTRIES>();`.
-
-**When fixed.** `where N == {1 << uint::bits_for(N - 1)} else "… must be a
-power of two"` beside the generic, `guards.spade` deleted, and the `let _ =`
-lines with it. A private extra generic on `fifo_impl` could carry the check
-today, but `async_fifo`, `sync_fifo` and `ft` are public and cannot, so it
-would only make the library inconsistent; wait for the language.
+v0.21.0 adds `<<` to type expressions. The check reads as a comparison, so the
+compiler quotes its message:
+`ENTRIES >= 1 << uint::bits_for(ENTRIES - 1) else "... must be a power of two"`
+(`1 << bits_for(N - 1)` is never below `N` and equals it exactly at a power of
+two). `where N == 1 << …` also compiles but *unifies* instead of checking, and
+reports a bare "Expected type 6, got 8" without the message, so use `>=`.
+`guards.spade` and its `let _ = require_power_of_two::<…>()` lines are gone.
 
 ## 6. Deprecated methods do not warn
 

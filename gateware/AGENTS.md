@@ -181,17 +181,19 @@ To bump the compiler:
   after the return type. The compiler checks it at monomorphisation and quotes
   the message with a traceback through every instantiation, and unlike a guard
   unit it costs no module. Clauses take a bare generic name on the left, and
-  type expressions have `+ - * / %`, comparisons, `&& || ^^ !`, `uint::bits_for`
-  and `int::bits_for` -- no shift and no exponentiation, which is why
-  `guards::require_power_of_two` still exists and why it is `#[inline]`.
+  type expressions have `+ - * / %`, `<< >>` (since 0.21), comparisons,
+  `&& || ^^ !`, `uint::bits_for` and `int::bits_for`. "Power of two" is
+  `N >= 1 << uint::bits_for(N - 1) else "..."`; write it as that comparison,
+  not as `N == ...`, which unifies instead of checking and drops the message.
   Prove a new constraint fires: instantiate it wrong once and read the error.
-- Type expressions do **not** work in a struct member that refers to the
-  struct's own generic ("Struct members cannot have const generics in their
-  type"), and routing one through a type alias panics the compiler. They do work
-  in a `let` annotation, which is where `fifos.spade`'s `FifoAddr<ENTRIES>` and
-  `FifoCount<ENTRIES>` are used, and in a `reg` annotation through an alias
-  whose arguments are type expressions (`fifos.spade`'s `FifoState`). Name a
-  type spelling that repeats more than a few times. An alias can name a port
+- Since 0.21 a struct member can compute its width from the struct's own
+  generic, directly or through an alias: `FifoImplState` holds
+  `FifoAddr<ENTRIES>` pointers and `BootBannerState<N>` a `BannerIdx<N>`
+  index. Do not add a width generic that another generic already implies.
+  Mind that `-` widens by a bit: `let last: uint<{uint::bits_for(N - 1)}> =
+  N - 1;` types `N` one bit too narrow, so go through a `uint::bits_for(N)`
+  value and `-.` (`boot_banner_step` shows it). Name a type spelling that
+  repeats more than a few times. An alias can name a port
   pair -- `serial::UartLineBusy` is `(UartLineBusyPort, inv UartLineBusyPort)`
   and `let (a, b): UartLineBusy = port();` works -- which an earlier note here
   said was impossible; it was, before 0.19.
