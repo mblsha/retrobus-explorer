@@ -97,18 +97,18 @@ fn organizer_ft_cmd_from_word(ft_ui_dout_empty: bool, word: FtData, be: FtBe) ->
 impl OrganizerFtCmd {
     fn effect(self, ft_enabled: bool) -> OrganizerFtCmdEffect {
         match self {
-            Self::None => OrganizerFtCmdEffect$(
+            Self::None => OrganizerFtCmdEffect {
                 next_ft_enabled: ft_enabled,
                 msg: OrganizerMsg::None(),
-            ),
-            Self::Enable => OrganizerFtCmdEffect$(
+            },
+            Self::Enable => OrganizerFtCmdEffect {
                 next_ft_enabled: true,
                 msg: OrganizerMsg::FtEnabled(),
-            ),
-            Self::Disable => OrganizerFtCmdEffect$(
+            },
+            Self::Disable => OrganizerFtCmdEffect {
                 next_ft_enabled: false,
                 msg: OrganizerMsg::FtDisabled(),
-            ),
+            },
         }
     }
 }
@@ -276,7 +276,7 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
     } else if cmd_sync_memory {
         OrganizerMsg::SyncMemorySelected()
     } else if cmd_status {
-        OrganizerMsg::Status(OrganizerStatus$(
+        OrganizerMsg::Status(OrganizerStatus {
             saleae_state: inputs.saleae_state,
             saleae_mode: inputs.saleae_mode,
             addr_delay: inputs.addr_stable_delay,
@@ -286,12 +286,12 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
             pin2: inputs.pin2,
             pin3: inputs.pin3,
             ft_enabled: inputs.ft_enabled,
-        ))
+        })
     } else {
         OrganizerMsg::None()
     };
 
-    OrganizerUiEffect$(
+    OrganizerUiEffect {
         next_saleae_state: next_saleae_state,
         next_sync_sub_mode: next_sync_sub_mode,
         next_saleae_mode: next_saleae_mode,
@@ -305,5 +305,5 @@ pub(lib) fn eval_organizer_ui(inputs: OrganizerUiInputs) -> OrganizerUiEffect {
         next_pin3: if set_pin && inputs.cmd_state == cmd_wait_pin3() { source } else { inputs.pin3 },
         next_ft_enabled: ft_effect.next_ft_enabled,
         msg: organizer_msg_combine(usb_msg, ft_effect.msg),
-    )
+    }
 }

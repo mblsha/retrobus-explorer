@@ -32,8 +32,8 @@ entity main_core(
     let protected: uint<7> = inst sync_bundle::<2, 7>(clk,
         [conn_stnby, conn_vbatt, conn_vpp, conn_nc02, conn_nc42, conn_nc43, conn_nc44]).as_uint();
     decl reply;
-    let command = inst protocol::command_link$(
-        clk, rst, rx_valid: rx.valid && !rx.parity_error,
+    let command = inst protocol::command_link(
+        clk:, rst:, rx_valid: rx.valid && !rx.parity_error,
         rx_byte: rx.byte, response: reply, tx: usb_tx,
     );
     decl status;
@@ -58,9 +58,9 @@ entity main_core(
         else { flags };
     reg(clk) rom_mask: uint<8> reset(rst: 0x80) =
         if accept && command.opcode == b'F' { command.arg1 } else { rom_mask };
-    let cycle = inst bus::bus_cycle$(
-        clk, rst, address, control, data: sampled_data,
-        raw_address: addr, raw_control, read_delay, write_delay,
+    let cycle = inst bus::bus_cycle(
+        clk:, rst:, address:, control:, data: sampled_data,
+        raw_address: addr, raw_control:, read_delay:, write_delay:,
     );
     let rom_selected = ((control ^ 0xf0) & 0xf0) == rom_mask;
     let ram_selected = (control & 0xf0) == 0xb0 && (flags & 4) != 0;
@@ -106,13 +106,13 @@ entity main_core(
     reg(clk) reply_status: uint<8> reset(rst: 0) =
         if command.fire { status } else { reply_status };
     let host_write = accept && command.opcode == b'W';
-    let rom = inst card_memory::<14>$(
-        clk, host_addr: trunc(command.address), host_data: command.arg0,
+    let rom = inst card_memory::<14>(
+        clk:, host_addr: trunc(command.address), host_data: command.arg0,
         host_write: host_write && host_rom, bus_addr: offset,
         bus_data: 0, bus_write: false,
     );
-    let ram = inst card_memory::<11>$(
-        clk, host_addr: trunc(command.address), host_data: command.arg0,
+    let ram = inst card_memory::<11>(
+        clk:, host_addr: trunc(command.address), host_data: command.arg0,
         host_write: host_write && host_ram, bus_addr: trunc(address),
         bus_data: sampled_data,
         bus_write: armed && cycle.fire && !cycle.reading && ram_selected,
@@ -120,7 +120,7 @@ entity main_core(
     decl ft;
     decl rx_high;
     let rx_read = armed && cycle.fire && cycle.reading && register_page && offset == 0x3ff8;
-    let rx_step = ft_rx_byte_step$(
+    let rx_step = ft_rx_byte_step(
         high: rx_high, packed: ft.rx_word, empty: ft.rx_empty, consume: rx_read,
     );
     reg(clk) rx_high reset(rst: false) = rx_step.next_high;
@@ -162,10 +162,10 @@ entity main_core(
     let record: uint<128> = zext(word0) | (zext(timestamp) << 32)
         | (zext(word2) << 64) | (zext(word3) << 96);
     let ft_clock = unsafe { inst sampled_bool_clock(ft_clk) };
-    let ft = inst transport::transport$(
-        clk, rst, ft_clk: ft_clock, ft_rxf, ft_txe, ft_data, ft_be,
-        record, record_valid: event, rx_pop: rx_step.pop_word,
-        ft_data_drive, ft_be_drive, ft_rd, ft_wr, ft_oe,
+    let ft = inst transport::transport(
+        clk:, rst:, ft_clk: ft_clock, ft_rxf:, ft_txe:, ft_data:, ft_be:,
+        record:, record_valid: event, rx_pop: rx_step.pop_word,
+        ft_data_drive:, ft_be_drive:, ft_rd:, ft_wr:, ft_oe:,
     );
     let status_flags: uint<8> = zext([armed].as_uint()) | (zext([resident_idle].as_uint()) << 1) | (zext([sealed].as_uint()) << 2)
         | (zext([ft.rx_empty].as_uint()) << 3) | (zext([ft.rx_full].as_uint()) << 4) | (zext([ft.trace_full].as_uint()) << 5);

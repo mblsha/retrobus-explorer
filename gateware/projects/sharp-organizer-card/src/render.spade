@@ -125,7 +125,7 @@ fn saleae_settling(inputs: BoardRenderInputs) -> [bool; 8] {
 }
 
 pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
-    BoardOutputs$(
+    BoardOutputs {
         led: [
             inputs.state.ft_enabled,
             inputs.stream_fifo_empty,
@@ -145,5 +145,5 @@ pub(lib) fn render_board_outputs(inputs: BoardRenderInputs) -> BoardOutputs {
         } else {
             saleae_standard_signals(inputs)
         },
-    )
+    }
 }

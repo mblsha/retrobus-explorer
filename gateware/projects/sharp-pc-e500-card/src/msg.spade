@@ -134,7 +134,7 @@ impl EchoMsg {
     fn byte(self, idx: EchoIdx) -> TxReq8 {
         match self {
             Self::None => tx_req_none(),
-            Self::Byte$(byte) => tx_req_indexed([byte], idx),
+            Self::Byte { byte } => tx_req_indexed([byte], idx),
             Self::CrLf => tx_req_indexed(b"\r\n", idx),
         }
     }
@@ -155,9 +155,9 @@ impl RespMsg {
             Self::Ok => tx_req_indexed(b"OK\r\n", idx),
             Self::Busy => tx_req_indexed(b"BUSY\r\n", idx),
             Self::Err => tx_req_indexed(b"ERR\r\n", idx),
-            Self::Timing$(cycles) => timing_byte(b'T', cycles, idx),
-            Self::CtrlTiming$(cycles) => timing_byte(b'C', cycles, idx),
-            Self::Read$(addr, value) => match idx {
+            Self::Timing { cycles } => timing_byte(b'T', cycles, idx),
+            Self::CtrlTiming { cycles } => timing_byte(b'C', cycles, idx),
+            Self::Read { addr, value } => match idx {
                 0 => tx_req_byte(offset_hex_char(addr, 0)),
                 1 => tx_req_byte(offset_hex_char(addr, 1)),
                 2 => tx_req_byte(offset_hex_char(addr, 2)),
@@ -168,7 +168,7 @@ impl RespMsg {
                 7 => tx_req_byte(b'\n'),
                 _ => tx_req_none(),
             },
-            Self::FtStatus$(status) => if idx < 7 {
+            Self::FtStatus { status } => if idx < 7 {
                 tx_req_indexed(b"FS,CFG=", idx)
             } else if idx == 7 {
                 tx_req_byte(status.config.hex_high())
@@ -207,7 +207,7 @@ impl RespMsg {
             } else {
                 tx_req_none()
             },
-            Self::MeasureStatus$(status) => if idx < 7 {
+            Self::MeasureStatus { status } => if idx < 7 {
                 tx_req_indexed(b"MS,CNT=", idx)
             } else if idx == 7 {
                 tx_req_byte(status.count.hex_high())
@@ -240,7 +240,7 @@ impl MeasureMsg {
     fn byte(self, idx: MeasureIdx) -> TxReq8 {
         match self {
             Self::None => tx_req_none(),
-            Self::Report$(report) => if idx < 5 {
+            Self::Report { report } => if idx < 5 {
                 tx_req_indexed(b"MR,S=", idx)
             } else if idx == 5 {
                 tx_req_byte(report.start_tag.hex_high())

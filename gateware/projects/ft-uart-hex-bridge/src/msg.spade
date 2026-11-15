@@ -55,12 +55,12 @@ impl BridgeMsg {
         } else {
             let byte = match self {
                 Self::None => 0,
-                Self::FtRx$(word, be) => packed_ft_byte(word, be, trunc(idx)),
+                Self::FtRx { word, be } => packed_ft_byte(word, be, trunc(idx)),
                 Self::Help => {
                     let text = b"hhhh[/b] ? h\r\n";
                     text[trunc(idx)]
                 },
-                Self::Status$(rx_count, tx_count, err_count, stall_count) => {
+                Self::Status { rx_count, tx_count, err_count, stall_count } => {
                     status_byte(rx_count, tx_count, err_count, stall_count, idx)
                 },
                 Self::ParseErr => {

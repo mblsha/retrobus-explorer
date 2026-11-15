@@ -12,11 +12,11 @@ pub struct StableSampleOut<#uint WIDTH, #uint COUNT_W> {
 }
 
 pub fn stable_sample_reset<#uint WIDTH, #uint COUNT_W>(value: uint<WIDTH>) -> StableSampleState<WIDTH, COUNT_W> {
-    StableSampleState$(
+    StableSampleState {
         last: value,
         sent: false,
         counter: 0,
-    )
+    }
 }
 
 pub fn stable_sample_step<#uint WIDTH, #uint COUNT_W>(
@@ -28,14 +28,14 @@ pub fn stable_sample_step<#uint WIDTH, #uint COUNT_W>(
     let stable = !changed;
     let has_waited_long_enough = state.counter > threshold;
     let should_send = stable && !state.sent && has_waited_long_enough;
-    StableSampleOut$(
-        next_state: StableSampleState$(
+    StableSampleOut {
+        next_state: StableSampleState {
             last: if changed { current } else { state.last },
             sent: if changed { false } else { state.sent || should_send },
             counter: if changed { 0 } else { state.counter +. 1 },
-        ),
+        },
         wput: should_send,
-    )
+    }
 }
 
 pub struct AsyncUartMonitorOut<#uint WIDTH> {
@@ -65,11 +65,11 @@ pub entity async_uart_monitor<#uint WIDTH, #uint ENTRIES, #uint SYNC_STAGES, #ui
         BridgePolicy::QueueOnly(),
     );
 
-    AsyncUartMonitorOut$(
+    AsyncUartMonitorOut {
         line: bridge.line,
         busy: bridge.busy,
         fifo_full: bridge.fifo_full,
         fifo_empty: bridge.fifo_empty,
         fifo_dout: bridge.fifo_dout,
-    )
+    }
 }

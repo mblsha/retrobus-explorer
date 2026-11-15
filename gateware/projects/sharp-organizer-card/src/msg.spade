@@ -72,17 +72,17 @@ struct ProgressedState {
 
 impl Default for MsgCursor {
     fn default() -> Self {
-        MsgCursor$(status_phase: 0, status_idx: 0, status_ch: 0, simple_idx: 0)
+        MsgCursor { status_phase: 0, status_idx: 0, status_ch: 0, simple_idx: 0 }
     }
 }
 
 impl Default for OrganizerMsgStreamState {
     fn default() -> Self {
-        OrganizerMsgStreamState$(
+        OrganizerMsgStreamState {
             cur_msg: OrganizerMsg::None(),
             pending_msg: OrganizerMsg::None(),
             cursor: MsgCursor::default(),
-        )
+        }
     }
 }
 
@@ -134,7 +134,7 @@ where
     // Concatenating a full eight zeros and slicing back is what pads here:
     // `[0; {8 - N}]` is rejected with "not supported in a type expression".
     let padded: [uint<8>; 8] = text.concat([0; 8])[..8];
-    Some(ChannelName$(text: padded, len: N))
+    Some(ChannelName { text: padded, len: N })
 }
 
 fn name_of(kind: NameKind) -> Option<ChannelName> {
@@ -470,7 +470,7 @@ impl OrganizerMsg {
     }
 
     fn tx_req(self, at: MsgCursor) -> TxReq8 {
-        if let Self::Status$(status) = self {
+        if let Self::Status { status } = self {
             status_byte(status, at.status_phase, at.status_idx, at.status_ch)
         } else if zext(at.simple_idx) < self.simple_len() {
             tx_req_byte(self.simple_byte(at.simple_idx))
@@ -480,7 +480,7 @@ impl OrganizerMsg {
     }
 
     fn last_byte(self, at: MsgCursor) -> bool {
-        if let Self::Status$(status) = self {
+        if let Self::Status { status } = self {
             status_last_byte(status, at.status_phase, at.status_idx, at.status_ch)
         } else {
             zext(at.simple_idx) == self.simple_len() -. 1
@@ -490,49 +490,49 @@ impl OrganizerMsg {
 
 impl Default for ProgressedState {
     fn default() -> Self {
-        ProgressedState$(cur_msg: OrganizerMsg::None(), cursor: MsgCursor::default())
+        ProgressedState { cur_msg: OrganizerMsg::None(), cursor: MsgCursor::default() }
     }
 }
 
 fn advance_cursor(msg: OrganizerMsg, at: MsgCursor) -> MsgCursor {
-    if let OrganizerMsg::Status$(status) = msg {
+    if let OrganizerMsg::Status { status } = msg {
         if !status_phase_done(status, at.status_phase, at.status_idx, at.status_ch) {
-            MsgCursor$(
+            MsgCursor {
                 status_phase: at.status_phase,
                 status_idx: at.status_idx +. 1,
                 status_ch: at.status_ch,
                 simple_idx: at.simple_idx,
-            )
+            }
         } else {
             // The CH= phase repeats once per channel; only the eighth leaves it.
             let more_channels = at.status_phase == phase_channel() && at.status_ch != 7;
-            MsgCursor$(
+            MsgCursor {
                 status_phase: if more_channels { at.status_phase } else { at.status_phase +. 1 },
                 status_idx: 0,
                 status_ch: if more_channels { at.status_ch +. 1 } else { at.status_ch },
                 simple_idx: at.simple_idx,
-            )
+            }
         }
     } else {
-        MsgCursor$(
+        MsgCursor {
             status_phase: at.status_phase,
             status_idx: at.status_idx,
             status_ch: at.status_ch,
             simple_idx: at.simple_idx +. 1,
-        )
+        }
     }
 }
 
 fn progress_state(state: OrganizerMsgStreamState, sent: bool) -> ProgressedState {
     if !sent {
-        ProgressedState$(cur_msg: state.cur_msg, cursor: state.cursor)
+        ProgressedState { cur_msg: state.cur_msg, cursor: state.cursor }
     } else if state.cur_msg.last_byte(state.cursor) {
         ProgressedState::default()
     } else {
-        ProgressedState$(
+        ProgressedState {
             cur_msg: state.cur_msg,
             cursor: advance_cursor(state.cur_msg, state.cursor),
-        )
+        }
     }
 }
 
@@ -551,7 +551,7 @@ pub fn organizer_msg_stream_step(
     };
     let progressed = progress_state(state, tx_req.valid);
     let progressed_none = progressed.cur_msg.is_none();
-    let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs$(
+    let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs {
         none_value: OrganizerMsg::None(),
         current: progressed.cur_msg,
         current_is_none: progressed_none,
@@ -560,15 +560,15 @@ pub fn organizer_msg_stream_step(
         incoming_valid: msg_valid,
         incoming: msg,
         incoming_is_none: msg.is_none(),
-    ));
+    });
     let reset_cursor = progressed_none || scheduled.current_loaded;
-    OrganizerMsgStreamOut$(
-        state: OrganizerMsgStreamState$(
+    OrganizerMsgStreamOut {
+        state: OrganizerMsgStreamState {
             cur_msg: scheduled.current,
             pending_msg: scheduled.pending,
             cursor: if reset_cursor { MsgCursor::default() } else { progressed.cursor },
-        ),
+        },
         tx_req: tx_req,
         msg_none: scheduled.current_is_none,
-    )
+    }
 }

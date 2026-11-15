@@ -65,7 +65,7 @@ entity tb_bus_debug(
         true,
         0,
     );
-    let step = CoreStepInputs$(
+    let step = CoreStepInputs {
         sample_state: SampleState::SampleBus(),
         wait_counter: 0,
         wait_enabled: 0,
@@ -84,7 +84,7 @@ entity tb_bus_debug(
         wr_rise: overflow_wr_rise,
         stream_fifo_full: overflow_fifo_full,
         fifo_full_counter: overflow_count,
-    ).run();
+    }.run();
 
     set event_word = pack_event_word(addr, data, event_code);
     set overflow_word = pack_overflow_word(overflow_count, event_code);

@@ -42,16 +42,16 @@ impl CycleDecode {
         if allow_ft_remote {
             self
         } else {
-            CycleDecode$(
+            CycleDecode {
                 bus: self.bus,
                 bus_error: self.bus_error,
                 rx_digit: self.rx_digit,
                 saleae_cmd: self.saleae_cmd,
-                ft_cmd: FtStreamCmdDecode$(
+                ft_cmd: FtStreamCmdDecode {
                     enable: false,
                     disable: false,
-                ),
-            )
+                },
+            }
         }
     }
 
@@ -64,7 +64,7 @@ impl CycleDecode {
         tx_busy: bool,
         upstream_req: TxReq8,
     ) -> UsbCmdInputs {
-        UsbCmdInputs$(
+        UsbCmdInputs {
             rx_valid: rx_valid,
             rx_byte: rx_byte,
             tx_busy: tx_busy,
@@ -72,7 +72,7 @@ impl CycleDecode {
             saleae_state: saleae_state,
             cycle_decode: self,
             upstream_req: upstream_req,
-        )
+        }
     }
 }
 
@@ -186,33 +186,33 @@ fn init_console_stream() -> ConsoleStreamState {
 
 impl Default for MainState {
     fn default() -> Self {
-        MainState$(
-            wait: WaitRegs$(
+        MainState {
+            wait: WaitRegs {
                 sample_state: SampleState::SampleBus(),
                 enabled: 0,
                 counter: 0,
                 last_addr: 0,
-            ),
-            saleae: SaleaeRegs$(
+            },
+            saleae: SaleaeRegs {
                 state: SaleaeState::DataSignals(),
                 counter: 0,
-            ),
-            ft: FtRegs$(
+            },
+            ft: FtRegs {
                 enabled: false,
                 state: FtState::GetFifo(),
                 cur_value: 0,
                 fifo_full_counter: 0,
                 remote_allowed: false,
                 armed: false,
-            ),
-            capture: CaptureRegs$(
+            },
+            capture: CaptureRegs {
                 addr_d0: 0,
                 addr: 0,
                 data_d0: 0,
                 data: 0,
-            ),
+            },
             console_stream: init_console_stream(),
-        )
+        }
     }
 }
 
@@ -223,12 +223,12 @@ impl ConsoleCmdEffect {
     }
 
     fn with_flags(enabled: bool, remote_allowed: bool, armed: bool, msg: ConsoleMsg) -> Self {
-        Self$(
+        Self {
             next_ft_enabled: enabled,
             next_ft_remote_allowed: remote_allowed,
             next_ft_armed: armed,
             msg: msg,
-        )
+        }
     }
 }
 
@@ -240,10 +240,10 @@ fn eval_console_stream(
 ) -> ConsoleStreamEval {
     let next = console_stream_step(stream, ctx, block_tx, true, next_msg);
     let current = console_stream_step(stream, ctx, block_tx, false, ConsoleMsg::None());
-    ConsoleStreamEval$(
+    ConsoleStreamEval {
         next_state: next.state,
         tx_req: current.tx_req,
-    )
+    }
 }
 
 impl ConsoleCmd {
@@ -272,23 +272,23 @@ impl UsbCmdOut {
     }
 
     fn with_upstream(self, tx_busy: bool, rx_byte: uint<8>, upstream_req: TxReq8) -> UsbCmdOut {
-        UsbCmdOut$(
+        UsbCmdOut {
             next_wait_enabled: self.next_wait_enabled,
             next_saleae_state: self.next_saleae_state,
             rx_is_digit: self.rx_is_digit,
             rx_is_saleae_cmd: self.rx_is_saleae_cmd,
             tx_req: if self.rx_preempts_console(tx_busy) {
-                TxReq8$(valid: true, byte: rx_byte)
+                TxReq8 { valid: true, byte: rx_byte }
             } else {
                 upstream_req
             },
-        )
+        }
     }
 }
 
 impl MainState {
     fn step_inputs(self, cycle_decode: CycleDecode, inputs: MainInputs) -> CoreStepInputs {
-        CoreStepInputs$(
+        CoreStepInputs {
             sample_state: self.wait.sample_state,
             wait_counter: self.wait.counter,
             wait_enabled: self.wait.enabled,
@@ -307,17 +307,17 @@ impl MainState {
             wr_rise: inputs.wr_rise,
             stream_fifo_full: inputs.stream_fifo_full,
             fifo_full_counter: self.ft.fifo_full_counter,
-        )
+        }
     }
 
     fn console_ctx(self) -> ConsoleMsgContext {
-        ConsoleMsgContext$(
+        ConsoleMsgContext {
             wait_enabled: self.wait.enabled,
             saleae_state: self.saleae.state,
             ft_enabled: self.ft.enabled,
             ft_remote_allowed: self.ft.remote_allowed,
             ft_armed: self.ft.armed,
-        )
+        }
     }
 
     fn eval(self, inputs: MainInputs) -> MainEval {
@@ -405,12 +405,12 @@ impl MainState {
         };
 
         let bus_error_tx = if bus_sample.bus_error.valid && !inputs.tx_busy {
-            TxReq8$(valid: true, byte: bus_sample.bus_error.ch)
+            TxReq8 { valid: true, byte: bus_sample.bus_error.ch }
         } else {
             tx_req_none()
         };
         let stream_drop_tx = if bus_sample.bus_event_valid && self.ft.enabled && inputs.stream_fifo_full && !inputs.tx_busy {
-            TxReq8$(valid: true, byte: bus_sample.bus_event_char)
+            TxReq8 { valid: true, byte: bus_sample.bus_event_char }
         } else {
             tx_req_none()
         };
@@ -424,40 +424,40 @@ impl MainState {
         let uart_upstream_req = tx_req_arbiter(console_eval.tx_req, ft_tx_req, tx_req_none());
         let usb_cmd = usb_cmd_state.with_upstream(inputs.tx_busy, inputs.rx_byte, uart_upstream_req);
 
-        MainEval$(
-            next_state: MainState$(
-                wait: WaitRegs$(
+        MainEval {
+            next_state: MainState {
+                wait: WaitRegs {
                     sample_state: next_sample_state,
                     enabled: usb_cmd_state.next_wait_enabled,
                     counter: next_wait_counter,
                     last_addr: next_last_addr,
-                ),
-                saleae: SaleaeRegs$(
+                },
+                saleae: SaleaeRegs {
                     state: usb_cmd_state.next_saleae_state,
                     counter: next_saleae_counter,
-                ),
-                ft: FtRegs$(
+                },
+                ft: FtRegs {
                     enabled: console_effect.next_ft_enabled,
                     state: ft_mux.next_ft_state,
                     cur_value: ft_mux.next_ft_cur_value,
                     fifo_full_counter: next_fifo_full_counter,
                     remote_allowed: console_effect.next_ft_remote_allowed,
                     armed: console_effect.next_ft_armed,
-                ),
-                capture: CaptureRegs$(
+                },
+                capture: CaptureRegs {
                     addr_d0: inputs.addr,
                     addr: self.capture.addr_d0,
                     data_d0: inputs.data,
                     data: self.capture.data_d0,
-                ),
+                },
                 console_stream: console_eval.next_state,
-            ),
+            },
             usb_cmd: usb_cmd,
             bus_sample: bus_sample,
             ft_mux: ft_mux,
             stream_fifo_din: stream_fifo_din,
             stream_fifo_wput: stream_fifo_wput,
-        )
+        }
     }
 }
 
@@ -466,7 +466,7 @@ fn render_board_outputs(
     bus_sample: BusSamplerOut,
     inputs: BoardRenderInputs,
 ) -> BoardOutputs {
-    BoardOutputs$(
+    BoardOutputs {
         led: [
             state.ft.enabled,
             state.ft.remote_allowed,
@@ -497,7 +497,7 @@ fn render_board_outputs(
             inputs.addr_line,
             state.saleae.counter,
         ),
-    )
+    }
 }
 
 #[inline]
@@ -601,7 +601,7 @@ entity main_core(
         usb_uart.busy,
     );
 
-    let inputs = MainInputs$(
+    let inputs = MainInputs {
         cycle_decode: cycle_decode,
         rx_valid: rx.valid,
         rx_byte: rx.byte,
@@ -618,7 +618,7 @@ entity main_core(
         stream_fifo_dout: stream_fifo_dout,
         addr: addr,
         data: data,
-    );
+    };
 
     reg(clk) state: MainState
         reset(rst: MainState::default())
@@ -710,7 +710,7 @@ entity main_core(
     let board_outputs = render_board_outputs(
         state,
         bus_sample,
-        BoardRenderInputs$(
+        BoardRenderInputs {
             ft_txe: ft_txe,
             ft_rxf: ft_rxf,
             ft_ui_dout_empty: ft_io.ui_dout_empty,
@@ -731,7 +731,7 @@ entity main_core(
             data_line: data_bridge.line,
             event_line: event_bridge.line,
             addr_line: addr_bridge.line,
-        ),
+        },
     );
 
     set ft_data_drive = ft_io.ft_data_out;

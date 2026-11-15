@@ -86,7 +86,7 @@ entity main_core(
     let stream = inst streaming_rom_core(
         clk,
         rst,
-        StreamingRomInputs$(
+        StreamingRomInputs {
             ft_ui_din_full: ft_io.ui_din_full,
             ft_ui_dout_empty: ft_io.ui_dout_empty,
             ft_ui_dout: ft_io.ui_dout,
@@ -95,7 +95,7 @@ entity main_core(
             addr_sync: addr_sync,
             addr_bnk_sync: bank_sync,
             addr_cerom2_sync: addr_cerom2_sync,
-        ),
+        },
     );
 
     inst ft_tap::<16, 2, 64, 16384, 1, 0>(

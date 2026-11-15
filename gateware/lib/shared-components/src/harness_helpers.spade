@@ -37,9 +37,9 @@ entity tb_ascii_message_helpers(
 ) {
     let indexed = tx_req_indexed(b"ABC", text_idx);
     let arbitrated = tx_req_arbiter(
-        TxReq8$(valid: highest_valid, byte: highest_byte),
-        TxReq8$(valid: high_valid, byte: high_byte),
-        TxReq8$(valid: low_valid, byte: low_byte),
+        TxReq8 { valid: highest_valid, byte: highest_byte },
+        TxReq8 { valid: high_valid, byte: high_byte },
+        TxReq8 { valid: low_valid, byte: low_byte },
     );
 
     set hex_char_out = nibble.hex_char();
@@ -101,7 +101,7 @@ entity tb_message_stream(
         enqueue_valid,
         enqueue_msg,
     );
-    let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs$(
+    let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs {
         none_value: 0,
         current: schedule_current,
         current_is_none: schedule_current_is_none,
@@ -110,7 +110,7 @@ entity tb_message_stream(
         incoming_valid: schedule_incoming_valid,
         incoming: schedule_incoming,
         incoming_is_none: schedule_incoming_is_none,
-    ));
+    });
 
     set tx_valid = step.tx_req.valid;
     set tx_byte = step.tx_req.byte;

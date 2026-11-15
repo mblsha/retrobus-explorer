@@ -94,28 +94,28 @@ entity organizer_monitor_uart<#uint WIDTH>(
 
 impl Default for OrganizerMonitorState {
     fn default() -> Self {
-        OrganizerMonitorState$(
+        OrganizerMonitorState {
             addr: stable_sample_reset::<20, 8>(0),
             data: stable_sample_reset::<8, 8>(0),
             misc: stable_sample_reset::<11, 8>(0),
             queued: OrganizerQueuedSamples::default(),
             overflow_count: 0,
-        )
+        }
     }
 }
 
 fn queue_push(queue: OrganizerQueuedSamples, sample_valid: bool, sample: OrganizerSample) -> QueuePushOut {
     let entry = Some(sample);
     if !sample_valid {
-        QueuePushOut$(queue: queue, dropped: 0)
+        QueuePushOut { queue: queue, dropped: 0 }
     } else if queue[0].is_none() {
-        QueuePushOut$(queue: [entry, queue[1], queue[2]], dropped: 0)
+        QueuePushOut { queue: [entry, queue[1], queue[2]], dropped: 0 }
     } else if queue[1].is_none() {
-        QueuePushOut$(queue: [queue[0], entry, queue[2]], dropped: 0)
+        QueuePushOut { queue: [queue[0], entry, queue[2]], dropped: 0 }
     } else if queue[2].is_none() {
-        QueuePushOut$(queue: [queue[0], queue[1], entry], dropped: 0)
+        QueuePushOut { queue: [queue[0], queue[1], entry], dropped: 0 }
     } else {
-        QueuePushOut$(queue: queue, dropped: 1)
+        QueuePushOut { queue: queue, dropped: 1 }
     }
 }
 
@@ -127,7 +127,7 @@ fn live_samples(
     data_wput: bool,
     misc_wput: bool,
 ) -> OrganizerMonitorSamples {
-    OrganizerMonitorSamples$(
+    OrganizerMonitorSamples {
         addr: if addr_wput {
             organizer_addr_sample(addr_sync)
         } else {
@@ -143,7 +143,7 @@ fn live_samples(
         } else {
             organizer_sample_none()
         },
-    )
+    }
 }
 
 impl OrganizerMonitorState {
@@ -169,66 +169,66 @@ impl OrganizerMonitorState {
         );
 
         if !stream_capture_enable {
-            OrganizerMonitorOut$(
-                next_state: OrganizerMonitorState$(
+            OrganizerMonitorOut {
+                next_state: OrganizerMonitorState {
                     addr: addr_step.next_state,
                     data: data_step.next_state,
                     misc: misc_step.next_state,
                     queued: OrganizerQueuedSamples::default(),
                     overflow_count: 0,
-                ),
+                },
                 samples: samples,
-            )
+            }
         } else {
             let pushed_addr = queue_push(self.queued, samples.addr.valid, samples.addr.sample);
             let pushed_data = queue_push(pushed_addr.queue, samples.data.valid, samples.data.sample);
             let pushed_misc = queue_push(pushed_data.queue, samples.misc.valid, samples.misc.sample);
-            OrganizerMonitorOut$(
-                next_state: OrganizerMonitorState$(
+            OrganizerMonitorOut {
+                next_state: OrganizerMonitorState {
                     addr: addr_step.next_state,
                     data: data_step.next_state,
                     misc: misc_step.next_state,
                     queued: pushed_misc.queue,
                     overflow_count: self.overflow_count +. pushed_addr.dropped +. pushed_data.dropped +. pushed_misc.dropped,
-                ),
+                },
                 samples: samples,
-            )
+            }
         }
     }
 
     pub fn drain_stream(self, stream_ready: bool) -> OrganizerMonitorTransportOut {
         if !stream_ready {
-            OrganizerMonitorTransportOut$(
+            OrganizerMonitorTransportOut {
                 next_state: self,
                 stream_event: organizer_trace_event_none(),
-            )
+            }
         } else if let Some(head) = self.queued[0] {
-            OrganizerMonitorTransportOut$(
-                next_state: OrganizerMonitorState$(
+            OrganizerMonitorTransportOut {
+                next_state: OrganizerMonitorState {
                     addr: self.addr,
                     data: self.data,
                     misc: self.misc,
                     queued: self.queued.shift_back(None),
                     overflow_count: self.overflow_count,
-                ),
+                },
                 stream_event: organizer_trace_event_sample(head),
-            )
+            }
         } else if self.overflow_count != 0 {
-            OrganizerMonitorTransportOut$(
-                next_state: OrganizerMonitorState$(
+            OrganizerMonitorTransportOut {
+                next_state: OrganizerMonitorState {
                     addr: self.addr,
                     data: self.data,
                     misc: self.misc,
                     queued: self.queued,
                     overflow_count: 0,
-                ),
+                },
                 stream_event: organizer_trace_event_overflow(self.overflow_count),
-            )
+            }
         } else {
-            OrganizerMonitorTransportOut$(
+            OrganizerMonitorTransportOut {
                 next_state: self,
                 stream_event: organizer_trace_event_none(),
-            )
+            }
         }
     }
 }
@@ -262,9 +262,9 @@ pub(lib) entity organizer_monitor_uarts(
         clk_uart,
     );
 
-    OrganizerMonitorLines$(
+    OrganizerMonitorLines {
         addr: addr_uart,
         data: data_uart,
         misc: misc_uart,
-    )
+    }
 }

@@ -25,8 +25,8 @@ pub entity command_link(
     let send = phase == 12 && !uart.busy;
     let shift: uint<128> = zext(tx_index) << 3;
     let tx_byte: uint<8> = trunc(reply >> shift);
-    let _ = inst uart_tx_tap::<100_000_000, 4_000_000, 8>$(
-        clk, rst, block: false, data: tx_byte, new_data: send,
+    let _ = inst uart_tx_tap::<100_000_000, 4_000_000, 8>(
+        clk:, rst:, block: false, data: tx_byte, new_data: send,
         tx_line: uart_w.line, busy: uart_w.busy,
     );
     set tx = uart.line;
@@ -65,7 +65,7 @@ pub entity command_link(
         if phase == 11 { zext(header) | (zext(reply_xor) << 120) } else { reply };
     reg(clk) tx_index: uint<4> reset(rst: 0) =
         if phase != 12 { 0 } else if send { tx_index +. 1 } else { tx_index };
-    Command$(opcode: trunc(request), address: trunc(request >> 8),
+    Command {opcode: trunc(request), address: trunc(request >> 8),
         arg0: trunc(request >> 24), arg1: trunc(request >> 32),
-        arg2: trunc(request >> 40), fire: phase == 8 && !bad, bad: bad)
+        arg2: trunc(request >> 40), fire: phase == 8 && !bad, bad: bad}
 }

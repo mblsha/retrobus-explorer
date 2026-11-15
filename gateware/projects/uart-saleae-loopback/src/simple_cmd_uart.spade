@@ -38,11 +38,11 @@ fn max_supported_freq_code() -> uint<4> {
 
 impl Default for RxByteDecode {
     fn default() -> Self {
-        RxByteDecode$(
+        RxByteDecode {
             byte: 0,
             upper: 0,
             digit: DigitDecode::default(),
-        )
+        }
     }
 }
 
@@ -55,11 +55,11 @@ fn decode_rx_byte(
     let maybe_rx_byte = if rx_valid && !rx_parity_error { Some(rx_byte) } else { None };
 
     maybe_rx_byte.map(fn |byte| {
-        RxByteDecode$(
+        RxByteDecode {
             byte: byte,
             upper: byte.to_upper(),
             digit: byte.decode_digit_max(max_freq_code),
-        )
+        }
     })
 }
 
@@ -69,7 +69,7 @@ fn pad_message<#uint N, #uint CAPACITY>(message: [uint<8>; N]) -> [uint<8>; CAPA
 
 fn msg_template_bytes<#uint N>(message: [uint<8>; N]) -> MsgTemplate<64> {
     let len: uint<8> = N;
-    MsgTemplate$(len: len, bytes: pad_message::<N, 64>(message))
+    MsgTemplate { len: len, bytes: pad_message::<N, 64>(message) }
 }
 
 fn mode_freq_suffix(mode: uint<8>, freq: uint<8>) -> [uint<8>; 10] {
@@ -108,7 +108,7 @@ impl MsgKind {
         let f = freq_code.digit_char();
 
         match self {
-            Self::None => MsgTemplate$(len: 0, bytes: [0; 64]),
+            Self::None => MsgTemplate { len: 0, bytes: [0; 64] },
             Self::Ready => msg_template_bytes(b"RBX READY".concat(mode_freq_suffix(m, f))),
             Self::Help => msg_template_bytes(b"RBX HELP !H !S !C !E !F0-5 M:CLOCK E:ECHO\r\n"),
             Self::Status => msg_template_bytes(b"RBX STATUS".concat(mode_freq_suffix(m, f))),
@@ -171,47 +171,47 @@ struct CmdDecode {
 
 impl CmdDecode {
     fn none() -> Self {
-        Self$(
+        Self {
             msg: MsgKind::None(),
             msg_valid: false,
             mode_write: false,
             mode_value: Mode::ClockTester(),
             freq_write: false,
             freq_value: 0,
-        )
+        }
     }
 
     fn reply(msg: MsgKind) -> Self {
-        Self$(
+        Self {
             msg: msg,
             msg_valid: true,
             mode_write: false,
             mode_value: Mode::ClockTester(),
             freq_write: false,
             freq_value: 0,
-        )
+        }
     }
 
     fn set_mode(mode: Mode) -> Self {
-        Self$(
+        Self {
             msg: MsgKind::Ok(),
             msg_valid: true,
             mode_write: true,
             mode_value: mode,
             freq_write: false,
             freq_value: 0,
-        )
+        }
     }
 
     fn set_freq(freq: uint<4>) -> Self {
-        Self$(
+        Self {
             msg: MsgKind::Ok(),
             msg_valid: true,
             mode_write: false,
             mode_value: Mode::ClockTester(),
             freq_write: true,
             freq_value: freq,
-        )
+        }
     }
 }
 
@@ -306,7 +306,7 @@ pub entity simple_cmd_uart_core(
     };
 
     reg(clk) tx_state: ByteMsgStreamState<MsgKind, 8>
-        reset(rst: ByteMsgStreamState$(cur_msg: MsgKind::Ready(), cur_idx: 0, pending_msg: MsgKind::None()))
+        reset(rst: ByteMsgStreamState { cur_msg: MsgKind::Ready(), cur_idx: 0, pending_msg: MsgKind::None() })
         = {
         tx_stream_step(tx_state, mode, freq_code, tx_busy, cmd_decode.msg_valid, cmd_decode.msg).state
     };
@@ -317,14 +317,14 @@ pub entity simple_cmd_uart_core(
     let rx_is_bang = rx_ok && rx_decode.byte == b'!';
     let payload_rx = mode.is_echo() && cmd_state.is_idle() && rx_ok && !rx_is_bang;
 
-    SimpleCmdUartOut$(
+    SimpleCmdUartOut {
         mode: mode,
         freq_code: freq_code,
         cmd_state: cmd_state,
         tx_msg_none: tx_msg_none,
         tx_req: tx_stream.tx_req,
         payload_rx: payload_rx,
-    )
+    }
 }
 
 pub fn saleae_outputs(

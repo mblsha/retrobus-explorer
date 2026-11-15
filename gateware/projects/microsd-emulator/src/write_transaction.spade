@@ -63,51 +63,51 @@ pub entity sd_write_transaction(
     };
     // CMD12 stops reception but must preserve the CRC response/programming
     // busy for an already accepted packet. CMD0/deselect use cancel instead.
-    let _ = inst super::write_rx::sd_write_receiver$(
-        clk,
-        rst,
-        start,
+    let _ = inst super::write_rx::sd_write_receiver(
+        clk:,
+        rst:,
+        start:,
         cancel: cancel || stop,
-        wide,
-        sample,
-        dat,
+        wide:,
+        sample:,
+        dat:,
         active: receive_active_w,
         complete: receive_complete_w,
         good: receive_crc_good_w,
         byte_index: staged_byte_index,
         sector_byte: staged_byte_w,
     );
-    let _ = inst super::storage::ddr_sector_writer$(
-        clk,
-        rst,
+    let _ = inst super::storage::ddr_sector_writer(
+        clk:,
+        rst:,
         start: commit,
         lba: saved_lba,
         byte_index: staged_byte_index_w,
         sector_byte: staged_byte,
-        cmd_valid,
-        cmd_ready,
-        cmd_address,
-        wdata_valid,
-        wdata_ready,
-        wdata,
-        wdata_mask,
+        cmd_valid:,
+        cmd_ready:,
+        cmd_address:,
+        wdata_valid:,
+        wdata_ready:,
+        wdata:,
+        wdata_mask:,
         busy: commit_active_w,
         complete: commit_complete,
         failed: commit_failed_w,
     );
-    let _ = inst super::write_response::sd_write_response$(
-        clk,
-        rst,
-        prepared_mode,
-        cancel,
+    let _ = inst super::write_response::sd_write_response(
+        clk:,
+        rst:,
+        prepared_mode:,
+        cancel:,
         start: receive_complete,
-        accepted,
-        fall,
+        accepted:,
+        fall:,
         busy: committing,
-        dat_out,
-        dat_oe,
+        dat_out:,
+        dat_oe:,
         active: response_active_w,
-        complete,
+        complete:,
     );
     set active = (receive_active || response_active || committing);
     set good = (packet_good && !commit_failed);

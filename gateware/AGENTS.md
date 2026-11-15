@@ -169,6 +169,11 @@ To bump the compiler:
   `struct port`. This matters beyond tidiness: since 0.19 `&T` means a
   read-only copy view of a linear type, so a leftover `&` would still compile
   and say something quite different from what it used to.
+- Name arguments the 0.21 way: braces for a type, enum variant or pattern
+  (`TxReq8 { valid: true, byte }`, `Self::ReadRam { addr } = self`), and
+  parentheses for a unit, where a shorthand argument keeps its colon
+  (`inst sd_frontend(clk:, rst:, armed: card_armed)`). The `$(...)` form is
+  deprecated.
 - Ask for widths with `uint::bits_for` and `int::bits_for`, not the deprecated
   `uint_bits_to_fit` / `int_bits_to_fit`.
 - Reinterpret bits with the standard library's methods rather than the

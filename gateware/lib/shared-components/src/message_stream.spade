@@ -5,12 +5,12 @@ pub struct TxReq8 {
 
 #[inline]
 pub fn tx_req_none() -> TxReq8 {
-    TxReq8$(valid: false, byte: 0)
+    TxReq8 { valid: false, byte: 0 }
 }
 
 #[inline]
 pub fn tx_req_byte(byte: uint<8>) -> TxReq8 {
-    TxReq8$(valid: true, byte: byte)
+    TxReq8 { valid: true, byte: byte }
 }
 
 pub fn tx_req_from_option(byte: Option<uint<8>>) -> TxReq8 {
@@ -91,21 +91,21 @@ pub fn schedule_one_current_latest_pending<T>(
     let replace_empty_current = enqueue && loaded_current_is_none;
     let queue_latest_pending = enqueue && !loaded_current_is_none;
 
-    OneCurrentLatestPendingOut$(
+    OneCurrentLatestPendingOut {
         current: if replace_empty_current { args.incoming } else { loaded_current },
         current_is_none: if replace_empty_current { false } else { loaded_current_is_none },
         pending: if queue_latest_pending { args.incoming } else { loaded_pending },
         pending_is_none: if queue_latest_pending { false } else { loaded_pending_is_none },
         current_loaded: promote_pending || replace_empty_current,
-    )
+    }
 }
 
 pub fn init_byte_msg_stream<TMsg, #uint IDX_W>(none_msg: TMsg) -> ByteMsgStreamState<TMsg, IDX_W> {
-    ByteMsgStreamState$(
+    ByteMsgStreamState {
         cur_msg: none_msg,
         cur_idx: 0,
         pending_msg: none_msg,
-    )
+    }
 }
 
 impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
@@ -137,7 +137,7 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             self.cur_idx
         };
         let post_msg_none = args.cur_msg_is_none || drained;
-        let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs$(
+        let scheduled = schedule_one_current_latest_pending(OneCurrentLatestPendingArgs {
             none_value: none_msg,
             current: post_cur_msg,
             current_is_none: post_msg_none,
@@ -146,16 +146,16 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             incoming_valid: args.next_msg_valid,
             incoming: args.next_msg,
             incoming_is_none: args.next_msg_is_none,
-        ));
-        ByteMsgStreamOut$(
-            state: ByteMsgStreamState$(
+        });
+        ByteMsgStreamOut {
+            state: ByteMsgStreamState {
                 cur_msg: scheduled.current,
                 cur_idx: if scheduled.current_loaded { 0 } else { post_cur_idx },
                 pending_msg: scheduled.pending,
-            ),
+            },
             tx_req: tx_req,
             msg_none: scheduled.current_is_none,
-        )
+        }
     }
 
     pub fn step_with(
@@ -195,7 +195,7 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             (false, none_msg, true)
         };
 
-        self.step(none_msg, ByteMsgStepArgs$(
+        self.step(none_msg, ByteMsgStepArgs {
             cur_msg_is_none: cur_msg_is_none,
             pending_msg_is_none: pending_msg_is_none,
             cur_byte: cur_byte,
@@ -204,6 +204,6 @@ impl<TMsg, #uint IDX_W> ByteMsgStreamState<TMsg, IDX_W> {
             next_msg_valid: next_msg_valid,
             next_msg: next_msg_value,
             next_msg_is_none: next_msg_is_none,
-        ))
+        })
     }
 }

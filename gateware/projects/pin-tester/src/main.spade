@@ -31,11 +31,11 @@ struct PinTesterStep {
 
 impl Default for PinTesterState {
     fn default() -> Self {
-        PinTesterState$(
+        PinTesterState {
             mode: PinTesterMode::Receive(),
             bank: 0,
             counter: 0,
-        )
+        }
     }
 }
 
@@ -83,14 +83,14 @@ impl PinTesterState {
         };
         let accepted = bank_command || switch_to_send || switch_to_receive;
 
-        PinTesterStep$(
-            next_state: PinTesterState$(
+        PinTesterStep {
+            next_state: PinTesterState {
                 mode: mode,
                 bank: bank,
                 counter: counter,
-            ),
+            },
             echo: if accepted { tx_req_byte(rx_byte) } else { tx_req_none() },
-        )
+        }
     }
 }
 
